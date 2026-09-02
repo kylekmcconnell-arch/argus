@@ -2,7 +2,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
 import { getCost, withCostLedger } from "../cost";
 import type { CollectContext } from "./types";
-import { collectProjectTokenIdentity, launchedProductSearchQueries, PLATFORM_CHAIN, projectRegistrySearchQueries, siteContractCandidates } from "./projectToken";
+import {
+  bioTickerQueries,
+  cleanRegistryName,
+  collectProjectTokenIdentity,
+  launchedProductSearchQueries,
+  PLATFORM_CHAIN,
+  projectRegistrySearchQueries,
+  siteContractCandidates,
+  tokenSearchQueries,
+} from "./projectToken";
 
 const SOLANA_TOKEN = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const OTHER_TOKEN = "So11111111111111111111111111111111111111112";
@@ -1381,3 +1390,154 @@ describe("launched-product CoinGecko recall", () => {
     expect(evidence.projectToken).toBeUndefined();
   });
 });
+
+describe("registry queries for decorated display names", () => {
+  // Verified live against the public CoinGecko search on 2026-09-02:
+  //   "Altcoinist ($ALTT)"            -> no coins
+  //   "Altcoinist 🚀"                  -> no coins
+  //   "$ALTT"                          -> no coins
+  //   "Altcoinist" / "ALTT"            -> altcoinist-token
+  // So the raw decorated string must never be the only query sent.
+  it("strips emoji and cashtag decoration and adds the ticker as its own query", () => {
+    expect(tokenSearchQueries("Altcoinist ($ALTT)")).toEqual(["Altcoinist", "ALTT"]);
+    expect(tokenSearchQueries("Altcoinist 🚀")).toEqual(["Altcoinist"]);
+    expect(tokenSearchQueries("Altcoinist 🚀 | Trade Smarter")).toEqual(["Altcoinist"]);
+    expect(tokenSearchQueries("Altcoinist | $ALTT on Base")).toEqual(["Altcoinist", "ALTT"]);
+    expect(tokenSearchQueries("Altcoinist - The Trader In Your Pocket")).toEqual(["Altcoinist"]);
+    expect(tokenSearchQueries("$ALTT")).toEqual(["ALTT"]);
+  });
+
+  it("keeps the existing suffix-stripping and plain-name behaviour", () => {
+    expect(tokenSearchQueries("Greenwood Finance")).toEqual(["Greenwood Finance", "Greenwood"]);
+    expect(tokenSearchQueries("CLUTCH")).toEqual(["CLUTCH"]);
+    expect(tokenSearchQueries("Layer3 (L3)")).toEqual(["Layer3", "L3"]);
+    expect(tokenSearchQueries("Acme Labs (Beta)")).toEqual(["Acme Labs", "Acme"]);
+    expect(cleanRegistryName("  ✨ Ondo.Finance ✨ ")).toBe("Ondo.Finance");
+  });
+
+  it("treats a short bio cashtag list as a self-declared ticker but not a promoter's watchlist", () => {
+    expect(bioTickerQueries("The home of $ALTT on Base. Trade smarter.")).toEqual(["ALTT"]);
+    expect(bioTickerQueries("$ALTT and $altt are the same ticker")).toEqual(["ALTT"]);
+    expect(bioTickerQueries("Bags: $BTC $ETH $SOL $DOGE $PEPE. NFA.")).toEqual([]);
+    expect(bioTickerQueries("no ticker here, $5 minimum")).toEqual([]);
+  });
+
+  it("binds the token when the display name is decorated and only the cleaned name and ticker match", async () => {
+    const ALTT = "0x1b5ce2a593a840e3ad3549a34d7b3dec697c114d";
+    const { ctx, evidence } = context("@altcoinist", "Altcoinist 🚀 ($ALTT)", "");
+    const searches: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) {
+        const query = decodeURIComponent((url.split("query=")[1] ?? "").split("&")[0] ?? "");
+        searches.push(query);
+        // The live registry returns nothing for any decorated form.
+        if (/[^\w\s]/u.test(query)) return json({ coins: [] });
+        if (query.toLowerCase() === "altcoinist" || query.toLowerCase() === "altt") {
+          return json({ coins: [{ id: "altcoinist-token", name: "Altcoinist Token", symbol: "ALTT", market_cap_rank: 1730 }] });
+        }
+        return json({ coins: [] });
+      }
+      if (url.includes("/coins/altcoinist-token?")) {
+        return json({
+          id: "altcoinist-token",
+          name: "Altcoinist Token",
+          symbol: "altt",
+          asset_platform_id: "base",
+          platforms: { base: ALTT },
+          links: {
+            twitter_screen_name: "Altcoinist_com",
+            homepage: ["https://www.altcoinist.com/", "https://x.com/Altcoinist"],
+          },
+          market_data: { current_price: { usd: 0.016 } },
+        });
+      }
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(searches).not.toContain("Altcoinist 🚀 ($ALTT)");
+    expect(searches.map((query) => query.toLowerCase())).toEqual(expect.arrayContaining(["altcoinist", "altt"]));
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      symbol: "ALTT",
+      officialX: "@Altcoinist",
+    });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "confirmed",
+    }));
+  });
+
+  it("REGRESSION SHAPE: a slogan name plus a bio cashtag reaches the registry through the ticker", async () => {
+    const ALTT = "0x1b5ce2a593a840e3ad3549a34d7b3dec697c114d";
+    const { ctx, evidence } = context("@tradesmarter_hq", "The Trader In Your Pocket", "");
+    evidence.profile.bio = "Trade smarter with $ALTT on Base.";
+    const searches: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) {
+        const query = decodeURIComponent((url.split("query=")[1] ?? "").split("&")[0] ?? "");
+        searches.push(query);
+        if (query.toLowerCase() === "altt") {
+          return json({ coins: [{ id: "altcoinist-token", name: "Altcoinist Token", symbol: "ALTT", market_cap_rank: 1730 }] });
+        }
+        return json({ coins: [] });
+      }
+      if (url.includes("/coins/altcoinist-token?")) {
+        return json({
+          id: "altcoinist-token",
+          name: "Altcoinist Token",
+          symbol: "altt",
+          asset_platform_id: "base",
+          platforms: { base: ALTT },
+          links: { twitter_screen_name: "tradesmarter_hq", homepage: ["https://www.altcoinist.com/"] },
+          market_data: { current_price: { usd: 0.016 } },
+        });
+      }
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(searches.map((query) => query.toLowerCase())).toContain("altt");
+    expect(evidence.projectToken).toMatchObject({ verified: true, symbol: "ALTT", officialX: "@tradesmarter_hq" });
+  });
+
+  it("does not bind a bio cashtag whose registry record belongs to someone else", async () => {
+    const { ctx, evidence } = context("@somekol", "Some KOL", "");
+    evidence.profile.bio = "Long $ALTT since day one.";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) {
+        const query = decodeURIComponent((url.split("query=")[1] ?? "").split("&")[0] ?? "");
+        if (query.toLowerCase() === "altt") {
+          return json({ coins: [{ id: "altcoinist-token", name: "Altcoinist Token", symbol: "ALTT", market_cap_rank: 1730 }] });
+        }
+        return json({ coins: [] });
+      }
+      if (url.includes("/coins/altcoinist-token?")) {
+        return json({
+          id: "altcoinist-token",
+          name: "Altcoinist Token",
+          symbol: "altt",
+          asset_platform_id: "base",
+          platforms: { base: "0x1b5ce2a593a840e3ad3549a34d7b3dec697c114d" },
+          links: { twitter_screen_name: "Altcoinist", homepage: ["https://www.altcoinist.com/", "https://x.com/Altcoinist"] },
+          market_data: { current_price: { usd: 0.016 } },
+        });
+      }
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("no identity-bound project token"),
+    });
+    expect(evidence.projectToken).toBeUndefined();
+  });
+});
+

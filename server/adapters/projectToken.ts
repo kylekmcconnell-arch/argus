@@ -127,7 +127,71 @@ const cleanText = (value: unknown): string => typeof value === "string" ? value.
 const normalized = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 const projectName = (value: string): string =>
-  value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*/)[0]?.trim() || value.trim();
+  value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*|\s+-\s+/)[0]?.trim() || value.trim();
+
+// A `$TICKER` in a provider-frozen display name or bio. Registry search by
+// symbol is exact, so a cashtag is the most reliable query a project hands us.
+const CASHTAG = /\$([A-Za-z][A-Za-z0-9]{1,11})(?![A-Za-z0-9])/g;
+// Bracketed asides only count as a ticker when written the way tickers are:
+// "(ALTT)" and "(L3)" qualify, "(Beta)" and "(Official)" do not.
+const BRACKETED_TICKER_SHAPE = /^\$?[A-Z][A-Z0-9]{1,11}$/;
+const MAX_TICKER_QUERIES = 3;
+/**
+ * A bio that lists more cashtags than this is a watchlist or a promoter's
+ * portfolio, not a project naming its own token. Every ticker would still have
+ * to pass the official-X identity gate, but searching them all spends registry
+ * calls on assets that cannot bind.
+ */
+const MAX_BIO_CASHTAGS_FOR_SELF_DECLARATION = 3;
+
+export function cashtagTickers(text: string): string[] {
+  const out: string[] = [];
+  for (const match of (text ?? "").matchAll(CASHTAG)) {
+    const ticker = match[1].toUpperCase();
+    if (!out.includes(ticker)) out.push(ticker);
+  }
+  return out;
+}
+
+/**
+ * Ticker queries the official bio declares. Returns nothing for a bio that
+ * reads like a watchlist (see MAX_BIO_CASHTAGS_FOR_SELF_DECLARATION).
+ */
+export function bioTickerQueries(bio: string): string[] {
+  const tickers = cashtagTickers(bio);
+  if (!tickers.length || tickers.length > MAX_BIO_CASHTAGS_FOR_SELF_DECLARATION) return [];
+  return tickers.slice(0, 2);
+}
+
+/**
+ * The display name with everything a registry search chokes on removed:
+ * cashtags, emoji and symbol decoration, and bracketed asides. CoinGecko's
+ * search returns nothing for "Altcoinist 🚀" or "Altcoinist ($ALTT)" while
+ * "Altcoinist" and "ALTT" both find the listed token, so a decorated brand
+ * name silently produced an assessed "no token under a matching name" result
+ * and the report normalized token conduct away as if the project were tokenless.
+ */
+export function cleanRegistryName(raw: string): string {
+  return raw
+    .replace(CASHTAG, " ")
+    .replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, " ")
+    .replace(/[^\p{L}\p{N}\s.&'-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s.&'-]+|[\s.&'-]+$/g, "")
+    .trim();
+}
+
+/** Short bracketed asides that are really a ticker: "Layer3 (L3)". */
+const bracketedTickers = (raw: string): string[] => {
+  const out: string[] = [];
+  for (const match of raw.matchAll(/\(([^)]{2,12})\)|\[([^\]]{2,12})\]/g)) {
+    const inner = (match[1] ?? match[2] ?? "").trim();
+    if (!BRACKETED_TICKER_SHAPE.test(inner)) continue;
+    const ticker = inner.replace(/^\$/, "").toUpperCase();
+    if (!out.includes(ticker)) out.push(ticker);
+  }
+  return out;
+};
 
 // Registry searches are literal enough that a display name carrying a generic
 // corporate suffix misses the token named without it: DexScreener's search for
@@ -143,7 +207,6 @@ const projectName = (value: string): string =>
 // through unique-id surfaces (investigation CA, official X, owned domain).
 const GENERIC_NAME_SUFFIX = /^(?:finance|protocol|labs?|network|official|app|exchange|capital|fund|foundation|dao|token|coin|money|cash|club|world|games?|inu)$/i;
 export function tokenSearchQueries(raw: string): string[] {
-  const primary = projectName(raw);
   const queries: string[] = [];
   const push = (candidate: string) => {
     const trimmed = candidate.trim();
@@ -151,12 +214,22 @@ export function tokenSearchQueries(raw: string): string[] {
       queries.push(trimmed);
     }
   };
+  // The name segment before any slogan separator, then stripped of the
+  // decoration that makes a registry return nothing. The raw decorated string
+  // is never sent: it cannot match, and it costs a rate-limited call.
+  const primary = cleanRegistryName(projectName(raw)) || cleanRegistryName(raw);
   push(primary);
   const words = primary.split(/\s+/);
   while (words.length > 1 && GENERIC_NAME_SUFFIX.test(words[words.length - 1])) {
     words.pop();
     push(words.join(" "));
   }
+  // Ticker queries last: name matches rank first, and a ticker still has to
+  // pass the same official-X / official-domain identity gate as every other hit.
+  const tickers = [...cashtagTickers(raw), ...bracketedTickers(raw)]
+    .filter((ticker, index, all) => all.indexOf(ticker) === index)
+    .slice(0, MAX_TICKER_QUERIES);
+  for (const ticker of tickers) push(ticker);
   return queries;
 }
 
@@ -1313,10 +1386,21 @@ export async function collectProjectTokenIdentity(
   if (!handleAlreadyCovered) {
     registryQueries.push(handleQuery);
   }
-  const seeded = parseSeededContract(ctx);
-  const profileDeclaredToken = ctx.evidence.profile.profile_collection_state === "resolved"
+  const profileFrozen = ctx.evidence.profile.profile_collection_state === "resolved"
     && ctx.evidence.profile.profile_provider === "twitterapi"
-    && Number.isFinite(Date.parse(ctx.evidence.profile.profile_captured_at ?? ""))
+    && Number.isFinite(Date.parse(ctx.evidence.profile.profile_captured_at ?? ""));
+  // A project whose display name is a slogan usually still names its ticker in
+  // the bio ("The home of $ALTT on Base"). That symbol is a search lead only:
+  // the registry record it finds must still list this exact official X account.
+  if (profileFrozen) {
+    for (const ticker of bioTickerQueries(ctx.evidence.profile.bio)) {
+      if (!registryQueries.some((existing) => existing.toLowerCase() === ticker.toLowerCase())) {
+        registryQueries.push(ticker);
+      }
+    }
+  }
+  const seeded = parseSeededContract(ctx);
+  const profileDeclaredToken = profileFrozen
     ? declaredTokenFromBio(ctx.evidence.profile.bio)
     : null;
   if (!registryQueries.length && !seeded && !profileDeclaredToken) {
