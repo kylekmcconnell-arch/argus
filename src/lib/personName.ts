@@ -1,8 +1,11 @@
 const ORGANIZATION_WORDS = new Set([
-  "app", "capital", "company", "corp", "corporation", "dao", "exchange",
-  "finance", "foundation", "fund", "group", "inc", "incorporated", "labs",
-  "limited", "llc", "ltd", "markets", "network", "protocol", "studio",
-  "studios", "systems", "ventures", "wallet",
+  "advisors", "app", "asset", "assets", "capital", "college", "company",
+  "corp", "corporation", "credit", "dao", "digital", "equity", "exchange",
+  "finance", "foundation", "fund", "group", "holdings", "inc", "incorporated",
+  "infrastructure", "labs", "limited", "llc", "ltd", "management", "markets",
+  "network", "protocol", "solutions", "strategies", "strategy", "studio",
+  "studios", "systems", "technologies", "treasuries", "treasury", "university",
+  "ventures", "wallet",
 ]);
 
 const ROLE_OR_FRAGMENT_WORDS = new Set([
