@@ -8,10 +8,11 @@
 //                      pioneers"), a real CAUTION grounded in rendered evidence
 //   absent           - rendered fine, no team section at all
 //   not-retrieved    - the site never rendered; a COVERAGE GAP, not a finding
-import { isPlausiblePersonRosterName } from "../lib/personName";
 import { retrieveSite, type Retrieval } from "./retrieve";
 import { pivotOnChain, type OnChainPivot } from "./onchain";
 import { scoreProject, type ProjectVerdict } from "./projectverdict";
+import { readRoster, type NamedPerson } from "./roster";
+import { buildSiteProfile, profileOf, selfDescribesAsFund, STRONG_TOKEN, type SiteProfile } from "./siteProfile";
 
 export type TeamState = "named" | "unnamed-section" | "absent" | "not-retrieved";
 
@@ -20,7 +21,13 @@ export interface ReconFinding { claim: string; tone: "good" | "warn" | "bad" | "
 export interface Recon {
   retrieval: Retrieval;
   title: string | null;
-  team: { state: TeamState; names: string[]; note: string };
+  team: {
+    state: TeamState;
+    names: string[];
+    note: string;
+    /** The same people with the role the page gives each. Absent on records saved before roles were read. */
+    people?: NamedPerson[];
+  };
   socials: { label: string; url: string }[];
   funding: string[];          // raise / FDV / valuation claims found in copy
   tokenSignals: string[];     // on-chain / token signals (this is a token project?)
@@ -28,73 +35,35 @@ export interface Recon {
   identityLine: string;       // the one honest sentence that replaces "anonymous team"
   pivot?: OnChainPivot;       // on-chain reality check, when it reads as a token project
   isFund?: boolean;           // self-describes as a VC / fund / studio (skip token reality-check)
+  /** What this is, whether it is live, official vs linked accounts, the bound next step. */
+  profile?: SiteProfile;
   verdict?: ProjectVerdict;   // synthesized PASS / CAUTION / FAIL / INCOMPLETE
 }
 
-const SOCIAL = /\bhttps?:\/\/(?:www\.)?(x\.com|twitter\.com|t\.me|discord\.(?:gg|com)|github\.com|linkedin\.com)\/[^\s)"'<>]+/gi;
+const SOCIAL = /\bhttps?:\/\/(?:www\.)?(x\.com|twitter\.com|t\.me|discord\.(?:gg|com)|github\.com|linkedin\.com|youtube\.com|medium\.com|[a-z0-9-]+\.medium\.com|warpcast\.com|instagram\.com)\/[^\s)"'<>]+/gi;
 // A share button points at the reader's own account, not the project's. Reading
 // the markup surfaces these for the first time, and "x.com/intent/tweet" is not
 // a social presence, so they are dropped from both scans.
 const SHARE_INTENT = /(?:x\.com|twitter\.com)\/(?:intent|share)(?:\/|\?|$)|linkedin\.com\/(?:shareArticle|sharing|cws\/share)|t\.me\/share(?:\/|\?|$)|\/sharer(?:\/|\?|$)/i;
-const TEAM_HEADING = /\b(the team|our team|meet the team|leadership|founders?|built by|who we are|advisors?)\b/i;
+const TEAM_HEADING = /\b(the team|our team|meet the team|(?:core|executive|founding|management|leadership) team|leadership|founders?|built by|who we are|advisors?)\b/i;
 const TOKEN_SIG = /\b(token|tokenomics|airdrop|presale|\$[A-Z]{2,8}\b|on-chain|onchain|solana|ethereum|tge|staking|whitepaper)\b/i;
 // A VC / fund / studio / advisory site naturally discusses "tokens" and
 // "tokenomics" about the projects it BACKS — it is not itself a token project.
 // When the site self-describes as an investor, we do NOT reality-check it as a
-// token (that chased a random same-ticker DEX coin and defamed the site).
-const FUND_SITE = /\b(venture capital|ventures\b|\bvc\b|\bfund\b|\bfunds\b|capital\b|investment (?:firm|fund|dao)|portfolio compan|we (?:invest|back)|backing founders|accelerator|incubator|advisory|angel (?:investor|fund)|research (?:collective|studio))\b/i;
-// Strong, first-party evidence that THIS site is the token project (not just
-// keyword noise): an explicit token launch/economics claim or a $-ticker/contract.
-const STRONG_TOKEN = /\b(tokenomics|total supply|circulating supply|max supply|\bTGE\b|fair launch|token sale|presale|airdrop|buy \$?[A-Z]{2,8}\b|our token)\b|0x[a-fA-F0-9]{40}/i;
+// token (that chased a random same-ticker DEX coin and defamed the site). The
+// gate (selfDescribesAsFund) lives in ./siteProfile next to the classifier.
+// STRONG_TOKEN (first-party evidence that THIS site is the token project) lives
+// in ./siteProfile so the profile can be rebuilt for stored records.
 // Funding claim: a dollar figure that is explicitly tied to a raise/valuation —
 // not any dollar amount (market-size and price copy must not read as funding).
 const FUNDING = /\$[\d.]+\s?[mMbBkK](?:illion)?\b(?:[^.\n]{0,30}\b(?:raise|raised|round|seed|series\s?[a-d]|fdv|valuation|funding|backed|led by)\b)|\bat\s+\$[\d.]+\s?[mMbB]\s*fdv\b/gi;
 
-// Named individual: a 2–3 word proper name with a role IMMEDIATELY adjacent
-// (either order). Strict adjacency is deliberate — a forensic engine must not
-// promote a capitalized marketing phrase into a "named founder".
-// Spaces only: `\s` also matches newlines and glued "Al Yousuf\\nSenior Advisor"
-// into a fake three-word name sitting next to the role.
-const NAME = "[A-Z][a-z]+(?:[ \\t][A-Z][a-z]+){1,2}";
-const ROLES = "co-?founder|cofounder|founder|ceo|cto|coo|cfo|chief[\\w ]{2,24}officer|managing partner|general partner|head of [\\w ]{2,24}|advisor|lead engineer";
-const NAME_ROLE = new RegExp(`\\b(${NAME})\\b[\\s,\\u2013\\u2014|·\\-]{1,4}(?:${ROLES})\\b`, "gi");
-const ROLE_NAME = new RegExp(`\\b(?:${ROLES})\\b[\\s:\\u2013\\u2014\\-]{1,4}(${NAME})\\b`, "gi");
-// Words that begin a phrase but never a person's first name, and brand-ish
-// second tokens, both of which produce false "names".
-const FIRST_BAD = /^(Visit|Join|Read|Learn|Meet|Our|The|Built|Get|Start|Explore|Discover|View|See|Watch|Click|Live|Real|Privacy|Verified|Edge|Why|How|What|Contact|About|Back|Next|Powered|Coming|Buy|Trade|Connect|Emerging|Alternative|Institutional|Global|Digital|Private|Public|Corporate|International|Advanced|Strategic|Native|Decentralized)$/;
-const SECOND_BAD = /^(App|Protocol|Labs?|Partner|Marketplace|Ecosystem|Ecosistema|Network|Capital|Ventures?|Team|Model|Layer|Round|Raise|Introduction|Vault|Stack|Compute|Hoja|Officer|Officers|Markets?|Digital|Assets?|Treasur(?:y|ies)|Management|Strateg(?:y|ies)|University|College|Holdings?|Group|Advisors?|Solutions?|Technologies|Services|Global|International|Institutional|Alternative|Equity|Credit|Infrastructure|Finance|Company|Companies|Corporation|Foundation|Exchange|Studios?|Systems|Wallet|Research|Consulting|Associates|Limited|Llc|Ltd|Inc|Dao)$/;
+// Named individuals are read by ./roster: the structural name-line / role-line
+// shape of a team page, strict inline adjacency in prose, and "founded by".
+// Every reader shares the same person-name discipline, so a capitalized
+// marketing phrase is never promoted into a "named founder".
 
 function uniq(a: string[]): string[] { return [...new Set(a)]; }
-
-const CONNECTOR = /^(of|the|and|both|for|to|in|on|at|a|an|our|your|with|by|from|is|are|that|this)$/i;
-function validName(n: string): boolean {
-  if (/\n|\r/.test(n)) return false;
-  const parts = n.split(/\s+/);
-  if (parts.length < 2) return false;
-  // every token must read like a real name part: Title-case, not a connector,
-  // not a brand/structure/desk word. Kills "of both the" / "of the Fund" /
-  // "Emerging Markets Digital".
-  for (const p of parts) {
-    if (!/^[A-Z][A-Za-z.'-]{1,}$/.test(p)) return false;
-    if (CONNECTOR.test(p)) return false;
-    if (SECOND_BAD.test(p)) return false;
-  }
-  if (FIRST_BAD.test(parts[0])) return false;
-  return isPlausiblePersonRosterName(parts.join(" "));
-}
-
-function extractNames(content: string): string[] {
-  const out: string[] = [];
-  for (const re of [NAME_ROLE, ROLE_NAME]) {
-    re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(content))) {
-      const name = m[1];
-      if (name && validName(name)) out.push(name);
-    }
-  }
-  return uniq(out).slice(0, 12);
-}
 
 const JUNK_HANDLE = /^(gmail|outlook|hotmail|proton|icloud|yahoo|email|mail|university|college|network|capital|finance|protocol|official|home|about|team|contact|support|help|news|blog|info|admin|www|the|and|for)$/i;
 const FIRST_PARTY_HANDLE_CUE = /follow(?:\s+us)?(?:\s+on)?|twitter|\bx\b|t(?:elegram)?\.me|discord|github|linkedin|official(?:\s+account)?|socials?|handle/i;
@@ -134,12 +103,14 @@ export function analyzeContent(retrieval: Retrieval): Recon {
   // ---- retrieval gap short-circuits every content claim ----
   if (retrieval.status === "gap") {
     findings.push({ claim: retrieval.coverageNote, tone: "gap" });
-    return {
+    const gap: Recon = {
       retrieval, title: retrieval.title,
-      team: { state: "not-retrieved", names: [], note: "Site never rendered; team could not be assessed." },
+      team: { state: "not-retrieved", names: [], people: [], note: "Site never rendered; team could not be assessed." },
       socials: [], funding: [], tokenSignals: [], findings,
       identityLine: "Could not render the site. The team could not be established from available evidence (coverage gap, not a finding).",
     };
+    gap.profile = buildSiteProfile({ retrieval, socials: [], people: [], isFund: false, strongToken: false, tokenSignalCount: 0, content: "" });
+    return gap;
   }
 
   // Full social URLs, PLUS bare handles the page shows as text (@EnigmaFund) or
@@ -188,44 +159,75 @@ export function analyzeContent(retrieval: Retrieval): Recon {
   const socials = [...socialSet.values()].slice(0, 12);
   const funding = uniq((c.match(FUNDING) ?? []).map((s) => s.trim())).slice(0, 6);
   const tokenSignals = uniq((c.match(new RegExp(TOKEN_SIG, "gi")) ?? []).map((s) => s.toLowerCase())).slice(0, 10);
-  const names = extractNames(c);
+  const people = readRoster(c);
+  const names = people.map((p) => p.name);
   const hasTeamSection = TEAM_HEADING.test(c);
 
+  // Only call it a token project on FIRST-PARTY evidence (a launch/economics
+  // claim or an on-page contract) AND when the site isn't a fund/VC/studio.
+  // Two generic keywords ("token", "tokenomics") on an investor's site is not it.
+  const isFund = selfDescribesAsFund(c, retrieval.title);
+  const strongToken = STRONG_TOKEN.test(c);
+  const profile = buildSiteProfile({ retrieval, socials, people, isFund, strongToken, tokenSignalCount: tokenSignals.length, content: c });
+
+  // A bot wall or a parking page is not the project's page. Nothing on it can
+  // name a team or an account, and saying "no team section" about it would be
+  // the same false-absence error the retrieval layer exists to prevent.
+  if (profile.kind === "blocked" || profile.kind === "parked") {
+    findings.push({ claim: profile.availabilityNote, tone: profile.kind === "blocked" ? "gap" : "bad" });
+    if (profile.kindEvidence) findings.push({ claim: `Page text: “${profile.kindEvidence}”`, tone: "gap" });
+    return {
+      retrieval, title: retrieval.title,
+      team: { state: profile.kind === "blocked" ? "not-retrieved" : "absent", names: [], people: [], note: profile.kind === "blocked" ? "A challenge page was returned; the team could not be assessed." : "A parked domain names no team." },
+      socials: [], funding: [], tokenSignals: [], findings,
+      identityLine: profile.summary, isFund: false, profile,
+    };
+  }
+
   let team: Recon["team"];
-  if (names.length > 0) {
-    team = { state: "named", names, note: `Names ${names.length} individual${names.length === 1 ? "" : "s"} with roles.` };
-    findings.push({ claim: `Team names ${names.length} individual${names.length === 1 ? "" : "s"}: ${names.slice(0, 5).join(", ")}.`, tone: "good" });
+  if (people.length > 0) {
+    team = { state: "named", names, people, note: `Names ${people.length} individual${people.length === 1 ? "" : "s"} with roles.` };
+    findings.push({ claim: `Named on the page with roles: ${describePeople(people, 5)}${people.length > 5 ? `, and ${people.length - 5} more` : ""}.`, tone: "good" });
   } else if (hasTeamSection) {
-    team = { state: "unnamed-section", names: [], note: "A team section exists but names no individuals." };
+    team = { state: "unnamed-section", names: [], people: [], note: "A team section exists but names no individuals." };
     findings.push({ claim: "A team section is present but names no individuals, so identity is unverifiable. This is an evidence-based caution, not an inferred one.", tone: "warn" });
   } else {
-    team = { state: "absent", names: [], note: "No team or leadership section found on the rendered page." };
+    team = { state: "absent", names: [], people: [], note: "No team or leadership section found on the rendered page." };
     findings.push({ claim: "Rendered fine, but no team or leadership section was found.", tone: "warn" });
   }
+
+  // What this is, in the site's own words, leads the ledger.
+  if (profile.kind === "fund") findings.unshift({ claim: `Self-describes as a fund / investment firm (“${profile.kindEvidence}”). Not treated as a token project; no same-ticker reality check.`, tone: "good" });
+  else if (profile.kind === "token-project") findings.unshift({ claim: `Reads as a token project. ${profile.kindEvidence ?? ""} Run the token audit on the contract for the on-chain verdict.`.trim(), tone: "warn" });
+  else if (profile.kind === "studio") findings.unshift({ claim: `Self-describes as a studio / agency (“${profile.kindEvidence}”).`, tone: "good" });
+  else if (profile.kind === "coming-soon") findings.unshift({ claim: `${profile.availabilityNote} (“${profile.kindEvidence}”)`, tone: "warn" });
+  else if (!profile.selfDescription) findings.unshift({ claim: "The rendered page never says what the project is in plain language.", tone: "warn" });
 
   if (retrieval.status === "recovered") {
     findings.unshift({ claim: retrieval.coverageNote, tone: "good" });
   }
-  if (socials.length) findings.push({ claim: `${socials.length} social link${socials.length === 1 ? "" : "s"} found: ${socials.map((s) => s.label).join(", ")}.`, tone: "good" });
-  else findings.push({ claim: "No social or community links found in the rendered content.", tone: "warn" });
+
+  const official = profile.officialAccounts;
+  const linked = profile.linkedAccounts;
+  if (official.length) findings.push({ claim: `Official accounts linked on the page: ${official.map((a) => `${a.label} (${a.why.replace(/\.$/, "").replace(/^./, (ch) => ch.toLowerCase())})`).join("; ")}.`, tone: "good" });
+  else findings.push({ claim: "No official X, Telegram, Discord, GitHub, or LinkedIn account is linked on the rendered page.", tone: "warn" });
+  if (linked.length) findings.push({ claim: `Also links ${linked.length} account${linked.length === 1 ? "" : "s"} it does not claim as its own (${linked.slice(0, 5).map((a) => a.label).join(", ")}); not counted as official.`, tone: "warn" });
   if (funding.length) findings.push({ claim: `Funding/valuation claim in copy: ${funding[0]} (claim only, not independently verified here).`, tone: "warn" });
-  // Only call it a token project on FIRST-PARTY evidence (a launch/economics
-  // claim or an on-page contract) AND when the site isn't a fund/VC/studio.
-  // Two generic keywords ("token", "tokenomics") on an investor's site is not it.
-  const isFund = FUND_SITE.test(c) || FUND_SITE.test(retrieval.title ?? "");
-  const strongToken = STRONG_TOKEN.test(c);
-  if (!isFund && strongToken && tokenSignals.length >= 2) {
-    findings.push({ claim: `Reads as a token project (signals: ${tokenSignals.slice(0, 5).join(", ")}). Run a token audit on the contract for the on-chain verdict.`, tone: "warn" });
-  }
 
   // ---- the single honest sentence that replaces "anonymous team" ----
   let identityLine: string;
-  if (team.state === "named") identityLine = `Team identified: ${names.slice(0, 4).join(", ")}${names.length > 4 ? ", …" : ""}.`;
+  if (team.state === "named") identityLine = `Team identified on the site: ${describePeople(people, 4)}${people.length > 4 ? `, and ${people.length - 4} more` : ""}.`;
   else if (team.state === "unnamed-section") identityLine = "Team section present but names no principals, so identity is unverifiable. Distinct from anonymous: it is a stated-but-unnamed team.";
   else identityLine = "No team section was found on the rendered site. The team could not be established. This records an observed absence in content ARGUS actually rendered.";
 
-  return { retrieval, title: retrieval.title, team, socials, funding, tokenSignals, findings, identityLine, isFund };
+  return { retrieval, title: retrieval.title, team, socials, funding, tokenSignals, findings, identityLine, isFund, profile };
 }
+
+function describePeople(people: NamedPerson[], max: number): string {
+  return people.slice(0, max).map((p) => (p.role ? `${p.name} (${p.role})` : p.name)).join(", ");
+}
+
+export { profileOf };
 
 export async function runRecon(
   url: string,
@@ -237,9 +239,14 @@ export async function runRecon(
   // Skip the on-chain reality check on fund/VC/studio sites — they discuss
   // portfolio tokens they don't own, and name-searching a portfolio ticker
   // pulled a random same-ticker DEX coin and dragged the site's verdict.
-  if (retrieval.status !== "gap" && !recon.isFund) {
+  if (retrieval.status !== "gap" && !recon.isFund && recon.profile?.kind !== "blocked" && recon.profile?.kind !== "parked") {
     const pivot = await pivotOnChain(retrieval.content, recon.tokenSignals.length, onPivot);
-    if (pivot.attempted) recon.pivot = pivot;
+    if (pivot.attempted) {
+      recon.pivot = pivot;
+      // A contract the page links is the strongest bound next step; the profile
+      // is rebuilt so it can point there instead of at an account.
+      recon.profile = profileOf({ ...recon, profile: undefined });
+    }
   }
   recon.verdict = scoreProject(recon);
   return recon;

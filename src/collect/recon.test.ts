@@ -124,7 +124,7 @@ Head of Bitcoin Strategy. Fmr. CEO @Kraken EMEA. Co-Founder @NY Bitcoin Center
 `;
 
 describe("site recon identity extract", () => {
-  it("does not treat an org/desk phrase or bio @mentions as a named team that supports PASS", () => {
+  it("keeps the desk phrase and bio @mentions out while reading the real roster the page names", () => {
     const recon = analyzeContent({
       url: "https://10xcapital.com/",
       status: "recovered",
@@ -135,20 +135,29 @@ describe("site recon identity extract", () => {
     });
     const verdict = scoreProject(recon);
 
+    // #341 junk stays out: the desk phrase is not a person, no glued newline name.
     expect(recon.team.names).not.toContain("Emerging Markets Digital");
-    expect(recon.team.names.join(" ")).not.toMatch(/Yousuf/);
-    expect(recon.team.state).not.toBe("named");
+    expect(recon.team.names.join(" | ")).not.toMatch(/Yousuf Senior|Emerging|Markets|Digital/);
     expect(recon.identityLine).not.toMatch(/Emerging Markets Digital/);
+    // The page's actual card grid (name line, role line) is read as people WITH roles.
+    expect(recon.team.state).toBe("named");
+    expect(recon.team.people).toEqual([
+      expect.objectContaining({ name: "Omar Al Yousuf", role: "Senior Advisor", basis: "roster" }),
+      expect.objectContaining({ name: "Alex Monje", role: "Partner, Chief Legal Officer", basis: "roster" }),
+      expect.objectContaining({ name: "Austin Alexander", role: "Partner", basis: "roster" }),
+    ]);
 
     const socialLabels = recon.socials.map((s) => s.label);
     for (const junk of ["@UNC", "@NY", "@University", "@Siemens", "@Kraken", "@CoinW", "@Legend"]) {
       expect(socialLabels).not.toContain(junk);
     }
-    expect(recon.findings.some((f) => /social link/i.test(f.claim) && f.tone === "good")).toBe(false);
+    expect(recon.socials).toEqual([]);
+    expect(recon.profile?.officialAccounts).toEqual([]);
+    expect(recon.findings.some((f) => /official accounts linked/i.test(f.claim) && f.tone === "good")).toBe(false);
 
-    expect(verdict.reasons.some((r) => r.tone === "good" && /Team identified/i.test(r.text))).toBe(false);
-    expect(verdict.score).not.toBe(89);
-    expect(verdict.score === null || verdict.score < 89).toBe(true);
+    // The named-team credit is earned by real people, never by the desk phrase.
+    expect(verdict.reasons.some((r) => r.tone === "good" && /Emerging Markets Digital/i.test(r.text))).toBe(false);
+    expect(verdict.reasons.some((r) => r.tone === "good" && /Team identified on the site: Omar Al Yousuf \(Senior Advisor\)/.test(r.text))).toBe(true);
   });
 
   it("still extracts a real person next to a role", () => {

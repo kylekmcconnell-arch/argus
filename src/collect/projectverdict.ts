@@ -7,6 +7,7 @@
 //   - Hard caps over scores: a disqualifying finding ceilings the result.
 import { isPlausiblePersonRosterName } from "../lib/personName";
 import type { Recon } from "./recon";
+import { profileOf } from "./siteProfile";
 
 export interface HypeSignals {
   fabricatedMetrics: string[]; // precise vanity stats from an unproven project
@@ -58,6 +59,17 @@ export function scoreProject(recon: Recon): ProjectVerdict {
     };
   }
 
+  const profile = profileOf(recon);
+
+  // A bot-protection challenge is the same thing as a failed fetch: the page
+  // ARGUS holds is not the site. No content verdict.
+  if (profile.kind === "blocked") {
+    return {
+      verdict: "INCOMPLETE", score: null, hype, capApplied: "bot_wall",
+      reasons: [{ tone: "gap", text: "The URL answered with a bot-protection challenge, not the site. No verdict can be issued on a page ARGUS never saw." }],
+    };
+  }
+
   // ---- Verifiability (0-40): the on-chain reality check ----
   let verifiability: number;
   const p = recon.pivot;
@@ -101,7 +113,14 @@ export function scoreProject(recon: Recon): ProjectVerdict {
     reasons.push({ tone: "warn", text: "Stated-but-unnamed team: no disclosure bonus, but not penalized for pseudonymity alone." });
   } else { team = 9; reasons.push({ tone: "warn", text: "No team section on the rendered site." }); }
   const hasDocs = recon.socials.some((s) => /github|gitbook|docs/i.test(s.label) || /docs|whitepaper/i.test(s.url));
-  if (recon.socials.length) team += 1;
+  // Only an account the page claims as its own is a transparency signal. A
+  // portfolio company's X link or a bio @mention is not the project's presence.
+  if (profile.officialAccounts.length) {
+    team += 1;
+    reasons.push({ tone: "good", text: `Official accounts linked on the page: ${profile.officialAccounts.slice(0, 4).map((a) => a.label).join(", ")}.` });
+  } else {
+    reasons.push({ tone: "warn", text: "No official X, Telegram, Discord, GitHub, or LinkedIn account is linked on the page." });
+  }
   if (hasDocs) team += 1;
   team = Math.min(20, team);
 
@@ -113,10 +132,29 @@ export function scoreProject(recon: Recon): ProjectVerdict {
   let score = Math.round(verifiability + claims + team + coverage);
   let capApplied: string | null = null;
 
+  if (profile.kind === "fund") {
+    reasons.push({ tone: "good", text: `Self-describes as a fund / investment firm; not reality-checked as a token.` });
+  }
+
   // ---- Hard caps ----
   if (hype.guaranteed.length) { score = Math.min(score, 25); capApplied = "manipulation_language"; }
   if (p && p.attempted && !p.found && (p.claim.live || p.claim.fdv)) {
     score = Math.min(score, 38); capApplied = capApplied ?? "unverifiable_token_claim";
+  }
+  // A parking page or a placeholder is not a project. Nothing on it can PASS.
+  if (profile.kind === "parked") {
+    score = Math.min(score, 40); capApplied = capApplied ?? "parked_domain";
+    reasons.push({ tone: "bad", text: "The domain is parked / for sale. There is no project content at this URL to assess." });
+  } else if (profile.kind === "coming-soon") {
+    score = Math.min(score, 55); capApplied = capApplied ?? "coming_soon";
+    reasons.push({ tone: "warn", text: "A placeholder page: the site is live but shows no product, team, or documentation yet. Nothing here can be verified." });
+  }
+  // Empty identity must not mint a confident PASS. Pseudonymity stays neutral
+  // (one signal is enough to escape this); a page with no self-description, no
+  // named person, no official account, and no docs has given ARGUS nothing.
+  if (profile.identitySignals === 0 && profile.kind !== "parked" && profile.kind !== "coming-soon") {
+    score = Math.min(score, 60); capApplied = capApplied ?? "no_identity_evidence";
+    reasons.push({ tone: "warn", text: "Nothing on the rendered page establishes who runs this: no self-description, no named person, no official account, no documentation." });
   }
 
   reasons.sort((a, b) => order(b.tone) - order(a.tone));
