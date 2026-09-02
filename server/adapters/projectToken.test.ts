@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
 import { getCost, withCostLedger } from "../cost";
 import type { CollectContext } from "./types";
 import {
   bioTickerQueries,
   cleanRegistryName,
+  coingeckoThrottle,
   collectProjectTokenIdentity,
   launchedProductSearchQueries,
   PLATFORM_CHAIN,
@@ -76,6 +77,12 @@ const pair = (overrides: Record<string, unknown> = {}) => {
     ...overrides,
   };
 };
+
+beforeEach(() => {
+  // The one-shot 429 back-off is real wall clock in production; tests that
+  // answer 429 must not pay it.
+  coingeckoThrottle.backoffMs = 0;
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -1957,5 +1964,97 @@ describe("a Solana mint published on the project's own verified site", () => {
     await collectProjectTokenIdentity(ctx);
     expect(evidence.projectToken).toBeUndefined();
     expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "confirmed" }));
+  });
+});
+
+describe("CoinGecko fan-out stays bounded and a throttle is retried once", () => {
+  // #338. Keyless CoinGecko answers 429 after a few quick queries; six
+  // registry queries times three detail reads each is what tipped it over.
+  const sixQueryContext = () => {
+    const { ctx, evidence } = context("@alphabeta", "Alpha Beta Capital", "https://alphabeta.example/");
+    evidence.profile.bio = "Home of $DELTA and $EPS";
+    evidence.subjectOrientation = {
+      kind: "PROJECT",
+      what: "Alpha Beta Capital",
+      audience: "",
+      boundHandle: "@alphabeta",
+      boundDomain: "https://alphabeta.example/",
+      sourceUrls: [],
+      launchedProducts: [{ name: "Gamma Product", tokenTicker: "GAMMA" }],
+    } as never;
+    return { ctx, evidence };
+  };
+  const searchHit = (url: string) => {
+    const query = decodeURIComponent((url.split("query=")[1] ?? "").split("&")[0] ?? "");
+    const key = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return json({ coins: [1, 2, 3].map((i) => ({ id: `${key}-${i}`, name: query, symbol: `${key}${i}`.toUpperCase(), market_cap_rank: null })) });
+  };
+  const unrelatedDetails = (url: string) => {
+    const id = url.split("/coins/")[1]?.split("?")[0] ?? "x";
+    return json(details({ id, name: id, symbol: id, platforms: { solana: OTHER_TOKEN }, links: { twitter_screen_name: "someoneelse", homepage: ["https://someone-else.example/"] } }));
+  };
+
+  it("makes at most six detail reads for a run with six registry queries", async () => {
+    const { ctx } = sixQueryContext();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return searchHit(url);
+      if (url.includes("/coins/")) return unrelatedDetails(url);
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      if (url === "https://alphabeta.example/") return new Response("<p>Alpha Beta</p>", { status: 200 });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    const searches = fetchMock.mock.calls.filter(([input]) => String(input).includes("/search?"));
+    const detailReads = fetchMock.mock.calls.filter(([input]) => String(input).includes("/coins/"));
+    expect(searches.length).toBeGreaterThanOrEqual(5);
+    expect(detailReads.length).toBeLessThanOrEqual(6);
+  });
+
+  it("does not repeat a query that completed empty earlier in the same run", async () => {
+    const { ctx } = sixQueryContext();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      if (url === "https://alphabeta.example/") return new Response("<p>Alpha Beta</p>", { status: 200 });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    const firstPassSearches = fetchMock.mock.calls.filter(([input]) => String(input).includes("/search?")).length;
+    const firstPassDex = fetchMock.mock.calls.filter(([input]) => String(input).includes("/latest/dex/search")).length;
+    expect(firstPassSearches).toBeGreaterThanOrEqual(5);
+
+    // Second pass on the same evidence bag, as the post-orientation re-run does.
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/search?")).length).toBe(firstPassSearches);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/latest/dex/search")).length).toBe(firstPassDex);
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "unavailable" }));
+  });
+
+  it("completes the search after one 429 followed by a successful retry", async () => {
+    {
+      const { ctx, evidence } = context();
+      let searchCalls = 0;
+      vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("coingecko.com") && url.includes("/search?")) {
+          searchCalls += 1;
+          if (searchCalls === 1) return new Response("Throttled", { status: 429 });
+          return json(search());
+        }
+        if (url.includes("/coins/project-token?")) return json(details());
+        if (url.includes("dexscreener.com")) return json({ pairs: [] });
+        throw new Error(`unexpected URL ${url}`);
+      }));
+
+      await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+      expect(evidence.projectToken).toMatchObject({ verified: true, symbol: "PDX" });
+      expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ status: "unavailable" }));
+    }
   });
 });

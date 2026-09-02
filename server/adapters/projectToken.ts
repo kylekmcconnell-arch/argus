@@ -6,7 +6,7 @@ import { env } from "../config";
 import { captureTimestamp } from "../captureTime";
 import { recordCall } from "../cost";
 import { fetchPublicTextWithRecovery, type PublicTextWithRecoveryResult } from "../publicWeb";
-import type { Adapter, AdapterRunResult, CollectContext } from "./types";
+import type { Adapter, AdapterRunResult, CollectContext, CollectedEvidence } from "./types";
 
 const COINGECKO_PUBLIC = "https://api.coingecko.com/api/v3";
 const COINGECKO_PRO = "https://pro-api.coingecko.com/api/v3";
@@ -14,6 +14,14 @@ const DEXSCREENER = "https://api.dexscreener.com/latest/dex/tokens";
 const DEXSCREENER_SEARCH = "https://api.dexscreener.com/latest/dex/search";
 const GECKOTERMINAL = "https://api.geckoterminal.com/api/v2";
 const MAX_CANDIDATES = 3;
+/** CoinGecko `/coins/{id}` reads per adapter invocation, across every registry query. */
+const MAX_DETAIL_FETCHES = 6;
+/**
+ * Keyless CoinGecko answers HTTP 429 "Throttled" after a few quick queries.
+ * One bounded back-off before recording the query as failed turns most of
+ * those into completed searches. Mutable so tests can zero the wait.
+ */
+export const coingeckoThrottle = { backoffMs: 1_500 };
 const MAX_HISTORY_POINTS = 90;
 const PRICE_TOLERANCE = 0.25;
 const MIN_POOL_LIQUIDITY_USD = 25_000;
@@ -279,15 +287,32 @@ const coingeckoConfig = () => {
   };
 };
 
+/**
+ * One CoinGecko read with a single back-off on 429. Returns null on transport
+ * failure; the caller still inspects the final status of the response.
+ */
+async function coingeckoFetch(url: string, headers: Record<string, string>, label: string, tier: string): Promise<Response | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+    } catch {
+      return null;
+    }
+    if (response.status === 429 && attempt === 0) {
+      recordCall("coingecko", label, 0, `${tier} · http_429 · backing_off_once`, "partial");
+      await new Promise((resolve) => setTimeout(resolve, coingeckoThrottle.backoffMs));
+      continue;
+    }
+    return response;
+  }
+  return null;
+}
+
 async function coinSearch(query: string): Promise<CoinSearchRow[] | null> {
   const { base, headers, tier } = coingeckoConfig();
-  let response: Response;
-  try {
-    response = await fetch(`${base}/search?query=${encodeURIComponent(query)}`, {
-      headers,
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch {
+  const response = await coingeckoFetch(`${base}/search?query=${encodeURIComponent(query)}`, headers, "project-search", tier);
+  if (!response) {
     recordCall("coingecko", "project-search", 0, `${tier} · transport_error`, "failed");
     return null;
   }
@@ -358,10 +383,8 @@ function rankedCandidates(query: string, rows: CoinSearchRow[]): CoinSearchRow[]
 async function coinDetails(id: string): Promise<JsonRecord | null> {
   const { base, headers, tier } = coingeckoConfig();
   const url = `${base}/coins/${encodeURIComponent(id)}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
-  let response: Response;
-  try {
-    response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
-  } catch {
+  const response = await coingeckoFetch(url, headers, "project-details", tier);
+  if (!response) {
     recordCall("coingecko", "project-details", 0, `${tier} · transport_error`, "failed");
     return null;
   }
@@ -1456,6 +1479,27 @@ async function collectProfileDeclaredToken(
 type DeclaredOutcome = { candidate: TokenCandidate; result: DexFallbackResult };
 
 /**
+ * Registry queries that already completed with NO candidate at all earlier in
+ * the same run, per provider. The adapter runs more than once per scan (after
+ * orientation names launched products, after an official site is recovered),
+ * and each re-run used to repeat every display-name query that had already
+ * come back empty, which is what pushes keyless CoinGecko into throttling.
+ * Only truly empty queries are remembered: a query whose candidates merely
+ * failed the identity gate must run again, because a recovered official
+ * domain can bind exactly those candidates.
+ */
+const completedEmptyQueries = new WeakMap<CollectedEvidence, { coingecko: Set<string>; dexscreener: Set<string> }>();
+
+function emptyQueryLedger(evidence: CollectedEvidence): { coingecko: Set<string>; dexscreener: Set<string> } {
+  let ledger = completedEmptyQueries.get(evidence);
+  if (!ledger) {
+    ledger = { coingecko: new Set(), dexscreener: new Set() };
+    completedEmptyQueries.set(evidence, ledger);
+  }
+  return ledger;
+}
+
+/**
  * The registry platform whose listed address equals the bio-declared contract.
  * CoinGecko lists every chain a token is deployed on under `platforms`, so a
  * declared contract that is the token's Base deployment still matches when the
@@ -1660,10 +1704,18 @@ export async function collectProjectTokenIdentity(
   // tracks this, and CoinGecko must not report "no token under a matching
   // name" for a name it was never allowed to look up.
   let searchFailures = 0;
+  const emptyLedger = emptyQueryLedger(ctx.evidence);
   if (!selected && registryQueries.length) {
     const seenIds = new Set<string>();
     let anySearchCompleted = false;
     for (const registryQuery of registryQueries) {
+      const queryKey = registryQuery.toLowerCase();
+      if (emptyLedger.coingecko.has(queryKey)) {
+        // Completed empty earlier in this run; the answer cannot change.
+        anySearchCompleted = true;
+        search ??= [];
+        continue;
+      }
       const rows = await coinSearch(registryQuery);
       if (rows === null) {
         searchFailures += 1;
@@ -1671,15 +1723,20 @@ export async function collectProjectTokenIdentity(
       }
       anySearchCompleted = true;
       search = rows;
-      for (const row of rankedCandidates(registryQuery, rows)) {
+      const ranked = rankedCandidates(registryQuery, rows);
+      if (!ranked.length) emptyLedger.coingecko.add(queryKey);
+      for (const row of ranked) {
         if (seenIds.has(row.id)) continue;
         seenIds.add(row.id);
         candidates.push(row);
       }
     }
     if (!anySearchCompleted) search = null;
-    detailAttempts += candidates.length;
-    inspected = await Promise.all(candidates.map(async (candidate) => {
+    // A hard cap on detail reads per invocation: six queries times three
+    // candidates each is what tipped keyless CoinGecko into throttling.
+    const inspectedCandidates = candidates.slice(0, MAX_DETAIL_FETCHES);
+    detailAttempts += inspectedCandidates.length;
+    inspected = await Promise.all(inspectedCandidates.map(async (candidate) => {
       const details = await coinDetails(candidate.id);
       if (!details) return { details: null, selected: null };
       registryHomepages.push(...cgHandleBoundHomepages(ctx, details));
@@ -1713,16 +1770,26 @@ export async function collectProjectTokenIdentity(
     let dexSearchEverFailed = false;
     const dexNameMatches = new Set<string>();
     let dexNameMatchCount = 0;
+    let dexQueriesSkipped = 0;
     for (const fallbackQuery of dexQueries) {
       if (dexFallback.state === "matched") break;
+      const queryKey = fallbackQuery.toLowerCase();
+      if (emptyLedger.dexscreener.has(queryKey)) {
+        dexQueriesSkipped += 1;
+        continue;
+      }
       const retry = await collectDexProjectToken(ctx, fallbackQuery);
       dexAttempts += retry.attempts;
       if (retry.state === "failed") dexSearchEverFailed = true;
       if (retry.state === "empty") {
+        if (!(retry.nameMatchCount ?? 0) && !(retry.nameMatches?.length)) emptyLedger.dexscreener.add(queryKey);
         for (const match of retry.nameMatches ?? []) dexNameMatches.add(match);
         dexNameMatchCount = Math.max(dexNameMatchCount, retry.nameMatchCount ?? 0);
       }
       if (retry.state === "matched") dexFallback = retry;
+    }
+    if (dexFallback.state === "empty" && dexQueriesSkipped && dexQueriesSkipped === dexQueries.length) {
+      dexFallback = { ...dexFallback, detail: "DexScreener project search already completed empty earlier in this run" };
     }
     if (dexFallback.state !== "matched" && dexNameMatches.size) {
       dexFallback = {
