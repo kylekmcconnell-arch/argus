@@ -9,8 +9,21 @@ const PRELAUNCH_TOKEN = /\b(?:token|coin)\b[\s\S]{0,45}\b(?:pre[- ]?launch|plann
 const completed = (status: ScanCheck["status"] | undefined): boolean =>
   status === "confirmed" || status === "reported" || status === "finding" || status === "checked-empty";
 
-const unresolvedCandidate = (check: ScanCheck | undefined): boolean =>
-  check?.status === "finding" && /\b(?:official (?:x )?bio declared a contract|declared contract|exact address|candidate contract)\b[\s\S]{0,100}\b(?:no market|unresolved|could not be attributed|not resolved)\b/i.test(check.note ?? "");
+// A first-party contract the adapter could not bind is a structured evidence
+// record, not a phrase in a check note: applicability must not change when
+// the adapter rewords its disclosure.
+const unresolvedCandidateLine = (evidence: CollectedEvidence): string | null => {
+  const candidate = evidence.unresolvedProjectToken;
+  if (!candidate) return null;
+  switch (candidate.state) {
+    case "registry_conflict":
+      return `The official X bio declares contract ${candidate.address}, but the identity-bound ${candidate.registry?.provider ?? "registry"} record lists ${candidate.registry?.address ?? "a different contract"}; the two were not reconciled.`;
+    case "provider_unavailable":
+      return `The official X bio declares contract ${candidate.address}, and the market and registry providers could not complete the read.`;
+    default:
+      return `The official X bio declares contract ${candidate.address}, and no exact-address market or identity-bound registry record confirms it.`;
+  }
+};
 
 const continuityHasTokenLineage = (evidence: CollectedEvidence): boolean => {
   const continuity = evidence.entityContinuity;
@@ -97,7 +110,9 @@ export function deriveTokenApplicability(
     };
   }
 
-  if (!tokenCheck || !completed(tokenCheck.status) || unresolvedCandidate(tokenCheck)) {
+  const unresolvedLine = unresolvedCandidateLine(evidence);
+  if (!tokenCheck || !completed(tokenCheck.status) || unresolvedLine) {
+    if (unresolvedLine) evidenceLines.push(unresolvedLine);
     if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
     return {
       state: "unresolved_token_identity",

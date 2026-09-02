@@ -1582,6 +1582,10 @@ describe("DexScreener's null-pairs answer is a completed empty market read", () 
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("dexscreener.com/latest/dex/tokens/")) return json({ schemaVersion: "1.0.0", pairs: null });
+      // The declared contract no longer ends the search (#336): the registry
+      // tiers still run and complete empty here.
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
       throw new Error(`unexpected URL ${url}`);
     }));
 
@@ -1595,6 +1599,8 @@ describe("DexScreener's null-pairs answer is a completed empty market read", () 
       note: expect.stringContaining("no market for that exact address"),
     }));
     expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ status: "unavailable" }));
+    expect(evidence.unresolvedProjectToken).toMatchObject({ address: PONS_TOKEN, via: "evm", source: "official_bio", state: "no_market" });
+    expect(evidence.projectToken).toBeUndefined();
   });
 
   it("keeps a registry-bound token without any DEX pool as a fully executed bind", async () => {
@@ -1723,5 +1729,119 @@ describe("official-domain gates read every credible domain on the frozen profile
     await collectProjectTokenIdentity(ctx);
     expect(evidence.projectToken).toBeUndefined();
     expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "confirmed" }));
+  });
+});
+
+describe("a bio-declared contract with no DEX market continues into the registry tiers", () => {
+  // #336. The bio names a contract; DexScreener has no pool for it. Before,
+  // the adapter returned right there and CoinGecko never got to say that the
+  // audited official X account owns a listed token.
+  const OTHER_EVM = "0x1111111111111111111111111111111111111111";
+  const declaring = (handle: string, displayName: string) => {
+    const { ctx, evidence } = context(handle, displayName, "");
+    evidence.profile.bio = `Trade the future. CA: ${PONS_TOKEN}`;
+    return { ctx, evidence };
+  };
+  const registryFetch = (cgDetails: Record<string, unknown>) => vi.fn(async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("dexscreener.com/latest/dex/tokens/")) return json({ schemaVersion: "1.0.0", pairs: null });
+    if (url.includes("coingecko.com") && url.includes("/search?")) return json(search({ id: "pons", name: "Pons", symbol: "PONS" }));
+    if (url.includes("/coins/pons?")) return json(details(cgDetails));
+    if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+    throw new Error(`unexpected URL ${url}`);
+  });
+
+  it("binds the token when the identity-bound CoinGecko record lists the exact declared contract", async () => {
+    const { ctx, evidence } = declaring("@ponsdotfamily", "Pons");
+    vi.stubGlobal("fetch", registryFetch({
+      id: "pons",
+      name: "Pons",
+      symbol: "pons",
+      asset_platform_id: "ethereum",
+      platforms: { ethereum: OTHER_EVM, base: PONS_TOKEN },
+      links: { twitter_screen_name: "ponsdotfamily", homepage: ["https://ponsfamily.com/"] },
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      symbol: "PONS",
+      address: PONS_TOKEN,
+      chain: "base",
+      producerSources: { identity: { provider: "coingecko" } },
+    });
+    expect(evidence.unresolvedProjectToken).toBeUndefined();
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "confirmed",
+      note: expect.stringContaining("exact contract declared in the official X bio"),
+    }));
+  });
+
+  it("stays unresolved and names both contracts when the identity-bound record lists a different one", async () => {
+    const { ctx, evidence } = declaring("@ponsdotfamily", "Pons");
+    vi.stubGlobal("fetch", registryFetch({
+      id: "pons",
+      name: "Pons",
+      symbol: "pons",
+      asset_platform_id: "base",
+      platforms: { base: OTHER_EVM },
+      links: { twitter_screen_name: "ponsdotfamily", homepage: ["https://ponsfamily.com/"] },
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("differ"),
+    });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(evidence.unresolvedProjectToken).toMatchObject({
+      address: PONS_TOKEN,
+      state: "registry_conflict",
+      registry: { provider: "coingecko", address: OTHER_EVM, chain: "base", symbol: "PONS" },
+    });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "finding",
+      note: expect.stringMatching(new RegExp(`${PONS_TOKEN}[\\s\\S]*${OTHER_EVM}`)),
+    }));
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "confirmed" }));
+  });
+
+  it("does not bind when the registry record's official X and domain belong to someone else", async () => {
+    const { ctx, evidence } = declaring("@ponsdotfamily", "Pons");
+    vi.stubGlobal("fetch", registryFetch({
+      id: "pons",
+      name: "Pons",
+      symbol: "pons",
+      asset_platform_id: "base",
+      platforms: { base: PONS_TOKEN },
+      links: { twitter_screen_name: "someoneelse", homepage: ["https://someone-else.example/"] },
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(evidence.unresolvedProjectToken).toMatchObject({ address: PONS_TOKEN, state: "no_market" });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "finding",
+      note: expect.stringContaining("no market for that exact address"),
+    }));
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ status: "unavailable" }));
+  });
+
+  it("records a provider gap, not an assessed null, when a registry tier failed after the declared contract had no market", async () => {
+    const { ctx, evidence } = declaring("@ponsdotfamily", "Pons");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("dexscreener.com/latest/dex/tokens/")) return json({ schemaVersion: "1.0.0", pairs: null });
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ error: "throttled" }, 429);
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "partial" });
+    expect(evidence.unresolvedProjectToken).toMatchObject({ address: PONS_TOKEN, state: "provider_unavailable" });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "unavailable" }));
   });
 });
