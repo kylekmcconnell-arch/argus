@@ -89,6 +89,58 @@ describe("research director", () => {
     });
   });
 
+  it("lets a fund brand with a credible official site run portfolio and fund-scale discovery despite an open identity question", () => {
+    // Owner decision on #327: the collectors bind every artifact on the
+    // official domain, so the person-shaped identity gate is redundant here.
+    const evidence = emptyEvidence("@formventures");
+    evidence.roles = [SubjectClass.INVESTOR];
+    evidence.profile.display_name = "Form Ventures";
+    evidence.profile.bio = "We back founders building the next generation of finance.";
+    evidence.profile.website = "https://formventures.example/";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.basicFactQuestionLedger = [{
+      questionId: "investor.official-identity",
+      audience: "investor",
+      batch: "identity",
+      predicate: "official_identity",
+      question: "Which exact organization does this account represent?",
+      critical: true,
+      status: "unanswered",
+      answerRefs: [],
+      providerRuns: [],
+    }];
+
+    const plan = buildResearchPlan(evidence);
+    expect(researchPlanAllows(plan, "portfolio_and_outcomes")).toBe(true);
+    expect(researchPlanAllows(plan, "fund_scale")).toBe(true);
+    expect(plan.tasks.find((task) => task.capability === "portfolio_and_outcomes")?.blockedBy).toEqual([]);
+  });
+
+  it("keeps blocking an organization whose profile has no credible official site", () => {
+    const evidence = emptyEvidence("@formventures");
+    evidence.roles = [SubjectClass.INVESTOR];
+    evidence.profile.display_name = "Form Ventures";
+    evidence.profile.bio = "We back founders.";
+    evidence.profile.website = "https://linktr.ee/formventures";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.basicFactQuestionLedger = [{
+      questionId: "investor.official-identity",
+      audience: "investor",
+      batch: "identity",
+      predicate: "official_identity",
+      question: "Which exact organization does this account represent?",
+      critical: true,
+      status: "unanswered",
+      answerRefs: [],
+      providerRuns: [],
+    }];
+
+    const plan = buildResearchPlan(evidence);
+    expect(researchPlanAllows(plan, "portfolio_and_outcomes")).toBe(false);
+  });
+
   it("ranks high-impact lower-cost open work ahead of expensive untriggered enrichment", () => {
     const evidence = emptyEvidence("@fixturefund");
     evidence.roles = [SubjectClass.INVESTOR];
