@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./live", () => ({ streamAudit: mocks.streamAudit }));
 vi.mock("../threat/scan", () => ({ threatScan: mocks.threatScan }));
+// The runner must never import this: a CoinGecko name match is not evidence
+// that a token belongs to the subject (#321). The mock stays so a regression
+// that reintroduces the import is caught by the assertion below.
 vi.mock("./resolveProjectToken", () => ({ resolveProjectToken: mocks.resolveProjectToken }));
 
 import { getRun, setOnComplete, startPersonAudit } from "./runner";
@@ -77,6 +80,33 @@ describe("project report token-safety leg", () => {
     expect(getRun("@AnyoneFDN")?.dossier?.threat).toBe(tokenSafety);
     expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("canonical $ANYONE project token");
     expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("PASS · 18/100 risk");
+  });
+
+  it("never attaches a token by CoinGecko name match when nothing first-party names one", async () => {
+    const dossier = { ...anyoneDossier(), projectToken: undefined, bio: "Privacy network.", evidence: { promotions: [] } } as unknown as Dossier;
+    mocks.resolveProjectToken.mockResolvedValue({
+      name: "Anyone Protocol",
+      symbol: "ANYONE",
+      contract: "0x1234567890abcdef1234567890abcdef12345678",
+      chain: "ethereum",
+      homepage: "https://www.anyone.io/",
+    });
+    mocks.streamAudit.mockImplementation((
+      _handle: string,
+      _priv: boolean,
+      handlers: { onDone: (value: Dossier) => void },
+    ) => {
+      handlers.onDone(dossier);
+      return () => undefined;
+    });
+
+    startPersonAudit("@AnyoneFDN");
+    await vi.waitFor(() => expect(getRun("@AnyoneFDN")?.status).toBe("done"));
+
+    expect(mocks.resolveProjectToken).not.toHaveBeenCalled();
+    expect(mocks.threatScan).not.toHaveBeenCalled();
+    expect(getRun("@AnyoneFDN")?.dossier?.threat).toBeUndefined();
+    expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("does not attach tokens by name match");
   });
 
   it("does not mark the report done until the token-enriched version is durably saved", async () => {
