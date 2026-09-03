@@ -17,7 +17,6 @@ import {
   tokenFromVerifiedProjectToken,
   type TokenCandidate,
 } from "./projectTokenLeg";
-import { resolveProjectToken } from "./resolveProjectToken";
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
 import type { ResearchIntent } from "./researchDirector";
@@ -126,31 +125,19 @@ export function startPersonAudit(
   };
 
   const finalize = async (d: Dossier) => {
-    // Fallback attribution when the server never announced a token: bio CA, a
-    // claimed promotion, then the canonical CoinGecko name-match - guarded
-    // against namesakes by the bio's own domain (never smear a subject with a
-    // same-name token that isn't theirs).
+    // Fallback attribution when the server never announced a token: the
+    // verified project token, then the contract in the subject's own bio, then
+    // a claimed promotion. Nothing else. A CoinGecko name match used to be the
+    // last resort here; it is gone on purpose (#321): anyone can mint a token
+    // in anyone's name, so a same-name listing is never evidence that the
+    // token is the subject's, and the server rightly refused to save it.
     if (!threatLeg) {
       const cand = tokenFromVerifiedProjectToken(d.projectToken)
         ?? tokenFromBio(d.bio)
         ?? tokenFromPromotions(d.evidence?.promotions);
       if (cand) startThreatLeg(cand);
       else {
-        const cg = await resolveProjectToken(d.display_name || d.handle).catch(() => null);
-        if (cg) {
-          const bioDomain = (d.bio ?? "").match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1]?.toLowerCase();
-          let homeHost: string | null = null;
-          try { homeHost = cg.homepage ? new URL(cg.homepage).hostname.replace(/^www\./, "").toLowerCase() : null; } catch { /* bad homepage URL */ }
-          const mismatch = !!bioDomain && !!homeHost && bioDomain !== homeHost && !homeHost.endsWith("." + bioDomain) && !bioDomain.endsWith("." + homeHost);
-          if (mismatch) {
-            threatNote = `A same-name token ($${cg.symbol}) exists, but its official site (${homeHost}) does not match this subject's bio domain (${bioDomain}) - treated as a namesake; no token leg run.`;
-            pushStep({ phase: "ARGUS · Threat", label: "Namesake token skipped", detail: threatNote, source: "argus", tone: "warn" });
-          } else {
-            startThreatLeg({ address: cg.contract, via: cg.chain === "solana" ? "solana" : "evm", source: `the canonical CoinGecko match for "${cg.name}" ($${cg.symbol})${homeHost && bioDomain ? " - site matches the bio" : ""}` });
-          }
-        } else {
-          threatNote = "No project token could be attributed to this subject (no contract in the bio, no claimed promotion, no canonical name match) - token threat leg skipped.";
-        }
+        threatNote = "No project token could be attributed to this subject (no verified project token, no contract in the bio, no claimed promotion). ARGUS does not attach tokens by name match, so the token threat leg was skipped.";
       }
     }
     if (threatLeg) {
