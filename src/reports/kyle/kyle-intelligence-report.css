@@ -370,7 +370,7 @@
 :is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-brief-column:last-child { border-right: 0; padding-right: 0; }
 :is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-brief-kicker { color: var(--color-ink-faint); font-size: 0.59rem; letter-spacing: 0.12em; }
 :is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-brief-column h3 { font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif; font-size: 1.6rem; letter-spacing: -0.025em; line-height: 1.05; margin-top: 0.55rem; }
-:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-brief-column ol { margin-top: 1.2rem; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-brief-column :is(ol, ul) { margin-top: 1.2rem; }
 :is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-brief-column li { border-top: 1px solid var(--color-line); }
 :is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-brief-column li a { display: grid; gap: 0.75rem; grid-template-columns: 1.5rem 1fr; padding: 1rem 0; }
 :is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-brief-index { color: var(--color-ink-faint); font-size: 0.58rem; padding-top: 0.16rem; }
@@ -634,3 +634,47 @@
 @media (prefers-reduced-motion: reduce) {
   :is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-composition-row summary > svg { transition: none; }
 }
+
+/* ---- shared-brief contract inside the Kyle presentation ---- */
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-intelligence-report.story-chapter { margin-inline: 0; padding: 0; border-radius: 0; background: transparent; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-verdict-hero.report-section-heading { display: grid; align-items: start; border-top: 0; padding-inline: 0; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-verdict-hero.report-section-heading::before { display: none; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-verdict-hero.report-section-heading > :first-child { flex: initial; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-verdict-copy .eyebrow { font-family: inherit; font-size: 0.66rem; letter-spacing: 0.16em; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-state-accent { display: block; font-size: 0.42em; font-weight: 400; letter-spacing: 0; color: var(--color-ink-dim); margin-top: 0.35rem; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-number { display: flex; align-items: baseline; gap: 0.35rem; margin: 0 0 0.6rem; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-number strong { font-size: 1.6rem; letter-spacing: -0.03em; line-height: 1; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-number span { font-size: 0.74rem; color: var(--color-ink-faint); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-withheld { font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-ink); margin-top: 0.25rem; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-active { display: flex; justify-content: space-between; gap: 0.75rem; margin-top: 0.7rem; font-size: 0.66rem; color: var(--color-ink-faint); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-active strong { color: var(--color-ink); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-dual-explainer { grid-column: 1 / -1; margin: 0.6rem 0 0; font-size: 0.8rem; line-height: 1.5; color: var(--color-ink-dim); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-rail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--color-line); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-rail > section { padding: 1.25rem 1.25rem 1.25rem 0; border-right: 1px solid var(--color-line); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-rail > section:last-child { border-right: 0; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-rail > section + section { padding-left: 1.25rem; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger-head { display: flex; align-items: center; gap: 0.6rem; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger-head > :last-child { margin-left: auto; font-size: 0.82rem; color: var(--color-ink); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-progress { height: 0.36rem; margin-top: 0.7rem; overflow: hidden; border-radius: 9999px; background: var(--color-line); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-progress > div { height: 100%; border-radius: 9999px; background: var(--kyle-editorial-green); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger-empty { margin-top: 0.6rem; font-size: 0.8rem; line-height: 1.5; color: var(--color-ink-faint); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-saved { margin-top: 0.5rem; font-size: 0.64rem; color: var(--color-ink-faint); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger ul { margin-top: 0.5rem; display: grid; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger li + li { border-top: 1px solid var(--color-line); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger li a { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.55rem 0; color: var(--color-ink-dim); text-decoration: none; font-size: 0.82rem; line-height: 1.4; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger li a:hover { color: var(--color-ink); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger li a strong { display: block; color: var(--color-ink); font-weight: 600; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger li a small { display: block; margin-top: 0.15rem; font-size: 0.74rem; color: var(--color-ink-faint); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger li a svg { margin-top: 0.3rem; flex: none; color: var(--color-ink-faint); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-ledger-more { display: inline-flex; margin-top: 0.5rem; font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--kyle-editorial-green); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-discovery-links { display: flex; flex-wrap: wrap; gap: 0.5rem 1.2rem; align-items: baseline; }
+@media (max-width: 900px) {
+  :is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-rail { grid-template-columns: 1fr; }
+  :is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-rail > section { border-right: 0; border-bottom: 1px solid var(--color-line); padding-left: 0; }
+  :is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-check-rail > section:last-child { border-bottom: 0; }
+}
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-legend { display: grid; gap: 0.3rem; margin-top: 0.8rem; width: 100%; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-legend li { display: grid; grid-template-columns: 0.55rem minmax(0, 1fr) auto; align-items: center; gap: 0.5rem; font-size: 0.74rem; color: var(--color-ink-dim); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-legend li.is-active { color: var(--color-ink); }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-legend i { display: block; width: 0.55rem; height: 0.55rem; border-radius: 9999px; }
+:is([data-report-lane="kyle"], [data-report-lane="production"]) .kyle-score-legend strong { font-variant-numeric: tabular-nums; }

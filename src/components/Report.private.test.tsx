@@ -1908,10 +1908,15 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Provider returned no identity match");
     expect([...container.querySelectorAll("span")].some((node) => node.textContent?.trim() === "decision-ready")).toBe(false);
     expect(container.textContent).not.toContain("<UNKNOWN>");
-    expect(harness.trustGraph).toHaveBeenCalledWith(expect.objectContaining({
-      nodes: expect.not.arrayContaining([expect.objectContaining({ key: "<unknown>" })]),
-      edges: expect.not.arrayContaining([expect.objectContaining({ dst: "<unknown>" })]),
-    }));
+    // The promoted connections workspace draws the graph itself; the
+    // collector placeholder must never become a node or a drawer entry.
+    expect(container.querySelector('[aria-label^="<UNKNOWN>"]')).toBeNull();
+    expect(container.querySelector('[aria-label^="<unknown>"]')).toBeNull();
+    for (const call of harness.trustGraph.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({
+        nodes: expect.not.arrayContaining([expect.objectContaining({ key: "<unknown>" })]),
+      }));
+    }
     expect(decisionBasisText()).toContain("could not confirm what kind of subject this is");
     expect(decisionBasisText()).not.toContain("predates strict evidence-to-axis citations");
   });

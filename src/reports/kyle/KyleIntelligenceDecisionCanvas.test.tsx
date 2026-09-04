@@ -147,7 +147,7 @@ describe("Kyle intelligence report opening", () => {
     expect(strip?.textContent).not.toContain("Team & leadership");
     expect(strip?.querySelectorAll("li")).toHaveLength(2);
     expect(container.textContent).not.toContain("What ARGUS is watching.");
-    expect(container.textContent).not.toContain("Confirm a third lower-impact item");
+    expect(strip?.textContent).not.toContain("Confirm a third lower-impact item");
   });
 
   it("removes Verify next entirely when no material question remains", async () => {
@@ -172,6 +172,7 @@ describe("Kyle intelligence report opening", () => {
 
   it("keeps project diligence and linked-token safety as two separate scores", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      presentationStyle={2}
       {...props}
       secondaryScore={{
         label: "Token safety score",
