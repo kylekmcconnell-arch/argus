@@ -722,8 +722,9 @@ export function siteContractCandidates(html: string, limit = 10): string[] {
   const rest = html.replace(SITE_EVM_ADDRESS, " ");
   for (const match of rest.matchAll(SITE_SOLANA_ADDRESS)) {
     const address = match[1];
-    // The system program and other all-ones sentinels are never a token.
-    if (/^1+$/.test(address)) continue;
+    // The system program and other all-ones sentinels are never a token, and
+    // a pure hex word (an asset hash, a content id) is never a base58 mint.
+    if (/^1+$/.test(address) || /^[0-9a-f]+$/i.test(address)) continue;
     if (take(address)) break;
   }
   return out;

@@ -890,6 +890,11 @@ describe("token declared on the project's own site", () => {
     expect(siteContractCandidates(html)).toEqual(evm);
   });
 
+  it("ignores pure hex words such as content hashes, which are never a base58 mint", () => {
+    const html = `<img src="/img/ebff56d527921e888e65878bcefd6b79.png"> CA: ${SSR_TOKEN}`;
+    expect(siteContractCandidates(html)).toEqual([SSR_TOKEN]);
+  });
+
   it("does not read the hex tail of a zero-free EVM address as a base58 word", () => {
     const zeroFree = "0xabcdef123456789abcdef123456789abcdef1234";
     expect(siteContractCandidates(`<p>${zeroFree}</p>`)).toEqual([zeroFree]);
@@ -1323,7 +1328,9 @@ describe("launched-product CoinGecko recall", () => {
       }
       if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
       if (url.includes("dexscreener.com/latest/dex/tokens/")) return json({ pairs: [] });
-      if (url === "https://www.altcoinist.com/") return new Response("<html><p>Altcoinist</p></html>", { status: 200 });
+      // The site tier fetches the canonical host, not the www form the profile
+      // carries. A miss here fell through to the live reader service.
+      if (url === "https://www.altcoinist.com/" || url === "https://altcoinist.com/") return new Response("<html><p>Altcoinist</p></html>", { status: 200 });
       throw new Error(`unexpected URL ${url}`);
     }));
 
@@ -1586,7 +1593,9 @@ describe("a throttled registry query never completes the identity search", () =>
         return json({ coins: [] });
       }
       if (url.includes("dexscreener.com")) return json({ pairs: [] });
-      if (url === "https://www.altcoinist.com/") return new Response("<html><p>Altcoinist</p></html>", { status: 200 });
+      // The site tier fetches the canonical host, not the www form the profile
+      // carries. A miss here fell through to the live reader service.
+      if (url === "https://www.altcoinist.com/" || url === "https://altcoinist.com/") return new Response("<html><p>Altcoinist</p></html>", { status: 200 });
       throw new Error(`unexpected URL ${url}`);
     }));
 
