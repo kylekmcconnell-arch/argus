@@ -18915,7 +18915,12 @@ var RELATIONSHIP_CAPABILITIES = /* @__PURE__ */ new Set([
 ]);
 var priorityWeight = { critical: 300, high: 200, medium: 100 };
 var costPenalty = { free: 0, low: 4, medium: 12, high: 24 };
+function organizationBoundByOfficialSite(evidence) {
+  const profile = evidence.profile;
+  return profile.profile_collection_state === "resolved" && profile.profile_provider === "twitterapi" && canonicalOfficialWebsite(profile.website) !== null && isOrganizationAccount(evidence);
+}
 function unresolvedIdentityQuestions(evidence, capability) {
+  if ((capability === "portfolio_and_outcomes" || capability === "fund_scale") && organizationBoundByOfficialSite(evidence)) return [];
   const blockingPredicates = capability === "fund_scale" ? ["official_identity", "legal_entity", "current_role"] : ["official_identity", "current_role"];
   return (evidence.basicFactQuestionLedger ?? []).filter((entry) => entry.status === "unanswered" && entry.critical && blockingPredicates.includes(entry.predicate)).map((entry) => entry.questionId);
 }
@@ -28654,7 +28659,7 @@ function siteContractCandidates(html, limit = 10) {
   const rest = html.replace(SITE_EVM_ADDRESS, " ");
   for (const match of rest.matchAll(SITE_SOLANA_ADDRESS)) {
     const address = match[1];
-    if (/^1+$/.test(address)) continue;
+    if (/^1+$/.test(address) || /^[0-9a-f]+$/i.test(address)) continue;
     if (take(address)) break;
   }
   return out;
