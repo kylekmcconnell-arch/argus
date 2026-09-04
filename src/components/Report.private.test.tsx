@@ -14,7 +14,12 @@ const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn(), trus
 
 vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
-vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
+// The promoted production lane renders the connection workspace, which needs
+// the real entity-key canonicalizer; only the connection lookup is stubbed.
+vi.mock("../graph/network", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../graph/network")>()),
+  subjectConnections: () => [],
+}));
 vi.mock("./RingAlert", () => ({ RingAlert: (props: Record<string, unknown>) => { harness.livePanel("ring-alert", props); return null; } }));
 vi.mock("./SanctionsNameScreen", () => ({ SanctionsNameScreen: () => { harness.livePanel("sanctions"); return null; } }));
 vi.mock("./LegalScreen", () => ({ LegalScreen: () => { harness.livePanel("legal"); return null; } }));

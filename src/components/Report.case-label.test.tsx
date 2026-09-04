@@ -12,7 +12,12 @@ import { publicCaseLabel } from "../lib/caseLabel";
 
 vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
-vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
+// The promoted production lane renders the connection workspace, which needs
+// the real entity-key canonicalizer; only the connection lookup is stubbed.
+vi.mock("../graph/network", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../graph/network")>()),
+  subjectConnections: () => [],
+}));
 vi.mock("./RingAlert", () => ({ RingAlert: () => null }));
 vi.mock("./SanctionsNameScreen", () => ({ SanctionsNameScreen: () => null }));
 vi.mock("./LegalScreen", () => ({ LegalScreen: () => null }));

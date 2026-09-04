@@ -15,7 +15,12 @@ import { SubjectClass } from "../engine";
 vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../lib/useArkhamLabels", () => ({ useArkhamLabels: () => ({ labels: {}, state: "idle" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [], investigationContribution: () => null }));
-vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
+// The promoted production lane renders the connection workspace, which needs
+// the real entity-key canonicalizer; only the connection lookup is stubbed.
+vi.mock("../graph/network", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../graph/network")>()),
+  subjectConnections: () => [],
+}));
 vi.mock("./Avatar", () => ({ Avatar: () => null }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => null }));
 vi.mock("./OnChainForensics", () => ({ OnChainForensics: () => null }));
