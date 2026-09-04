@@ -12,7 +12,12 @@ const harness = vi.hoisted(() => ({ arkham: vi.fn(() => ({})) }));
 
 vi.mock("../lib/useArkhamLabels", () => ({ useArkhamLabels: harness.arkham }));
 vi.mock("../graph/store", () => ({ getContributions: () => [], investigationContribution: () => null }));
-vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
+// The promoted production lane renders the connection workspace, which needs
+// the real entity-key canonicalizer; only the connection lookup is stubbed.
+vi.mock("../graph/network", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../graph/network")>()),
+  subjectConnections: () => [],
+}));
 vi.mock("./Avatar", () => ({ Avatar: () => null }));
 vi.mock("./OnChainForensics", () => ({ OnChainForensics: () => null }));
 vi.mock("./ProjectResearch", () => ({ ProjectResearch: () => null }));

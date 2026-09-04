@@ -127,6 +127,11 @@ function displayKey(value: string): string {
   return compactAddress(typed ?? value);
 }
 
+function isPlaceholderLabel(value: string | null | undefined): boolean {
+  const clean = String(value ?? "").trim();
+  return !clean || /^<[^>]*>$/.test(clean);
+}
+
 function researchKey(value: string): string {
   return value.match(/^(?:token|wallet|holder|funder):[^:]+:(.+)$/i)?.[1] ?? value;
 }
@@ -192,6 +197,9 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
   const add = (entity: WorkspaceEntity) => {
     const id = canonical(entity.id);
     if (!id || id === canonical(subjectKey)) return;
+    // A collector placeholder ("<UNKNOWN>") is not an entity; the shared
+    // report never prints it and neither does this workspace.
+    if (isPlaceholderLabel(entity.label) || isPlaceholderLabel(id)) return;
     const next = { ...entity, id, sources: uniqueSources(entity.sources) };
     const keys = entityKeys(next);
     const existingIndex = keys.map((key) => identityIndex.get(key)).find((index) => index !== undefined);
@@ -530,7 +538,10 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [lens, setLens] = useState<Lens | null>(null);
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(() => entities[0]?.id ?? null);
+  // The drawer opens on the audited subject; a person or organization is
+  // shown only once the reader picks it. The roster section owns each
+  // person's first-party link proof, so the workspace never gets ahead of it.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [legendOpen, setLegendOpen] = useState(false);
   const [pendingResearch, setPendingResearch] = useState<WorkspaceEntity | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -542,7 +553,7 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
   const connectionEntities = entities.filter((entity) => entity.relation !== "official account");
   const visibleConnections = visible.filter((entity) => entity.relation !== "official account");
   const visibleIds = new Set(visible.map((entity) => entity.id));
-  const selected = entities.find((entity) => entity.id === selectedId) ?? visible[0] ?? null;
+  const selected = entities.find((entity) => entity.id === selectedId) ?? null;
   const byId = new Map(entities.map((entity) => [entity.id, entity]));
   const connectionCount = edges.length + props.connections.length;
   const recommendations = recommendedEntities(entities, props);
