@@ -233,7 +233,7 @@ describe("v1 person decision-readiness contract", () => {
       score: null,
       decision_ready: false,
       completeness_state: "partial",
-      headline: "Some checks did not finish. Do not rely on the early score yet.",
+      headline: expect.stringContaining("Based on the evidence assessed so far."),
       decision_readiness: {
         state: "provisional",
         coverage_percent: 90,

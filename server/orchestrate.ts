@@ -5475,6 +5475,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // axis set is still a useful report, but it must remain partial and cannot
   // poison later trust-graph reconciliation with an INCOMPLETE verdict.
   dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE"
+    || dossier.report.score_coverage?.provisional === true
     || dossier.report.role_reports.some((role) => role.raw_total === null)
     ? "partial"
     : checkCompleteness;

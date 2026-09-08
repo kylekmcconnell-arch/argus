@@ -2,6 +2,8 @@
 
 ## Assessment
 
+**Policy update:** Kyle subsequently requested scores from available assessed evidence with explicit data gaps. See [the provisional-scoring decision](../decisions/2026-09-08-provisional-scoring.md). The implemented branch now publishes partial-axis scores provisionally; references below to withholding a score until all axes or token identity resolve describe the earlier review policy, not the current owner-approved behavior. No-evidence and identity-block cases still withhold scores.
+
 ARGUS has substantial automated coverage and working authentication at its public scan entry points, but it is not yet consistently fail-closed across all scan types. The most important defects concern what a completed result means: missing provider evidence can become a negative finding, partial scoring can erase a known risk, and different delivery paths can apply different publication rules.
 
 This review includes concrete repairs, not just a restatement of the September handoff. Seven issue areas are repaired or hardened in this pass, with the earlier official-site coverage repair carried forward. Remaining items are explicitly separated below. No claim is made that all open issues are resolved.

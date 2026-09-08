@@ -878,25 +878,39 @@ var Audit = class {
       if (triggered.length) {
         [ceiling, applied] = triggered.reduce((m, c) => c[0] < m[0] ? c : m);
       }
-      const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
       const provisionalToken = role === "PROJECT" /* PROJECT */ && this.tokenApplicability?.axisTreatment === "provisional";
-      if (!complete || Object.keys(axes).length !== expectedAxes.length || provisionalToken) {
+      if (provisionalToken) delete axes.P3_token_conduct;
+      const assessedAxes = expectedAxes.filter((axis) => axes[axis] && Number.isFinite(axes[axis].score));
+      const assessedWeight = assessedAxes.reduce((sum, axis) => sum + getProfile(role).axes[axis], 0);
+      const missingAxes = expectedAxes.filter((axis) => !assessedAxes.includes(axis));
+      const provisional = missingAxes.length > 0 || provisionalToken;
+      const scoreCoverage2 = {
+        assessedAxes: assessedAxes.length,
+        totalAxes: expectedAxes.length,
+        assessedWeight,
+        totalWeight: applicableWeight,
+        missingAxes,
+        provisional
+      };
+      if (assessedWeight === 0) {
         roleReports.push({
           role,
           verdict: this.identityBlocks() ? "UNVERIFIABLE_IDENTITY" : applied && ceiling <= 10 ? "AVOID" : "INCOMPLETE",
           raw_total: null,
           score_total: null,
           cap_applied: applied,
-          dox_bonus: doxBonus,
+          dox_bonus: 0,
           axes,
+          score_coverage: scoreCoverage2,
           ...axisApplicability ? { axis_applicability: axisApplicability } : {},
           applicable_weight: applicableWeight
         });
         continue;
       }
-      const earnedPoints = Object.values(axes).reduce((a, x) => a + x.score, 0);
-      const raw = Math.round(applicableWeight > 0 ? earnedPoints / applicableWeight * 100 : 0);
-      const base = raw + doxBonus;
+      const earnedPoints = assessedAxes.reduce((sum, axis) => sum + axes[axis].score, 0);
+      const raw = Math.round(earnedPoints / assessedWeight * 100);
+      const appliedBonus = provisional ? 0 : doxBonus;
+      const base = raw + appliedBonus;
       let total;
       if (ceiling !== null) {
         total = Math.min(base, ceiling);
@@ -919,7 +933,8 @@ var Audit = class {
         role,
         axes,
         raw_total: raw,
-        dox_bonus: doxBonus,
+        dox_bonus: appliedBonus,
+        score_coverage: scoreCoverage2,
         cap_applied: applied,
         score_total: published,
         verdict,
@@ -934,7 +949,7 @@ var Audit = class {
     let govCap = null;
     const blocking = scored.filter((role) => role.verdict === "AVOID" || role.verdict === "UNVERIFIABLE_IDENTITY");
     const candidates = blocking.length ? blocking : scored;
-    if (blocking.length || scored.length === roleReports.length && roleReports.length > 0) {
+    if (candidates.length > 0) {
       const governing = candidates.reduce((current, candidate) => {
         const candidateSeverity = SEVERITY[candidate.verdict];
         const currentSeverity = SEVERITY[current.verdict];
@@ -951,7 +966,17 @@ var Audit = class {
       govScore = governing.score_total;
       govCap = governing.cap_applied;
     }
+    const scoreCoverage = {
+      assessedAxes: roleReports.reduce((sum, role) => sum + (role.score_coverage?.assessedAxes ?? 0), 0),
+      totalAxes: roleReports.reduce((sum, role) => sum + (role.score_coverage?.totalAxes ?? 0), 0),
+      assessedWeight: roleReports.reduce((sum, role) => sum + (role.score_coverage?.assessedWeight ?? 0), 0),
+      totalWeight: roleReports.reduce((sum, role) => sum + (role.score_coverage?.totalWeight ?? 0), 0),
+      missingAxes: roleReports.flatMap((role) => role.score_coverage?.missingAxes ?? []),
+      provisional: roleReports.some((role) => role.score_coverage?.provisional)
+    };
+    if (scoreCoverage.provisional && govScore !== null && !blocking.length) composite = "PROVISIONAL";
     const report = {
+      score_coverage: scoreCoverage,
       audit_id: this.audit_id,
       handle: this.handle,
       roles: this.roles,
@@ -36859,7 +36884,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const dossier = assembleDossier(evidence, cost.calls.some((line) => line.calls > 0));
   dossier.checkRuns = finalChecks;
   const checkCompleteness = checkTracker.completeness(evidence.roles, checkScope);
-  dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE" || dossier.report.role_reports.some((role) => role.raw_total === null) ? "partial" : checkCompleteness;
+  dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE" || dossier.report.score_coverage?.provisional === true || dossier.report.role_reports.some((role) => role.raw_total === null) ? "partial" : checkCompleteness;
   if (options?.organizationId) {
     const prior = await readPriorOutcome(options.organizationId, evidence.profile.handle);
     if (prior) {
