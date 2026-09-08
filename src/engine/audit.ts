@@ -718,14 +718,28 @@ export class Audit {
         : undefined;
       const applicableWeight = expectedAxes.reduce((sum, axis) =>
         sum + (getProfile(role).axes[axis] ?? 0), 0);
+      const caps = effectiveCaps(role);
+      const triggered: [number, string][] = [
+        ...this.roleCapsTriggered(role).map((k) => [caps[k], k] as [number, string]),
+        ...sharedKeys.map((k) => [SHARED_CAPS[k], k] as [number, string]),
+      ];
+
+      let ceiling: number | null = null;
+      let applied: string | null = null;
+      if (triggered.length) {
+        [ceiling, applied] = triggered.reduce((m, c) => (c[0] < m[0] ? c : m));
+      }
       const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
-      if (!complete || Object.keys(axes).length !== expectedAxes.length) {
+      const provisionalToken = role === SubjectClass.PROJECT
+        && this.tokenApplicability?.axisTreatment === "provisional";
+      if (!complete || Object.keys(axes).length !== expectedAxes.length || provisionalToken) {
         roleReports.push({
           role,
-          verdict: "INCOMPLETE",
+          verdict: this.identityBlocks() ? "UNVERIFIABLE_IDENTITY"
+            : applied && ceiling! <= 10 ? "AVOID" : "INCOMPLETE",
           raw_total: null,
           score_total: null,
-          cap_applied: null,
+          cap_applied: applied,
           dox_bonus: doxBonus,
           axes,
           ...(axisApplicability ? { axis_applicability: axisApplicability } : {}),
@@ -740,17 +754,9 @@ export class Audit {
       // rewards nor penalizes the project.
       const raw = Math.round(applicableWeight > 0 ? (earnedPoints / applicableWeight) * 100 : 0);
       const base = raw + doxBonus;
-      const caps = effectiveCaps(role);
-      const triggered: [number, string][] = [
-        ...this.roleCapsTriggered(role).map((k) => [caps[k], k] as [number, string]),
-        ...sharedKeys.map((k) => [SHARED_CAPS[k], k] as [number, string]),
-      ];
 
-      let ceiling: number | null = null;
-      let applied: string | null = null;
       let total: number;
-      if (triggered.length) {
-        [ceiling, applied] = triggered.reduce((m, c) => (c[0] < m[0] ? c : m));
+      if (ceiling !== null) {
         total = Math.min(base, ceiling);
       } else {
         total = Math.min(100, base);
@@ -786,8 +792,10 @@ export class Audit {
     let govRole: string | null = null;
     let govScore: number | null = null;
     let govCap: string | null = null;
-    if (scored.length === roleReports.length && roleReports.length > 0) {
-      const governing = scored.reduce((current, candidate) => {
+    const blocking = scored.filter((role) => role.verdict === "AVOID" || role.verdict === "UNVERIFIABLE_IDENTITY");
+    const candidates = blocking.length ? blocking : scored;
+    if (blocking.length || (scored.length === roleReports.length && roleReports.length > 0)) {
+      const governing = candidates.reduce((current, candidate) => {
         const candidateSeverity = SEVERITY[candidate.verdict];
         const currentSeverity = SEVERITY[current.verdict];
         if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity ? candidate : current;

@@ -3349,20 +3349,21 @@ export async function adverseSignalsAndTooling(
   const gap = unanswered
     ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.`
     : "";
-  if (totalSigs || toolingLeads) {
+  if (!subjectScreen.completed) {
+    record({
+      id: "adverse-screen",
+      status: "unavailable",
+      note: `The subject's own adverse search returned no readable answer. ${answered} of ${screens.length} target searches completed, but related targets cannot clear the unscreened subject. ${totalSigs + toolingLeads} candidate leads were retained for follow-up.${gap}`,
+      provider: "adverse-sweep",
+    });
+
+  } else if (totalSigs || toolingLeads) {
     record({
       id: "adverse-screen",
       status: "finding",
       note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: ${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}${toolingLeads ? ` and ${toolingLeads} manipulation-tooling lead${toolingLeads === 1 ? "" : "s"}` : ""} surfaced. Each is an unverified candidate source for follow-up, not a verified finding.${gap}`,
       provider: "adverse-sweep",
       sourceCount: totalSigs + toolingLeads,
-    });
-  } else if (!answered) {
-    record({
-      id: "adverse-screen",
-      status: "unavailable",
-      note: `the model search returned no readable answer for any of the ${screens.length} adverse-screen target${screens.length === 1 ? "" : "s"}, so no rug, scam, or drain search was completed`,
-      provider: "adverse-sweep",
     });
   } else {
     record({
@@ -3722,6 +3723,9 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
 interface RunAuditOptions {
   organizationId?: string;
   analystDeadlineAt?: number;
+  /** Server-derived reserves for authorized bounded follow-ups. */
+  collectionReserveMs?: number;
+  graphScreenReserveMs?: number;
   intent?: ResearchIntent;
   /** Server-derived from one frozen saved plan. Never accept these values directly from a browser. */
   authorizedResearchScope?: {
@@ -3843,14 +3847,15 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // than mid-run, so no in-flight adapter is abandoned while it mutates evidence.
   const analystDeadlineAt = options?.analystDeadlineAt
     ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000 - ANALYST_FINALIZATION_RESERVE_MS;
-  const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
+  const collectionDeadlineAt = analystDeadlineAt - (options?.collectionReserveMs ?? COLLECTION_ANALYST_RESERVE_MS);
   const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
   // The never-waive trust-graph screen runs AFTER general collection stops, in a
   // dedicated window carved from the reserve. General adapters halt at
   // collectionDeadlineAt; the bounded graph screen may still run until here, so a
   // high-connectivity subject's flagged-subject screen is recorded instead of
-  // skipped. Still leaves ANALYST_SCORING_TIMEOUT_MS before analystDeadlineAt.
-  const graphScreenDeadlineAt = collectionDeadlineAt + TRUST_GRAPH_SCREEN_RESERVE_MS;
+  // skipped. Full scans retain the full analyst window; bounded gap scans
+  // explicitly share their shorter budget with the deadline-aware scorer.
+  const graphScreenDeadlineAt = collectionDeadlineAt + (options?.graphScreenReserveMs ?? TRUST_GRAPH_SCREEN_RESERVE_MS);
   const graphScreenOverBudget = () => Date.now() >= graphScreenDeadlineAt;
   const startRuntimeStage = (stage: string) => {
     const stageStartedAt = Date.now();
@@ -5470,6 +5475,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // axis set is still a useful report, but it must remain partial and cannot
   // poison later trust-graph reconciliation with an INCOMPLETE verdict.
   dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE"
+    || dossier.report.role_reports.some((role) => role.raw_total === null)
     ? "partial"
     : checkCompleteness;
   // "Since last scan": one bounded read of the prior persisted outcome so a

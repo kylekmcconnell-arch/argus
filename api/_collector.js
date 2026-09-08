@@ -868,14 +868,25 @@ var Audit = class {
       const expectedAxes = Object.keys(getProfile(role).axes).filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct"));
       const axisApplicability = role === "PROJECT" /* PROJECT */ && this.tokenApplicability ? { P3_token_conduct: structuredClone(this.tokenApplicability) } : void 0;
       const applicableWeight = expectedAxes.reduce((sum, axis) => sum + (getProfile(role).axes[axis] ?? 0), 0);
+      const caps = effectiveCaps(role);
+      const triggered = [
+        ...this.roleCapsTriggered(role).map((k) => [caps[k], k]),
+        ...sharedKeys.map((k) => [SHARED_CAPS[k], k])
+      ];
+      let ceiling = null;
+      let applied = null;
+      if (triggered.length) {
+        [ceiling, applied] = triggered.reduce((m, c) => c[0] < m[0] ? c : m);
+      }
       const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
-      if (!complete || Object.keys(axes).length !== expectedAxes.length) {
+      const provisionalToken = role === "PROJECT" /* PROJECT */ && this.tokenApplicability?.axisTreatment === "provisional";
+      if (!complete || Object.keys(axes).length !== expectedAxes.length || provisionalToken) {
         roleReports.push({
           role,
-          verdict: "INCOMPLETE",
+          verdict: this.identityBlocks() ? "UNVERIFIABLE_IDENTITY" : applied && ceiling <= 10 ? "AVOID" : "INCOMPLETE",
           raw_total: null,
           score_total: null,
-          cap_applied: null,
+          cap_applied: applied,
           dox_bonus: doxBonus,
           axes,
           ...axisApplicability ? { axis_applicability: axisApplicability } : {},
@@ -886,16 +897,8 @@ var Audit = class {
       const earnedPoints = Object.values(axes).reduce((a, x) => a + x.score, 0);
       const raw = Math.round(applicableWeight > 0 ? earnedPoints / applicableWeight * 100 : 0);
       const base = raw + doxBonus;
-      const caps = effectiveCaps(role);
-      const triggered = [
-        ...this.roleCapsTriggered(role).map((k) => [caps[k], k]),
-        ...sharedKeys.map((k) => [SHARED_CAPS[k], k])
-      ];
-      let ceiling = null;
-      let applied = null;
       let total;
-      if (triggered.length) {
-        [ceiling, applied] = triggered.reduce((m, c) => c[0] < m[0] ? c : m);
+      if (ceiling !== null) {
         total = Math.min(base, ceiling);
       } else {
         total = Math.min(100, base);
@@ -929,8 +932,10 @@ var Audit = class {
     let govRole = null;
     let govScore = null;
     let govCap = null;
-    if (scored.length === roleReports.length && roleReports.length > 0) {
-      const governing = scored.reduce((current, candidate) => {
+    const blocking = scored.filter((role) => role.verdict === "AVOID" || role.verdict === "UNVERIFIABLE_IDENTITY");
+    const candidates = blocking.length ? blocking : scored;
+    if (blocking.length || scored.length === roleReports.length && roleReports.length > 0) {
+      const governing = candidates.reduce((current, candidate) => {
         const candidateSeverity = SEVERITY[candidate.verdict];
         const currentSeverity = SEVERITY[current.verdict];
         if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity ? candidate : current;
@@ -11650,17 +11655,6 @@ function deriveTokenApplicability(evidence, checks, determinedAt = (/* @__PURE__
       determinedAt
     };
   }
-  if (PRELAUNCH_TOKEN.test(prelaunchText(evidence))) {
-    evidenceLines.push("A bound first-party source describes a token as planned or not yet live.");
-    if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
-    return {
-      state: "prelaunch_token_deferred",
-      axisTreatment: "deferred",
-      reason: "The project describes a future token, but no live token conduct surface exists yet; P3 is deferred without penalty.",
-      evidence: evidenceLines,
-      determinedAt
-    };
-  }
   const unresolvedLine = unresolvedCandidateLine(evidence);
   if (!tokenCheck || !completed(tokenCheck.status) || unresolvedLine) {
     if (unresolvedLine) evidenceLines.push(unresolvedLine);
@@ -11670,6 +11664,17 @@ function deriveTokenApplicability(evidence, checks, determinedAt = (/* @__PURE__
       axisTreatment: "provisional",
       reason: "Token identity did not reach a completed, attributable result, so the project verdict remains provisional.",
       evidence: evidenceLines.length ? evidenceLines : ["No completed project-token identity result was frozen."],
+      determinedAt
+    };
+  }
+  if (PRELAUNCH_TOKEN.test(prelaunchText(evidence))) {
+    evidenceLines.push("A bound first-party source describes a token as planned or not yet live.");
+    if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
+    return {
+      state: "prelaunch_token_deferred",
+      axisTreatment: "deferred",
+      reason: "The project describes a future token, but no live token conduct surface exists yet; P3 is deferred without penalty.",
+      evidence: evidenceLines,
       determinedAt
     };
   }
@@ -28046,6 +28051,44 @@ async function collectFundScale(ctx, dependencies = {}) {
   return { state: "partial", detail: `${successfulFetches} sources inspected \xB7 ${reportedClaims} reported \xB7 0 verified` };
 }
 
+// src/lib/officialXProfile.ts
+var X_RESERVED_PATHS = /* @__PURE__ */ new Set([
+  "i",
+  "home",
+  "search",
+  "intent",
+  "share",
+  "hashtag",
+  "explore",
+  "settings",
+  "messages",
+  "notifications",
+  "compose",
+  "login",
+  "signup",
+  "privacy",
+  "tos",
+  "about",
+  "download",
+  "jobs",
+  "help"
+]);
+function officialXProfileHandle(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    const host2 = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (!["https:", "http:"].includes(url.protocol) || host2 !== "x.com" && host2 !== "twitter.com") return null;
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length !== 1) return null;
+    const handle = segments[0];
+    if (!/^[A-Za-z0-9_]{2,30}$/.test(handle) || X_RESERVED_PATHS.has(handle.toLowerCase())) return null;
+    return handle;
+  } catch {
+    return null;
+  }
+}
+
 // src/lib/priceHistory.ts
 var NETWORK = {
   solana: "solana",
@@ -28550,42 +28593,7 @@ function verifyIdentity(ctx, details) {
     ...officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}
   };
 }
-var X_RESERVED_PATHS = /* @__PURE__ */ new Set([
-  "i",
-  "home",
-  "search",
-  "intent",
-  "share",
-  "hashtag",
-  "explore",
-  "settings",
-  "messages",
-  "notifications",
-  "compose",
-  "login",
-  "signup",
-  "privacy",
-  "tos",
-  "about",
-  "download",
-  "jobs",
-  "help"
-]);
-var xHandleFromUrlRaw = (value) => {
-  const raw = cleanText2(value);
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    const host2 = url.hostname.toLowerCase().replace(/^www\./, "");
-    if (host2 !== "x.com" && host2 !== "twitter.com") return null;
-    const handle = url.pathname.split("/").filter(Boolean)[0] ?? "";
-    if (!handle || X_RESERVED_PATHS.has(handle.toLowerCase())) return null;
-    if (!/^[A-Za-z0-9_]{2,30}$/.test(handle)) return null;
-    return handle;
-  } catch {
-    return null;
-  }
-};
+var xHandleFromUrlRaw = officialXProfileHandle;
 var xHandleFromUrl = (value) => {
   const handle = xHandleFromUrlRaw(value);
   return handle ? normalizeHandle3(handle) : null;
@@ -35231,20 +35239,20 @@ async function adverseSignalsAndTooling(ctx, record5) {
   const unanswered = screens.length - answered;
   const swept = `the subject, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}`;
   const gap = unanswered ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.` : "";
-  if (totalSigs || toolingLeads) {
+  if (!subjectScreen.completed) {
+    record5({
+      id: "adverse-screen",
+      status: "unavailable",
+      note: `The subject's own adverse search returned no readable answer. ${answered} of ${screens.length} target searches completed, but related targets cannot clear the unscreened subject. ${totalSigs + toolingLeads} candidate leads were retained for follow-up.${gap}`,
+      provider: "adverse-sweep"
+    });
+  } else if (totalSigs || toolingLeads) {
     record5({
       id: "adverse-screen",
       status: "finding",
       note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: ${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}${toolingLeads ? ` and ${toolingLeads} manipulation-tooling lead${toolingLeads === 1 ? "" : "s"}` : ""} surfaced. Each is an unverified candidate source for follow-up, not a verified finding.${gap}`,
       provider: "adverse-sweep",
       sourceCount: totalSigs + toolingLeads
-    });
-  } else if (!answered) {
-    record5({
-      id: "adverse-screen",
-      status: "unavailable",
-      note: `the model search returned no readable answer for any of the ${screens.length} adverse-screen target${screens.length === 1 ? "" : "s"}, so no rug, scam, or drain search was completed`,
-      provider: "adverse-sweep"
     });
   } else {
     record5({
@@ -35625,9 +35633,9 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   resetDefiLlamaScanMemo();
   resetFollowScanMemo();
   const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
-  const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
+  const collectionDeadlineAt = analystDeadlineAt - (options?.collectionReserveMs ?? COLLECTION_ANALYST_RESERVE_MS);
   const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
-  const graphScreenDeadlineAt = collectionDeadlineAt + TRUST_GRAPH_SCREEN_RESERVE_MS;
+  const graphScreenDeadlineAt = collectionDeadlineAt + (options?.graphScreenReserveMs ?? TRUST_GRAPH_SCREEN_RESERVE_MS);
   const graphScreenOverBudget = () => Date.now() >= graphScreenDeadlineAt;
   const startRuntimeStage = (stage) => {
     const stageStartedAt = Date.now();
@@ -36851,7 +36859,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const dossier = assembleDossier(evidence, cost.calls.some((line) => line.calls > 0));
   dossier.checkRuns = finalChecks;
   const checkCompleteness = checkTracker.completeness(evidence.roles, checkScope);
-  dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE" ? "partial" : checkCompleteness;
+  dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE" || dossier.report.role_reports.some((role) => role.raw_total === null) ? "partial" : checkCompleteness;
   if (options?.organizationId) {
     const prior = await readPriorOutcome(options.organizationId, evidence.profile.handle);
     if (prior) {
@@ -37570,9 +37578,8 @@ function band(score) {
   return score >= 70 ? "PASS" : score >= 40 ? "CAUTION" : "FAIL";
 }
 function handleFromUrl(url) {
-  if (!url) return null;
-  const m = url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i);
-  return m ? "@" + m[1].toLowerCase() : null;
+  const handle = officialXProfileHandle(url);
+  return handle ? "@" + handle.toLowerCase() : null;
 }
 var isBurnAddr2 = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
 var isBurnTag2 = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");

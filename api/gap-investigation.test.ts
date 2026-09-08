@@ -285,6 +285,8 @@ describe("gap investigation API", () => {
       observedCostUsd: 1.2,
     });
     expect(runAudit).toHaveBeenCalledWith("alice", expect.any(Function), expect.objectContaining({
+      collectionReserveMs: 162_000,
+      graphScreenReserveMs: 40_500,
       authorizedResearchScope: {
         taskIds: ["portfolio", "identity", "synthesis"],
         capabilities: ["portfolio_and_outcomes", "identity_resolution", "analyst_synthesis"],

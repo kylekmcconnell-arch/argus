@@ -1,3 +1,4 @@
+import { officialXProfileHandle } from "../../src/lib/officialXProfile";
 import type { LaunchedProductLead, ProjectTokenSnapshot, UnresolvedProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
 import { canonicalOfficialWebsite, type OfficialWebsiteScope } from "../../src/lib/fundScaleEvidence";
 import { readCandle, summarizeCandles, type Candle } from "../../src/lib/priceHistory";
@@ -564,43 +565,7 @@ function verifyIdentity(
   };
 }
 
-const X_RESERVED_PATHS = new Set([
-  "i",
-  "home",
-  "search",
-  "intent",
-  "share",
-  "hashtag",
-  "explore",
-  "settings",
-  "messages",
-  "notifications",
-  "compose",
-  "login",
-  "signup",
-  "privacy",
-  "tos",
-  "about",
-  "download",
-  "jobs",
-  "help",
-]);
-
-const xHandleFromUrlRaw = (value: unknown): string | null => {
-  const raw = cleanText(value);
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    if (host !== "x.com" && host !== "twitter.com") return null;
-    const handle = url.pathname.split("/").filter(Boolean)[0] ?? "";
-    if (!handle || X_RESERVED_PATHS.has(handle.toLowerCase())) return null;
-    if (!/^[A-Za-z0-9_]{2,30}$/.test(handle)) return null;
-    return handle;
-  } catch {
-    return null;
-  }
-};
+const xHandleFromUrlRaw = officialXProfileHandle;
 
 const xHandleFromUrl = (value: unknown): string | null => {
   const handle = xHandleFromUrlRaw(value);

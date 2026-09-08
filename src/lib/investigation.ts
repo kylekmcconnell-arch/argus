@@ -404,7 +404,13 @@ export function streamInvestigation(
         } catch { /* binding stays unrecorded; crediting falls back to the project scan's own check */ }
         const providers = await probeBackend();
         const analystLive = !!providers?.some((p) => p.id === "analyst" && p.configured);
-        if (analystLive) {
+        if (projectAccountBinding?.status === "mismatch") {
+          projectAccountAudit = {
+            state: "unavailable",
+            note: `The account ${projectX} did not match the scanned contract, so its audit was not attached to this investigation.`,
+          };
+          h.onStep(milestone("Project account rejected", projectAccountAudit.note, "warn"));
+        } else if (analystLive) {
           h.onHop("backgrounding the project's X account");
           h.onStep(milestone("Step 3 · Background the project account", `Live people-audit of ${projectX}. This is the project's own account, not a named founder.`, "neutral"));
           const projectAuditResult = await new Promise<

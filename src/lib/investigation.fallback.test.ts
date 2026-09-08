@@ -59,6 +59,21 @@ afterEach(() => {
 });
 
 describe("combined token investigation fallback", () => {
+  it("does not audit or embed an account whose token binding mismatches", async () => {
+    harness.auditToken.mockResolvedValue({ ...thinMemecoin(), projectX: "@unrelated" });
+    harness.probeBackend.mockResolvedValue([{ id: "analyst", configured: true }]);
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      if (String(input).startsWith("/api/x-authenticity?")) return new Response(JSON.stringify({ available: true, status: "mismatch", note: "This account publishes a different contract." }), { status: 200 });
+      return new Response(null, { status: 404 });
+    }));
+    const result = await new Promise<Investigation>((resolve, reject) => {
+      streamInvestigation({ kind: "token", via: "evm", ref: MEME_ADDRESS }, { onStep: () => {}, onHop: () => {}, onDone: resolve, onError: reject });
+    });
+    expect(harness.streamAudit).not.toHaveBeenCalled();
+    expect(result.projectAccount).toBeNull();
+    expect(result.projectAccountAudit).toMatchObject({ state: "unavailable", note: expect.stringContaining("did not match") });
+  });
+
   it("keeps a thin memecoin as an honest token-only result when no project identity resolves", async () => {
     const steps: string[] = [];
     const result = await new Promise<Investigation>((resolve, reject) => {

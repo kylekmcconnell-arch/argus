@@ -63,6 +63,34 @@ function trustGraphFinding(
 }
 
 describe("ARGUS-P v2 engine (port fidelity)", () => {
+  it.each(Object.values(SubjectClass))("preserves an identity block with missing axes for %s", (role) => {
+    const audit = new Audit("@unverified", { subject_class: role });
+    audit.setIdentity("SuspectedImpersonation");
+    expect(audit.finalize()).toMatchObject({ composite_verdict: "UNVERIFIABLE_IDENTITY", governing_score: null });
+  });
+
+  it("preserves a prior-rug cap when its role has missing axes", () => {
+    const audit = new Audit("@partialrug", { roles: [SubjectClass.FOUNDER, SubjectClass.MEMBER] });
+    audit.addVenture({ project_name: "RugCo", role: "founder", period: "2022", outcome: VentureOutcome.RUG });
+    const result = audit.finalize();
+    expect(result).toMatchObject({ composite_verdict: "AVOID", governing_score: null, cap_applied: "prior_rug_as_principal" });
+    expect(result.role_reports[0]).toMatchObject({ verdict: "AVOID", raw_total: null, score_total: null });
+  });
+
+  it("preserves a completed capped role when another role is incomplete", () => {
+    const audit = new Audit("@mixedrug", { roles: [SubjectClass.FOUNDER, SubjectClass.MEMBER] });
+    audit.addVenture({ project_name: "RugCo", role: "founder", period: "2022", outcome: VentureOutcome.RUG });
+    for (const axis of FOUNDER_AXES) audit.setAxis(axis, 100);
+    expect(audit.finalize()).toMatchObject({ composite_verdict: "AVOID", cap_applied: "prior_rug_as_principal" });
+  });
+
+  it("withholds a fully scored project when token identity is provisional", () => {
+    const audit = new Audit("@provisional", { subject_class: SubjectClass.PROJECT });
+    for (const axis of ["P1_team_and_identity", "P2_product_substance", "P3_token_conduct", "P4_backing_and_partners", "P5_traction_and_liveness", "P6_transparency_integrity"]) audit.setAxis(axis, 100);
+    audit.setTokenApplicability({ state: "unresolved_token_identity", axisTreatment: "provisional", reason: "Registry unavailable", evidence: [], determinedAt: "2026-09-08T00:00:00Z" });
+    expect(audit.finalize()).toMatchObject({ composite_verdict: "INCOMPLETE", governing_score: null });
+  });
+
   it("normalizes a confirmed-tokenless project over the remaining 80 applicable points", () => {
     const audit = new Audit("@fedibtc", { subject_class: SubjectClass.PROJECT });
     audit.setTokenApplicability({

@@ -93,6 +93,20 @@ afterEach(() => {
 });
 
 describe("verified project-token collection", () => {
+  it.each(["https://x.com/projectdex/status/123", "https://twitter.com/projectdex/likes", "ftp://x.com/projectdex"])("does not treat %s as an official account link", async (socialUrl) => {
+    const { ctx, evidence } = context();
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json(search());
+      if (url.includes("/coins/project-token?")) return json(details({ links: { twitter_screen_name: "unrelated", homepage: [socialUrl] } }));
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [pair({ info: { websites: [{ url: "https://project.example/" }], socials: [{ type: "twitter", url: socialUrl }] } })] });
+      if (url === "https://project.example/") return new Response("Official website without a token declaration");
+      throw new Error(`unexpected URL ${url}`);
+    }));
+    await collectProjectTokenIdentity(ctx);
+    expect(evidence.projectToken).toBeUndefined();
+  });
+
   it("binds SSR to the exact contract declared by its official X profile without requiring a website or CoinGecko", async () => {
     const { ctx, evidence } = context("@strategicsuperr", "Strategic Super Reserve SSR", "");
     evidence.profile.bio = `The Strategic Super Reserve by @EnigmaFund Venture Capital: Multichain DTFs to support builders & communities. CA: ${SSR_TOKEN}`;
