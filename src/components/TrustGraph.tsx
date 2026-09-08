@@ -434,12 +434,17 @@ export function TrustGraph({
     (event.target as Element).setPointerCapture?.(event.pointerId);
   };
   const onPointerMove = (event: React.PointerEvent) => {
-    if (!pan.current) return;
+    const active = pan.current;
+    if (!active) return;
     const rect = svgRef.current!.getBoundingClientRect();
-    const dx = ((event.clientX - pan.current.sx) / rect.width) * W;
-    const dy = ((event.clientY - pan.current.sy) / rect.height) * H;
-    if (Math.abs(dx) + Math.abs(dy) > 3) pan.current.moved = true;
-    if (pan.current.moved) setView((current) => ({ ...current, x: pan.current!.vx + dx, y: pan.current!.vy + dy }));
+    const dx = ((event.clientX - active.sx) / rect.width) * W;
+    const dy = ((event.clientY - active.sy) / rect.height) * H;
+    if (Math.abs(dx) + Math.abs(dy) > 3) active.moved = true;
+    // Snapshot before queueing: React evaluates the updater lazily on the
+    // next render, by which time pointerup may have nulled the ref, so the
+    // closure must capture values, never the ref itself.
+    const { vx, vy } = active;
+    if (active.moved) setView((current) => ({ ...current, x: vx + dx, y: vy + dy }));
   };
   const onPointerUp = () => { setTimeout(() => { pan.current = null; }, 0); };
   const onClickCapture = (event: React.MouseEvent) => {
