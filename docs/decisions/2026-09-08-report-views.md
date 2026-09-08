@@ -7,6 +7,6 @@ Kyle requested two views on 2026-09-08: Production and Developer. Developer uses
 - Only workspace owners can select Developer, preserving existing access rules. Public and non-owner reports always use Production.
 - Retired Kyle and Enigma URL/local-storage choices resolve to Production. Raw resolves to Developer for owners. Managed selections rewrite old URLs and preferences to canonical IDs while preserving the report query and anchor.
 - Component filenames under `src/reports/kyle` remain implementation history. They no longer correspond to separate selectable user experiences. Enigma-owned source files are not active registry entries.
-- Shared report ownership review remains required; this decision does not change GitHub approval policy.
+- Kyle subsequently requested removal of personal approval requirements. Releases require automated checks, not Kyle/Enigma reviews; see `docs/report-lanes.md`.
 
 Validation: 44 report-view tests; full suite 4,332 passing with one expected failure; typecheck, truth contract, offline canary, calibration, production build. Browser fixture verifies the two controls, evidence expansion, and 390px mobile width without horizontal overflow. No live scans or customer records are used by that fixture.
