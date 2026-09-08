@@ -147,7 +147,7 @@ const RISK_SCORE_FIELDS = [
 ] as const;
 
 async function lookup(addr: string, key: string, usage: CallCounter): Promise<ArkhamLabel | null> {
-  const ck = `arkham:${providerAddressKey(addr)}:v3`;
+  const ck = `arkham:${providerAddressKey(addr)}:v4`;
   const cached = await cacheGetJson<ArkhamLabel | { none: true }>(ck);
   if (cached) return (cached as { none?: true }).none ? null : (cached as ArkhamLabel);
   try {
@@ -205,6 +205,7 @@ async function lookup(addr: string, key: string, usage: CallCounter): Promise<Ar
           topSources,
         }
       : undefined;
+    if (usage.calls !== usage.succeeded) return null;
     if (!name && !risk) { await cacheSetJson(ck, { none: true }); return null; }
     const footprint = entityFootprint(e?.addresses);
     const entityType = cleanText(e?.type)?.toLowerCase();
@@ -252,7 +253,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const results = await Promise.all(addrs.map((a) => lookup(a, key, usage).then((l) => [providerAddressKey(a), l] as const)));
     const labels: Record<string, ArkhamLabel> = {};
     for (const [a, l] of results) if (l && (l.name || l.risk)) labels[a] = l;
-    res.status(200).json({ available: true, labels });
+    res.status(200).json({ available: usage.calls === usage.succeeded, labels, coverage: { attempted: usage.calls, succeeded: usage.succeeded } });
   } catch (e) {
     res.status(200).json({ available: false, error: String(e), note: "Arkham lookup failed." });
   } finally {

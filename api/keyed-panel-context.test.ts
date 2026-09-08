@@ -62,7 +62,7 @@ const routes: Route[] = [
   { name: "arkham risk paths", handler: arkhamRiskPathsHandler, query: { address: ADDRESS }, costs: [{ provider: "arkham", op: "panel:arkham-risk-paths", calls: 1, usd: 0, meta: "subscription/keyed" }] },
   { name: "EVM deployer", handler: evmDeployerHandler, query: { address: ADDRESS, chain: "ethereum" }, costs: [{ provider: "etherscan", op: "panel:evm-deployer", calls: 1, usd: 0, meta: "subscription/keyed" }] },
   { name: "EVM cluster", handler: evmClusterHandler, query: { address: ADDRESS, chain: "ethereum" }, costs: [{ provider: "goplus", op: "panel:evm-cluster", calls: 1, usd: 0, meta: "keyless" }] },
-  { name: "EVM funder", handler: evmFunderHandler, query: { wallet: ADDRESS, chain: "ethereum" }, costs: [{ provider: "etherscan", op: "panel:evm-funder", calls: 2, usd: 0, meta: "subscription/keyed", status: "failed" }] },
+  { name: "EVM funder", handler: evmFunderHandler, query: { wallet: ADDRESS, chain: "ethereum" }, costs: [{ provider: "etherscan", op: "panel:evm-funder", calls: 2, usd: 0, meta: "subscription/keyed", status: "succeeded" }] },
   { name: "Solana deployer", handler: deployerHandler, query: { wallet: SOL_ADDRESS }, costs: [{ provider: "helius", op: "panel:solana-deployer", calls: 3, usd: 0, meta: "subscription/keyed" }] },
   { name: "Solana funder", handler: funderHandler, query: { wallet: SOL_ADDRESS }, costs: [{ provider: "helius", op: "panel:solana-funder", calls: 2, usd: 0, meta: "subscription/keyed", status: "failed" }] },
   { name: "Solana cluster", handler: clusterHandler, query: { mint: SOL_ADDRESS, chain: "solana" }, costs: [{ provider: "rugcheck", op: "panel:solana-cluster", calls: 1, usd: 0, meta: "keyless" }] },
@@ -141,7 +141,7 @@ describe("keyed supplemental route report capabilities", () => {
 
   it.each(routes)("allows a valid capability through $name and records attempted provider calls", async (route) => {
     resolvePanelCostVersion.mockReturnValue(VERSION_ID);
-    const providerFetch = vi.fn(async () => new Response("{}", {
+    const providerFetch = vi.fn(async (url: unknown) => new Response(String(url).includes("etherscan.io") ? JSON.stringify({ status: "1", result: [] }) : "{}", {
       status: 200,
       headers: { "content-type": "application/json" },
     }));

@@ -1,136 +1,64 @@
-# ARGUS system reliability review, 2026-09-08
+# ARGUS system reliability review and implementation, 2026-09-08
 
-## Assessment
+## Assessment and scoring policy
 
-**Policy update:** Kyle subsequently requested scores from available assessed evidence with explicit data gaps. See [the provisional-scoring decision](../decisions/2026-09-08-provisional-scoring.md). The implemented branch now publishes partial-axis scores provisionally; references below to withholding a score until all axes or token identity resolve describe the earlier review policy, not the current owner-approved behavior. No-evidence and identity-block cases still withhold scores.
+Kyle approved scores from available assessed evidence, explicit data gaps, and a separate limit of **100 supplemental requests per workspace per UTC day**. Reports normalize earned points over assessed methodology weight and label partial assessments PROVISIONAL. Missing axes earn neither zero points nor positive credit. Identity blocks and disqualifying caps remain effective; no assessed evidence means no numeric score. See [the scoring decision](../decisions/2026-09-08-provisional-scoring.md).
 
-ARGUS has substantial automated coverage and working authentication at its public scan entry points, but it is not yet consistently fail-closed across all scan types. The most important defects concern what a completed result means: missing provider evidence can become a negative finding, partial scoring can erase a known risk, and different delivery paths can apply different publication rules.
+This branch repairs reliability defects across person, project, investor, token, combined investigation, website, threat, report persistence, and supplemental request paths. Automated evidence establishes the behaviors below. It does not establish live provider completeness or production throughput.
 
-This review includes concrete repairs, not just a restatement of the September handoff. Seven issue areas are repaired or hardened in this pass, with the earlier official-site coverage repair carried forward. Remaining items are explicitly separated below. No claim is made that all open issues are resolved.
+Baseline: `45689e56e2339d69d0d0adac37ccad60d1f54959`. Branch: `codex/reliability-system-review`. Draft PR #385 includes the earlier #360 official-site repair. The independent Production/Kyle/Enigma report-style promotion remains PR #351.
 
-Baseline: `origin/main` at `45689e56e2339d69d0d0adac37ccad60d1f54959`. Branch: `codex/reliability-system-review`. This branch includes the earlier issue #360 fix and excludes the independent report-style PR #351.
+## Implemented safeguards
 
-## Scope and evidence
-
-Reviewed intake, provider routing, identity attribution, scoring, coverage, deadlines, report persistence, usage controls, and recovery behavior across the following paths. Evidence consists of source inspection, fault-injection regression tests, the complete existing test suite, offline recorded canaries, calibration, and six read-only production HTTP probes.
-
-| Scan or feature | Main execution path | Assessment |
-| --- | --- | --- |
-| Person: founder, KOL, advisor, member, agency | `api/audit.ts`, `api/v1/person.ts`, `server/orchestrate.ts`, `src/engine/audit.ts` | Shared identity and partial-score safety repaired; credit replay and collection deadline weaknesses remain. |
-| Project / company account | Same collector, provider-backed PROJECT routing and six project axes | Token-identity coverage and provisional treatment repaired; brand-versus-investor routing and skipped basic-facts completion remain. |
-| Investor / fund | Shared collector with INVESTOR evidence requirements | Identity-block regression coverage added; absent fund-scale evidence can still prevent a useful score. No evidence requirements were weakened to manufacture a score. |
-| Standalone token: EVM, Solana, DEX URL | `src/token/audit.ts`, `api/v1/token.ts`, `src/lib/scanrunner.ts` | Account-link parser hardened; raw token API output does not use the person API's coverage-qualified presentation contract. Provider outage handling in supporting panels needs repair. |
-| Combined token + project investigation | `src/lib/investigation.ts` | Explicit account/contract mismatch now blocks the embedded account audit. Name-derived founder candidates and uncertain bindings still need additional policy work. |
-| Website / company reconnaissance | `src/collect/recon.ts`, project intake, `api/site-safety.ts` | The site-safety route follows redirects without the guarded public-web reader and can label partial source coverage clean. Not repaired here. |
-| Evidence-gap follow-up | `api/gap-investigation.ts`, runtime budgets, authorized research scope | Short-budget reserve arithmetic repaired. Long intake and already-running providers can still consume the remaining window. |
-| Threat scan and forensic panels | `api/threat-scan.ts`, `api/_ledger.js`, Arkham/Etherscan/burn/LP routes | Legacy ledger conflict target and partial-provider success handling remain material risks. |
-| Saved reports, shares, watchlists, rescans | `api/report.ts`, `src/App.tsx`, runners and report presentation | Immutable version and tenant checks have automated coverage; token publication order, rescan cancellation, and launch-capable navigation remain separate defects. |
-
-## Repairs in this branch
-
-### 1. Risk caps and identity blocks survive missing axes (#353)
-
-`Audit.finalize()` now evaluates caps before checking axis completeness. A known prior-rug cap remains AVOID even when some axes are missing; an identity block remains UNVERIFIABLE_IDENTITY. The missing score stays null. A fully scored capped role also governs when another role is incomplete, instead of disappearing into generic INCOMPLETE.
-
-The collector keeps coverage partial whenever any role has an unscored raw total. This prevents a retained risk signal from masquerading as a fully scored report.
-
-Regression tests cover identity blocks for every supported subject class, a partially scored capped founder, a capped founder alongside an incomplete member role, and existing uncapped incomplete behavior.
-
-### 2. Provisional token identity blocks project finalization (#354)
-
-A fully populated set of project axes no longer overrides `axisTreatment: provisional`. The engine withholds the project's overall score until token identity is resolved. Known disqualifying caps remain visible as risk signals.
-
-### 3. Short gap investigations get a real collection window (#358)
-
-The gap route previously passed an analyst deadline of budget minus 30 seconds while the collector subtracted a fixed 250-second reserve. A 240-second request therefore started with a collection deadline 40 seconds in the past.
-
-Authorized gap runs now allocate up to 60% of the available pre-finalization time to screening/scoring, capped at the normal full-scan reserve. The graph receives a bounded share of that reserve. A 240-second run gets 84 seconds for collection. Every integer budget from 180 through 540 seconds is tested for positive collection, graph, and scoring windows; the route test verifies the actual reserve options it passes.
-
-Full-scan defaults are unchanged. This is an arithmetic and wiring fix, not a guarantee that live providers finish inside their allocation. Short runs intentionally have shorter scoring timeouts; the existing scorer already clamps its timeout to the supplied deadline. No paid live delegate execution was performed.
-
-### 4. Token identity links must point to real profile URLs (#359)
-
-Both the project registry adapter and standalone token scanner now share `officialXProfileHandle`. It requires an HTTP(S) URL on exactly x.com or twitter.com, with one nonreserved profile path segment. Tweet URLs, likes pages, lookalike domains, path-embedded x.com strings, and non-web protocols cannot supply official-account identity.
-
-Tests cover valid profiles, trailing slash/query variants, malformed or hostile URLs, and CoinGecko/DexScreener integration. Existing exact official-account bindings continue to pass.
-
-### 5. Unread official sites remain evidence gaps (#360, carried forward)
-
-The earlier repair distinguishes declared, empty, and failed site outcomes. HTTP 403/429/404, failed reader recovery, token-batch errors, failed capped-batch follow-ups, and unread second official sites no longer become assessed absence. The orchestrator includes site-fetch in provider attempt accounting.
-
-### 6. Prelaunch language cannot override uncertainty (#370)
-
-Token applicability now checks unresolved identity and structured conflicts before considering prelaunch language. A bio saying a token is planned cannot excuse an unavailable provider or a conflicting contract. A completed prelaunch search still defers token conduct as before.
-
-### 7. A mismatched account is not embedded into a token investigation (#372, partial)
-
-An explicit mismatch from the account/contract binding check now prevents the account audit from launching and leaves the embedded account unavailable. A regression test verifies that the paid account stream is not invoked and no account dossier is attached.
-
-This does not fully close #372: model-resolved founder candidates and absent/unreadable binding outcomes still need a broader identity-policy repair. The candidate handle remains visible for investigation; it is not treated as a completed account audit.
-
-### 8. Related searches cannot complete a failed subject screen (#377)
-
-If the subject's own adverse search fails, the decision-critical row stays unavailable even when related-project searches answer or surface leads. Those leads remain in evidence for follow-up. A subject search that genuinely completes empty retains checked-empty, and a completed subject search with findings retains its findings.
-
-## Remaining material defects, in repair order
-
-These were confirmed in code; production frequency and financial impact were not measured.
-
-| Priority | Issue / area | Reproduction mechanism and next repair |
-| --- | --- | --- |
-| Critical | #355, credit replay | `consumeInvestigationQuota` accepts the credit RPC's allowed result, while the migration returns allowed again for an existing idempotency key. Audit/person/token routes then execute new work. Bind a unique run claim to tenant, user, route and exact subject, and return the stored result or a conflict on replay. |
-| High | #364, site-safety network access and coverage | `api/site-safety.ts` fetches the supplied page with `redirect: follow`; initial URL checks are not private-network or redirect-hop validation. Its final clean result can coexist with unavailable sources. Route page retrieval through the guarded public-web mechanism and preserve source-level outcomes. |
-| High | #363, forensic provider errors | Etherscan helper increments success after any HTTP-200 JSON, including API-level rate-limit errors. Catch-to-null paths become empty arrays; the outer failure response can say available=true. Arkham null responses can be cached as `{ none: true }`. Distinguish measured-empty, partial, unavailable and explicit access-denied outcomes before caching or scoring. |
-| High | #362, publication precedes durable save | Token/investigation callbacks in `src/App.tsx` enqueue persistence and then immediately call `logAudit` and graph contribution code. A failed save can therefore leave externally visible results without a durable version. Publish from successful exact-version persistence completion. |
-| High | #365, obsolete threat ledger target | `api/_ledger.js` and `api/threat-scan.ts` still upsert `reports?on_conflict=ref,kind`; migration `20260711191503...` drops that uniqueness index. Failures are reduced to false/empty values. Move to tenant-scoped storage with a valid unique key and make write failures observable. |
-| High | #357 and #320, skipped and ungated collection | `runAdapter` exits on budget exhaustion before running basic facts. Later project backing/transparency outcomes may be derived from other material without a completed basic-facts search. Some post-intake stages are independently time-boxed rather than uniformly deadline-gated. Preserve explicit skipped outcomes and require completed producers for negative findings. |
-| High | #330, project/investor role collision | `providerBackedRoles` can delete PROJECT whenever INVESTOR remains and no verified project token exists. A company account can inherit the wrong governing methodology because of fund vocabulary. Preserve provider-bound organization identity independently of token existence. |
-| High | #378, timeout without cancellation | `withWallClockBox` races an already-running promise; expiry does not cancel provider work or prevent later evidence mutations. Propagate AbortSignal and stop mutations after closure, with stage-level provider accounting. |
-| High | #369, forced rescans | `startInvestigationScan` aborts an existing run on force, keyed by the contract without privacy separation. Existing credit/receipt lifecycles can be orphaned. Deduplicate by authorized run identity and settle canceled reservations explicitly. |
-| High | Token API publication parity (#318/#323 related) | `api/v1/token.ts` returns raw `d.verdict` and `d.score` and records complete after any non-null dossier. `api/v1/person.ts` uses a coverage-qualified output and preliminary signal. Align token API completion and final fields with its frozen safety/check coverage. |
-| Medium | #356, bounded supplemental spending | Contrary to an overly broad reading of the old handoff, Arkham and EVM-deployer already require an organization-bound HMAC panel token and attach usage. That token is a report-context capability, not an atomic daily spending limit. `/api/ask` authenticates and loads an exact tenant-owned version, but this is not equivalent to a per-org model budget. Audit and enforce bounded spending across all paid routes. |
-| Medium | #326, investor assessed absence | The scoring prompt explicitly leaves I3 unscored without verified fund-scale artifacts. A clean but private fund can remain incomplete. Implement the approved assessed-empty policy with explicit search provenance; do not relax artifact eligibility or invent AUM. |
-| Medium | #361, watchlist navigation | `WatchlistPage` receives the launch-capable `onSafeAudit` callback. Opening a saved item should use saved-report resolution, with a new scan as an explicit action. |
-| Medium | #372 remaining identity work | `resolvedFounder` can still be constructed from the token-identity response and prepended to founders. Separate discovery leads from verified people and require unique identity binding before promotion. |
-| Medium | Dependency advisories | npm audit reports 16 advisories: one critical, 13 high, two moderate. These are package classifications, not a demonstrated production exploit. Several suggestions involve major changes or downgrades; review reachable code paths and upgrade in a separate tested change. |
-
-## Existing safeguards confirmed
-
-- The person API derives public readiness from frozen coverage and separates preliminary model output from final verdict fields.
-- Report APIs have tests for organization-qualified reads and exact immutable versions.
-- Core database migrations enable RLS and revoke direct privileged function access; API authentication resolves current membership server-side rather than trusting editable user metadata. This is source inspection, not a full live RLS penetration test.
-- Offline canaries exercise recorded person/project/token cases, including identity collision, incomplete coverage, honeypot, and sanctions outcomes.
-- Calibration is stable, but it is not evidence that runtime failures are safe. New tests explicitly inject unavailable sources, mismatches, partial scores, and conflicting identity evidence.
-- The old handoff's issue numbers drift after #369. This report uses current GitHub issue titles and numbers instead of copying the stale mapping.
-
-## Production entry-point smoke check
-
-Six unauthenticated requests on 2026-09-08 returned within 0.21 to 0.38 seconds from this machine:
-
-| Path | HTTP result |
+| Area | Result and issue references |
 | --- | --- |
-| `/` | 200 |
-| `/api/audit` | 401 |
-| `/api/v1/person` | 401 |
-| `/api/v1/token` | 401 |
-| `/api/report` | 401 |
-| `/api/gap-investigation` | 401 |
+| Person / multi-role scoring | Known risk caps and identity blocks survive missing axes and mixed-role completeness (#353). Available assessed axes produce provisional scores with named gaps. |
+| Project scoring and routing | Unresolved token identity leaves token conduct unassessed without erasing supported project scores (#354). Provider-bound project identity survives investor vocabulary without requiring a token (#330). Skipped basic-facts collection cannot establish negative backing/transparency findings (#357/#320). |
+| Investor scoring | Missing fund-scale artifacts remain unassessed; other assessed axes can yield a provisional score. This addresses the report-level incompleteness concern in #326 without inventing AUM or changing artifact eligibility. |
+| Identity and adverse evidence | Strict official-X profile URLs (#359), unread official sites remain unavailable (#360), prelaunch wording cannot override identity uncertainty (#370), and related searches cannot complete a failed subject screen (#377). |
+| Combined investigations | Only verified account/contract bindings launch an embedded account audit. Mismatch, unknown, and unavailable bindings do not. Model-derived founder suggestions remain discovery leads rather than verified founders (#372). |
+| Run replay | An atomic unique receipt insert claims tenant/user/route/subject context before provider execution. Reusing a run key returns conflict; claim storage failure returns unavailable (#355). Quota debit and receipt claim remain separate operations. |
+| Forced rescans and privacy | An already-running investigation is reused even when force is requested; completed runs can be refreshed. Public and private runs use separate keys. Canceled reservations receive terminal receipts and late callbacks cannot publish (#369). |
+| API presentation | Token API final fields now follow frozen check coverage. Provisional scores are available in the assessment and preliminary signal; partial runs are recorded degraded, not complete. |
+| Durable publication | Token/investigation audit history and graph publication follow successful exact-version persistence. Failed saves publish neither. Supplemental team discoveries remain session-only pending a durable version (#362). Watchlist opening resolves saved reports (#361). |
+| Website panels | Site safety, documentation, infrastructure, favicon hashing, and history subject reads use guarded public-web retrieval with DNS/IP checks, validated redirects, bounded bodies and one request deadline. Partial site-safety coverage cannot become clean (#364). |
+| Forensic providers | Etherscan semantic errors, malformed holder data, failed burn/log reads, incomplete Arkham reads, and unavailable wallet taxonomy rows remain unavailable. Failed Arkham coverage is not cached as absence (#363). |
+| Threat ledger | Authenticated organization scope propagates through reads/writes, valid organization-qualified conflict keys are used, Solana address case is preserved, and failed reads return unavailable instead of empty (#365). |
+| Collection budgets | Short gap runs receive positive collection/screening/scoring windows (#358). Boxed security-audit and Moni stages now abort their injected fetches on expiry and reject later fetch starts/results (#378, bounded repair). |
+| Supplemental spending | Middleware atomically reserves one request from the shared daily allowance before configured paid panels and report chat. Members and routes share the same workspace allowance. Database errors fail closed; exhausted allowance returns 429 (#356). |
+| Dependencies | Compatible dependency updates remove the baseline npm advisories. A real Open Graph render validates the selected patched release; mocked route tests alone missed a failure in the next release. |
 
-These confirm homepage reachability and rejection of unauthenticated entry-point requests. They do not establish provider health, tenant isolation under authenticated attack, data completeness, or paid-scan latency.
+## Supplemental allowance and deployment contract
 
-## Release and verification boundary
+`ARGUS_SUPPLEMENTAL_DAILY_LIMIT` defaults to 100 and accepts integers from 1 through 100000. This is a request-admission allowance, separate from investigation credits; cached and subsequently failed requests count once admitted. It is not a dollar cap or a count of downstream provider calls. Reset is UTC midnight.
 
-The reliability branch must pass its source/type/test/bundle gates and protected CI before deployment. Existing immutable reports retain their original evidence; fresh scans are needed to receive corrected outcomes. No customer records were modified, no production database migrations were applied, and no paid scans were launched in this review.
+Apply `supabase/migrations/20260908143234_supplemental_budget.sql` before deploying the middleware. Its service-role-only RPC validates active investigator membership and serializes per-workspace/day reservations with an advisory transaction lock. A partial usage-events index supports daily accounting. There is no new customer-facing table or permissive grant.
 
-The separate report-style PR is not bundled with these reliability changes. Roll back source and generated collector/sweep artifacts together if a reliability release needs reversal.
+Scheduled threat rechecks require `ARGUS_THREAT_ORGANIZATION_ID` for the intended workspace. Without it, the cron refuses to choose a tenant. Configure this deliberately during rollout.
 
-### Final local verification
+## Verification
 
-- Exact `npm run typecheck`: passed.
-- `npm run build`: passed; collector and sweep bundles rebuilt. Vite reports existing large-chunk and mixed static/dynamic import warnings.
-- `npm run truth:check`: passed.
-- `npm run canary:offline`: 7/7 matched, 18 provider requests intercepted locally, zero unexpected URLs.
-- `npm run calibrate`: 20/20 matched, no drift.
-- `npm test`: 401 files passed; 4,282 tests passed plus one expected failure.
-- `git diff --check`: passed.
-- Live database integration tests were not run locally. Protected CI remains a release requirement.
+- Final local gates passed: 405 test files, 4,302 passing tests plus one expected failure; typecheck; truth contract; 7/7 recorded canaries with 18 intercepted requests and no unexpected URLs; 20/20 calibration cases with no drift or unsafe conclusions; production build including generated bundles; git diff whitespace check. npm audit reports zero vulnerabilities. Vite retains large-chunk and mixed-import warnings.
+- Regression coverage injects provider rate limits and semantic failures, missing coverage, account mismatch/unknown bindings, duplicate claims, save failures, exhausted supplemental budgets, canceled fetches, concurrent tenant contexts, and force/private run collisions.
+- A fresh isolated local Supabase project applied repository migrations and passed all 57 database checks across nine test files. The pre-existing local database was not reset; production was not migrated.
+- Thirty concurrent service-role reservations against an allowance of five admitted exactly five and rejected twenty-five. Test fixtures were removed. Six new database assertions cover the supplemental allowance, shared membership accounting, denied-request accounting, privileges, and membership validation.
+- Local database security advisors reported no issues. This is not a full authenticated production penetration test.
+- Real Open Graph generation using the selected package produced a successful PNG response.
+- Earlier read-only production probes returned homepage 200 and 401 for five unauthenticated protected scan/report endpoints. They establish reachability and authentication rejection only.
+
+## Remaining boundaries and follow-up
+
+These are explicit limits, not claims of complete issue closure:
+
+- The cancellation repair covers the four boxed audit/Moni invocations. Ordinary collector adapters and long intake still rely on their own request timeouts; a single global cancellation contract and live deadline/latency proof remain follow-up for #357/#378.
+- Atomic run claims prevent provider replay, but quota reservation and claim insertion are not one database transaction. A receipt-store outage after debit requires an idempotent retry. Embedded run authorization still merits a parent/child capability review.
+- Provider outages are distinct from measured absence in the repaired routes. Capped burn pagination, provider freshness, and concurrent provider cost accounting still require broader completeness/telemetry work. No paid production provider runs were performed.
+- Threat keys remain organization/ref/kind; chain-specific identity for equal EVM addresses and a multi-organization cron dispatcher remain separate work.
+- Numeric provisional scoring does not justify treating missing investor AUM or other missing decision-critical evidence as assessed absence. Reports must retain confidence and coverage disclosures.
+- Existing immutable versions preserve their evidence. Fresh scans are needed to replace older null-score or misleading provider outcomes.
+
+## Release and rollback
+
+Deploy only through protected main after review and required checks. The shared report presentation changes still require the Enigma-Fund report-lane ownership approval; do not bypass it. This implementation has not been merged or deployed.
+
+Roll back source and generated collector/sweep artifacts together. For the supplemental allowance, reverting middleware first leaves the additive RPC/index harmless; remove those only after confirming no deployed caller uses them. Preserve usage history. No customer records were changed during this implementation.

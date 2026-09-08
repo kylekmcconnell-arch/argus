@@ -1,3 +1,5 @@
+import { withLedgerOrganization } from "./_ledger.js";
+import { requireArgusAuth } from "./_auth.js";
 // Receipts re-check cron. GET /api/threat-recheck  (Vercel cron, nightly)
 //
 // Two jobs, one pass over DexScreener:
@@ -56,7 +58,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Vercel cron requests carry a bearer secret when CRON_SECRET is set; enforce
   // it if present so the endpoint can't be triggered to burn quota.
   const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.authorization !== `Bearer ${secret}`) { res.status(401).json({ error: "unauthorized" }); return; }
+  let organizationId: string;
+  if (secret && req.headers.authorization === `Bearer ${secret}`) {
+    organizationId = process.env.ARGUS_THREAT_ORGANIZATION_ID ?? "";
+    if (!/^[0-9a-f-]{36}$/i.test(organizationId)) { res.status(503).json({ error: "threat_organization_not_configured" }); return; }
+  } else {
+    const auth = await requireArgusAuth(req, res, "owner");
+    if (!auth) return;
+    organizationId = auth.organizationId;
+  }
+  return withLedgerOrganization(organizationId, async () => {
   if (!ledgerAvailable()) { res.status(200).json({ available: false }); return; }
 
   const now = Date.now();
@@ -101,4 +112,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   res.status(200).json({ available: true, considered: queue.length, updated, alerts, outcomes: { dead, bleeding, alive } });
+  }).catch(() => { res.status(503).json({ available: false, error: "threat_ledger_unavailable" }); });
 }

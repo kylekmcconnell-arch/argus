@@ -7,7 +7,7 @@ import { Readable } from "node:stream";
 import { attachEvalNativeRequest } from "./evalTransport";
 
 const MAX_TEXT_BYTES = 1_500_000;
-const MAX_REDIRECTS = 4;
+const MAX_REDIRECTS = 3;
 const JINA_READER_ORIGIN = "https://r.jina.ai/";
 const PUBLIC_WEB_USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
 const JINA_RECOVERABLE_FAILURES = new Set([
@@ -146,6 +146,7 @@ export interface PinnedRequestOptions {
 type RequestFn = (url: URL, options: PinnedRequestOptions) => Promise<Response>;
 
 export interface PublicWebDependencies {
+  signal?: AbortSignal;
   request?: RequestFn;
   lookup?: LookupFn;
   now?: () => Date;
@@ -420,16 +421,18 @@ async function fetchValidatedPublicText(
   initialTarget: ValidatedPublicTarget,
   dependencies: PublicWebDependencies = {},
   accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8",
+  asset = false,
 ): Promise<PublicTextResult> {
   const request = dependencies.request ?? defaultRequestForMode();
   const lookup = dependencies.lookup ?? defaultLookupForMode();
   let target: ValidatedPublicTarget | null = initialTarget;
+  const signal = dependencies.signal ?? AbortSignal.timeout(8_000);
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     let response: Response;
     try {
       response = await request(target.url, {
-        signal: AbortSignal.timeout(8_000),
+        signal,
         headers: {
           accept,
           "accept-language": "en-US,en;q=0.8",
@@ -457,7 +460,7 @@ async function fetchValidatedPublicText(
     if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
 
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
+    if (asset ? !/^image\/(?:x-icon|vnd.microsoft.icon|png|jpeg|gif|webp|svg\+xml)$/.test(contentType) : contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
       return { status: "failed", reason: "unsupported_content_type" };
     }
     let bytes: Buffer | null;
@@ -467,7 +470,7 @@ async function fetchValidatedPublicText(
       return { status: "failed", reason: "response_stream_error" };
     }
     if (!bytes) return { status: "failed", reason: "response_too_large" };
-    const text = bytes.toString("utf8");
+    const text = asset ? "asset" : bytes.toString("utf8");
     if (!text.trim()) return { status: "failed", reason: "empty_response" };
     if (antiBotChallengeBody(contentType, text)) {
       return { status: "failed", reason: "anti_bot_challenge" };
@@ -494,6 +497,14 @@ export async function fetchPublicText(
   const target = await validatedPublicTarget(raw, undefined, lookup);
   if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
   return fetchValidatedPublicText(target, dependencies);
+}
+
+/** Hash a bounded public favicon using the same pinned transport and hop guards. */
+export async function fetchPublicAssetHash(raw: string, dependencies: PublicWebDependencies = {}): Promise<string | null> {
+  const target = await validatedPublicTarget(raw, undefined, dependencies.lookup ?? defaultLookupForMode());
+  if (!target) return null;
+  const result = await fetchValidatedPublicText(target, dependencies, "image/*", true);
+  return result.status === "ok" ? result.contentHash : null;
 }
 
 /**

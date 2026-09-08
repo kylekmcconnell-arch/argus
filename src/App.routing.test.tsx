@@ -1240,6 +1240,19 @@ describe("App routing safety", () => {
     }));
   });
 
+  it("does not publish a token whose immutable save fails", async () => {
+    const address = "0x8888888888888888888888888888888888888888";
+    harness.syncReport.mockResolvedValue({ state: "failed", reason: "storage unavailable" });
+    await renderApp();
+    await act(async () => {
+      harness.scanOnComplete?.({ id: "scan-save-failed", kind: "token", priv: false, result: tokenResult(address, "unsaved token"), creditKey: "credit-save-failed", startedAt: Date.now() });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+  });
+
   it("logs a finished token scan to recents with the same completion contract its report applies", async () => {
     const address = "0x7777777777777777777777777777777777777777";
     // Every check the standalone token collector actually runs has an outcome.
@@ -1265,6 +1278,7 @@ describe("App routing safety", () => {
       cg: { listed: true, cexCount: 2, rank: 400 },
       sanctionsScreen: { available: true, checked: 3, sanctioned: [], completedAt: "2026-08-30T00:00:00.000Z" },
     };
+    harness.syncReport.mockResolvedValue({ state: "persisted", caseId: "case-full", reportVersionId: "version-full", version: 1 });
     await renderApp();
 
     await act(async () => {

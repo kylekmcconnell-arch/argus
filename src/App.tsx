@@ -745,30 +745,32 @@ export default function App() {
                 ? supplemented
                 : current
             ));
-            const contribution = investigationContribution(supplemented);
-            if (contribution) recordContribution(contribution);
+            // New discovery stays in this session until a subsequent immutable version saves it.
           });
       }
+      if (persisted.state !== "persisted" || !versionContext) return;
+      logAudit({
+        id: versionContext.reportVersionId,
+        kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
+        summary: inv.founderNote,
+        // Same completion contract the investigation report and the stored
+        // version apply. The raw token checklist carries the org-side rows
+        // (docs, news, GitHub) as required, so without the contract every
+        // finished investigation logged "incomplete" to recents and the shared
+        // feed while its own report read complete.
+        coverage: deriveDecisionReadiness(applyReportCheckContract("investigation", reconcileInvestigationChecks(
+          tokenChecks(inv.token),
+          inv.token.address,
+          inv.projectAccount,
+          inv.projectAccountAudit,
+          inv.projectAccountBinding,
+        ))).status,
+        flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
+      });
+      const c = investigationContribution(settled);
+      if (c) recordContribution({ ...c, reportVersionId: versionContext.reportVersionId, provenanceState: "client_submitted" });
     });
-    logAudit({
-      kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
-      summary: inv.founderNote,
-      // Same completion contract the investigation report and the stored
-      // version apply. The raw token checklist carries the org-side rows
-      // (docs, news, GitHub) as required, so without the contract every
-      // finished investigation logged "incomplete" to recents and the shared
-      // feed while its own report read complete.
-      coverage: deriveDecisionReadiness(applyReportCheckContract("investigation", reconcileInvestigationChecks(
-        tokenChecks(inv.token),
-        inv.token.address,
-        inv.projectAccount,
-        inv.projectAccountAudit,
-        inv.projectAccountBinding,
-      ))).status,
-      flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
-    });
-    const c = investigationContribution(inv);
-    if (c) recordContribution(c);
+
   }, [enqueueReportPersistence, setDossier, setInvestigation, setTokenDossier]);
   const tokenData = useCallback((d: TokenDossier, priv: boolean, scanId: string, creditKey: string, startedAt: number) => {
     if (priv) {
@@ -819,14 +821,17 @@ export default function App() {
           ? settled
           : current
       ));
+      if (persisted.state !== "persisted" || !versionContext) return;
+      logAudit({
+        id: versionContext.reportVersionId,
+        kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
+        summary: d.headline,
+        coverage: deriveDecisionReadiness(applyReportCheckContract("token", tokenChecks(d))).status,
+        flags: [d.capApplied ? `cap:${d.capApplied}` : "", d.bundleRisk !== "low" ? `bundle:${d.bundleRisk}` : ""].filter(Boolean),
+      });
+      recordContribution({ ...tokenContribution(d.symbol, d.verdict, d.graph.nodes, d.graph.edges), reportVersionId: versionContext.reportVersionId, provenanceState: "client_submitted" });
     });
-    logAudit({
-      kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
-      summary: d.headline,
-      coverage: deriveDecisionReadiness(applyReportCheckContract("token", tokenChecks(d))).status,
-      flags: [d.capApplied ? `cap:${d.capApplied}` : "", d.bundleRisk !== "low" ? `bundle:${d.bundleRisk}` : ""].filter(Boolean),
-    });
-    recordContribution(tokenContribution(d.symbol, d.verdict, d.graph.nodes, d.graph.edges));
+
   }, [enqueueReportPersistence, setTokenDossier]);
   // The runner calls this for every finished token / investigation scan.
   useEffect(() => {
@@ -1755,7 +1760,7 @@ export default function App() {
 
       {phase === "trending" && <TrendingPage onOpen={onOpenRecent} />}
 
-      {phase === "watchlist" && <WatchlistPage onAudit={onSafeAudit} />}
+      {phase === "watchlist" && <WatchlistPage onAudit={onOpenRecent} />}
 
 
       {phase === "referrals" && <ReferralsPage />}
@@ -1776,7 +1781,7 @@ export default function App() {
       {phase === "project" && viewedProject && <ProjectView project={viewedProject} onAudit={viewedProject.privateMode ? onPrivateAudit : onSafeAudit} onReset={reset} record={!viewedProject.privateMode} panelCostToken={viewedProject.panelCostToken} />}
 
       {phase === "token-run" && tokenInput && (
-        <TokenRun input={tokenInput} onDone={onTokenDone} onError={onTokenError} />
+        <TokenRun privateRun={privateMode} input={tokenInput} onDone={onTokenDone} onError={onTokenError} />
       )}
 
       {phase === "token-report" && tokenDossier && <TokenReport key={`token:${tokenDossier.versionContext?.reportVersionId ?? tokenDossier.viewVersionContext?.reportVersionId ?? tokenDossier.persistence?.scanId ?? tokenDossier.viewPersistence?.scanId ?? tokenDossier.address}`} dossier={tokenDossier} onReset={reset} onAudit={tokenReportPrivate ? onPrivateAudit : onSafeAudit} onRescan={() => onAudit(tokenDossier.address, tokenReportPrivate, true)} onOpenBrief={!evidenceReviewVersionId && !privateMode && tokenBriefTarget ? () => setCaseBriefTarget(tokenBriefTarget) : undefined} />}
@@ -1788,7 +1793,7 @@ export default function App() {
           : <ThreatLanding onScan={onThreatScan} />)}
 
       {phase === "investigation" && investigationInput && (
-        <InvestigationRun input={investigationInput} expectedRunId={investigationScanId ?? undefined} onDone={onInvestigationDone} onError={onInvestigationError} />
+        <InvestigationRun privateRun={privateMode} input={investigationInput} expectedRunId={investigationScanId ?? undefined} onDone={onInvestigationDone} onError={onInvestigationError} />
       )}
 
       {phase === "investigation-report" && investigation && (

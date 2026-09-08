@@ -49,7 +49,7 @@ describe("background scan credit gate", () => {
 describe("forced investigation rescan", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("replaces a running investigation when force is true", async () => {
+  it("reattaches to a running investigation without another reservation when force is true", async () => {
     const input = { kind: "token", via: "evm", ref: "0x0000000000000000000000000000000000000180" } as const;
     mocks.reserveInvestigationCredit.mockResolvedValue({ chargedCredits: 1, remainingCredits: 10 });
     mocks.streamInvestigation.mockImplementation(() => () => undefined);
@@ -58,16 +58,29 @@ describe("forced investigation rescan", () => {
     expect(first.status).toBe("running");
     const second = startInvestigationScan(input, false, { force: true });
 
-    expect(second.id).not.toBe(first.id);
-    expect(second.creditKey).not.toBe(first.creditKey);
+    expect(second.id).toBe(first.id);
+    expect(second.creditKey).toBe(first.creditKey);
     expect(getScanRun("investigation", input.ref)?.id).toBe(second.id);
     expect(getScanRun("investigation", input.ref)?.status).toBe("running");
     await vi.waitFor(() => expect(mocks.streamInvestigation).toHaveBeenCalled());
+    expect(mocks.reserveInvestigationCredit).toHaveBeenCalledOnce();
     expect(mocks.streamInvestigation).toHaveBeenLastCalledWith(
       input,
       expect.any(Object),
-      expect.objectContaining({ forceTokenAudit: true }),
+      expect.objectContaining({ forceTokenAudit: undefined }),
     );
+  });
+
+  it("keeps private and public runs for the same subject separate", async () => {
+    const input = { kind: "token", via: "evm", ref: "0x0000000000000000000000000000000000000182" } as const;
+    mocks.reserveInvestigationCredit.mockResolvedValue({ chargedCredits: 1, remainingCredits: 10 });
+    mocks.streamInvestigation.mockImplementation(() => () => undefined);
+    const publicRun = startInvestigationScan(input);
+    const privateRun = startInvestigationScan(input, true);
+    expect(publicRun.creditKey).not.toBe(privateRun.creditKey);
+    expect(getScanRun("investigation", input.ref)).toBe(publicRun);
+    expect(getScanRun("investigation", input.ref, true)).toBe(privateRun);
+    await vi.waitFor(() => expect(mocks.streamInvestigation).toHaveBeenCalledTimes(2));
   });
 
   it("starts a new investigation after a completed run when force is true", async () => {

@@ -4,10 +4,10 @@ vi.mock("./_auth.js", () => ({
   requireArgusAuth: vi.fn(),
   consumeInvestigationQuota: vi.fn(),
 }));
-vi.mock("./_scanReceipts.js", () => ({ recordScanReceipt: vi.fn() }));
+vi.mock("./_scanReceipts.js", () => ({ claimScanReceipt: vi.fn() }));
 
 import { consumeInvestigationQuota, requireArgusAuth } from "./_auth.js";
-import { recordScanReceipt } from "./_scanReceipts.js";
+import { claimScanReceipt } from "./_scanReceipts.js";
 import handler from "./investigation-credit";
 
 const auth = { userId: "user", organizationId: "org", role: "analyst", email: "a@example.com", displayName: "A" };
@@ -25,7 +25,7 @@ describe("POST /api/investigation-credit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(requireArgusAuth).mockResolvedValue(auth as never);
-    vi.mocked(recordScanReceipt).mockResolvedValue(true);
+    vi.mocked(claimScanReceipt).mockResolvedValue("written");
   });
 
   it("returns the charged and remaining visible credits", async () => {

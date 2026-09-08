@@ -1,10 +1,13 @@
+import { tokenChecks, clearanceCoverage } from "../../src/lib/scanChecklist.js";
+import { applyReportCheckContract } from "../../src/lib/reportCheckContract.js";
+import { presentPublicReport } from "../../src/lib/reportPresentation.js";
 // Authenticated API: GET /api/v1/token?address=<contract> (or ?url=...).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { ResolvedInput, RunnableTokenInput } from "../../src/lib/resolveInput.js";
 import { auditToken, collectSocialActivity, resolveInput } from "../_collector.js";
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
 import { screenSanctionedAddresses } from "../_sanctions-core.js";
-import { recordScanReceipt } from "../_scanReceipts.js";
+import { claimScanReceipt, recordScanReceipt } from "../_scanReceipts.js";
 
 export const config = { maxDuration: 60 };
 
@@ -57,11 +60,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     return;
   }
-  await recordScanReceipt(auth, {
+  const claim = await claimScanReceipt(auth, {
     runKey: idempotencyKey, route: "/api/v1/token", kind: "token", canonicalRef: input.ref,
     displayQuery: ref, status: "running", creditsCharged: quota.used,
     startedAt: new Date(startedAt).toISOString(),
   });
+  if (claim !== "written") {
+    res.status(claim === "duplicate" ? 409 : 503).json({
+      error: claim === "duplicate" ? "scan_run_already_claimed" : "scan_run_claim_unavailable",
+      message: "This scan could not be started. Open its saved result or use a new scan identifier.",
+    });
+    return;
+  }
+
   try {
     // Inject the direct OFAC screener so this server path records a real
     // sanctions outcome (and applies the AVOID cap) rather than skipping the
@@ -81,9 +92,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(404).json({ error: "no DEX pair found for this contract" });
       return;
     }
+    const checks = applyReportCheckContract("token", tokenChecks(d));
+    const completeness = clearanceCoverage(checks).sufficient ? "complete" : "partial";
+    const presentation = presentPublicReport({ verdict: d.verdict, score: d.score, completeness, checks });
     await recordScanReceipt(auth, {
       runKey: idempotencyKey, route: "/api/v1/token", kind: "token", canonicalRef: input.ref,
-      displayQuery: ref, status: "complete", creditsCharged: quota.used,
+      displayQuery: ref, status: presentation.final ? "complete" : "degraded", creditsCharged: quota.used,
       startedAt: new Date(startedAt).toISOString(), finishedAt: new Date().toISOString(),
       durationMs: Date.now() - startedAt,
     });
@@ -94,10 +108,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       chain: d.chain,
       symbol: d.symbol,
       name: d.name,
-      verdict: d.verdict,
-      score: d.score,
+      verdict: presentation.final ? d.verdict : "INCOMPLETE",
+      score: presentation.final ? d.score : null,
+      decision_ready: presentation.final,
+      completeness_state: completeness,
+      assessment: { verdict: presentation.displayVerdict, score: presentation.primaryScore ? Number(presentation.primaryScore) : null, note: presentation.note },
+      preliminary_model_signal: presentation.final ? null : { verdict: d.verdict, score: d.score, headline: d.headline },
       cap_applied: d.capApplied,
-      headline: d.headline,
+      headline: presentation.final ? d.headline : presentation.note,
       market: { priceUsd: d.priceUsd, marketCap: d.mcap, liquidityUsd: d.liquidityUsd, volume24h: d.vol24, ageDays: d.ageDays, priceChange: d.priceChange },
       safety: d.safety,
       sanctions: d.sanctionsScreen

@@ -102,7 +102,7 @@ export function WatchlistPage({
   onAudit,
   alertsLoader,
 }: {
-  onAudit: (id: string) => void;
+  onAudit: (id: string, kind?: "person" | "token") => void;
   alertsLoader?: () => Promise<Alert[]>;
 }) {
   const [rows, setRows] = useState<Row[]>(() => getWatchlist().map((item) => ({ item, loading: true })));
@@ -240,7 +240,7 @@ export function WatchlistPage({
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[12.5px] text-signal-lift">
                   {r.item.kind === "token" ? r.item.label.replace("$", "").slice(0, 3) : r.item.label.replace("@", "").slice(0, 1).toUpperCase()}
                 </span>
-                <button onClick={() => onAudit(r.item.id)} className="mono min-w-0 flex-1 truncate text-left text-[13.5px] text-ink hover:text-signal-lift">
+                <button onClick={() => onAudit(r.item.id, r.item.kind)} className="mono min-w-0 flex-1 truncate text-left text-[13.5px] text-ink hover:text-signal-lift">
                   {r.item.label}
                   <span className="ml-2 text-[11px] text-ink-faint capitalize">
                     {r.item.kind === "token" ? `${r.item.chain} · live refresh` : "person · saved report"}

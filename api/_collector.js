@@ -42,6 +42,30 @@ var providerFallbacksEnabled = () => {
 };
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
+// server/boundedProvider.ts
+async function withWallClockBox(work, budgetMs) {
+  if (budgetMs <= 0) return null;
+  const controller = new AbortController();
+  let timer;
+  const fetcher = (input, init) => {
+    controller.signal.throwIfAborted();
+    return fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal });
+  };
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(null);
+    }, budgetMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([work(fetcher), timeout]);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
 // src/engine/taxonomy.ts
 var SubjectClass = /* @__PURE__ */ ((SubjectClass2) => {
   SubjectClass2["FOUNDER"] = "FOUNDER";
@@ -11810,7 +11834,7 @@ function attachEvalNativeRequest(init, request) {
 
 // server/publicWeb.ts
 var MAX_TEXT_BYTES = 15e5;
-var MAX_REDIRECTS = 4;
+var MAX_REDIRECTS = 3;
 var JINA_READER_ORIGIN = "https://r.jina.ai/";
 var PUBLIC_WEB_USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
 var JINA_RECOVERABLE_FAILURES = /* @__PURE__ */ new Set([
@@ -12049,15 +12073,16 @@ async function readBoundedText(response) {
   }
   return Buffer.concat(chunks, total);
 }
-async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8") {
+async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8", asset = false) {
   const request = dependencies.request ?? defaultRequestForMode();
   const lookup2 = dependencies.lookup ?? defaultLookupForMode();
   let target = initialTarget;
+  const signal2 = dependencies.signal ?? AbortSignal.timeout(8e3);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     let response;
     try {
       response = await request(target.url, {
-        signal: AbortSignal.timeout(8e3),
+        signal: signal2,
         headers: {
           accept,
           "accept-language": "en-US,en;q=0.8",
@@ -12080,7 +12105,7 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
     }
     if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
+    if (asset ? !/^image\/(?:x-icon|vnd.microsoft.icon|png|jpeg|gif|webp|svg\+xml)$/.test(contentType) : contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
       return { status: "failed", reason: "unsupported_content_type" };
     }
     let bytes;
@@ -12090,7 +12115,7 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
       return { status: "failed", reason: "response_stream_error" };
     }
     if (!bytes) return { status: "failed", reason: "response_too_large" };
-    const text2 = bytes.toString("utf8");
+    const text2 = asset ? "asset" : bytes.toString("utf8");
     if (!text2.trim()) return { status: "failed", reason: "empty_response" };
     if (antiBotChallengeBody(contentType, text2)) {
       return { status: "failed", reason: "anti_bot_challenge" };
@@ -12112,6 +12137,12 @@ async function fetchPublicText(raw, dependencies = {}) {
   const target = await validatedPublicTarget(raw, void 0, lookup2);
   if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
   return fetchValidatedPublicText(target, dependencies);
+}
+async function fetchPublicAssetHash(raw, dependencies = {}) {
+  const target = await validatedPublicTarget(raw, void 0, dependencies.lookup ?? defaultLookupForMode());
+  if (!target) return null;
+  const result = await fetchValidatedPublicText(target, dependencies, "image/*", true);
+  return result.status === "ok" ? result.contentHash : null;
 }
 async function fetchPublicTextWithRecovery(raw, dependencies = {}) {
   const lookup2 = dependencies.lookup ?? defaultLookupForMode();
@@ -33198,13 +33229,6 @@ function deriveFounderVentureCandidate(evidence) {
 var MONID_ENRICHMENT_BUDGET_MS = 25e3;
 var SECURITY_AUDITS_BUDGET_MS = 45e3;
 var EVM_CONTROL_RPC_TIMEOUT_MS = 2500;
-var withWallClockBox = (work, budgetMs) => Promise.race([
-  work,
-  new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), budgetMs);
-    if (typeof timer === "object" && "unref" in timer) timer.unref();
-  })
-]);
 var VERIFIED_EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 function verifiedEvmControlTarget(evidence) {
   const token = evidence.projectToken;
@@ -34521,9 +34545,9 @@ function providerBackedRoles(evidence) {
     roles.add("PROJECT" /* PROJECT */);
   }
   if (roles.has("INVESTOR" /* INVESTOR */)) {
-    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null) && !investorBeyondBio) {
+    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null || projectBound) && !investorBeyondBio) {
       roles.delete("INVESTOR" /* INVESTOR */);
-    } else if (!evidence.projectToken?.verified) {
+    } else if (!evidence.projectToken?.verified && !projectBound) {
       roles.delete("PROJECT" /* PROJECT */);
     }
   }
@@ -34986,8 +35010,8 @@ function collectProjectCoreEvidenceOutcomes(ctx, options = {}) {
     const assessable = (ctx.evidence.webTeam ?? []).length > 0 || (ctx.evidence.basicFacts ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live";
     ctx.recordCheck?.({
       id: "project-backing-partners",
-      status: assessable ? "finding" : "checked-empty",
-      note: assessable ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified funding, investor, advisor, counterparty, or operating-partner evidence appears. Project-only partnership claims and model-only leads were excluded. This is a null result on this axis, not adverse evidence." : "bounded scan of up to 32 frozen first-party team and account records found no verified funding, investor, advisor, counterparty, or operating-partner evidence; project-only partnership claims and model-only leads were excluded",
+      status: options.basicFactsCompleted === false ? "unavailable" : assessable ? "finding" : "checked-empty",
+      note: options.basicFactsCompleted === false ? "The backing search did not complete; collected material does not establish absence." : assessable ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified funding, investor, advisor, counterparty, or operating-partner evidence appears. Project-only partnership claims and model-only leads were excluded. This is a null result on this axis, not adverse evidence." : "bounded scan of up to 32 frozen first-party team and account records found no verified funding, investor, advisor, counterparty, or operating-partner evidence; project-only partnership claims and model-only leads were excluded",
       provider: "project-core-evidence"
     });
   }
@@ -35017,7 +35041,7 @@ function collectProjectCoreEvidenceOutcomes(ctx, options = {}) {
       note: "bounded disclosure search completed with an explicit no-match; no source-linked legal, governance, token-economic, repository, or security disclosure candidate was returned",
       provider: "basic-facts-web"
     });
-  } else if ((ctx.evidence.basicFacts ?? []).length > 0 || (ctx.evidence.webTeam ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live") {
+  } else if (options.basicFactsCompleted !== false && ((ctx.evidence.basicFacts ?? []).length > 0 || (ctx.evidence.webTeam ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live")) {
     ctx.recordCheck?.({
       id: "project-transparency",
       status: "finding",
@@ -35973,13 +35997,13 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         {
           const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
           const auditsResult = await withWallClockBox(
-            collectSecurityAudits(
+            (fetcher) => collectSecurityAudits(
               projectName2,
               evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
               auditLinks.available ? auditLinks.value.auditLinks : [],
-              { canonicalContractAddress: evidence.projectToken.address }
+              { canonicalContractAddress: evidence.projectToken.address, fetcher }
             ),
-            SECURITY_AUDITS_BUDGET_MS
+            Math.min(SECURITY_AUDITS_BUDGET_MS, collectionDeadlineAt - Date.now())
           );
           if (auditsResult?.available) {
             evidence.securityAudits = {
@@ -36006,11 +36030,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
           if (companyLookup) {
             const sections = projectCompanyEnrichmentSections(evidence);
             const enrichment = await withWallClockBox(
-              collectProjectCompanyEnrichment(companyLookup, {
+              (fetcher) => collectProjectCompanyEnrichment(companyLookup, {
+                fetcher,
                 sections,
                 officialName: projectName2
               }),
-              MONID_ENRICHMENT_BUDGET_MS
+              Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now())
             );
             if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, companyLookup)) {
               evidence.companyEnrichment = { ...enrichment.value };
@@ -36294,11 +36319,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     try {
       const sections = projectCompanyEnrichmentSections(evidence);
       const enrichment = sections.length ? await withWallClockBox(
-        collectProjectCompanyEnrichment(recoveredCompanyLookup, {
+        (fetcher) => collectProjectCompanyEnrichment(recoveredCompanyLookup, {
+          fetcher,
           sections,
           officialName: evidence.profile.resolved_name ?? evidence.profile.display_name
         }),
-        MONID_ENRICHMENT_BUDGET_MS
+        Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now())
       ) : null;
       if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, recoveredCompanyLookup)) {
         evidence.companyEnrichment = { ...enrichment.value };
@@ -36320,11 +36346,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     if (primaryVenture) {
       try {
         const enrichment = primaryVenture.domain ? await withWallClockBox(
-          collectProjectCompanyEnrichment(primaryVenture.domain, {
+          (fetcher) => collectProjectCompanyEnrichment(primaryVenture.domain, {
+            fetcher,
             sections: ["funding_detail", "firmographic"],
             officialName: primaryVenture.project_name.trim()
           }),
-          MONID_ENRICHMENT_BUDGET_MS
+          Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now())
         ) : null;
         if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, primaryVenture.domain)) {
           evidence.companyEnrichment = { ...enrichment.value };
@@ -36484,6 +36511,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   collectFounderDecisionQuestionOutcomes(ctx);
   try {
     const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx, {
+      basicFactsCompleted: adapterResults.get("basic-facts")?.state === "executed",
       transparencySearchExplicitlyEmpty: adapterResults.get("basic-facts")?.explicitEmptyChecks?.includes("project-transparency") === true
     });
     checkTracker.provider(
@@ -38481,6 +38509,8 @@ function resolveInput(raw) {
 export {
   auditToken,
   collectSocialActivity,
+  fetchPublicAssetHash,
+  fetchPublicText,
   providerStatus,
   resolveInput,
   runAudit

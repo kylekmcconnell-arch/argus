@@ -315,8 +315,8 @@ export function streamInvestigation(
       // If the token's own sources (DexScreener + CoinGecko) yielded no site OR no
       // X account, resolve the OFFICIAL identity from knowledge (Grok) so an
       // obscure token doesn't dead-end on "no website / no team". Also surfaces the
-      // founder to seed the people section directly.
-      let resolvedFounder: FounderCandidate | null = null;
+      // founder as an unverified discovery lead.
+
       if (!siteUrl || !projectX) {
         h.onHop("resolving the project's official identity");
         h.onStep(milestone("Step 1c · Resolve identity", `On-chain sources are thin. Resolving $${token.symbol}'s official site, X account, and founder from knowledge…`, "neutral"));
@@ -324,9 +324,9 @@ export function streamInvestigation(
         if (!aborted && id) {
           if (!siteUrl && id.website) siteUrl = id.website;
           if (!projectX && id.x_handle) projectX = id.x_handle;
-          if (id.founder) resolvedFounder = { name: id.founder, handle: id.founder_handle, source: "project" };
-          const bits = [id.website && `site ${shorten(id.website)}`, id.x_handle && `X ${id.x_handle}`, id.founder && `founder ${id.founder}${id.founder_handle ? ` (${id.founder_handle})` : ""}`].filter(Boolean) as string[];
-          h.onStep(milestone("Identity resolved", bits.length ? `Resolved ${bits.join(", ")} (${id.confidence} confidence).` : "No official identity could be resolved from knowledge either.", bits.length ? "good" : "warn"));
+
+          const bits = [id.website && `site ${shorten(id.website)}`, id.x_handle && `X ${id.x_handle}`, id.founder && `unverified founder lead ${id.founder}${id.founder_handle ? ` (${id.founder_handle})` : ""}`].filter(Boolean) as string[];
+          h.onStep(milestone("Identity leads found", bits.length ? `Suggested ${bits.join(", ")} (${id.confidence} model confidence). Account and founder bindings still require verification.` : "No identity leads were returned.", "warn"));
         }
       }
       if (aborted) return;
@@ -404,10 +404,10 @@ export function streamInvestigation(
         } catch { /* binding stays unrecorded; crediting falls back to the project scan's own check */ }
         const providers = await probeBackend();
         const analystLive = !!providers?.some((p) => p.id === "analyst" && p.configured);
-        if (projectAccountBinding?.status === "mismatch") {
+        if (projectAccountBinding?.status !== "verified") {
           projectAccountAudit = {
             state: "unavailable",
-            note: `The account ${projectX} did not match the scanned contract, so its audit was not attached to this investigation.`,
+            note: `The account ${projectX} was not verified against the scanned contract, so its audit was not attached to this investigation.`,
           };
           h.onStep(milestone("Project account rejected", projectAccountAudit.note, "warn"));
         } else if (analystLive) {
@@ -454,11 +454,6 @@ export function streamInvestigation(
 
       // ── Founders (honesty-gated; no auto-spend beyond the project account) ──
       const founders = deriveFounders(recon, projectX, projectAccount);
-      // A knowledge-resolved founder (e.g. Hayden Adams for $UNI) leads the list
-      // when the on-chain trail didn't already surface them.
-      if (resolvedFounder && !founders.some((f) => f.name.toLowerCase() === resolvedFounder!.name.toLowerCase() || (resolvedFounder!.handle && f.handle?.toLowerCase() === resolvedFounder!.handle.toLowerCase()))) {
-        founders.unshift(resolvedFounder);
-      }
       const note = founderNote(siteUrl, recon, founders);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
       h.onDone({ rootRef: input.ref, token, projectX, siteUrl, recon, projectAccount, projectAccountAudit, projectAccountBinding, founders, founderNote: note, deployerTrail, webTeam });

@@ -1,3 +1,14 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+const organizationContext = new AsyncLocalStorage();
+export function withLedgerOrganization(organizationId, work) {
+  if (!/^[0-9a-f-]{36}$/i.test(organizationId)) throw new Error("ledger_organization_required");
+  return organizationContext.run(organizationId, work);
+}
+function organizationId() {
+  const id = organizationContext.getStore();
+  if (!id) throw new Error("ledger_organization_required");
+  return id;
+}
 // Shared Supabase helpers for the threat scanner's SERVER-side receipts ledger —
 // the shared "we called it" track record + deployer memory that the client's
 // localStorage ledger (src/threat/receipts.ts) can only ever see its own slice
@@ -17,7 +28,7 @@ function creds() {
   return url && key ? { url: url.replace(/\/$/, ""), key } : null;
 }
 const headers = (key) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
-const normAddr = (s) => String(s || "").trim().toLowerCase();
+const normAddr = (s) => { const value = String(s || "").trim(); return /^0x[0-9a-f]+$/i.test(value) ? value.toLowerCase() : value; };
 
 export function ledgerAvailable() {
   return !!creds();
@@ -30,6 +41,7 @@ export async function ledgerUpsert(receipt) {
   if (!c || !receipt?.address) return false;
   try {
     const row = {
+      organization_id: organizationId(),
       ref: normAddr(receipt.address),
       kind: KIND,
       query: receipt.symbol ? `$${receipt.symbol}` : normAddr(receipt.address),
@@ -38,12 +50,13 @@ export async function ledgerUpsert(receipt) {
       payload: receipt,
       ts: new Date().toISOString(),
     };
-    const r = await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
+    const r = await fetch(`${c.url}/rest/v1/reports?on_conflict=organization_id,ref,kind`, {
       method: "POST",
       headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify(row),
       signal: AbortSignal.timeout(8000),
     });
+    if (!r.ok) console.error("[threat-ledger] write rejected", r.status);
     return r.ok;
   } catch {
     return false;
@@ -54,15 +67,15 @@ async function query(params) {
   const c = creds();
   if (!c) return [];
   try {
-    const r = await fetch(`${c.url}/rest/v1/reports?${params}`, {
+    const r = await fetch(`${c.url}/rest/v1/reports?organization_id=eq.${encodeURIComponent(organizationId())}&${params}`, {
       headers: headers(c.key),
       signal: AbortSignal.timeout(8000),
     });
-    if (!r.ok) return [];
+    if (!r.ok) throw new Error(`threat_ledger_http_${r.status}`);
     const rows = await r.json();
     return (rows ?? []).map((row) => row.payload).filter(Boolean);
-  } catch {
-    return [];
+  } catch (error) {
+    throw error;
   }
 }
 
@@ -108,6 +121,7 @@ export async function ledgerRecordAlert(alert) {
   if (!c || !alert?.address) return false;
   try {
     const row = {
+      organization_id: organizationId(),
       ref: normAddr(alert.address),
       kind: ALERT_KIND,
       query: alert.symbol ? `$${alert.symbol}` : normAddr(alert.address),
@@ -115,12 +129,13 @@ export async function ledgerRecordAlert(alert) {
       payload: alert,
       ts: new Date().toISOString(),
     };
-    const r = await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
+    const r = await fetch(`${c.url}/rest/v1/reports?on_conflict=organization_id,ref,kind`, {
       method: "POST",
       headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify(row),
       signal: AbortSignal.timeout(8000),
     });
+    if (!r.ok) console.error("[threat-ledger] write rejected", r.status);
     return r.ok;
   } catch {
     return false;
@@ -164,16 +179,17 @@ export async function ledgerRecordHolderEdges(token, symbol, verdict, wallets) {
   const at = new Date().toISOString();
   const rows = wallets.slice(0, 40).map((w) => {
     const wl = normAddr(w);
-    return { ref: `${wl}|${t}`, kind: EDGE_KIND, query: symbol ? `$${symbol}` : t, verdict: verdict ?? null, payload: { wallet: wl, token: t, symbol: symbol ?? null, verdictAtScan: verdict ?? null, at } };
+    return { organization_id: organizationId(), ref: `${wl}|${t}`, kind: EDGE_KIND, query: symbol ? `$${symbol}` : t, verdict: verdict ?? null, payload: { wallet: wl, token: t, symbol: symbol ?? null, verdictAtScan: verdict ?? null, at } };
   }).filter((r) => r.payload.wallet);
   if (!rows.length) return false;
   try {
-    const r = await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
+    const r = await fetch(`${c.url}/rest/v1/reports?on_conflict=organization_id,ref,kind`, {
       method: "POST",
       headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify(rows),
       signal: AbortSignal.timeout(8000),
     });
+    if (!r.ok) console.error("[threat-ledger] write rejected", r.status);
     return r.ok;
   } catch {
     return false;

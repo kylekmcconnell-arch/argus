@@ -1,3 +1,4 @@
+import { withLedgerOrganization } from "./_ledger.js";
 // Buyer-cohort / "Common Coins". GET /api/cohort?address=&chain=
 //
 // RAVN's strongest idea: the top holders of a token are not random - the same
@@ -123,6 +124,8 @@ async function enrich(chain: string, mints: string[]): Promise<Map<string, { sym
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireArgusAuth(req, res, "analyst");
   if (!auth) return;
+  return withLedgerOrganization(auth.organizationId, async () => {
+
   const address = String(req.query.address ?? "").trim();
   const chain = String(req.query.chain ?? "").trim().toLowerCase();
   const sol = chain === "solana";
@@ -196,4 +199,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? `${commonCoins.length} token(s) are held by ${threshold}+ of the ${holders.length} analyzed top holders - a shared-bag signature.`
       : `No shared holdings across ${threshold}+ of the ${holders.length} top holders - they look independent.`,
   });
+  }).catch(() => { res.status(503).json({ available: false, error: "threat_ledger_unavailable" }); });
 }

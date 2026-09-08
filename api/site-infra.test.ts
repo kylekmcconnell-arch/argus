@@ -1,3 +1,10 @@
+vi.mock("./_collector.js", () => ({
+  fetchPublicText: vi.fn(async (url: string) => {
+    try { const response = await fetch(url); return response.ok ? { status: "ok", text: await response.text(), url } : { status: "failed", reason: `http_${response.status}` }; }
+    catch { return { status: "failed", reason: "transport_error" }; }
+  }),
+  fetchPublicAssetHash: vi.fn(async () => null),
+}));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { cacheGetJson, cacheSetJson } = vi.hoisted(() => ({

@@ -34,6 +34,9 @@ async function es(chainid: number, params: Record<string, string>, key: string, 
   const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) });
   if (!r.ok) throw new Error(`etherscan ${r.status}`);
   const data = await r.json();
+  const record = rec(data);
+  const measuredEmpty = record.status === "0" && /no transactions found/i.test(String(record.message) + " " + String(record.result));
+  if (!(record.status === "1" && Array.isArray(record.result)) && !measuredEmpty) throw new Error("etherscan_unavailable");
   usage.succeeded += 1;
   return data;
 }
@@ -48,8 +51,8 @@ async function fundingSource(chainid: number, wallet: string, key: string, usage
   // contract, a multisig, a CEX withdrawal via proxy — invisible to txlist), then
   // take the earliest inflow across both as the true first funder.
   const [d, di] = await Promise.all([
-    es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key, usage).catch(() => null),
-    es(chainid, { module: "account", action: "txlistinternal", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key, usage).catch(() => null),
+    es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key, usage),
+    es(chainid, { module: "account", action: "txlistinternal", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key, usage),
   ]);
   const txs = arr(rec(d).result);
   const itxs = arr(rec(di).result);
@@ -70,7 +73,7 @@ async function fundingSource(chainid: number, wallet: string, key: string, usage
 // have an empty `to` and a populated contractAddress). A wallet that has minted
 // many contracts is a serial launcher on its own.
 async function deploymentsBy(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<number> {
-  const d = await es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "10000", sort: "asc" }, key, usage).catch(() => null);
+  const d = await es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "10000", sort: "asc" }, key, usage);
   const txs = arr(rec(d).result);
   const created = new Set<string>();
   for (const value of txs) {
@@ -147,7 +150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       note,
     });
   } catch (e) {
-    res.status(200).json({ address, chain, available: true, error: String(e), note: "EVM deployer lookup failed." });
+    res.status(200).json({ address, chain, available: false, error: String(e), note: "EVM deployer lookup failed." });
   } finally {
     if (usage.calls > 0) {
       await attachPanelCost(auth.organizationId, panelCostVersionId, {

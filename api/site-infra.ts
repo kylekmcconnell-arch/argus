@@ -13,7 +13,7 @@
 //   3. Hosting neighbours via urlscan (shared IP / ASN) — high-signal only when
 //      the site isn't behind a shared CDN, which we detect and down-rank.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createHash } from "node:crypto";
+import { fetchPublicText, fetchPublicAssetHash } from "./_collector.js";
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 
 export const config = { maxDuration: 25 };
@@ -35,9 +35,9 @@ type FingerprintRead = { available: boolean; fingerprints: Fingerprint[] };
 async function fingerprints(host: string): Promise<FingerprintRead> {
   const out: Fingerprint[] = [];
   try {
-    const r = await fetch(`https://${host}/`, { headers: { "user-agent": "Mozilla/5.0 (ARGUS due-diligence)" }, redirect: "follow", signal: AbortSignal.timeout(10000) });
-    if (!r.ok) return { available: false, fingerprints: [] };
-    const html = (await r.text()).slice(0, 900_000);
+    const r = await fetchPublicText(`https://${host}/`);
+    if (r.status !== "ok") return { available: false, fingerprints: [] };
+    const html = r.text.slice(0, 900_000);
     const seen = new Set<string>();
     const add = (kind: Fingerprint["kind"], id: string, label: string) => { const k = kind + ":" + id; if (id && !seen.has(k)) { seen.add(k); out.push({ kind, id, label }); } };
     for (const m of html.matchAll(/\bG-[A-Z0-9]{6,12}\b/g)) add("ga", m[0], "Google Analytics 4");
@@ -52,12 +52,8 @@ async function fingerprints(host: string): Promise<FingerprintRead> {
   }
   // Favicon hash: a reused custom favicon is a soft operator print (templated rugs).
   try {
-    const f = await fetch(`https://${host}/favicon.ico`, { signal: AbortSignal.timeout(6000) });
-    if (f.ok) {
-      const buf = Buffer.from(await f.arrayBuffer());
-      // Skip trivially-empty / default responses.
-      if (buf.length > 120) out.push({ kind: "favicon", id: createHash("sha1").update(buf).digest("hex").slice(0, 16), label: "favicon" });
-    }
+    const hash = await fetchPublicAssetHash(`https://${host}/favicon.ico`);
+    if (hash) out.push({ kind: "favicon", id: hash.slice(0, 16), label: "favicon" });
   } catch { /* optional */ }
   return { available: true, fingerprints: out };
 }

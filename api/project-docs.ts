@@ -1,3 +1,4 @@
+import { fetchPublicText } from "./_collector.js";
 // Project documents & resources finder.
 // GET /api/project-docs?name=<project>&domain=<host>&symbol=<sym>
 //
@@ -80,14 +81,14 @@ const notAttempted = (): DiscoveryRead => ({
 async function crawlNav(domain: string): Promise<CrawlResult> {
   const origin = `https://${domain}`;
   try {
-    const r = await fetch(`${origin}/`, { headers: { "user-agent": "Mozilla/5.0 (ARGUS due-diligence)" }, redirect: "follow", signal: AbortSignal.timeout(10000) });
-    if (!r.ok) {
+    const r = await fetchPublicText(`${origin}/`);
+    if (r.status !== "ok") {
       return {
         resources: [],
-        state: { attempted: true, completed: false, partial: false, truncated: false, providerFailed: true, meta: `http_${r.status}` },
+        state: { attempted: true, completed: false, partial: false, truncated: false, providerFailed: true, meta: r.reason },
       };
     }
-    const rawHtml = await r.text();
+    const rawHtml = r.text;
     const truncated = rawHtml.length > 700_000;
     const html = rawHtml.slice(0, 700_000);
     const targetApex = apex(domain);
