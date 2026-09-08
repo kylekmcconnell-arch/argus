@@ -59,7 +59,7 @@ These are explicit limits, not claims of complete issue closure:
 
 ## Release and rollback
 
-Deploy only through protected main after review and required checks. The shared report presentation changes still require the Enigma-Fund report-lane ownership approval; do not bypass it. This implementation has not been merged or deployed.
+Historical rollout note: this audit originally required Enigma-Fund ownership approval. Kyle retired that requirement on 2026-09-08; the current release policy is in `docs/report-lanes.md`. Deploy through protected main after its required automated checks.
 
 Roll back source and generated collector/sweep artifacts together. For the supplemental allowance, reverting middleware first leaves the additive RPC/index harmless; remove those only after confirming no deployed caller uses them. Preserve usage history. No customer records were changed during this implementation.
 

@@ -1,4 +1,4 @@
-import { useId, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useId, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import {
   ArrowDown,
   ArrowRight,
@@ -11,7 +11,8 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { compositionRowColor, type CompositionRow } from "../../components/ScoreComposition";
-import { ScoreRing } from "../../components/ScoreRing";
+import { HERO_SCORE_RING_SIZE, ScoreRing } from "../../components/ScoreRing";
+import { plainDecisionText } from "../../lib/plainDecisionText";
 import type { DecisionLensId } from "../../intelligence/types";
 import type { TokenDecisionBoundary } from "../../lib/decisionBoundary";
 import type { DecisionDiscovery, VerdictArgument } from "../../lib/reportInsights";
@@ -39,6 +40,11 @@ export interface KyleSecondaryScore {
 }
 
 export interface KyleIntelligenceDecisionCanvasProps {
+  /** 1 = single canonical score; 2 = the dual project/token lockup when a linked score exists. */
+  presentationStyle?: 1 | 2 | undefined;
+  verdictTone?: "pass" | "caution" | "signal" | "avoid" | "neutral" | undefined;
+  openItemsLabel?: string | undefined;
+  showDecisionDetails?: boolean | undefined;
   subjectName?: string | undefined;
   subjectSummary?: string | null | undefined;
   reportSummary?: string | null | undefined;
@@ -112,6 +118,12 @@ function evidenceTone(band: ReturnType<typeof evidenceBand>): string {
   return "unresolved";
 }
 
+function prefersReducedMotion(): boolean {
+  return typeof window === "undefined"
+    || typeof window.matchMedia !== "function"
+    || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 function scoreTone(score: number | null): "positive" | "caution" | "negative" | "unknown" {
   if (score == null) return "unknown";
   if (score >= 70) return "positive";
@@ -168,6 +180,7 @@ function ClaimLabel({ type, strength }: { type: "FACT" | "SIGNAL" | "INFERENCE";
 }
 
 function BriefColumn({
+  id,
   title,
   subtitle,
   items,
@@ -175,6 +188,7 @@ function BriefColumn({
   empty,
   href,
 }: {
+  id?: string;
   title: string;
   subtitle: string;
   items: KyleDecisionItem[];
@@ -183,27 +197,110 @@ function BriefColumn({
   href: `#${string}`;
 }) {
   return (
-    <section className={`kyle-brief-column kyle-tone-${tone}`}>
+    <section id={id} className={`kyle-brief-column kyle-tone-${tone} scroll-mt-28`}>
       <p className="kyle-brief-kicker mono">{subtitle}</p>
       <h3>{title}</h3>
       {items.length ? (
-        <ol>
+        <ul aria-label={title}>
           {items.slice(0, 3).map((item, index) => (
             <li key={`${title}-${index}`}>
               <a href={href}>
                 <span className="kyle-brief-index mono">0{index + 1}</span>
                 <span>
-                  <strong>{sentence(item.label)}</strong>
-                  {item.detail && <small>{sentence(item.detail)}</small>}
+                  <strong>{plainDecisionText(item.label)}</strong>
+                  {item.detail && <small>{plainDecisionText(item.detail)}</small>}
                 </span>
               </a>
             </li>
           ))}
-        </ol>
+        </ul>
       ) : (
         <p className="kyle-brief-empty">{empty}</p>
       )}
     </section>
+  );
+}
+
+/**
+ * The check register rail every public report carries: coverage, what is
+ * still open, what has finished. Same words and markers as the shared
+ * decision brief, so share cards, exports and the table of contents keep
+ * reading the report the same way under this presentation.
+ */
+function CheckRegisterRail({
+  checkScopeLabel,
+  openItemsLabel,
+  coveragePercent,
+  successful,
+  applicable,
+  nextSteps,
+  verified,
+  methodologyHref,
+  evidenceHref,
+  capturedAt,
+}: {
+  checkScopeLabel: string;
+  openItemsLabel: string;
+  coveragePercent: number;
+  successful: number;
+  applicable: number;
+  nextSteps: KyleDecisionItem[];
+  verified: KyleDecisionItem[];
+  methodologyHref: `#${string}`;
+  evidenceHref: `#${string}`;
+  capturedAt?: string | undefined;
+}) {
+  const ledger = (title: string, items: KyleDecisionItem[], href: `#${string}`, emptyCopy: string) => {
+    const visible = items.slice(0, 4);
+    const remaining = Math.max(0, items.length - visible.length);
+    return (
+      <section className="kyle-check-ledger" aria-label={title}>
+        <div className="kyle-check-ledger-head">
+          <h3 className="kyle-overline mono">{title}</h3>
+          <span className="mono">{items.length}</span>
+        </div>
+        {visible.length ? (
+          <ul>
+            {visible.map((item, index) => (
+              <li key={`${title}-${index}`}>
+                <a href={href}>
+                  <span>
+                    <strong>{plainDecisionText(item.label)}</strong>
+                    {item.detail && <small>{plainDecisionText(item.detail)}</small>}
+                  </span>
+                  <ArrowRight size={13} weight="bold" aria-hidden="true" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="kyle-check-ledger-empty">{emptyCopy}</p>
+        )}
+        {remaining > 0 && <a className="kyle-check-ledger-more mono" href={href}>Review {remaining} more</a>}
+      </section>
+    );
+  };
+  const openCount = Math.max(0, applicable - successful);
+  return (
+    <aside className="kyle-check-rail" aria-label={checkScopeLabel}>
+      <section className="kyle-check-coverage" aria-label="Checks finished">
+        <div className="kyle-check-ledger-head">
+          <h3 className="kyle-overline mono">{checkScopeLabel}</h3>
+          <strong className="mono">{applicable === 0 ? "Not available" : `${coveragePercent}%`}</strong>
+        </div>
+        {applicable > 0 && (
+          <div className="kyle-check-progress" role="progressbar" aria-label="Checks finished" aria-valuemin={0} aria-valuemax={100} aria-valuenow={coveragePercent}>
+            <div style={{ width: `${Math.max(0, Math.min(100, coveragePercent))}%` }} />
+          </div>
+        )}
+        <p className="kyle-check-ledger-empty">
+          {applicable === 0 ? "No check results were saved." : `${successful} finished, ${openCount} open.`}
+        </p>
+        {capturedAt && <p className="kyle-check-saved mono">Saved {capturedAt}.</p>}
+      </section>
+      {ledger(openItemsLabel, nextSteps, methodologyHref, applicable === 0 ? "No required check results were saved." : "No checks remain open.")}
+      {ledger("Finished checks", verified, evidenceHref, "No check has finished yet.")}
+    </aside>
   );
 }
 
@@ -332,6 +429,16 @@ function AnimatedVerdictScore({
       ? "No checks saved"
       : `${successful ?? 0}/${applicable} ${(checkScopeLabel ?? "checks").toLowerCase()} complete${scoreIsProvisional ? " · provisional" : ""}`
     : null;
+  // The composition build line: which dimension is being added right now.
+  // Without motion (reduced motion, static render) it rests on the last row.
+  const buildCount = buildRows.length;
+  const [activeIndex, setActiveIndex] = useState(() => prefersReducedMotion() ? Math.max(0, buildCount - 1) : -1);
+  useEffect(() => {
+    if (prefersReducedMotion() || buildCount === 0) return;
+    const timers = Array.from({ length: buildCount }, (_, index) => window.setTimeout(() => setActiveIndex(index), 420 + index * 430));
+    return () => timers.forEach(window.clearTimeout);
+  }, [buildCount]);
+  const activeRow = activeIndex >= 0 ? buildRows[activeIndex] : undefined;
   const [explainedAxis, setExplainedAxis] = useState<string | null>(null);
   const explanationId = useId();
   const explainedRow = buildRows.find((row) => row.axis === explainedAxis) ?? null;
@@ -352,6 +459,10 @@ function AnimatedVerdictScore({
       aria-label={score == null ? `${label} withheld` : `${label} ${score} out of 100`}
     >
       <p className="kyle-score-ring-label mono">{label}</p>
+      <p className="kyle-score-number">
+        <strong>{score ?? "N/A"}</strong>
+        <span>{score == null ? "not measured" : "/ 100"}</span>
+      </p>
       <div
         className="kyle-interactive-score-ring"
         data-active-axis={explainedRow?.axis}
@@ -368,7 +479,8 @@ function AnimatedVerdictScore({
             fallbackLabel={label}
           >
             <div className="kyle-score-status">
-              <p className="kyle-verdict-word score-ring-verdict mono">{score == null ? "Not measured" : verdictLabel}</p>
+              <p className="kyle-verdict-word score-ring-verdict mono">{verdictLabel}</p>
+              {score == null && <p className="kyle-score-withheld mono">Score withheld</p>}
               {context && <p className="kyle-score-context">{context}</p>}
               {checksCopy && <p className="kyle-check-state mono">{checksCopy}</p>}
             </div>
@@ -437,6 +549,23 @@ function AnimatedVerdictScore({
             })}
           </svg>
         )}
+        {buildRows.length > 0 && (
+          <ul className="kyle-score-legend" aria-label={`${label} evidence composition`}>
+            {buildRows.map((row) => (
+              <li key={`legend-${row.axis}`} className={activeRow?.axis === row.axis ? "is-active" : undefined}>
+                <i style={{ background: compositionRowColor(row) }} aria-hidden="true" />
+                <span>{row.label}</span>
+                <strong>{Math.round(row.score)}</strong>
+              </li>
+            ))}
+          </ul>
+        )}
+        {buildRows.length > 0 && (
+          <p className="kyle-score-active mono" aria-live="polite">
+            <span>{activeRow ? `Adding ${activeRow.label}` : "Building score composition"}</span>
+            <strong>{activeRow ? `+${Math.round(activeRow.score)} pts` : "0 pts"}</strong>
+          </p>
+        )}
         {explainedRow && (
           <div
             id={explanationId}
@@ -456,6 +585,9 @@ function AnimatedVerdictScore({
 }
 
 export function KyleIntelligenceDecisionCanvas({
+  presentationStyle = 1,
+  openItemsLabel = "What is still open",
+  showDecisionDetails = true,
   subjectName,
   subjectSummary,
   reportSummary,
@@ -502,14 +634,26 @@ export function KyleIntelligenceDecisionCanvas({
 
   const sortedComposition = useMemo(() => [...composition].sort((left, right) => right.weight - left.weight), [composition]);
   const totalPossible = composition.reduce((sum, row) => sum + row.weight, 0);
+  // Two labelled scores only in the dual presentation; Style 1 keeps the one
+  // canonical score even when a linked score was saved.
+  const dualScore = presentationStyle === 2 && secondaryScore ? secondaryScore : null;
+  // Verdict-first column order, as the shared brief: what carried the result,
+  // then the countervailing evidence (the anchor every risk link points at).
+  const verdictItems = favorable ? supports : concerns;
+  const countervailingItems = favorable ? concerns : supports;
 
   return (
-    <section id="report-summary" className="kyle-intelligence-report scroll-mt-28" data-kyle-intelligence-report="true">
-      <header className="kyle-verdict-hero">
+    <section
+      id="report-summary"
+      data-canonical-decision-brief="true"
+      className="kyle-intelligence-report story-chapter report-section scroll-mt-28"
+      data-kyle-intelligence-report="true"
+    >
+      <header className="kyle-verdict-hero report-section-heading">
         <div className="kyle-verdict-copy">
-          <p className="kyle-overline mono">01 · VERDICT</p>
-          <p className="kyle-investigation-meta mono">{scoreLabel} {capturedAt ? `· SAVED ${capturedAt}` : "· CURRENT REPORT"}</p>
-          <h2>{name}</h2>
+          <p className="kyle-overline eyebrow mono">01 · State of the house</p>
+          <p className="kyle-investigation-meta mono">VERDICT · {scoreLabel} {capturedAt ? `· SAVED ${capturedAt}` : "· CURRENT REPORT"}</p>
+          <h2>{name}<span className="kyle-state-accent">. The state of the house.</span></h2>
           <p className="kyle-verdict-headline">{headline}</p>
           <p className="kyle-verdict-thesis">{thesis}</p>
           <div className="kyle-verdict-facts">
@@ -527,7 +671,13 @@ export function KyleIntelligenceDecisionCanvas({
             </div>
           </div>
         </div>
-        <div className={`kyle-verdict-visual${secondaryScore ? " kyle-verdict-visual--dual" : ""}`}>
+        <div
+          className={`kyle-verdict-visual${dualScore ? " kyle-verdict-visual--dual" : ""}`}
+          data-report-score={dualScore ? "dual" : "prominent"}
+          aria-label={dualScore
+            ? "Two separate ARGUS scores"
+            : score == null ? `${scoreLabel} withheld` : `${scoreLabel} ${score} out of 100`}
+        >
           <AnimatedVerdictScore
             kind="primary"
             label={scoreLabel}
@@ -539,22 +689,27 @@ export function KyleIntelligenceDecisionCanvas({
             applicable={applicable}
             checkScopeLabel={checkScopeLabel}
             context={scoreContext}
-            size={252}
+            size={dualScore ? 252 : HERO_SCORE_RING_SIZE}
           />
-          {secondaryScore && (
+          {dualScore && (
             <AnimatedVerdictScore
               kind="secondary"
-              label={secondaryScore.label}
-              score={secondaryScore.score}
-              verdictLabel={secondaryScore.verdictLabel}
-              rows={secondaryScore.composition ?? []}
-              scoreIsProvisional={secondaryScore.scoreIsProvisional}
-              successful={secondaryScore.successful}
-              applicable={secondaryScore.applicable}
-              checkScopeLabel={secondaryScore.checkScopeLabel}
-              context={secondaryScore.context}
+              label={dualScore.label}
+              score={dualScore.score}
+              verdictLabel={dualScore.verdictLabel}
+              rows={dualScore.composition ?? []}
+              scoreIsProvisional={dualScore.scoreIsProvisional}
+              successful={dualScore.successful}
+              applicable={dualScore.applicable}
+              checkScopeLabel={dualScore.checkScopeLabel}
+              context={dualScore.context}
               size={208}
             />
+          )}
+          {dualScore && (
+            <p className="kyle-dual-explainer">
+              These scores answer different questions. They stay separate so project diligence cannot hide token risk, and token mechanics cannot stand in for an accountable organization.
+            </p>
           )}
         </div>
       </header>
@@ -577,6 +732,21 @@ export function KyleIntelligenceDecisionCanvas({
           <span><strong>{coverage}</strong><small>evidence coverage · {coveragePercent}%</small></span>
         </div>
       </section>
+
+      {showDecisionDetails && (
+        <CheckRegisterRail
+          checkScopeLabel={checkScopeLabel}
+          openItemsLabel={openItemsLabel}
+          coveragePercent={coveragePercent}
+          successful={successful}
+          applicable={applicable}
+          nextSteps={nextSteps}
+          verified={verified}
+          methodologyHref={methodologyHref}
+          evidenceHref={evidenceHref}
+          capturedAt={capturedAt}
+        />
+      )}
 
       <section id="composition" className="kyle-score-explanation scroll-mt-28" aria-labelledby="kyle-score-explanation-title">
         <div className="kyle-section-intro">
@@ -630,8 +800,27 @@ export function KyleIntelligenceDecisionCanvas({
           <p>The strongest case for it, the reason to hesitate, and the evidence that could change the verdict.</p>
         </div>
         <div className="kyle-brief-grid">
-          <BriefColumn title="Why we’re cautious" subtitle="DECISION PRESSURE" items={concerns} tone="caution" empty="No decision-changing concern was recorded." href={evidenceHref} />
-          <BriefColumn title="Why this may still be credible" subtitle="COUNTERWEIGHT" items={supports} tone="positive" empty="No positive counterweight was recorded." href={evidenceHref} />
+          <BriefColumn
+            title={favorable ? "What supports this result" : "Main concerns"}
+            subtitle={favorable ? "WHAT CARRIED THE RESULT" : "DECISION PRESSURE"}
+            items={verdictItems}
+            tone={favorable ? "positive" : "caution"}
+            empty={favorable
+              ? "No sourced support is recorded yet. Read the open questions before using this result."
+              : "No verified adverse finding was recorded. Lower-scoring areas reflect limited demonstrated evidence or maturity; review the score breakdown and Verify next."}
+            href={evidenceHref}
+          />
+          <BriefColumn
+            id="report-risks"
+            title={favorable ? "Main concerns" : "What looks credible"}
+            subtitle={favorable ? "DECISION PRESSURE" : "COUNTERWEIGHT"}
+            items={countervailingItems}
+            tone={favorable ? "caution" : "positive"}
+            empty={favorable
+              ? "No risk or major unanswered question is recorded in this saved report."
+              : "ARGUS did not confirm a positive finding in this saved report."}
+            href={evidenceHref}
+          />
         </div>
         <VerifyNextStrip items={nextSteps} rows={sortedComposition} href={methodologyHref} />
       </section>
@@ -663,38 +852,57 @@ export function KyleIntelligenceDecisionCanvas({
           )}
         </div>
         {context.length > 0 && (
-          <details className="kyle-context-disclosure">
-            <summary>Review additional decision context <span className="mono">{context.length}</span></summary>
+          <details id="report-important-context" className="kyle-context-disclosure scroll-mt-28">
+            <summary>Other useful context <span className="mono">{context.length}</span></summary>
             <ul>{context.slice(0, 6).map((item, index) => <li key={`context-${index}`}><strong>{sentence(item.label)}</strong>{item.detail && <span>{sentence(item.detail)}</span>}</li>)}</ul>
           </details>
         )}
       </section>
 
-      {discovery && (
-        <section className="kyle-beneath-headlines" aria-labelledby="kyle-beneath-headlines-title">
+      {discovery && showDecisionDetails && (
+        <section className="kyle-beneath-headlines" aria-labelledby="kyle-beneath-headlines-title" aria-label="ARGUS discovery" data-testid="decision-discovery">
           <div>
-            <p className="kyle-overline mono">BENEATH THE HEADLINES</p>
+            <p className="kyle-overline mono">ARGUS found</p>
             <h2 id="kyle-beneath-headlines-title">ARGUS found a source-backed pattern worth seeing.</h2>
           </div>
           <div className="kyle-beneath-headlines-body">
             <ClaimLabel type="SIGNAL" strength="Moderate" />
-            <h3>{sentence(discovery.headline)}</h3>
-            <p>{sentence(discovery.consequence)}</p>
+            <h3>{plainDecisionText(discovery.headline)}</h3>
+            <p>{plainDecisionText(discovery.consequence)}</p>
             {discovery.path && discovery.path.length > 1 && (
-              <p className="kyle-discovery-path mono">{discovery.path.map(executiveText).join(" → ")}</p>
+              <p className="kyle-discovery-path mono" aria-label={`Source-backed path: ${discovery.path.join(" to ")}`}>
+                {discovery.path.map((node, index) => (
+                  <span key={`${node}-${index}`}>
+                    {index > 0 && <span aria-hidden="true"> → </span>}
+                    {plainDecisionText(node)}
+                  </span>
+                ))}
+              </p>
             )}
             <dl>
-              <div><dt>What would change this interpretation</dt><dd>{sentence(discovery.reversalCondition)}</dd></div>
+              <div><dt>What would change it:</dt><dd>{plainDecisionText(discovery.reversalCondition)}</dd></div>
             </dl>
-            <a href={discovery.evidenceHref}>Open the proof <ArrowRight size={14} weight="bold" /></a>
+            <div className="kyle-discovery-links">
+              <a href={discovery.evidenceHref}>
+                {discovery.path
+                  ? "Open relationship graph"
+                  : discovery.id.startsWith("claim-conflict:")
+                    ? "Open both records"
+                    : "Open the proof"}
+                {" "}<ArrowRight size={14} weight="bold" />
+              </a>
+              {discovery.receipts?.map((receipt) => (
+                <a key={`${receipt.label}-${receipt.href}`} href={receipt.href} target="_blank" rel="noreferrer">{receipt.label}</a>
+              ))}
+            </div>
           </div>
         </section>
       )}
 
-      {decisionBoundary && decisionBoundaryEvidenceHref && (
-        <section className="kyle-decision-lock" aria-labelledby="kyle-decision-lock-title">
+      {decisionBoundary && decisionBoundaryEvidenceHref && showDecisionDetails && (
+        <section className="kyle-decision-lock" aria-labelledby="kyle-decision-lock-title" data-testid="decision-boundary">
           <div>
-            <p className="kyle-overline mono">DECISION LOCK</p>
+            <p className="kyle-overline mono">Decision lock</p>
             <h2 id="kyle-decision-lock-title">What controls this result.</h2>
             <p>{sentence(decisionBoundary.controllingFact)}</p>
           </div>
