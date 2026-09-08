@@ -124,9 +124,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try { host = new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`).hostname.replace(/^www\./, ""); } catch { /* keep raw */ }
   if (!host || !host.includes(".")) { res.status(400).json({ error: "domain required" }); return; }
 
-  // v3 distinguishes a completed empty screen from upstream failure. Older
-  // cache entries could contain false-clean empties produced by failed calls.
-  const ck = `siteinfra:${host}:v3`;
+  // v4 also excludes empty/tiny favicon hashes from operator fingerprints.
+  // Older entries may contain placeholder fingerprints or false-clean empties.
+  const ck = `siteinfra:${host}:v4`;
   const cached = await cacheGetJson<Record<string, unknown>>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 

@@ -39,7 +39,7 @@ async function etherscanBurns(chainid: number, token: string, burn: string, key:
     if (!r.ok) return null;
     const d = (await r.json()) as any;
     const empty = d.status === "0" && /no transactions found/i.test(String(d.message) + " " + String(d.result));
-    if (!(d.status === "1" && Array.isArray(d.result)) && !empty) return null;
+    if (empty) return { txs: [], decimals: null };
     if (d.status !== "1" || !Array.isArray(d.result)) return null;
     const out: BurnTx[] = [];
     let decimals: number | null = null;

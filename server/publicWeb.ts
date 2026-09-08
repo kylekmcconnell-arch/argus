@@ -470,6 +470,8 @@ async function fetchValidatedPublicText(
       return { status: "failed", reason: "response_stream_error" };
     }
     if (!bytes) return { status: "failed", reason: "response_too_large" };
+    // Tiny icons are commonly empty/default placeholders, not operator evidence.
+    if (asset && bytes.length <= 120) return { status: "failed", reason: "insufficient_asset_content" };
     const text = asset ? "asset" : bytes.toString("utf8");
     if (!text.trim()) return { status: "failed", reason: "empty_response" };
     if (antiBotChallengeBody(contentType, text)) {

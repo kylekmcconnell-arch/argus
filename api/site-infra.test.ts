@@ -98,7 +98,7 @@ describe("site-infrastructure screen completeness", () => {
       hosting: { available: true, cdn: false, neighbors: [] },
     });
     expect(cacheSetJson).toHaveBeenCalledWith(
-      "siteinfra:example.com:v3",
+      "siteinfra:example.com:v4",
       expect.objectContaining({ available: true, hasLinks: false }),
     );
   });

@@ -12115,6 +12115,7 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
       return { status: "failed", reason: "response_stream_error" };
     }
     if (!bytes) return { status: "failed", reason: "response_too_large" };
+    if (asset && bytes.length <= 120) return { status: "failed", reason: "insufficient_asset_content" };
     const text2 = asset ? "asset" : bytes.toString("utf8");
     if (!text2.trim()) return { status: "failed", reason: "empty_response" };
     if (antiBotChallengeBody(contentType, text2)) {

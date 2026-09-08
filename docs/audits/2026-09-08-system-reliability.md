@@ -38,7 +38,7 @@ Scheduled threat rechecks require `ARGUS_THREAT_ORGANIZATION_ID` for the intende
 
 ## Verification
 
-- Final local gates passed: 405 test files, 4,302 passing tests plus one expected failure; typecheck; truth contract; 7/7 recorded canaries with 18 intercepted requests and no unexpected URLs; 20/20 calibration cases with no drift or unsafe conclusions; production build including generated bundles; git diff whitespace check. npm audit reports zero vulnerabilities. Vite retains large-chunk and mixed-import warnings.
+- Final local gates passed: 405 test files, 4,310 passing tests plus one expected failure; typecheck; truth contract; 7/7 recorded canaries with 18 intercepted requests and no unexpected URLs; 20/20 calibration cases with no drift or unsafe conclusions; production build including generated bundles; git diff whitespace check. npm audit reports zero vulnerabilities. Vite retains large-chunk and mixed-import warnings.
 - Regression coverage injects provider rate limits and semantic failures, missing coverage, account mismatch/unknown bindings, duplicate claims, save failures, exhausted supplemental budgets, canceled fetches, concurrent tenant contexts, and force/private run collisions.
 - A fresh isolated local Supabase project applied repository migrations and passed all 57 database checks across nine test files. The pre-existing local database was not reset; production was not migrated.
 - Thirty concurrent service-role reservations against an allowance of five admitted exactly five and rejected twenty-five. Test fixtures were removed. Six new database assertions cover the supplemental allowance, shared membership accounting, denied-request accounting, privileges, and membership validation.
@@ -62,3 +62,10 @@ These are explicit limits, not claims of complete issue closure:
 Deploy only through protected main after review and required checks. The shared report presentation changes still require the Enigma-Fund report-lane ownership approval; do not bypass it. This implementation has not been merged or deployed.
 
 Roll back source and generated collector/sweep artifacts together. For the supplemental allowance, reverting middleware first leaves the additive RPC/index harmless; remove those only after confirming no deployed caller uses them. Preserve usage history. No customer records were changed during this implementation.
+
+
+## Enigma review follow-up
+
+The review of `5c21997` correctly identified that the Etherscan measured-empty guard fell through to a status-one requirement. Completed no-transfer reads now return an explicit empty history immediately; provider errors remain unavailable. Regressions cover both Etherscan empty payload forms and one populated burn address alongside one empty address.
+
+The public favicon hash reader again rejects bodies of 120 bytes or less before hashing. Tests cover empty/tiny bodies, the 121-byte boundary, and redirects into private networks. Site-infrastructure cache version v4 prevents earlier placeholder hashes from being reused. This restores the size heuristic; it does not identify every larger stock favicon, and favicon matches remain soft signals.

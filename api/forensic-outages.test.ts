@@ -34,3 +34,25 @@ describe("forensic provider outages", () => {
     expect(cacheSetJson).not.toHaveBeenCalled();
   });
 });
+
+
+describe("burn history measured absence", () => {
+  it.each([[[]], ["No transactions found"]])("preserves a completed empty history (%j)", async (result) => {
+    vi.stubGlobal("fetch", vi.fn(async (input) => new Response(JSON.stringify(
+      String(input).includes("action=tokensupply") ? { status: "1", result: "1000000000000000000000" }
+        : { status: "0", message: "No transactions found", result },
+    ))));
+    expect(await run(burns)).toMatchObject({ available: true, count: 0, totalBurned: 0, cadence: "none" });
+  });
+  it("retains burns when the other burn address completes empty", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input) => {
+      const url = new URL(String(input));
+      const data = url.searchParams.get("action") === "tokensupply" ? { status: "1", result: "1000000" }
+        : url.searchParams.get("address")?.endsWith("dead") ? { status: "1", result: [{
+          to: url.searchParams.get("address"), tokenDecimal: "3", value: "1000", timeStamp: "1700000000",
+        }] } : { status: "0", message: "No transactions found", result: [] };
+      return new Response(JSON.stringify(data));
+    }));
+    expect(await run(burns)).toMatchObject({ available: true, count: 1, totalBurned: 1, burnedSupplyPct: 0.1 });
+  });
+});
