@@ -1,18 +1,19 @@
-import { enigmaReportLane } from "../enigma/reportLane";
-import { kyleReportLane } from "../kyle/reportLane";
 import { productionReportLane } from "../production/reportLane";
-import { rawEvidenceReportLane } from "../raw/reportLane";
 import type { ReportLaneDefinition, ReportLaneId } from "./reportLaneTypes";
 
-export const REPORT_LANE_ORDER = ["production", "kyle", "enigma", "raw"] as const satisfies readonly ReportLaneId[];
+export const REPORT_LANE_ORDER = ["production", "developer"] as const satisfies readonly ReportLaneId[];
 
-export const REPORT_LANE_DEFINITIONS: Readonly<Record<ReportLaneId, ReportLaneDefinition>> = Object.freeze({
+export const REPORT_LANE_DEFINITIONS: Readonly<Record<ReportLaneId, ReportLaneDefinition<ReportLaneId>>> = Object.freeze({
   production: productionReportLane,
-  kyle: kyleReportLane,
-  enigma: enigmaReportLane,
-  raw: rawEvidenceReportLane,
+  developer: {
+    ...productionReportLane,
+    id: "developer",
+    label: "Developer Report",
+    shortLabel: "Developer",
+    description: "The same production report with expandable saved evidence and verification tools.",
+  },
 });
 
-export function reportLaneDefinition(id: ReportLaneId): ReportLaneDefinition {
+export function reportLaneDefinition(id: ReportLaneId): ReportLaneDefinition<ReportLaneId> {
   return REPORT_LANE_DEFINITIONS[id];
 }

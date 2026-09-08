@@ -4925,7 +4925,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // allowed to complete transparency.
   try {
     const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx, {
-      basicFactsCompleted: adapterResults.get("basic-facts")?.state === "executed",
+      basicFactsCompleted: adapterResults.get("basic-facts")?.collectionCompleted === true,
       transparencySearchExplicitlyEmpty: adapterResults
         .get("basic-facts")
         ?.explicitEmptyChecks

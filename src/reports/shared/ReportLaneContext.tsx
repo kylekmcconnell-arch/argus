@@ -50,7 +50,21 @@ export function ReportLaneProvider({
     storedLane: allowSelection ? storedReportLane() : null,
     canSelect: allowSelection,
   }), [allowSelection]);
-  const [lane, setLane] = useState<ResolvedReportLane>(resolveCurrent);
+  const [selection, setLane] = useState<ResolvedReportLane>(resolveCurrent);
+  // Permission changes must take effect during render, before any effects run.
+  const lane = allowSelection ? selection : defaultResolvedLane;
+
+  useEffect(() => {
+    if (!manageSelection || !allowSelection) return;
+    const resolved = resolveCurrent();
+    setLane(resolved);
+    try {
+      window.localStorage.setItem(REPORT_VIEW_STORAGE_KEY, resolved.definition.id);
+    } catch {
+      // URL canonicalization also works when storage is disabled.
+    }
+    replaceReportView(resolved.definition.id);
+  }, [allowSelection, manageSelection, resolveCurrent]);
 
   useEffect(() => {
     if (!manageSelection) return;

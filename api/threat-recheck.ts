@@ -11,18 +11,19 @@ import { requireArgusAuth } from "./_auth.js";
 //     per token (no nightly re-spam) and optionally pushed to a webhook.
 // Bounded per run so it never runs long or hammers DexScreener.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { ledgerAvailable, ledgerFlagged, ledgerRatedOk, ledgerUpsert, ledgerRecordAlert, ledgerGetAlert, type LedgerReceipt, type ThreatAlert } from "./_ledger.js";
+import { ledgerAvailable, ledgerDueReceipts, ledgerUpsert, ledgerRecordAlert, ledgerGetAlert, type LedgerReceipt, type ThreatAlert } from "./_ledger.js";
 
-export const config = { maxDuration: 60 };
+export const config = { maxDuration: 120 };
 
 const MAX_PER_RUN = 120;
-const STALE_MS = 12 * 3600 * 1000; // don't re-check something checked in the last 12h
+const RUN_BUDGET_MS = 80_000;
 
 async function liquidityNow(address: string): Promise<number | null> {
   try {
     const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, { signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null;
-    const d = (await r.json()) as { pairs?: { liquidity?: { usd?: number } }[] };
+    const d = (await r.json()) as { pairs?: { liquidity?: { usd?: number } }[] | null };
+    if (d.pairs !== null && !Array.isArray(d.pairs)) return null;
     const pairs = d.pairs ?? [];
     if (!pairs.length) return 0; // no pair left = dead market
     return Math.max(...pairs.map((p) => p.liquidity?.usd ?? 0));
@@ -34,12 +35,12 @@ async function liquidityNow(address: string): Promise<number | null> {
 // Fire the alert once per token, and push to THREAT_ALERT_WEBHOOK if configured
 // (a generic JSON POST — the user wires it to Telegram/Slack/Discord on their
 // side; ARGUS never holds a bot token).
-async function emitAlert(alert: ThreatAlert): Promise<boolean> {
+async function emitAlert(alert: ThreatAlert, organizationId: string): Promise<boolean> {
   const existing = await ledgerGetAlert(alert.address);
   if (existing) return false; // already alerted on this token — don't re-spam
   const ok = await ledgerRecordAlert(alert);
   const hook = process.env.THREAT_ALERT_WEBHOOK;
-  if (ok && hook) {
+  if (ok && hook && organizationId === process.env.ARGUS_THREAT_ORGANIZATION_ID) {
     try {
       await fetch(hook, {
         method: "POST",
@@ -58,44 +59,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Vercel cron requests carry a bearer secret when CRON_SECRET is set; enforce
   // it if present so the endpoint can't be triggered to burn quota.
   const secret = process.env.CRON_SECRET;
-  let organizationId: string;
-  if (secret && req.headers.authorization === `Bearer ${secret}`) {
-    organizationId = process.env.ARGUS_THREAT_ORGANIZATION_ID ?? "";
-    if (!/^[0-9a-f-]{36}$/i.test(organizationId)) { res.status(503).json({ error: "threat_organization_not_configured" }); return; }
-  } else {
+  let scope: string | undefined;
+  if (!(secret && req.headers.authorization === `Bearer ${secret}`)) {
     const auth = await requireArgusAuth(req, res, "owner");
     if (!auth) return;
-    organizationId = auth.organizationId;
+    scope = auth.organizationId;
   }
-  return withLedgerOrganization(organizationId, async () => {
-  if (!ledgerAvailable()) { res.status(200).json({ available: false }); return; }
-
+  if (!ledgerAvailable()) { res.status(503).json({ available: false }); return; }
+  try {
   const now = Date.now();
-  // Flagged tokens first (receipts), then the tradeable-rated ones (flip alerts),
-  // deduped by address, bounded per run.
-  const seen = new Set<string>();
-  const queue: LedgerReceipt[] = [];
-  for (const r of [...(await ledgerFlagged(300)), ...(await ledgerRatedOk(300))]) {
-    const k = r.address.toLowerCase();
-    if (seen.has(k)) continue;
-    seen.add(k);
-    if (r.checkedAt != null && now - r.checkedAt <= STALE_MS) continue;
-    queue.push(r);
-    if (queue.length >= MAX_PER_RUN) break;
-  }
-
-  let dead = 0, bleeding = 0, alive = 0, updated = 0, alerts = 0;
+  const deadline = now + RUN_BUDGET_MS;
+  // Oldest due rows first across every workspace; successful reads and failed
+  // attempts move to the back, so one busy/unavailable tenant cannot monopolize runs.
+  const queue = await ledgerDueReceipts(MAX_PER_RUN, now, scope);
+  let dead = 0, bleeding = 0, alive = 0, updated = 0, alerts = 0, failures = 0, processed = 0;
   const BATCH = 8;
   for (let i = 0; i < queue.length; i += BATCH) {
+    if (Date.now() >= deadline) break;
     const slice = queue.slice(i, i + BATCH);
-    await Promise.all(slice.map(async (r: LedgerReceipt) => {
+    await Promise.all(slice.map(({ organizationId, receipt: r }) => withLedgerOrganization(organizationId, async () => {
+      processed++;
       const liqNow = await liquidityNow(r.address);
-      if (liqNow == null) return; // fetch failed — leave the receipt untouched
+      if (liqNow == null) {
+        // Preserve measured outcomes; defer failed provider retries for ten minutes.
+        failures++;
+        if (!await ledgerUpsert({ ...r, recheckAfter: Date.now() + 10 * 60 * 1000 })) throw new Error("threat_ledger_write_failed");
+        return;
+      }
       const priceDropPct = r.liqThen > 0 ? Math.max(0, Math.min(100, Math.round((1 - liqNow / r.liqThen) * 100))) : 0;
       const status: LedgerReceipt["status"] = liqNow < 1000 ? "dead" : liqNow < r.liqThen * 0.2 ? "bleeding" : "alive";
       if (status === "dead") dead++; else if (status === "bleeding") bleeding++; else alive++;
-      const ok = await ledgerUpsert({ ...r, liqNow, priceDropPct, status, checkedAt: now });
-      if (ok) updated++;
+      const ok = await ledgerUpsert({ ...r, liqNow, priceDropPct, status, checkedAt: now, recheckAfter: 0 });
+      if (!ok) throw new Error("threat_ledger_write_failed");
+      updated++;
 
       // Verdict-flip alert: a token we rated TRADEABLE that has now collapsed.
       // (Flagged tokens dying is expected — that's a receipt, not a surprise.)
@@ -105,12 +101,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           address: r.address, chain: r.chain, symbol: r.symbol,
           type: status === "dead" ? "confirmed-dead" : "liquidity-collapse",
           wasVerdict: r.verdict, liqThen: r.liqThen, liqNow, priceDropPct, at: now,
-        });
+        }, organizationId);
         if (fired) alerts++;
       }
-    }));
+    })));
   }
 
-  res.status(200).json({ available: true, considered: queue.length, updated, alerts, outcomes: { dead, bleeding, alive } });
-  }).catch(() => { res.status(503).json({ available: false, error: "threat_ledger_unavailable" }); });
+  res.status(200).json({ available: failures === 0, considered: queue.length, processed, deferred: queue.length - processed, failures, updated, alerts, outcomes: { dead, bleeding, alive } });
+  } catch { res.status(503).json({ available: false, error: "threat_ledger_unavailable" }); }
 }

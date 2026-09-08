@@ -14,7 +14,12 @@ const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn(), trus
 
 vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
-vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
+// The promoted production lane renders the connection workspace, which needs
+// the real entity-key canonicalizer; only the connection lookup is stubbed.
+vi.mock("../graph/network", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../graph/network")>()),
+  subjectConnections: () => [],
+}));
 vi.mock("./RingAlert", () => ({ RingAlert: (props: Record<string, unknown>) => { harness.livePanel("ring-alert", props); return null; } }));
 vi.mock("./SanctionsNameScreen", () => ({ SanctionsNameScreen: () => { harness.livePanel("sanctions"); return null; } }));
 vi.mock("./LegalScreen", () => ({ LegalScreen: () => { harness.livePanel("legal"); return null; } }));
@@ -1903,10 +1908,15 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Provider returned no identity match");
     expect([...container.querySelectorAll("span")].some((node) => node.textContent?.trim() === "decision-ready")).toBe(false);
     expect(container.textContent).not.toContain("<UNKNOWN>");
-    expect(harness.trustGraph).toHaveBeenCalledWith(expect.objectContaining({
-      nodes: expect.not.arrayContaining([expect.objectContaining({ key: "<unknown>" })]),
-      edges: expect.not.arrayContaining([expect.objectContaining({ dst: "<unknown>" })]),
-    }));
+    // The promoted connections workspace draws the graph itself; the
+    // collector placeholder must never become a node or a drawer entry.
+    expect(container.querySelector('[aria-label^="<UNKNOWN>"]')).toBeNull();
+    expect(container.querySelector('[aria-label^="<unknown>"]')).toBeNull();
+    for (const call of harness.trustGraph.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({
+        nodes: expect.not.arrayContaining([expect.objectContaining({ key: "<unknown>" })]),
+      }));
+    }
     expect(decisionBasisText()).toContain("could not confirm what kind of subject this is");
     expect(decisionBasisText()).not.toContain("predates strict evidence-to-axis citations");
   });
