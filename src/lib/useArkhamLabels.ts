@@ -73,7 +73,7 @@ export function useArkhamLabels(addresses: (string | undefined | null)[], panelC
     )
       .then((raw) => {
         if (!live) return;
-        setResult({ key: requestKey, labels: raw.available && raw.labels ? raw.labels : {}, state: "ready" });
+        setResult({ key: requestKey, labels: raw.labels ?? {}, state: raw.available ? "ready" : "unavailable" });
       })
       .catch((error: unknown) => {
         if (live) setResult({ key: requestKey, labels: {}, state: panelRequestFailure(error) });

@@ -24625,22 +24625,25 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   });
   const attempts = primary.attempts + repair.attempts;
   const providerDetail = `primary ${primary.provider}:${primary.state}; repair ${repair.provider}:${repair.state}`;
+  const collectionCompleted = ["succeeded", "completed_empty"].includes(primary.state) && ["succeeded", "completed_empty", "skipped"].includes(repair.state) && (await Promise.all(sourceByUrl.values())).every((source2) => source2.status === "ok");
   if (!allLeads.length) {
     const completedEmpty = primary.state === "completed_empty" && (repair.state === "completed_empty" || repair.state === "skipped");
     if (completedEmpty) {
       return {
         state: "partial",
         detail: `broad search returned no source-linked basic-fact candidates; individual questions remain unresolved \xB7 ${providerDetail}`,
-        attempts
+        attempts,
+        collectionCompleted
       };
     }
     return {
       state: primary.state === "failed" && ["failed", "skipped"].includes(repair.state) ? "failed" : "partial",
       detail: `basic-facts discovery produced no usable leads \xB7 ${providerDetail}`,
-      attempts
+      attempts,
+      collectionCompleted
     };
   }
-  return ctx.evidence.basicFacts.length ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified \xB7 ${allLeads.length} leads \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts } : { state: "partial", detail: `${allLeads.length} leads \xB7 0 passed source verification \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts };
+  return ctx.evidence.basicFacts.length ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified \xB7 ${allLeads.length} leads \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts, collectionCompleted } : { state: "partial", detail: `${allLeads.length} leads \xB7 0 passed source verification \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts, collectionCompleted };
 }
 var basicFactsAdapter = {
   id: "basic-facts",
@@ -36512,7 +36515,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   collectFounderDecisionQuestionOutcomes(ctx);
   try {
     const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx, {
-      basicFactsCompleted: adapterResults.get("basic-facts")?.state === "executed",
+      basicFactsCompleted: adapterResults.get("basic-facts")?.collectionCompleted === true,
       transparencySearchExplicitlyEmpty: adapterResults.get("basic-facts")?.explicitEmptyChecks?.includes("project-transparency") === true
     });
     checkTracker.provider(

@@ -35,7 +35,9 @@ async function es(chainid: number, params: Record<string, string>, key: string, 
   if (!r.ok) throw new Error(`etherscan ${r.status}`);
   const data = await r.json();
   const record = rec(data);
-  const measuredEmpty = record.status === "0" && /no transactions found/i.test(String(record.message) + " " + String(record.result));
+  const emptyMessage = `${String(record.message)} ${String(record.result)}`;
+  const measuredEmpty = record.status === "0" && (/no transactions found/i.test(emptyMessage)
+    || (params.action === "getcontractcreation" && /\bno data found\b/i.test(emptyMessage)));
   if (!(record.status === "1" && Array.isArray(record.result)) && !measuredEmpty) throw new Error("etherscan_unavailable");
   usage.succeeded += 1;
   return data;

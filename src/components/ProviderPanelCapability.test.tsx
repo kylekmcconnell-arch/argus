@@ -66,8 +66,8 @@ function Panels({ panelCostToken }: { panelCostToken?: string }) {
 }
 
 function ArkhamProbe({ address: probeAddress, panelCostToken }: { address: string; panelCostToken?: string }) {
-  useArkhamLabels([probeAddress], panelCostToken);
-  return null;
+  const result = useArkhamLabels([probeAddress], panelCostToken);
+  return <output>{JSON.stringify(result)}</output>;
 }
 
 let container: HTMLDivElement;
@@ -238,4 +238,18 @@ describe("provider panel capability boundary", () => {
     expect(container.textContent).toContain("saved report context for operator trace expired");
     expect(container.textContent).not.toContain("No serial-launch cluster found");
   });
+});
+
+
+it("retains successful Arkham labels while disclosing incomplete batch coverage", async () => {
+  fetchMock.mockImplementation(async () => ({ ok: true, json: async () => ({ available: false,
+    labels: { [address]: { name: "Verified sibling" } },
+  }) }));
+  await act(async () => {
+    root.render(<ArkhamProbe address={address} panelCostToken={capability} />);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(container.textContent).toContain("Verified sibling");
+  expect(container.textContent).toContain('"state":"unavailable"');
 });
