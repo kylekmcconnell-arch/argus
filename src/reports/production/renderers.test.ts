@@ -11,5 +11,9 @@ describe("production report lane promotion", () => {
       expect(productionReportRenderers[slot]).toBe(kyleReportRenderers[slot]);
     }
     expect(reportLaneRenderers("production")).toBe(productionReportRenderers);
+    expect(reportLaneRenderers("enigma")).toBe(productionReportRenderers);
+    for (const slot of slots) {
+      expect(reportLaneRenderers("enigma")[slot]).toBe(reportLaneRenderers("kyle")[slot]);
+    }
   });
 });
