@@ -7,10 +7,10 @@ import evm from "./evm-deployer";
 import flow from "./arkham-money-flow";
 import burns from "./burns";
 const address = `0x${"1".repeat(40)}`;
-async function run(handler: (req: never, res: never) => Promise<unknown>) {
+async function run(handler: (req: never, res: never) => Promise<unknown>, query = { address, chain: "ethereum" } as Record<string, string>) {
   let body: Record<string, unknown> = {};
   const res = { status() { return this; }, json(value: Record<string, unknown>) { body = value; return this; } };
-  await handler({ headers: { "x-argus-panel-token": "token" }, query: { address, chain: "ethereum" } } as never, res as never);
+  await handler({ headers: { "x-argus-panel-token": "token" }, query } as never, res as never);
   return body;
 }
 beforeEach(() => { vi.clearAllMocks(); vi.stubEnv("ARKHAM_API_KEY", "test"); vi.stubEnv("ETHERSCAN_API_KEY", "test"); });
@@ -54,5 +54,38 @@ describe("burn history measured absence", () => {
       return new Response(JSON.stringify(data));
     }));
     expect(await run(burns)).toMatchObject({ available: true, count: 1, totalBurned: 1, burnedSupplyPct: 0.1 });
+  });
+});
+
+
+describe("independent Arkham outcomes", () => {
+  it("retains and caches a successful address beside an unavailable sibling", async () => {
+    const other = `0x${"2".repeat(40)}`;
+    vi.stubGlobal("fetch", vi.fn(async (input) => String(input).includes(other)
+      ? new Response("unavailable", { status: 503 })
+      : new Response(JSON.stringify(String(input).includes("/risk/") ? { risk_level: "NONE" } : { arkhamEntity: { name: "Verified label" } }))));
+    expect(await run(arkham, { addresses: `${address},${other}` })).toMatchObject({ available: false,
+      labels: { [address]: { name: "Verified label" } }, coverage: { addresses: { [address]: "complete", [other]: "unavailable" } } });
+    expect(cacheSetJson).toHaveBeenCalledTimes(1);
+    expect(cacheSetJson).toHaveBeenCalledWith(expect.stringContaining(address), expect.objectContaining({ name: "Verified label" }));
+  });
+  it("accepts a completed basic fallback while accounting for the failed enriched call", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input) => String(input).includes("address_enriched")
+      ? new Response("unavailable", { status: 503 })
+      : new Response(JSON.stringify(String(input).includes("/risk/") ? { risk_level: "NONE" } : { arkhamEntity: { name: "Fallback label" } }))));
+    expect(await run(arkham)).toMatchObject({ available: true, labels: { [address]: { name: "Fallback label" } }, coverage: { attempted: 3, succeeded: 2 } });
+    expect(attachPanelCost).toHaveBeenCalledWith("org", "version", expect.objectContaining({ calls: 3, status: "partial" }));
+  });
+});
+
+describe("Etherscan creation measured absence", () => {
+  it("returns not resolvable for a completed no-data creation lookup", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ status: "0", message: "NOTOK", result: "No data found" }))));
+    expect(await run(evm)).toMatchObject({ available: true, deployer: null, note: "Deployer not resolvable from contract-creation records." });
+    expect(attachPanelCost).toHaveBeenCalledWith("org", "version", expect.objectContaining({ status: "succeeded", calls: 1 }));
+  });
+  it("does not treat that creation-only response as a completed wallet history", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ status: "0", message: "NOTOK", result: "No data found" }))));
+    expect(await run(evm, { wallet: address, chain: "ethereum" })).toMatchObject({ available: false });
   });
 });

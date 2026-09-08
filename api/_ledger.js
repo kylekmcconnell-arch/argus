@@ -223,3 +223,25 @@ export async function ledgerWalletReputation(wallets) {
   }
   return rep;
 }
+
+
+/** Service-only cron discovery, or an explicit owner scope. Writes still require ALS scope. */
+export async function ledgerDueReceipts(limit, now, scope) {
+  const c = creds();
+  if (!c) throw new Error("threat_ledger_unavailable");
+  const params = new URLSearchParams({
+    select: "organization_id,payload",
+    kind: "eq.threat-receipt",
+    verdict: "in.(SAFE,CAUTION,DANGER,RUG)",
+    and: `(or(payload->>checkedAt.is.null,payload->checkedAt.lt.${now - 12 * 3600 * 1000}),or(payload->>recheckAfter.is.null,payload->recheckAfter.lt.${now}))`,
+    order: "ts.asc",
+    limit: String(Math.max(1, Math.min(120, limit))),
+  });
+  if (scope) params.set("organization_id", `eq.${scope}`);
+  const response = await fetch(`${c.url}/rest/v1/reports?${params}`, { headers: headers(c.key), signal: AbortSignal.timeout(8000) });
+  if (!response.ok) throw new Error(`threat_ledger_http_${response.status}`);
+  const rows = await response.json();
+  if (!Array.isArray(rows)) throw new Error("threat_ledger_invalid_response");
+  return rows.filter((row) => /^[0-9a-f-]{36}$/i.test(row.organization_id) && row.payload?.address)
+    .map((row) => ({ organizationId: row.organization_id, receipt: row.payload }));
+}

@@ -2,7 +2,9 @@ name: Report lane ownership
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, review_submitted, review_dismissed]
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
 
 permissions:
   contents: read

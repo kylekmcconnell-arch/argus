@@ -10,6 +10,7 @@ export interface LedgerReceipt {
   priceDropPct?: number;
   status?: "alive" | "bleeding" | "dead";
   checkedAt?: number;
+  recheckAfter?: number;
   deployer?: string | null;
   codeVerified?: boolean;
   flagCount?: number;
@@ -41,3 +42,5 @@ export function ledgerRecordHolderEdges(token: string, symbol: string | null, ve
 export function ledgerWalletReputation(wallets: string[]): Promise<Record<string, { held: number; dead: number; deadSymbols: string[] }>>;
 
 export function withLedgerOrganization<T>(organizationId: string, work: () => Promise<T>): Promise<T>;
+
+export function ledgerDueReceipts(limit: number, now: number, scope?: string): Promise<Array<{ organizationId: string; receipt: LedgerReceipt }>>;

@@ -5013,6 +5013,9 @@ export async function collectBasicFacts(
   });
   const attempts = primary.attempts + repair.attempts;
   const providerDetail = `primary ${primary.provider}:${primary.state}; repair ${repair.provider}:${repair.state}`;
+  const collectionCompleted = ["succeeded", "completed_empty"].includes(primary.state)
+    && ["succeeded", "completed_empty", "skipped"].includes(repair.state)
+    && (await Promise.all(sourceByUrl.values())).every((source) => source.status === "ok");
   if (!allLeads.length) {
     const completedEmpty = primary.state === "completed_empty"
       && (repair.state === "completed_empty" || repair.state === "skipped");
@@ -5021,17 +5024,19 @@ export async function collectBasicFacts(
         state: "partial",
         detail: `broad search returned no source-linked basic-fact candidates; individual questions remain unresolved · ${providerDetail}`,
         attempts,
+        collectionCompleted,
       };
     }
     return {
       state: primary.state === "failed" && ["failed", "skipped"].includes(repair.state) ? "failed" : "partial",
       detail: `basic-facts discovery produced no usable leads · ${providerDetail}`,
       attempts,
+      collectionCompleted,
     };
   }
   return ctx.evidence.basicFacts.length
-    ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified · ${allLeads.length} leads · ${unansweredCritical} critical gaps · ${providerDetail}`, attempts }
-    : { state: "partial", detail: `${allLeads.length} leads · 0 passed source verification · ${unansweredCritical} critical gaps · ${providerDetail}`, attempts };
+    ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified · ${allLeads.length} leads · ${unansweredCritical} critical gaps · ${providerDetail}`, attempts, collectionCompleted }
+    : { state: "partial", detail: `${allLeads.length} leads · 0 passed source verification · ${unansweredCritical} critical gaps · ${providerDetail}`, attempts, collectionCompleted };
 }
 
 export const basicFactsAdapter: Adapter = {
