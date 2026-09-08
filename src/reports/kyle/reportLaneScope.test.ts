@@ -5,15 +5,15 @@ import { describe, expect, it } from "vitest";
 const dir = new URL("./", import.meta.url);
 
 describe("Kyle lane stylesheets", () => {
-  it("scope every rule to Kyle, Production, and Enigma", () => {
+  it("scope every rule to Kyle, Production, and Developer", () => {
     const files: string[] = readdirSync(dir).filter((file: string) => file.endsWith(".css"));
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
       const css: string = readFileSync(new URL(file, dir), "utf8");
-      const bare = css.split(":is([data-report-lane=\"kyle\"], [data-report-lane=\"production\"], [data-report-lane=\"enigma\"])").join("");
+      const bare = css.split(":is([data-report-lane=\"kyle\"], [data-report-lane=\"production\"], [data-report-lane=\"developer\"])").join("");
       expect(bare, `${file} has a rule scoped to the Kyle lane only`).not.toContain("[data-report-lane=\"kyle\"]");
       expect(css).toContain("[data-report-lane=\"production\"]");
-      expect(css).toContain("[data-report-lane=\"enigma\"]");
+      expect(css).toContain("[data-report-lane=\"developer\"]");
     }
   });
 });

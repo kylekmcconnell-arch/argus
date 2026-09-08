@@ -1,6 +1,6 @@
 /* Kyle-owned report presentation overrides belong here.
-   Scope every selector to :is([data-report-lane="kyle"], [data-report-lane="production"], [data-report-lane="enigma"]). */
+   Scope every selector to :is([data-report-lane="kyle"], [data-report-lane="production"], [data-report-lane="developer"]). */
 
-:is([data-report-lane="kyle"], [data-report-lane="production"], [data-report-lane="enigma"]) {
+:is([data-report-lane="kyle"], [data-report-lane="production"], [data-report-lane="developer"]) {
   --report-lane-accent: var(--signal);
 }

@@ -42,7 +42,7 @@ describe("Raw Evidence decision canvas", () => {
     ));
 
     expect(container.textContent).toContain("Raw evidence");
-    expect(container.textContent).toContain("without adding a lane-specific narrative");
+    expect(container.textContent).toContain("same saved evidence used by the production report");
     expect(container.textContent).toContain("Project diligence score");
     expect(container.textContent).toContain("Token safety score");
     expect(container.textContent).toContain("7/7 required report checks");

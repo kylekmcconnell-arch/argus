@@ -1,20 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { REPORT_LANE_DEFINITIONS, REPORT_LANE_ORDER } from "./reportLaneRegistry";
+import { reportLaneRenderers } from "./reportLaneRendererRegistry";
 
-describe("report lane architecture", () => {
-  it("registers exactly three editorial interpretations and one evidence view", () => {
-    expect(REPORT_LANE_ORDER).toEqual(["production", "kyle", "enigma", "raw"]);
-    expect(REPORT_LANE_ORDER.filter((id) => REPORT_LANE_DEFINITIONS[id].kind === "editorial")).toHaveLength(3);
-    expect(REPORT_LANE_ORDER.filter((id) => REPORT_LANE_DEFINITIONS[id].kind === "evidence")).toEqual(["raw"]);
+describe("report view architecture", () => {
+  it("registers only Production and Developer with the same report contract and layout", () => {
+    expect(REPORT_LANE_ORDER).toEqual(["production", "developer"]);
+    expect(Object.keys(REPORT_LANE_DEFINITIONS)).toEqual([...REPORT_LANE_ORDER]);
+    for (const id of REPORT_LANE_ORDER) {
+      expect(REPORT_LANE_DEFINITIONS[id]).toMatchObject({ kind: "editorial", presentationStyle: 2, navigation: "sticky", dataContract: "shared-saved-report-v1" });
+    }
   });
-
-  it("keeps all views on one immutable saved-report contract", () => {
-    const contracts = new Set(REPORT_LANE_ORDER.map((id) => REPORT_LANE_DEFINITIONS[id].dataContract));
-    expect([...contracts]).toEqual(["shared-saved-report-v1"]);
-  });
-
-  it("keeps editorial synthesis out of the Raw Evidence renderer", () => {
-    expect(REPORT_LANE_DEFINITIONS.raw.kind).toBe("evidence");
-    expect(REPORT_LANE_DEFINITIONS.raw.description).toContain("frozen evidence");
+  it("reuses production connection, social, and GitHub renderers in Developer", () => {
+    for (const slot of ["connectionWorkspace", "socialSynthesis", "githubSynthesis"] as const) {
+      expect(reportLaneRenderers("developer")[slot]).toBe(reportLaneRenderers("production")[slot]);
+    }
   });
 });

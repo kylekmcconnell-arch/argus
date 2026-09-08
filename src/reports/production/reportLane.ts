@@ -1,5 +1,7 @@
 import type { ReportLaneDefinition } from "../shared/reportLaneTypes";
 import "./report-lane.css";
+import "../kyle/report-lane.css";
+import "../kyle/report-typography.css";
 
 /**
  * Public ARGUS report presentation.
