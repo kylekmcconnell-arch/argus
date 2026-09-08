@@ -139,18 +139,24 @@ export function NetworkGraph({
     panning.current = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
   };
   const onPointerMove = (e: React.PointerEvent) => {
-    if (drag.current?.id) {
+    // Snapshot the refs before queueing state updates: React evaluates the
+    // updaters lazily on the next render, by which time pointerup may have
+    // nulled the ref, so the closures must capture values, never the refs.
+    const activeDrag = drag.current;
+    const activePan = panning.current;
+    if (activeDrag?.id) {
       const r = svgRef.current!.getBoundingClientRect();
-      const dx = (e.clientX - drag.current.sx) / r.width * W / view.k;
-      const dy = (e.clientY - drag.current.sy) / r.height * H / view.k;
-      if (Math.abs(e.clientX - drag.current.sx) + Math.abs(e.clientY - drag.current.sy) > 3) drag.current.moved = true;
-      const id = drag.current.id;
-      setOverride((m) => new Map(m).set(id, { x: drag.current!.ox + dx, y: drag.current!.oy + dy }));
-    } else if (panning.current) {
+      const dx = (e.clientX - activeDrag.sx) / r.width * W / view.k;
+      const dy = (e.clientY - activeDrag.sy) / r.height * H / view.k;
+      if (Math.abs(e.clientX - activeDrag.sx) + Math.abs(e.clientY - activeDrag.sy) > 3) activeDrag.moved = true;
+      const { id, ox, oy } = activeDrag;
+      setOverride((m) => new Map(m).set(id, { x: ox + dx, y: oy + dy }));
+    } else if (activePan) {
       const r = svgRef.current!.getBoundingClientRect();
-      const dx = (e.clientX - panning.current.sx) / r.width * W;
-      const dy = (e.clientY - panning.current.sy) / r.height * H;
-      setView((v) => ({ ...v, x: panning.current!.vx + dx, y: panning.current!.vy + dy }));
+      const dx = (e.clientX - activePan.sx) / r.width * W;
+      const dy = (e.clientY - activePan.sy) / r.height * H;
+      const { vx, vy } = activePan;
+      setView((v) => ({ ...v, x: vx + dx, y: vy + dy }));
     }
   };
   const onPointerUp = (e: React.PointerEvent, n?: NetNode) => {

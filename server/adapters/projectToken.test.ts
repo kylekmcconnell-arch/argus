@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SubjectClass } from "../../src/engine";
+import { deriveTokenApplicability } from "../tokenApplicability";
 import { emptyEvidence } from "../../src/data/evidence";
 import { getCost, withCostLedger } from "../cost";
 import type { CollectContext } from "./types";
@@ -91,6 +93,20 @@ afterEach(() => {
 });
 
 describe("verified project-token collection", () => {
+  it.each(["https://x.com/projectdex/status/123", "https://twitter.com/projectdex/likes", "ftp://x.com/projectdex"])("does not treat %s as an official account link", async (socialUrl) => {
+    const { ctx, evidence } = context();
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json(search());
+      if (url.includes("/coins/project-token?")) return json(details({ links: { twitter_screen_name: "unrelated", homepage: [socialUrl] } }));
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [pair({ info: { websites: [{ url: "https://project.example/" }], socials: [{ type: "twitter", url: socialUrl }] } })] });
+      if (url === "https://project.example/") return new Response("Official website without a token declaration");
+      throw new Error(`unexpected URL ${url}`);
+    }));
+    await collectProjectTokenIdentity(ctx);
+    expect(evidence.projectToken).toBeUndefined();
+  });
+
   it("binds SSR to the exact contract declared by its official X profile without requiring a website or CoinGecko", async () => {
     const { ctx, evidence } = context("@strategicsuperr", "Strategic Super Reserve SSR", "");
     evidence.profile.bio = `The Strategic Super Reserve by @EnigmaFund Venture Capital: Multichain DTFs to support builders & communities. CA: ${SSR_TOKEN}`;
@@ -584,6 +600,7 @@ describe("verified project-token collection", () => {
     const { ctx, evidence } = context("@unrelated", "Project Dex", "https://unrelated.example/");
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
+      if (url === "https://unrelated.example/") return new Response("Official website without a token declaration");
       if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
       if (url.includes("coingecko.com") && url.includes("/search?")) return json(search());
       if (url.includes("/coins/project-token?")) return json(details());
@@ -614,6 +631,7 @@ describe("verified project-token collection", () => {
     const { ctx, evidence } = context("@freshbrand", "Freshbrand Launcher", "https://freshbrand.example/");
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
+      if (url === "https://freshbrand.example/") return new Response("Official website without a token declaration");
       if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
       if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
       throw new Error(`unexpected URL ${url}`);
@@ -637,6 +655,7 @@ describe("verified project-token collection", () => {
     const { ctx, evidence } = context("@realproject", "Project", "https://realproject.example/");
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
+      if (url === "https://realproject.example/") return new Response("Official website without a token declaration");
       if (url.includes("dexscreener.com/latest/dex/search")) return json({
         pairs: [{
           chainId: "base",
@@ -749,6 +768,41 @@ describe("verified project-token collection", () => {
 });
 
 describe("token declared on the project's own site", () => {
+  it.each(["403", "429", "404", "transport", "batch", "followup", "second-site"])(
+    "keeps token applicability provisional after a %s failure with empty registries",
+    async (failure) => {
+      const { ctx, evidence } = context();
+      evidence.roles = [SubjectClass.PROJECT];
+      if (failure === "second-site") evidence.profile.official_websites = ["https://second.example/"];
+      const recoverOfficialText = vi.fn(async () => ({ status: "failed" as const, reason: "reader unavailable" }));
+      vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+        if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+        if (url === "https://second.example/") return new Response("blocked", { status: 429 });
+        if (url === "https://project.example/") {
+          if (["403", "429", "404"].includes(failure)) return new Response("blocked", { status: Number(failure) });
+          if (failure === "transport") throw new Error("connection failed");
+          return new Response(`Official contract: ${SOLANA_TOKEN} ${failure === "followup" ? OTHER_TOKEN : ""}`);
+        }
+        if (url.includes("/latest/dex/tokens/")) {
+          if (failure === "batch" || url.endsWith(`/${OTHER_TOKEN}`)) return json({}, 503);
+          return json({ pairs: failure === "followup" ? Array.from({ length: 30 }, () => pair()) : [pair()] });
+        }
+        if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+        throw new Error(`unexpected URL ${url}`);
+      }));
+      await expect(collectProjectTokenIdentity(ctx, { recoverOfficialText })).resolves.toMatchObject({ state: "partial" });
+      expect(evidence.projectToken).toBeUndefined();
+      const check = vi.mocked(ctx.recordCheck!).mock.calls.map(([row]) => row).find((row) => row.id === "project-token-identity");
+      expect(check).toMatchObject({ status: "unavailable", note: expect.stringContaining("official site") });
+      expect(deriveTokenApplicability(evidence, [{ label: "Token identity", checkId: check!.id, status: check!.status, note: check!.note }])).toMatchObject({
+        axisTreatment: "provisional",
+        state: "unresolved_token_identity",
+      });
+    },
+  );
+
   it("recovers an official token declaration after a direct 403", async () => {
     const siteToken = "0xe934e36a439c94017b64a3fece66af12099abf50";
     const sitePool = "0x2222222222222222222222222222222222222222";
@@ -1003,8 +1057,8 @@ describe("token declared on the project's own site", () => {
     }));
 
     await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
-      state: "executed",
-      detail: expect.stringContaining("no identity-bound project token"),
+      state: "partial",
+      detail: expect.stringContaining("official site token declarations could not be fully resolved"),
     });
     expect(evidence.projectToken).toBeUndefined();
     expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({

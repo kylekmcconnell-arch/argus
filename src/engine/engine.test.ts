@@ -63,6 +63,61 @@ function trustGraphFinding(
 }
 
 describe("ARGUS-P v2 engine (port fidelity)", () => {
+  it.each(Object.values(SubjectClass))("preserves an identity block with missing axes for %s", (role) => {
+    const audit = new Audit("@unverified", { subject_class: role });
+    audit.setIdentity("SuspectedImpersonation");
+    expect(audit.finalize()).toMatchObject({ composite_verdict: "UNVERIFIABLE_IDENTITY", governing_score: null });
+  });
+
+  it("preserves a prior-rug cap when its role has missing axes", () => {
+    const audit = new Audit("@partialrug", { roles: [SubjectClass.FOUNDER, SubjectClass.MEMBER] });
+    audit.addVenture({ project_name: "RugCo", role: "founder", period: "2022", outcome: VentureOutcome.RUG });
+    const result = audit.finalize();
+    expect(result).toMatchObject({ composite_verdict: "AVOID", governing_score: null, cap_applied: "prior_rug_as_principal" });
+    expect(result.role_reports[0]).toMatchObject({ verdict: "AVOID", raw_total: null, score_total: null });
+  });
+
+  it("preserves a completed capped role when another role is incomplete", () => {
+    const audit = new Audit("@mixedrug", { roles: [SubjectClass.FOUNDER, SubjectClass.MEMBER] });
+    audit.addVenture({ project_name: "RugCo", role: "founder", period: "2022", outcome: VentureOutcome.RUG });
+    for (const axis of FOUNDER_AXES) audit.setAxis(axis, 100);
+    expect(audit.finalize()).toMatchObject({ composite_verdict: "AVOID", cap_applied: "prior_rug_as_principal" });
+  });
+
+  it("scores the assessed project areas while token identity remains provisional", () => {
+    const audit = new Audit("@provisional", { subject_class: SubjectClass.PROJECT });
+    for (const axis of ["P1_team_and_identity", "P2_product_substance", "P3_token_conduct", "P4_backing_and_partners", "P5_traction_and_liveness", "P6_transparency_integrity"]) audit.setAxis(axis, 100);
+    audit.setTokenApplicability({ state: "unresolved_token_identity", axisTreatment: "provisional", reason: "Registry unavailable", evidence: [], determinedAt: "2026-09-08T00:00:00Z" });
+    expect(audit.finalize()).toMatchObject({ composite_verdict: "PROVISIONAL", governing_score: 100, score_coverage: { assessedAxes: 5, totalAxes: 6, assessedWeight: 80, provisional: true } });
+  });
+
+  it("still applies a verified hard cap to a score calculated from partial evidence", () => {
+    const audit = new Audit("@partialrisk", { subject_class: SubjectClass.FOUNDER });
+    audit.setAxis("F1_identity_verifiability", 12);
+    audit.addVenture({ project_name: "RugCo", role: "founder", period: "2022", outcome: VentureOutcome.RUG });
+    expect(audit.finalize()).toMatchObject({ composite_verdict: "AVOID", governing_score: 10, cap_applied: "prior_rug_as_principal", score_coverage: { provisional: true } });
+  });
+
+  it("normalizes only assessed weighted points and reports the missing denominator", () => {
+    const audit = new Audit("@partialscore", { subject_class: SubjectClass.FOUNDER });
+    audit.setIdentity("Confirmed");
+    audit.setAxis("F1_identity_verifiability", 8);
+    audit.setAxis("F2_track_record", 20);
+    expect(audit.finalize()).toMatchObject({
+      composite_verdict: "PROVISIONAL", governing_score: 70,
+      score_coverage: { assessedAxes: 2, totalAxes: 6, assessedWeight: 40, totalWeight: 100, provisional: true },
+    });
+    expect(audit.finalize().role_reports[0].dox_bonus).toBe(0);
+    audit.setAxis("F3_repeat_backing", 0);
+    expect(audit.finalize().governing_score).toBe(51);
+  });
+
+  it("does not invent a score when no areas were assessed", () => {
+    const audit = new Audit("@nodata", { subject_class: SubjectClass.FOUNDER });
+    audit.setIdentity("Confirmed");
+    expect(audit.finalize()).toMatchObject({ composite_verdict: "INCOMPLETE", governing_score: null });
+  });
+
   it("normalizes a confirmed-tokenless project over the remaining 80 applicable points", () => {
     const audit = new Audit("@fedibtc", { subject_class: SubjectClass.PROJECT });
     audit.setTokenApplicability({
@@ -425,16 +480,16 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(result.verdict).toBe("PASS");
   });
 
-  it("a partial axis set finalizes INCOMPLETE with no score", () => {
+  it("a partial axis set publishes a provisional score with its coverage", () => {
     const a = new Audit("@partial", { subject_class: SubjectClass.FOUNDER });
     a.setIdentity("Confirmed");
     a.setAxis("F1_identity_verifiability", 0, "only one axis returned");
     const r = a.finalize();
-    expect(r.role_reports[0].verdict).toBe("INCOMPLETE");
-    expect(r.role_reports[0].score_total).toBeNull();
+    expect(r.role_reports[0].verdict).toBe("FAIL");
+    expect(r.role_reports[0].score_total).toBe(0);
     expect(r.role_reports[0].axes).toHaveProperty("F1_identity_verifiability");
-    expect(r.composite_verdict).toBe("INCOMPLETE");
-    expect(r.governing_score).toBeNull();
+    expect(r.composite_verdict).toBe("PROVISIONAL");
+    expect(r.governing_score).toBe(0);
   });
 
   it("preserves immutable axis lineage while legacy axis calls remain valid", () => {
@@ -462,16 +517,16 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(axes.F2_track_record).not.toHaveProperty("evidenceRefs");
   });
 
-  it("one incomplete requested role makes the composite incomplete", () => {
+  it("a partially assessed role makes the composite provisional", () => {
     const a = new Audit("@mixed_completeness", { roles: [SubjectClass.FOUNDER, SubjectClass.MEMBER] });
     a.setIdentity("Confirmed");
     for (const ax of ["F1_identity_verifiability", "F2_track_record", "F3_repeat_backing", "F4_build_substance", "F5_reputation_integrity", "F6_network_quality"]) a.setAxis(ax, 10);
     a.setAxis("ME1_identity", 5);
     const r = a.finalize();
     expect(r.role_reports.find((role) => role.role === SubjectClass.FOUNDER)?.verdict).not.toBe("INCOMPLETE");
-    expect(r.role_reports.find((role) => role.role === SubjectClass.MEMBER)?.verdict).toBe("INCOMPLETE");
-    expect(r.composite_verdict).toBe("INCOMPLETE");
-    expect(r.governing_role).toBeNull();
+    expect(r.role_reports.find((role) => role.role === SubjectClass.MEMBER)?.score_coverage?.provisional).toBe(true);
+    expect(r.composite_verdict).toBe("PROVISIONAL");
+    expect(r.governing_role).toBe(SubjectClass.MEMBER);
   });
 
   it("KOL pseudonymous wallet sold into promo -> cap 35 (not gated)", () => {

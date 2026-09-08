@@ -744,6 +744,15 @@ describe("provider-backed project routing", () => {
     expect(axisCatalog(roles)).toEqual([]);
   });
 
+  it("keeps backing and disclosure unavailable when their producer was skipped", () => {
+    const evidence = resolvedProjectProfile("the Solana liquidity protocol", "https://jup.ag");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.profile.site_substance_status = "live";
+    const checks: CheckObservation[] = [];
+    collectProjectCoreEvidenceOutcomes({ handle: "@JupiterExchange", evidence, emit: () => {}, recordCheck: (check) => checks.push(check) }, { basicFactsCompleted: false });
+    for (const id of ["project-backing-partners", "project-transparency"]) expect(checks.find((check) => check.id === id)?.status).toBe("unavailable");
+  });
+
   it("turns verified basic facts into a cited project roster and completed diligence checks", () => {
     const evidence = resolvedProjectProfile("the Solana liquidity protocol", "https://jup.ag");
     evidence.roles = [SubjectClass.PROJECT];

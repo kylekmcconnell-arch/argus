@@ -505,12 +505,12 @@ export const GOLDEN: GoldenCase[] = [
   // ── abstention controls ──
   {
     name: "abstain:missing-founder-axis",
-    note: "one unrun required axis means no score and no verdict",
+    note: "an unrun axis leaves a provisional score on assessed evidence",
     groundTruth: "insufficient-evidence",
     evidence: ev("@missing_axis", [SubjectClass.FOUNDER], "Confirmed", {
       axes: completeAxes(SubjectClass.FOUNDER, 0.95).slice(0, -1),
     }),
-    expect: { verdict: "INCOMPLETE", governing: null, cap: null, score: null },
+    expect: { verdict: "PROVISIONAL", governing: SubjectClass.FOUNDER, cap: null, score: { min: 94, max: 94 } },
   },
   {
     name: "abstain:partial-second-role",
@@ -522,11 +522,11 @@ export const GOLDEN: GoldenCase[] = [
         ...completeAxes(SubjectClass.INVESTOR, 0.9).slice(0, -1),
       ],
     }),
-    expect: { verdict: "INCOMPLETE", governing: null, cap: null, score: null },
+    expect: { verdict: "PROVISIONAL", governing: SubjectClass.INVESTOR, cap: null, score: { min: 92, max: 92 } },
   },
   {
     name: "abstain:missing-project-axis",
-    note: "an established-looking project with one unscored required axis must abstain",
+    note: "a project with an unscored area publishes its assessed score provisionally",
     groundTruth: "insufficient-evidence",
     evidence: projectEvidence("@partial_project", "Partial Project", "Confirmed", {
       projectToken: {
@@ -549,9 +549,9 @@ export const GOLDEN: GoldenCase[] = [
         { axis: "P4_backing_and_partners", score: 10, rationale: "Backing evidence is complete." },
         { axis: "P5_traction_and_liveness", score: 12, rationale: "Traction evidence is complete." },
         // P6 is intentionally absent. Strong evidence elsewhere must not be
-        // converted into a score when a required project axis did not run.
+        // presented as final clearance when a required project axis did not run.
       ],
     }),
-    expect: { verdict: "INCOMPLETE", governing: null, cap: null, score: null },
+    expect: { verdict: "PROVISIONAL", governing: SubjectClass.PROJECT, cap: null, score: { min: 83, max: 83 } },
   },
 ];

@@ -13,7 +13,7 @@ import {
   coverageQualifiedCompleteness,
   presentPublicReport,
 } from "../../src/lib/reportPresentation.js";
-import { recordScanReceipt } from "../_scanReceipts.js";
+import { claimScanReceipt, recordScanReceipt } from "../_scanReceipts.js";
 
 export const config = { maxDuration: 600 };
 
@@ -149,11 +149,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     return;
   }
-  await recordScanReceipt(auth, {
+  const claim = await claimScanReceipt(auth, {
     runKey: idempotencyKey, route: "/api/v1/person", kind: "person", canonicalRef: handle,
     displayQuery: rawHandle, status: "running", creditsCharged: quota.used,
     startedAt: new Date(requestStartedAt).toISOString(),
   });
+  if (claim !== "written") {
+    res.status(claim === "duplicate" ? 409 : 503).json({
+      error: claim === "duplicate" ? "scan_run_already_claimed" : "scan_run_claim_unavailable",
+      message: "This scan could not be started. Open its saved result or use a new scan identifier.",
+    });
+    return;
+  }
+
   try {
     const dossier = await runAudit(handle, () => {}, {
       organizationId: auth.organizationId,

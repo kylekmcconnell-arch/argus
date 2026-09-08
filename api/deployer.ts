@@ -441,7 +441,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       note,
     });
   } catch (e) {
-    res.status(200).json({ wallet, available: true, error: String(e), note: "Funding-trail lookup failed." });
+    res.status(200).json({ wallet, available: false, error: String(e), note: "Funding-trail lookup failed." });
   } finally {
     if (usage.calls > 0) {
       await attachPanelCost(auth.organizationId, panelCostVersionId, {

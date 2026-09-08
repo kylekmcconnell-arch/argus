@@ -19,7 +19,7 @@ vi.mock("../_auth.js", () => ({
     displayName: "Analyst",
   })),
 }));
-vi.mock("../_scanReceipts.js", () => ({ recordScanReceipt: vi.fn() }));
+vi.mock("../_scanReceipts.js", () => ({ claimScanReceipt: vi.fn(async () => "written"), recordScanReceipt: vi.fn() }));
 
 vi.mock("../audit.js", () => ({
   persistServerDossier: vi.fn(),
@@ -233,7 +233,7 @@ describe("v1 person decision-readiness contract", () => {
       score: null,
       decision_ready: false,
       completeness_state: "partial",
-      headline: "Some checks did not finish. Do not rely on the early score yet.",
+      headline: expect.stringContaining("Based on the evidence assessed so far."),
       decision_readiness: {
         state: "provisional",
         coverage_percent: 90,

@@ -58,6 +58,25 @@ describe("an adverse sweep that never answered is not an empty sweep", () => {
     expect(row(recorded)?.note).not.toContain("returned no candidate source");
   });
 
+  it("does not clear the subject when only a related project answered", async () => {
+    harness.adverse.mockImplementation(async (handle: string) => ({ completed: handle.replace(/^@/, "").toLowerCase() !== "subject", signals: [] }));
+    harness.tooling.mockResolvedValue(null);
+    const { ctx, recorded, record } = context(["@one"]);
+    await adverseSignalsAndTooling(ctx, record);
+    expect(row(recorded)).toMatchObject({ status: "unavailable", note: expect.stringContaining("subject's own") });
+  });
+
+  it("retains related leads without marking an unanswered subject screen complete", async () => {
+    harness.adverse.mockImplementation(async (handle: string) => handle.replace(/^@/, "").toLowerCase() === "subject"
+      ? { completed: false, signals: [] }
+      : { completed: true, signals: [{ category: "rug", claim: "Related venture complaint", source: "reports.example", source_url: "https://reports.example/thread", target_entity_key: "@one", target_entity_type: "project", relationship_to_subject: "venture", relationship_label: "venture" }] });
+    harness.tooling.mockResolvedValue(null);
+    const { ctx, recorded, record } = context(["@one"]);
+    await adverseSignalsAndTooling(ctx, record);
+    expect(row(recorded)?.status).toBe("unavailable");
+    expect(ctx.evidence.findings).toHaveLength(1);
+  });
+
   it("still records a completed empty search as an answer", async () => {
     harness.adverse.mockResolvedValue({ completed: true, signals: [] });
     harness.tooling.mockResolvedValue(null);

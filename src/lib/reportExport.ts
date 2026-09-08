@@ -1,3 +1,4 @@
+import { presentPublicReport } from "./reportPresentation";
 // Export a rendered audit to a portable document. Two dependency-free targets:
 //   • PDF      - render a print-styled standalone page and hand it to the browser's
 //                native "Save as PDF" (window.print). Highest fidelity, no libs.
@@ -80,16 +81,17 @@ function subjectBlock(d: Dossier): string {
 
 function verdictBanner(d: Dossier): string {
   const r = d.report;
-  const color = verdictHex(r.composite_verdict);
+  const presentation = presentPublicReport({ verdict: r.composite_verdict, score: r.governing_score, completeness: d.completeness_state ?? "partial", scoreCoverage: r.score_coverage, checks: d.checkRuns });
+  const color = presentation.color;
   const gov = r.governing_role ? ` &nbsp;·&nbsp; governed by ${esc(roleLabel(r.governing_role))}` : "";
   const cap = r.cap_applied ? `<div class="cap">▲ Hard cap · ${esc(capLabel(r.cap_applied))}</div>` : "";
   return `
     <div class="banner" style="border-color:${color}">
-      <div class="banner-score" style="color:${color}">${r.governing_score == null ? "-" : r.governing_score}<span>/100</span></div>
+      <div class="banner-score" style="color:${color}">${presentation.primaryScore || "-"}<span>/100</span></div>
       <div class="banner-body">
-        <div class="banner-kicker">Composite verdict</div>
-        <div class="banner-verdict" style="color:${color}">${esc(verdictLabel(r.composite_verdict))}${gov}</div>
-        ${d.headline ? `<p class="headline">${esc(d.headline)}</p>` : ""}
+        <div class="banner-kicker">${esc(presentation.scoreLabel ?? presentation.resultLabel)}</div>
+        <div class="banner-verdict" style="color:${color}">${esc(presentation.displayVerdict)}${gov}</div>
+        <p class="headline">${esc(presentation.final ? d.headline : presentation.note)}</p>
         ${cap}
       </div>
     </div>`;
@@ -159,7 +161,7 @@ function roleBreakdown(d: Dossier): string {
         <div class="role-card">
           <div class="role-head">
             <span class="role-name">${esc(roleLabel(rr.role))}${rr.role === gov ? ' <span class="pill">governs</span>' : ""}</span>
-            <span class="role-verdict" style="color:${color}">${esc(verdictLabel(rr.verdict))} · ${rr.score_total == null ? "-" : rr.score_total}/100</span>
+            <span class="role-verdict" style="color:${color}">${esc(rr.score_coverage?.provisional && rr.score_total != null && rr.verdict !== "AVOID" && rr.verdict !== "UNVERIFIABLE_IDENTITY" ? "PROVISIONAL" : verdictLabel(rr.verdict))} · ${rr.score_total == null ? "-" : rr.score_total}/100</span>
           </div>
           ${rr.cap_applied ? `<p class="cap-line">cap · ${esc(capLabel(rr.cap_applied))}</p>` : ""}
           ${axes}

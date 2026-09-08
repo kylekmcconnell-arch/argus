@@ -101,11 +101,13 @@ async function blockscoutGetLogs(base: string, address: string, topic0: string):
       `${base}/api?module=logs&action=getLogs&address=${address}&topic0=${topic0}&fromBlock=0&toBlock=latest`,
       { signal: AbortSignal.timeout(15000) },
     );
-    if (!r.ok) return [];
+    if (!r.ok) throw new Error(`explorer_http_${r.status}`);
     const d = (await r.json()) as any;
-    return d.status === "1" && Array.isArray(d.result) ? d.result : [];
-  } catch {
-    return [];
+    if (d.status === "1" && Array.isArray(d.result)) return d.result;
+    if (d.status === "0" && /no (?:records|logs) found/i.test(String(d.message) + " " + String(d.result))) return [];
+    throw new Error("explorer_logs_unavailable");
+  } catch (error) {
+    throw error;
   }
 }
 

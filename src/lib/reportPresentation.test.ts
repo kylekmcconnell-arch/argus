@@ -19,71 +19,29 @@ const provisionalReadiness: PublicReportReadinessSummary = {
 };
 
 describe("public report presentation policy", () => {
-  it("never presents an incomplete positive report as final PASS", () => {
-    const presentation = presentPublicReport({ verdict: "PASS", score: 94, completeness: "partial" });
-
-    expect(presentation).toMatchObject({
-      rawVerdict: "PASS",
-      displayVerdict: "INCOMPLETE",
-      resultLabel: "DECISION READINESS",
-      readinessLabel: "INVESTIGATION INCOMPLETE",
-      coverageLabel: "PARTIAL COVERAGE",
-      primaryScore: "",
-      secondarySignal: "EARLY SCORE · PASS 94/100",
-      final: false,
+  it("shows an existing score provisionally without claiming final PASS", () => {
+    expect(presentPublicReport({ verdict: "PASS", score: 94, completeness: "partial" })).toMatchObject({
+      displayVerdict: "PROVISIONAL", primaryScore: "94", scoreLabel: "PROVISIONAL SCORE", final: false,
     });
   });
 
-  it("presents a fully supported PASS as provisional when only non-axis evidence checks remain open", () => {
-    const presentation = presentPublicReport({
-      verdict: "PASS",
-      score: 71,
-      completeness: "partial",
-      readiness: provisionalReadiness,
+  it("states assessed coverage and named missing areas beside a partial score", () => {
+    const presentation = presentPublicReport({ verdict: "PROVISIONAL", score: 72, completeness: "complete",
+      scoreCoverage: { assessedAxes: 4, totalAxes: 6, assessedWeight: 70, totalWeight: 100, missingAxes: ["F3_repeat_backing", "F6_network_quality"], provisional: true },
     });
-
-    expect(presentation).toMatchObject({
-      rawVerdict: "PASS",
-      displayVerdict: "PROVISIONAL",
-      resultLabel: "DECISION READINESS",
-      readinessLabel: "ASSESSMENT PROVISIONAL",
-      coverageLabel: "PARTIAL COVERAGE",
-      primaryScore: "71",
-      scoreLabel: "PROVISIONAL SCORE",
-      secondarySignal: "PASS SIGNAL",
-      final: false,
-    });
-    expect(presentation.note).toContain("All 6 parts of the score have saved sources");
-    expect(presentation.note).toContain("3 of 13 applicable evidence checks remain open");
-    expect(presentation.note).toContain("Do not rely on this result");
-    expect(publicReportTitle("@jupiterexchange", presentation)).toBe(
-      "@jupiterexchange · PROVISIONAL · 71/100 · assessment provisional · ARGUS",
-    );
+    expect(presentation).toMatchObject({ displayVerdict: "PROVISIONAL", primaryScore: "72", coverageLabel: "PARTIAL COVERAGE", final: false });
+    expect(presentation.note).toContain("4 of 6 scoring areas assessed (70%");
+    expect(presentation.note).toContain("repeat backing, network quality");
   });
 
-  it.each([
-    ["readiness is incomplete", { status: "incomplete" }],
-    ["coverage is below 70%", { coveragePercent: 69 }],
-    ["routing did not resolve a role", { roleCount: 0 }],
-    ["scoring returned zero axes", { decisionAxisTotal: 0, evidenceBackedAxes: 0 }],
-    ["one governing axis lacks support", { evidenceBackedAxes: 5 }],
-    ["the evidence-gap summary is absent", { neededEvidenceSummary: "" }],
-    ["the coverage claim is internally inconsistent", { coveragePercent: 100 }],
-  ])("fails closed instead of presenting provisional when %s", (_case, override) => {
-    const presentation = presentPublicReport({
-      verdict: "PASS",
-      score: 71,
-      completeness: "partial",
-      readiness: { ...provisionalReadiness, ...override } as PublicReportReadinessSummary,
-    });
-
-    expect(presentation).toMatchObject({
-      displayVerdict: "INCOMPLETE",
-      primaryScore: "",
-      scoreLabel: null,
-      final: false,
-    });
+  it.each(["incomplete", "provisional"] as const)("does not erase a usable score because readiness is %s", (status) => {
+    expect(presentPublicReport({ verdict: "PASS", score: 71, completeness: "partial", readiness: { ...provisionalReadiness, status, coveragePercent: 40, evidenceBackedAxes: 2 } })).toMatchObject({ primaryScore: "71", scoreLabel: "PROVISIONAL SCORE", final: false });
   });
+
+  it.each([{ roleCount: 0 }, { evidenceBackedAxes: 0 }])("withholds when the supplied assessment has no usable scoring evidence: %j", (override) => {
+    expect(presentPublicReport({ verdict: "PASS", score: 71, completeness: "partial", readiness: { ...provisionalReadiness, ...override } })).toMatchObject({ primaryScore: "", final: false });
+  });
+
 
   it("fails closed when a provisional PASS score does not match the PASS band", () => {
     expect(presentPublicReport({
@@ -312,10 +270,10 @@ describe("public report presentation policy", () => {
     expect(publicScoreLabel("")).toBe("");
     expect(exactReportPath("version/id with spaces")).toBe("/?version=version%2Fid%20with%20spaces");
     expect(publicReportTitle("@alice", presentation)).toBe(
-      "@alice · INCOMPLETE · investigation incomplete · ARGUS",
+      "@alice · PROVISIONAL · 88.3/100 · assessment provisional · ARGUS",
     );
     expect(publicReportDescription("Strong operator.", "SERVER-COLLECTED REPORT", presentation)).toMatch(
-      /^Some checks did not finish\. Do not rely on the early score yet\./,
+      /^Based on the evidence assessed so far\./,
     );
   });
 });

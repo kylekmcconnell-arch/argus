@@ -20,7 +20,7 @@ vi.mock("../_auth.js", () => ({
     displayName: "Analyst",
   })),
 }));
-vi.mock("../_scanReceipts.js", () => ({ recordScanReceipt: vi.fn() }));
+vi.mock("../_scanReceipts.js", () => ({ claimScanReceipt: vi.fn(async () => "written"), recordScanReceipt: vi.fn() }));
 
 vi.mock("../_sanctions-core.js", () => ({
   screenSanctionedAddresses: vi.fn(),
@@ -99,4 +99,43 @@ describe("v1 token input guard", () => {
     expect(captured.statusCode).toBe(404);
     expect(captured.body).toEqual({ error: "no DEX pair found for this contract" });
   });
+  it("retains a provisional score without publishing final clearance on missing token checks", async () => {
+    const address = "0x1111111111111111111111111111111111111111";
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(auditToken).mockResolvedValue(thinToken(address, "Raw positive model output") as never);
+    const { res, captured } = response();
+    await handler(request({ address }), res);
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).toMatchObject({ decision_ready: false, verdict: "INCOMPLETE", score: null,
+      assessment: { verdict: "PROVISIONAL", score: 90 }, preliminary_model_signal: { verdict: "PASS", score: 90 } });
+  });
+
 });
+
+function thinToken(address: string, headline: string) {
+  return {
+    address,
+    chain: "ethereum",
+    dexId: "uniswap",
+    symbol: "ORDER",
+    name: "Ordering Test",
+    verdict: "PASS",
+    score: 90,
+    capApplied: null,
+    headline,
+    axes: [],
+    safety: { available: false, simChecked: false },
+    socials: [],
+    projectX: null,
+    deployer: null,
+    topHolders: [],
+    insiderPct: 0,
+    bundleCount: 0,
+    bundleRisk: "low",
+    graph: { nodes: [], edges: [] },
+    findings: [],
+    trace: [],
+    live: true,
+    safetyChecked: false,
+  };
+}

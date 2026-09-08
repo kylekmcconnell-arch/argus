@@ -1,0 +1,19 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions, pg_catalog;
+select plan(5);
+insert into organizations(id,slug,name) values ('00000000-0000-4000-8000-000000009201','case-test-a','Case A'),('00000000-0000-4000-8000-000000009202','case-test-b','Case B');
+insert into reports(organization_id,ref,kind,payload) values
+('00000000-0000-4000-8000-000000009201',lower('So11111111111111111111111111111111111111112'),'threat-receipt','{"address":"So11111111111111111111111111111111111111112","marker":"legacy"}'),
+('00000000-0000-4000-8000-000000009201',lower('So11111111111111111111111111111111111111112'),'threat-alert','{"address":"So11111111111111111111111111111111111111112","marker":"old"}'),
+('00000000-0000-4000-8000-000000009201','So11111111111111111111111111111111111111112','threat-alert','{"address":"So11111111111111111111111111111111111111112","marker":"current"}'),
+('00000000-0000-4000-8000-000000009202',lower('So11111111111111111111111111111111111111112'),'threat-receipt','{"address":"so11111111111111111111111111111111111111112","marker":"case-lost"}');
+\ir ../migrations/20260908165653_restore_threat_address_case.sql
+select is((select ref from reports where organization_id='00000000-0000-4000-8000-000000009201' and kind='threat-receipt'),'So11111111111111111111111111111111111111112','restores retained exact address');
+select is((select payload->>'marker' from reports where organization_id='00000000-0000-4000-8000-000000009201' and kind='threat-alert'),'current','canonical row is preserved');
+select is((select payload->>'marker' from reports where organization_id='00000000-0000-4000-8000-000000009201' and kind='threat-alert-legacy-case'),'old','collision is archived without loss');
+select is((select ref from reports where organization_id='00000000-0000-4000-8000-000000009202'),'so11111111111111111111111111111111111111112','never guesses capitalization or crosses organizations');
+\ir ../migrations/20260908165653_restore_threat_address_case.sql
+select is((select count(*)::integer from reports where organization_id in ('00000000-0000-4000-8000-000000009201','00000000-0000-4000-8000-000000009202')),4,'rerun is idempotent and preserves all rows');
+select * from finish();
+rollback;

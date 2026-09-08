@@ -58,6 +58,17 @@ const anyoneLineage = (): EntityContinuitySnapshot => ({
 });
 
 describe("deriveTokenApplicability", () => {
+  it.each(["unavailable", "unknown"] as const)("prelaunch wording cannot override a %s identity check", (status) => {
+    const evidence = project("@prelaunch", "The token launch is planned after mainnet.");
+    expect(deriveTokenApplicability(evidence, [tokenCheck(status, "Identity unresolved")])).toMatchObject({ axisTreatment: "provisional" });
+  });
+
+  it("prelaunch wording cannot override a registry conflict", () => {
+    const evidence = project("@prelaunch", "The token launch is planned after mainnet.");
+    evidence.unresolvedProjectToken = { address: "0x1111111111111111111111111111111111111111", via: "evm", source: "official_bio", state: "registry_conflict", capturedAt: "2026-09-08T00:00:00Z" };
+    expect(deriveTokenApplicability(evidence, [tokenCheck("finding", "Conflicting contracts")])).toMatchObject({ axisTreatment: "provisional" });
+  });
+
   it("classifies Fedi's wallet/app business as confirmed tokenless after a completed search", () => {
     const evidence = project("@fedibtc", "Fedi is a privacy-first Bitcoin wallet with chat and community spaces.");
     expect(deriveTokenApplicability(evidence, [tokenCheck("checked-empty", "No token linked to Fedi's official identity.")]))

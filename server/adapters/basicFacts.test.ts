@@ -5657,3 +5657,25 @@ describe("grounded discovery lane", () => {
     expect(spy).toHaveBeenCalled();
   });
 });
+
+
+describe("basic facts completion independent of fact yield", () => {
+  it("records completed discovery with zero facts without inventing question answers", async () => {
+    const { ctx, evidence } = context();
+    const result = await collectBasicFacts(ctx, { discover: async () => [], repair: async () => [], fetchSource: vi.fn() });
+    expect(result).toMatchObject({ state: "partial", collectionCompleted: true });
+    expect(evidence.basicFacts).toEqual([]);
+    expect(result.explicitEmptyChecks).toBeUndefined();
+  });
+  it("keeps failed discovery incomplete", async () => {
+    const { ctx } = context();
+    const result = await collectBasicFacts(ctx, { discover: async () => null, repair: async () => [], fetchSource: vi.fn() });
+    expect(result.collectionCompleted).toBe(false);
+  });
+  it("keeps failed source verification incomplete", async () => {
+    const { ctx } = context();
+    const result = await collectBasicFacts(ctx, { discover: async () => [lead()], repair: async () => [],
+      fetchSource: async () => ({ status: "failed", reason: "http_503" }) });
+    expect(result.collectionCompleted).toBe(false);
+  });
+});

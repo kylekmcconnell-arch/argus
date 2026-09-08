@@ -1,3 +1,4 @@
+import { officialXProfileHandle } from "../lib/officialXProfile";
 // Token audit: contract / DexScreener URL -> a forensic rug verdict, computed
 // live in the browser, keyless. Sources: DexScreener (market), GoPlus EVM +
 // honeypot.is simulation (EVM safety), GoPlus Solana (Solana safety). Also
@@ -397,9 +398,8 @@ function band(score: number): string {
 }
 
 function handleFromUrl(url?: string): string | null {
-  if (!url) return null;
-  const m = url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i);
-  return m ? "@" + m[1].toLowerCase() : null;
+  const handle = officialXProfileHandle(url);
+  return handle ? "@" + handle.toLowerCase() : null;
 }
 
 const isBurnAddr = (a?: string) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));

@@ -101,17 +101,17 @@ describe("public immutable report card", () => {
     await handler(request() as never, response as never);
 
     expect(captured.statusCode).toBe(200);
-    expect(captured.body).toContain('<div class="label">DECISION READINESS</div><div class="verdict">INCOMPLETE</div>');
-    expect(captured.body).toContain("INVESTIGATION INCOMPLETE");
-    expect(captured.body).toContain("EARLY SCORE · PASS 94/100");
+    expect(captured.body).toContain('<div class="label">DECISION READINESS</div><div class="verdict">PROVISIONAL</div>');
+    expect(captured.body).toContain("ASSESSMENT PROVISIONAL");
+    expect(captured.body).toContain("PROVISIONAL SCORE");
     expect(captured.body).toContain("PARTIAL COVERAGE");
     expect(captured.body).not.toContain('<div class="label">VERDICT</div><div class="verdict">PASS</div>');
-    expect(captured.body).toContain("<title>@alice · INCOMPLETE · investigation incomplete · ARGUS</title>");
+    expect(captured.body).toContain("<title>@alice · PROVISIONAL · 94/100 · assessment provisional · ARGUS</title>");
     expect(captured.body).toContain(
-      '<meta property="og:title" content="@alice · INCOMPLETE · investigation incomplete · ARGUS"/>',
+      '<meta property="og:title" content="@alice · PROVISIONAL · 94/100 · assessment provisional · ARGUS"/>',
     );
     expect(captured.body).toContain(
-      '<meta name="description" content="Some checks did not finish. Do not rely on the early score yet.',
+      '<meta name="description" content="Based on the evidence assessed so far.',
     );
     expect(captured.body).toContain(`href="/?version=${VERSION_ID}"`);
     expect(captured.body).toContain("Open exact snapshot");
@@ -159,7 +159,7 @@ describe("public immutable report card", () => {
 
     await handler(request() as never, response as never);
 
-    expect(captured.body).toContain("INCOMPLETE");
+    expect(captured.body).toContain("PROVISIONAL");
   });
 
   it("fails closed when a frozen check has expired", async () => {
@@ -169,7 +169,7 @@ describe("public immutable report card", () => {
 
     await handler(request() as never, response as never);
 
-    expect(captured.body).toContain("INCOMPLETE");
+    expect(captured.body).toContain("PROVISIONAL");
     expect(captured.body).not.toContain('<div class="label">VERDICT</div><div class="verdict">PASS</div>');
     expect(String(fetchMock.mock.calls[3]?.[0])).toContain("select=state,stale_at,metadata");
   });

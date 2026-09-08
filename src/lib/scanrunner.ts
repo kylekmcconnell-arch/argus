@@ -54,12 +54,20 @@ export function subscribeScanRuns(cb: Listener): () => void { listeners.add(cb);
 export function activeScanRuns(): ScanRun[] {
   return [...runs.values()].filter((r) => r.status === "running" && !r.priv).sort((a, b) => b.startedAt - a.startedAt);
 }
-export function getScanRun(kind: ScanKind, ref: string): ScanRun | undefined { return runs.get(`${kind}:${norm(ref)}`); }
+export function getScanRun(kind: ScanKind, ref: string, priv = false): ScanRun | undefined { return runs.get(`${kind}:${priv ? "private" : "public"}:${norm(ref)}`); }
 
-export function cancelScanRun(kind: ScanKind, ref: string) {
-  const key = `${kind}:${norm(ref)}`;
+export function cancelScanRun(kind: ScanKind, ref: string, priv = false) {
+  const key = `${kind}:${priv ? "private" : "public"}:${norm(ref)}`;
+  const run = runs.get(key);
   aborts.get(key)?.();
   aborts.delete(key);
+  if (run?.status === "running") {
+    run.status = "error";
+    run.error = "cancelled";
+    void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: run.ref,
+      displayQuery: run.input, privateRun: run.priv, startedAt: run.startedAt,
+      status: "failed", failureCode: "cancelled", failureDetail: "Scan cancelled by the user." });
+  }
   runs.delete(key);
   emit();
 }
@@ -67,7 +75,7 @@ export function cancelScanRun(kind: ScanKind, ref: string) {
 // Start (or re-attach to) a background token audit.
 export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: { force?: boolean }): ScanRun {
   const ref = norm(input.ref);
-  const key = `token:${ref}`;
+  const key = `token:${priv ? "private" : "public"}:${ref}`;
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
 
@@ -80,7 +88,11 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
   (async () => {
     try {
       await reserveInvestigationCredit(run.creditKey, "token", run.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
-      if (cancelled) return;
+      if (cancelled) {
+        void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: run.ref, displayQuery: run.input,
+          privateRun: run.priv, startedAt: run.startedAt, status: "failed", failureCode: "cancelled", failureDetail: "Scan cancelled." });
+        return;
+      }
       let count = 0;
       const d = await auditToken(
         input,
@@ -110,7 +122,7 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
           failureCode: "collection_failed", failureDetail: run.error,
         });
       }
-    } finally { aborts.delete(key); }
+    } finally { if (runs.get(key) === run) aborts.delete(key); }
   })();
   return run;
 }
@@ -123,9 +135,9 @@ export function startInvestigationScan(
 ): ScanRun {
   const rawInput = input.ref;
   const ref = norm(input.ref);
-  const key = `investigation:${ref}`;
+  const key = `investigation:${priv ? "private" : "public"}:${ref}`;
   const existing = runs.get(key);
-  if (existing && existing.status === "running" && !opts?.force) return existing;
+  if (existing && existing.status === "running") return existing;
   if (existing) {
     aborts.get(key)?.();
     aborts.delete(key);
@@ -141,13 +153,18 @@ export function startInvestigationScan(
   void (async () => {
     try {
       await reserveInvestigationCredit(run.creditKey, "investigation", run.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
-      if (cancelled) return;
+      if (cancelled) {
+        void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: run.ref, displayQuery: run.input,
+          privateRun: run.priv, startedAt: run.startedAt, status: "failed", failureCode: "cancelled", failureDetail: "Scan cancelled." });
+        return;
+      }
       let count = 0;
       const abort = streamInvestigation(input, {
-        onStep: (s) => { count += 1; run.steps = [...run.steps, s]; run.pct = Math.min(94, count * 7); emit(); },
-        onHop: (sub) => { run.hop = sub; emit(); },
-        onDone: (inv) => { run.status = "done"; run.result = inv; run.pct = 100; aborts.delete(key); emit(); onComplete?.(run); },
+        onStep: (s) => { if (cancelled) return; count += 1; run.steps = [...run.steps, s]; run.pct = Math.min(94, count * 7); emit(); },
+        onHop: (sub) => { if (cancelled) return; run.hop = sub; emit(); },
+        onDone: (inv) => { if (cancelled) return; run.status = "done"; run.result = inv; run.pct = 100; aborts.delete(key); emit(); onComplete?.(run); },
         onError: (error) => {
+          if (cancelled) return;
           run.status = "error";
           run.error = error;
           aborts.delete(key);
@@ -159,7 +176,7 @@ export function startInvestigationScan(
           });
         },
       }, { forceTokenAudit: opts?.force, intent: opts?.intent, creditKey: run.creditKey });
-      aborts.set(key, abort);
+      if (run.status === "running") aborts.set(key, () => { cancelled = true; abort(); });
     } catch (error) {
       if (!cancelled) {
         run.status = "error";

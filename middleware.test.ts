@@ -208,7 +208,7 @@ describe("Case Brief middleware policy", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("allows an analyst augmentation POST without a hidden daily API counter", async () => {
+  it("allows an analyst augmentation POST after reserving the explicit workspace supplemental budget", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         id: "00000000-0000-4000-8000-000000000010",
@@ -219,6 +219,7 @@ describe("Case Brief middleware policy", () => {
         role: "analyst",
         active: true,
       }]));
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 99 }]));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await middleware(new Request("https://argus.example/api/augment", {
@@ -229,7 +230,7 @@ describe("Case Brief middleware policy", () => {
 
     expect(response.status).toBe(204);
     expect(next).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/rest/v1/rpc/consume_usage_quota"))).toBe(false);
   });
 
@@ -401,4 +402,16 @@ describe("Case Brief middleware policy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/rest/v1/rpc/consume_usage_quota"))).toBe(false);
   });
+  it.each([false, null])("blocks paid chat when budget admission is %s", async (allowed) => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: "00000000-0000-4000-8000-000000000010", email_confirmed_at: "2026-07-11T00:00:00Z" }))
+      .mockResolvedValueOnce(jsonResponse([{ organization_id: "00000000-0000-4000-8000-000000000001", role: "analyst", active: true }]))
+      .mockResolvedValueOnce(allowed === null ? jsonResponse({}, 503) : jsonResponse([{ allowed, used: 100, remaining: 0 }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await middleware(new Request("https://argus.example/api/ask", { method: "POST", headers: { authorization: "Bearer analyst-token" } }));
+    expect(response.status).toBe(allowed === null ? 503 : 429);
+    expect(next).not.toHaveBeenCalled();
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ p_organization_id: "00000000-0000-4000-8000-000000000001", p_daily_limit: 100 });
+  });
+
 });

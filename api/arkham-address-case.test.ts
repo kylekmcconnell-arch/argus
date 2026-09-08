@@ -83,7 +83,7 @@ describe("Arkham address case safety", () => {
     await arkhamHandler(request({ address: input }) as never, res as never);
 
     expect(captured.status).toBe(200);
-    expect(cacheGetJson).toHaveBeenCalledWith(`arkham:${expected}:v3`);
+    expect(cacheGetJson).toHaveBeenCalledWith(`arkham:${expected}:v4`);
     expect(captured.body).toMatchObject({
       available: true,
       labels: { [expected]: { name: "Case-safe label" } },
@@ -201,7 +201,7 @@ describe("Arkham address case safety", () => {
       {
         handler: arkhamMoneyFlowHandler,
         query: { address: SOLANA_ADDRESS, chain: "solana" } as Record<string, string>,
-        cacheKey: `arkham-money-flow:solana:${SOLANA_ADDRESS}:v1`,
+        cacheKey: `arkham-money-flow:solana:${SOLANA_ADDRESS}:v2`,
       },
       {
         handler: arkhamTokenHoldersHandler,

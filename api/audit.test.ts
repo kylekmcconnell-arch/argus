@@ -1,3 +1,4 @@
+vi.mock("./_scanReceipts.js", () => ({ claimScanReceipt: vi.fn(async () => "written"), recordScanReceipt: vi.fn(async () => true) }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
@@ -46,6 +47,7 @@ vi.mock("./_graph.js", () => ({ activateReportVersionWithAuthoritativeGraph }));
 import { consumeInvestigationQuota, requireArgusAuth, serviceCredentials } from "./_auth.js";
 import { activateReportVersion } from "./_provenance.js";
 import { resolveInput, runAudit } from "./_collector.js";
+import { claimScanReceipt } from "./_scanReceipts.js";
 import handler, { config } from "./audit";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
@@ -97,6 +99,29 @@ describe("person audit input guard", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["argus", "different"])("rejects a replay for %s before a second collector starts", async (secondHandle) => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 0, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://db.example", key: "test" });
+    const actual = await vi.importActual<typeof import("./_scanReceipts.js")>("./_scanReceipts.js");
+    vi.mocked(claimScanReceipt).mockImplementationOnce(actual.claimScanReceipt).mockImplementationOnce(actual.claimScanReceipt);
+    const claimed = new Set<string>();
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const row = JSON.parse(String(init.body));
+      const key = `${row.organization_id}:${row.run_key}`;
+      const exists = claimed.has(key);
+      claimed.add(key);
+      return new Response(JSON.stringify(exists ? [] : [row]), { status: 201 });
+    }));
+    vi.mocked(runAudit).mockResolvedValue(null);
+    const first = response();
+    await handler(request("argus", { creditKey: "replay-key-123" }), first.res);
+    const second = response();
+    await handler(request(secondHandle, { creditKey: "replay-key-123" }), second.res);
+    expect(first.captured.statusCode).toBe(200);
+    expect(second.captured.statusCode).toBe(409);
+    expect(runAudit).toHaveBeenCalledTimes(1);
   });
 
   it.each([

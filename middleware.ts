@@ -38,6 +38,14 @@ const VIEWER_GET_PATHS = new Set([
   "/api/sanctions",
 ]);
 const OWNER_PATHS = new Set(["/api/reclassify", "/api/members", "/api/waitlist"]);
+// Admission budget for bounded paid panels/chat; scan credits remain separate.
+const SUPPLEMENTAL_PATHS = new Set([
+  "ask", "arkham", "arkham-money-flow", "arkham-counterparties", "arkham-holdings", "arkham-token-holders", "arkham-risk-paths",
+  "project-docs", "recon-team", "github-forensics", "resolve-github", "x-find", "pfp-check", "kol-signals", "token-identity",
+  "identity-sweep", "challenge-verdict", "vc-portfolio", "call-performance", "namesake", "cluster", "funder", "deployer",
+  "evm-funder", "evm-cluster", "evm-deployer", "code-review", "wallet-taxonomy", "deployer-origin", "migration", "early-buyers",
+  "cohort", "wallet-holdings", "deployer-risk", "reclassify", "resolve-deployer", "ocr-clue",
+].map((route) => `/api/${route}`));
 const ROLE_RANK: Record<string, number> = { viewer: 0, analyst: 1, owner: 2 };
 
 export const config = {
@@ -218,6 +226,28 @@ export default async function middleware(request: Request): Promise<Response> {
           : "analyst");
   if (ROLE_RANK[role] < ROLE_RANK[requiredRole]) {
     return Response.json({ error: "insufficient_role", requiredRole }, { status: 403 });
+  }
+
+  if (SUPPLEMENTAL_PATHS.has(pathname) || (pathname === "/api/augment" && request.method === "POST")) {
+    const configuredLimit = Number(process.env.ARGUS_SUPPLEMENTAL_DAILY_LIMIT ?? 100);
+    if (!Number.isInteger(configuredLimit) || configuredLimit < 1 || configuredLimit > 100000) {
+      return Response.json({ error: "supplemental_budget_not_configured" }, { status: 503 });
+    }
+    const reservation = await fetch(`${supabaseUrl}/rest/v1/rpc/reserve_supplemental_budget`, {
+      method: "POST", headers: { ...serviceHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ p_organization_id: organizationId, p_user_id: user.id, p_route: pathname, p_daily_limit: configuredLimit }),
+      signal: AbortSignal.timeout(8_000),
+    }).catch(() => null);
+    const rows: unknown = reservation?.ok ? await reservation.json().catch(() => null) : null;
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row || typeof row.allowed !== "boolean") {
+      return Response.json({ error: "supplemental_budget_unavailable" }, { status: 503, headers: { "cache-control": "no-store" } });
+    }
+    if (!row.allowed) {
+      return Response.json({ error: "supplemental_daily_limit_reached", limit: configuredLimit,
+        message: "This workspace has reached its daily limit for supplemental checks and report chat." },
+        { status: 429, headers: { "cache-control": "no-store" } });
+    }
   }
 
   const requestHeaders = new Headers(request.headers);

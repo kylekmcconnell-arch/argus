@@ -42,6 +42,30 @@ var providerFallbacksEnabled = () => {
 };
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
+// server/boundedProvider.ts
+async function withWallClockBox(work, budgetMs) {
+  if (budgetMs <= 0) return null;
+  const controller = new AbortController();
+  let timer;
+  const fetcher = (input, init) => {
+    controller.signal.throwIfAborted();
+    return fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal });
+  };
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(null);
+    }, budgetMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([work(fetcher), timeout]);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+
 // src/engine/taxonomy.ts
 var SubjectClass = /* @__PURE__ */ ((SubjectClass2) => {
   SubjectClass2["FOUNDER"] = "FOUNDER";
@@ -868,24 +892,6 @@ var Audit = class {
       const expectedAxes = Object.keys(getProfile(role).axes).filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct"));
       const axisApplicability = role === "PROJECT" /* PROJECT */ && this.tokenApplicability ? { P3_token_conduct: structuredClone(this.tokenApplicability) } : void 0;
       const applicableWeight = expectedAxes.reduce((sum, axis) => sum + (getProfile(role).axes[axis] ?? 0), 0);
-      const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
-      if (!complete || Object.keys(axes).length !== expectedAxes.length) {
-        roleReports.push({
-          role,
-          verdict: "INCOMPLETE",
-          raw_total: null,
-          score_total: null,
-          cap_applied: null,
-          dox_bonus: doxBonus,
-          axes,
-          ...axisApplicability ? { axis_applicability: axisApplicability } : {},
-          applicable_weight: applicableWeight
-        });
-        continue;
-      }
-      const earnedPoints = Object.values(axes).reduce((a, x) => a + x.score, 0);
-      const raw = Math.round(applicableWeight > 0 ? earnedPoints / applicableWeight * 100 : 0);
-      const base = raw + doxBonus;
       const caps = effectiveCaps(role);
       const triggered = [
         ...this.roleCapsTriggered(role).map((k) => [caps[k], k]),
@@ -893,9 +899,44 @@ var Audit = class {
       ];
       let ceiling = null;
       let applied = null;
-      let total;
       if (triggered.length) {
         [ceiling, applied] = triggered.reduce((m, c) => c[0] < m[0] ? c : m);
+      }
+      const provisionalToken = role === "PROJECT" /* PROJECT */ && this.tokenApplicability?.axisTreatment === "provisional";
+      if (provisionalToken) delete axes.P3_token_conduct;
+      const assessedAxes = expectedAxes.filter((axis) => axes[axis] && Number.isFinite(axes[axis].score));
+      const assessedWeight = assessedAxes.reduce((sum, axis) => sum + getProfile(role).axes[axis], 0);
+      const missingAxes = expectedAxes.filter((axis) => !assessedAxes.includes(axis));
+      const provisional = missingAxes.length > 0 || provisionalToken;
+      const scoreCoverage2 = {
+        assessedAxes: assessedAxes.length,
+        totalAxes: expectedAxes.length,
+        assessedWeight,
+        totalWeight: applicableWeight,
+        missingAxes,
+        provisional
+      };
+      if (assessedWeight === 0) {
+        roleReports.push({
+          role,
+          verdict: this.identityBlocks() ? "UNVERIFIABLE_IDENTITY" : applied && ceiling <= 10 ? "AVOID" : "INCOMPLETE",
+          raw_total: null,
+          score_total: null,
+          cap_applied: applied,
+          dox_bonus: 0,
+          axes,
+          score_coverage: scoreCoverage2,
+          ...axisApplicability ? { axis_applicability: axisApplicability } : {},
+          applicable_weight: applicableWeight
+        });
+        continue;
+      }
+      const earnedPoints = assessedAxes.reduce((sum, axis) => sum + axes[axis].score, 0);
+      const raw = Math.round(earnedPoints / assessedWeight * 100);
+      const appliedBonus = provisional ? 0 : doxBonus;
+      const base = raw + appliedBonus;
+      let total;
+      if (ceiling !== null) {
         total = Math.min(base, ceiling);
       } else {
         total = Math.min(100, base);
@@ -916,7 +957,8 @@ var Audit = class {
         role,
         axes,
         raw_total: raw,
-        dox_bonus: doxBonus,
+        dox_bonus: appliedBonus,
+        score_coverage: scoreCoverage2,
         cap_applied: applied,
         score_total: published,
         verdict,
@@ -929,8 +971,10 @@ var Audit = class {
     let govRole = null;
     let govScore = null;
     let govCap = null;
-    if (scored.length === roleReports.length && roleReports.length > 0) {
-      const governing = scored.reduce((current, candidate) => {
+    const blocking = scored.filter((role) => role.verdict === "AVOID" || role.verdict === "UNVERIFIABLE_IDENTITY");
+    const candidates = blocking.length ? blocking : scored;
+    if (candidates.length > 0) {
+      const governing = candidates.reduce((current, candidate) => {
         const candidateSeverity = SEVERITY[candidate.verdict];
         const currentSeverity = SEVERITY[current.verdict];
         if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity ? candidate : current;
@@ -946,7 +990,17 @@ var Audit = class {
       govScore = governing.score_total;
       govCap = governing.cap_applied;
     }
+    const scoreCoverage = {
+      assessedAxes: roleReports.reduce((sum, role) => sum + (role.score_coverage?.assessedAxes ?? 0), 0),
+      totalAxes: roleReports.reduce((sum, role) => sum + (role.score_coverage?.totalAxes ?? 0), 0),
+      assessedWeight: roleReports.reduce((sum, role) => sum + (role.score_coverage?.assessedWeight ?? 0), 0),
+      totalWeight: roleReports.reduce((sum, role) => sum + (role.score_coverage?.totalWeight ?? 0), 0),
+      missingAxes: roleReports.flatMap((role) => role.score_coverage?.missingAxes ?? []),
+      provisional: roleReports.some((role) => role.score_coverage?.provisional)
+    };
+    if (scoreCoverage.provisional && govScore !== null && !blocking.length) composite = "PROVISIONAL";
     const report = {
+      score_coverage: scoreCoverage,
       audit_id: this.audit_id,
       handle: this.handle,
       roles: this.roles,
@@ -11650,17 +11704,6 @@ function deriveTokenApplicability(evidence, checks, determinedAt = (/* @__PURE__
       determinedAt
     };
   }
-  if (PRELAUNCH_TOKEN.test(prelaunchText(evidence))) {
-    evidenceLines.push("A bound first-party source describes a token as planned or not yet live.");
-    if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
-    return {
-      state: "prelaunch_token_deferred",
-      axisTreatment: "deferred",
-      reason: "The project describes a future token, but no live token conduct surface exists yet; P3 is deferred without penalty.",
-      evidence: evidenceLines,
-      determinedAt
-    };
-  }
   const unresolvedLine = unresolvedCandidateLine(evidence);
   if (!tokenCheck || !completed(tokenCheck.status) || unresolvedLine) {
     if (unresolvedLine) evidenceLines.push(unresolvedLine);
@@ -11670,6 +11713,17 @@ function deriveTokenApplicability(evidence, checks, determinedAt = (/* @__PURE__
       axisTreatment: "provisional",
       reason: "Token identity did not reach a completed, attributable result, so the project verdict remains provisional.",
       evidence: evidenceLines.length ? evidenceLines : ["No completed project-token identity result was frozen."],
+      determinedAt
+    };
+  }
+  if (PRELAUNCH_TOKEN.test(prelaunchText(evidence))) {
+    evidenceLines.push("A bound first-party source describes a token as planned or not yet live.");
+    if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
+    return {
+      state: "prelaunch_token_deferred",
+      axisTreatment: "deferred",
+      reason: "The project describes a future token, but no live token conduct surface exists yet; P3 is deferred without penalty.",
+      evidence: evidenceLines,
       determinedAt
     };
   }
@@ -11780,7 +11834,7 @@ function attachEvalNativeRequest(init, request) {
 
 // server/publicWeb.ts
 var MAX_TEXT_BYTES = 15e5;
-var MAX_REDIRECTS = 4;
+var MAX_REDIRECTS = 3;
 var JINA_READER_ORIGIN = "https://r.jina.ai/";
 var PUBLIC_WEB_USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
 var JINA_RECOVERABLE_FAILURES = /* @__PURE__ */ new Set([
@@ -12019,15 +12073,16 @@ async function readBoundedText(response) {
   }
   return Buffer.concat(chunks, total);
 }
-async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8") {
+async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8", asset = false) {
   const request = dependencies.request ?? defaultRequestForMode();
   const lookup2 = dependencies.lookup ?? defaultLookupForMode();
   let target = initialTarget;
+  const signal2 = dependencies.signal ?? AbortSignal.timeout(8e3);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     let response;
     try {
       response = await request(target.url, {
-        signal: AbortSignal.timeout(8e3),
+        signal: signal2,
         headers: {
           accept,
           "accept-language": "en-US,en;q=0.8",
@@ -12050,7 +12105,7 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
     }
     if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
+    if (asset ? !/^image\/(?:x-icon|vnd.microsoft.icon|png|jpeg|gif|webp|svg\+xml)$/.test(contentType) : contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
       return { status: "failed", reason: "unsupported_content_type" };
     }
     let bytes;
@@ -12060,7 +12115,8 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
       return { status: "failed", reason: "response_stream_error" };
     }
     if (!bytes) return { status: "failed", reason: "response_too_large" };
-    const text2 = bytes.toString("utf8");
+    if (asset && bytes.length <= 120) return { status: "failed", reason: "insufficient_asset_content" };
+    const text2 = asset ? "asset" : bytes.toString("utf8");
     if (!text2.trim()) return { status: "failed", reason: "empty_response" };
     if (antiBotChallengeBody(contentType, text2)) {
       return { status: "failed", reason: "anti_bot_challenge" };
@@ -12082,6 +12138,12 @@ async function fetchPublicText(raw, dependencies = {}) {
   const target = await validatedPublicTarget(raw, void 0, lookup2);
   if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
   return fetchValidatedPublicText(target, dependencies);
+}
+async function fetchPublicAssetHash(raw, dependencies = {}) {
+  const target = await validatedPublicTarget(raw, void 0, dependencies.lookup ?? defaultLookupForMode());
+  if (!target) return null;
+  const result = await fetchValidatedPublicText(target, dependencies, "image/*", true);
+  return result.status === "ok" ? result.contentHash : null;
 }
 async function fetchPublicTextWithRecovery(raw, dependencies = {}) {
   const lookup2 = dependencies.lookup ?? defaultLookupForMode();
@@ -24563,22 +24625,25 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   });
   const attempts = primary.attempts + repair.attempts;
   const providerDetail = `primary ${primary.provider}:${primary.state}; repair ${repair.provider}:${repair.state}`;
+  const collectionCompleted = ["succeeded", "completed_empty"].includes(primary.state) && ["succeeded", "completed_empty", "skipped"].includes(repair.state) && (await Promise.all(sourceByUrl.values())).every((source2) => source2.status === "ok");
   if (!allLeads.length) {
     const completedEmpty = primary.state === "completed_empty" && (repair.state === "completed_empty" || repair.state === "skipped");
     if (completedEmpty) {
       return {
         state: "partial",
         detail: `broad search returned no source-linked basic-fact candidates; individual questions remain unresolved \xB7 ${providerDetail}`,
-        attempts
+        attempts,
+        collectionCompleted
       };
     }
     return {
       state: primary.state === "failed" && ["failed", "skipped"].includes(repair.state) ? "failed" : "partial",
       detail: `basic-facts discovery produced no usable leads \xB7 ${providerDetail}`,
-      attempts
+      attempts,
+      collectionCompleted
     };
   }
-  return ctx.evidence.basicFacts.length ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified \xB7 ${allLeads.length} leads \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts } : { state: "partial", detail: `${allLeads.length} leads \xB7 0 passed source verification \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts };
+  return ctx.evidence.basicFacts.length ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified \xB7 ${allLeads.length} leads \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts, collectionCompleted } : { state: "partial", detail: `${allLeads.length} leads \xB7 0 passed source verification \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts, collectionCompleted };
 }
 var basicFactsAdapter = {
   id: "basic-facts",
@@ -28046,6 +28111,44 @@ async function collectFundScale(ctx, dependencies = {}) {
   return { state: "partial", detail: `${successfulFetches} sources inspected \xB7 ${reportedClaims} reported \xB7 0 verified` };
 }
 
+// src/lib/officialXProfile.ts
+var X_RESERVED_PATHS = /* @__PURE__ */ new Set([
+  "i",
+  "home",
+  "search",
+  "intent",
+  "share",
+  "hashtag",
+  "explore",
+  "settings",
+  "messages",
+  "notifications",
+  "compose",
+  "login",
+  "signup",
+  "privacy",
+  "tos",
+  "about",
+  "download",
+  "jobs",
+  "help"
+]);
+function officialXProfileHandle(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    const host2 = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (!["https:", "http:"].includes(url.protocol) || host2 !== "x.com" && host2 !== "twitter.com") return null;
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length !== 1) return null;
+    const handle = segments[0];
+    if (!/^[A-Za-z0-9_]{2,30}$/.test(handle) || X_RESERVED_PATHS.has(handle.toLowerCase())) return null;
+    return handle;
+  } catch {
+    return null;
+  }
+}
+
 // src/lib/priceHistory.ts
 var NETWORK = {
   solana: "solana",
@@ -28550,42 +28653,7 @@ function verifyIdentity(ctx, details) {
     ...officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}
   };
 }
-var X_RESERVED_PATHS = /* @__PURE__ */ new Set([
-  "i",
-  "home",
-  "search",
-  "intent",
-  "share",
-  "hashtag",
-  "explore",
-  "settings",
-  "messages",
-  "notifications",
-  "compose",
-  "login",
-  "signup",
-  "privacy",
-  "tos",
-  "about",
-  "download",
-  "jobs",
-  "help"
-]);
-var xHandleFromUrlRaw = (value) => {
-  const raw = cleanText2(value);
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    const host2 = url.hostname.toLowerCase().replace(/^www\./, "");
-    if (host2 !== "x.com" && host2 !== "twitter.com") return null;
-    const handle = url.pathname.split("/").filter(Boolean)[0] ?? "";
-    if (!handle || X_RESERVED_PATHS.has(handle.toLowerCase())) return null;
-    if (!/^[A-Za-z0-9_]{2,30}$/.test(handle)) return null;
-    return handle;
-  } catch {
-    return null;
-  }
-};
+var xHandleFromUrlRaw = officialXProfileHandle;
 var xHandleFromUrl = (value) => {
   const handle = xHandleFromUrlRaw(value);
   return handle ? normalizeHandle3(handle) : null;
@@ -28868,11 +28936,11 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
           recordCall("site-fetch", "token-declaration", 0, `reader_recovery_after_http_${response.status}`, "succeeded");
         } else {
           recordCall("site-fetch", "token-declaration", 0, `http_${response.status} \xB7 ${recovered.reason}`, "failed");
-          return null;
+          return { state: "failed" };
         }
       } else {
         recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
-        return null;
+        return { state: "failed" };
       }
     } else {
       html = (await response.text()).slice(0, 4e5);
@@ -28882,7 +28950,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
     const recovered = await recoverOfficialText(scope.canonicalUrl);
     if (recovered.status !== "ok") {
       recordCall("site-fetch", "token-declaration", 0, `transport_error \xB7 ${recovered.reason}`, "failed");
-      return null;
+      return { state: "failed" };
     }
     html = recovered.text.slice(0, 4e5);
     identityCapturedAt = captureTimestamp();
@@ -28891,12 +28959,12 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
   const candidates = siteContractCandidates(html);
   if (!candidates.length) {
     recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
-    return null;
+    return { state: "empty" };
   }
   const batch = await dexTokenPairs(candidates);
   if (!batch) {
     recordCall("site-fetch", "token-declaration", 0, "candidate_resolution_failed", "failed");
-    return null;
+    return { state: "failed" };
   }
   const pairsByAddress = /* @__PURE__ */ new Map();
   const candidateKeys = new Set(candidates.map(addressKey));
@@ -28910,7 +28978,11 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
     for (const address of candidates) {
       if (pairsByAddress.has(addressKey(address))) continue;
       const pairs = await dexPairs(address);
-      if (pairs && pairs.length) pairsByAddress.set(addressKey(address), pairs);
+      if (!pairs) {
+        recordCall("site-fetch", "token-declaration", 0, "candidate_followup_failed", "failed");
+        return { state: "failed" };
+      }
+      if (pairs.length) pairsByAddress.set(addressKey(address), pairs);
     }
   }
   const capturedAt = captureTimestamp();
@@ -28919,8 +28991,8 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
     return pairs && pairs.length ? [{ address, pairs, capturedAt }] : [];
   });
   if (resolved.length !== 1) {
-    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", "succeeded");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", resolved.length ? "partial" : "succeeded");
+    return { state: resolved.length ? "failed" : "empty" };
   }
   const [only] = resolved;
   const best = [...only.pairs].sort((left, right) => {
@@ -28934,7 +29006,10 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
   const chain = cleanText2(best.chainId);
   const pairAddress = cleanText2(best.pairAddress);
   const pairCreatedAt = finiteNumber2(best.pairCreatedAt);
-  if (!symbol || !chain) return null;
+  if (!symbol || !chain) {
+    recordCall("site-fetch", "token-declaration", 0, "candidate_metadata_incomplete", "failed");
+    return { state: "failed" };
+  }
   const info = isRecord4(best.info) ? best.info : {};
   const priceUsd = finiteNumber2(best.priceUsd);
   const liquidityUsd = isRecord4(best.liquidity) ? finiteNumber2(best.liquidity.usd) : void 0;
@@ -28945,6 +29020,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
   const hasMarketRead = priceUsd !== void 0 || marketCapUsd !== void 0 || fdvUsd !== void 0 || volume24hUsd !== void 0;
   const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: void 0, attempts: 0 };
   return {
+    state: "declared",
     sourceUrl: scope.canonicalUrl,
     snapshot: {
       verified: true,
@@ -28984,17 +29060,20 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
 }
 async function collectSiteDeclaredToken(ctx, fetchImpl = fetch, extraOfficialUrls = [], recoverOfficialText = fetchPublicTextWithRecovery) {
   const scopes = officialWebsiteScopes(ctx, extraOfficialUrls);
-  if (!scopes.length) return null;
+  if (!scopes.length) return { state: "empty" };
   const declared = [];
+  let failed = false;
   for (const scope of scopes) {
     const found = await resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialText);
-    if (found) declared.push(found);
+    if (found.state === "declared") declared.push(found);
+    if (found.state === "failed") failed = true;
   }
-  if (!declared.length) return null;
+  if (failed) return { state: "failed" };
+  if (!declared.length) return { state: "empty" };
   const addresses = new Set(declared.map((row) => row.snapshot.address.toLowerCase()));
   if (addresses.size !== 1) {
-    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "succeeded");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "partial");
+    return { state: "failed" };
   }
   return declared[0];
 }
@@ -29516,7 +29595,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       registryHomepages,
       dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery
     );
-    if (declared && declaredOutcome && !sameAddress(declared.snapshot.address, declaredOutcome.candidate.address)) {
+    if (declared.state === "declared" && declaredOutcome && !sameAddress(declared.snapshot.address, declaredOutcome.candidate.address)) {
       return recordDeclaredConflict(ctx, declaredOutcome, {
         provider: "official_site",
         address: declared.snapshot.address,
@@ -29526,7 +29605,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
         sourceUrl: declared.sourceUrl
       }, attempts + 1);
     }
-    if (declared) {
+    if (declared.state === "declared") {
       ctx.evidence.projectToken = declared.snapshot;
       ctx.recordCheck?.({
         id: "project-token-identity",
@@ -29547,6 +29626,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
     const coinSearchIncomplete = registryQueries.length > 0 && (!search || searchFailures > 0);
     const gaps = [
+      declared.state === "failed" ? "official site token declarations could not be fully resolved" : null,
       contractLookupFailed ? "CoinGecko contract lookup failed" : null,
       coinSearchIncomplete ? !search ? "CoinGecko search failed" : `CoinGecko search failed for ${searchFailures} of ${registryQueries.length} queries` : null,
       coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
@@ -33153,13 +33233,6 @@ function deriveFounderVentureCandidate(evidence) {
 var MONID_ENRICHMENT_BUDGET_MS = 25e3;
 var SECURITY_AUDITS_BUDGET_MS = 45e3;
 var EVM_CONTROL_RPC_TIMEOUT_MS = 2500;
-var withWallClockBox = (work, budgetMs) => Promise.race([
-  work,
-  new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), budgetMs);
-    if (typeof timer === "object" && "unref" in timer) timer.unref();
-  })
-]);
 var VERIFIED_EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 function verifiedEvmControlTarget(evidence) {
   const token = evidence.projectToken;
@@ -34476,9 +34549,9 @@ function providerBackedRoles(evidence) {
     roles.add("PROJECT" /* PROJECT */);
   }
   if (roles.has("INVESTOR" /* INVESTOR */)) {
-    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null) && !investorBeyondBio) {
+    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null || projectBound) && !investorBeyondBio) {
       roles.delete("INVESTOR" /* INVESTOR */);
-    } else if (!evidence.projectToken?.verified) {
+    } else if (!evidence.projectToken?.verified && !projectBound) {
       roles.delete("PROJECT" /* PROJECT */);
     }
   }
@@ -34941,8 +35014,8 @@ function collectProjectCoreEvidenceOutcomes(ctx, options = {}) {
     const assessable = (ctx.evidence.webTeam ?? []).length > 0 || (ctx.evidence.basicFacts ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live";
     ctx.recordCheck?.({
       id: "project-backing-partners",
-      status: assessable ? "finding" : "checked-empty",
-      note: assessable ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified funding, investor, advisor, counterparty, or operating-partner evidence appears. Project-only partnership claims and model-only leads were excluded. This is a null result on this axis, not adverse evidence." : "bounded scan of up to 32 frozen first-party team and account records found no verified funding, investor, advisor, counterparty, or operating-partner evidence; project-only partnership claims and model-only leads were excluded",
+      status: options.basicFactsCompleted === false ? "unavailable" : assessable ? "finding" : "checked-empty",
+      note: options.basicFactsCompleted === false ? "The backing search did not complete; collected material does not establish absence." : assessable ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified funding, investor, advisor, counterparty, or operating-partner evidence appears. Project-only partnership claims and model-only leads were excluded. This is a null result on this axis, not adverse evidence." : "bounded scan of up to 32 frozen first-party team and account records found no verified funding, investor, advisor, counterparty, or operating-partner evidence; project-only partnership claims and model-only leads were excluded",
       provider: "project-core-evidence"
     });
   }
@@ -34972,7 +35045,7 @@ function collectProjectCoreEvidenceOutcomes(ctx, options = {}) {
       note: "bounded disclosure search completed with an explicit no-match; no source-linked legal, governance, token-economic, repository, or security disclosure candidate was returned",
       provider: "basic-facts-web"
     });
-  } else if ((ctx.evidence.basicFacts ?? []).length > 0 || (ctx.evidence.webTeam ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live") {
+  } else if (options.basicFactsCompleted !== false && ((ctx.evidence.basicFacts ?? []).length > 0 || (ctx.evidence.webTeam ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live")) {
     ctx.recordCheck?.({
       id: "project-transparency",
       status: "finding",
@@ -35219,20 +35292,20 @@ async function adverseSignalsAndTooling(ctx, record5) {
   const unanswered = screens.length - answered;
   const swept = `the subject, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}`;
   const gap = unanswered ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.` : "";
-  if (totalSigs || toolingLeads) {
+  if (!subjectScreen.completed) {
+    record5({
+      id: "adverse-screen",
+      status: "unavailable",
+      note: `The subject's own adverse search returned no readable answer. ${answered} of ${screens.length} target searches completed, but related targets cannot clear the unscreened subject. ${totalSigs + toolingLeads} candidate leads were retained for follow-up.${gap}`,
+      provider: "adverse-sweep"
+    });
+  } else if (totalSigs || toolingLeads) {
     record5({
       id: "adverse-screen",
       status: "finding",
       note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: ${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}${toolingLeads ? ` and ${toolingLeads} manipulation-tooling lead${toolingLeads === 1 ? "" : "s"}` : ""} surfaced. Each is an unverified candidate source for follow-up, not a verified finding.${gap}`,
       provider: "adverse-sweep",
       sourceCount: totalSigs + toolingLeads
-    });
-  } else if (!answered) {
-    record5({
-      id: "adverse-screen",
-      status: "unavailable",
-      note: `the model search returned no readable answer for any of the ${screens.length} adverse-screen target${screens.length === 1 ? "" : "s"}, so no rug, scam, or drain search was completed`,
-      provider: "adverse-sweep"
     });
   } else {
     record5({
@@ -35613,9 +35686,9 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   resetDefiLlamaScanMemo();
   resetFollowScanMemo();
   const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
-  const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
+  const collectionDeadlineAt = analystDeadlineAt - (options?.collectionReserveMs ?? COLLECTION_ANALYST_RESERVE_MS);
   const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
-  const graphScreenDeadlineAt = collectionDeadlineAt + TRUST_GRAPH_SCREEN_RESERVE_MS;
+  const graphScreenDeadlineAt = collectionDeadlineAt + (options?.graphScreenReserveMs ?? TRUST_GRAPH_SCREEN_RESERVE_MS);
   const graphScreenOverBudget = () => Date.now() >= graphScreenDeadlineAt;
   const startRuntimeStage = (stage) => {
     const stageStartedAt = Date.now();
@@ -35752,7 +35825,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     }
   };
   const projectTokenPass = async () => {
-    const providers = ["coingecko", "dexscreener", "geckoterminal"];
+    const providers = ["coingecko", "dexscreener", "geckoterminal", "site-fetch"];
     const before = attemptTotals(providers);
     try {
       const result = await collectProjectTokenIdentity(ctx);
@@ -35928,13 +36001,13 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         {
           const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
           const auditsResult = await withWallClockBox(
-            collectSecurityAudits(
+            (fetcher) => collectSecurityAudits(
               projectName2,
               evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
               auditLinks.available ? auditLinks.value.auditLinks : [],
-              { canonicalContractAddress: evidence.projectToken.address }
+              { canonicalContractAddress: evidence.projectToken.address, fetcher }
             ),
-            SECURITY_AUDITS_BUDGET_MS
+            Math.min(SECURITY_AUDITS_BUDGET_MS, collectionDeadlineAt - Date.now())
           );
           if (auditsResult?.available) {
             evidence.securityAudits = {
@@ -35961,11 +36034,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
           if (companyLookup) {
             const sections = projectCompanyEnrichmentSections(evidence);
             const enrichment = await withWallClockBox(
-              collectProjectCompanyEnrichment(companyLookup, {
+              (fetcher) => collectProjectCompanyEnrichment(companyLookup, {
+                fetcher,
                 sections,
                 officialName: projectName2
               }),
-              MONID_ENRICHMENT_BUDGET_MS
+              Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now())
             );
             if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, companyLookup)) {
               evidence.companyEnrichment = { ...enrichment.value };
@@ -36249,11 +36323,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     try {
       const sections = projectCompanyEnrichmentSections(evidence);
       const enrichment = sections.length ? await withWallClockBox(
-        collectProjectCompanyEnrichment(recoveredCompanyLookup, {
+        (fetcher) => collectProjectCompanyEnrichment(recoveredCompanyLookup, {
+          fetcher,
           sections,
           officialName: evidence.profile.resolved_name ?? evidence.profile.display_name
         }),
-        MONID_ENRICHMENT_BUDGET_MS
+        Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now())
       ) : null;
       if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, recoveredCompanyLookup)) {
         evidence.companyEnrichment = { ...enrichment.value };
@@ -36275,11 +36350,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     if (primaryVenture) {
       try {
         const enrichment = primaryVenture.domain ? await withWallClockBox(
-          collectProjectCompanyEnrichment(primaryVenture.domain, {
+          (fetcher) => collectProjectCompanyEnrichment(primaryVenture.domain, {
+            fetcher,
             sections: ["funding_detail", "firmographic"],
             officialName: primaryVenture.project_name.trim()
           }),
-          MONID_ENRICHMENT_BUDGET_MS
+          Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now())
         ) : null;
         if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, primaryVenture.domain)) {
           evidence.companyEnrichment = { ...enrichment.value };
@@ -36439,6 +36515,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   collectFounderDecisionQuestionOutcomes(ctx);
   try {
     const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx, {
+      basicFactsCompleted: adapterResults.get("basic-facts")?.collectionCompleted === true,
       transparencySearchExplicitlyEmpty: adapterResults.get("basic-facts")?.explicitEmptyChecks?.includes("project-transparency") === true
     });
     checkTracker.provider(
@@ -36839,7 +36916,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const dossier = assembleDossier(evidence, cost.calls.some((line) => line.calls > 0));
   dossier.checkRuns = finalChecks;
   const checkCompleteness = checkTracker.completeness(evidence.roles, checkScope);
-  dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE" ? "partial" : checkCompleteness;
+  dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE" || dossier.report.score_coverage?.provisional === true || dossier.report.role_reports.some((role) => role.raw_total === null) ? "partial" : checkCompleteness;
   if (options?.organizationId) {
     const prior = await readPriorOutcome(options.organizationId, evidence.profile.handle);
     if (prior) {
@@ -37558,9 +37635,8 @@ function band(score) {
   return score >= 70 ? "PASS" : score >= 40 ? "CAUTION" : "FAIL";
 }
 function handleFromUrl(url) {
-  if (!url) return null;
-  const m = url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i);
-  return m ? "@" + m[1].toLowerCase() : null;
+  const handle = officialXProfileHandle(url);
+  return handle ? "@" + handle.toLowerCase() : null;
 }
 var isBurnAddr2 = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
 var isBurnTag2 = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
@@ -38437,6 +38513,8 @@ function resolveInput(raw) {
 export {
   auditToken,
   collectSocialActivity,
+  fetchPublicAssetHash,
+  fetchPublicText,
   providerStatus,
   resolveInput,
   runAudit
