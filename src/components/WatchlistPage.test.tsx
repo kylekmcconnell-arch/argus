@@ -131,10 +131,10 @@ describe("WatchlistPage decision-safe verdicts", () => {
 
       const badge = await renderPage();
 
-      expect(badge.textContent).toBe(completenessState === "failed" ? "INCOMPLETE · FAILED" : "INCOMPLETE");
+      expect(badge.textContent).toBe(completenessState === "failed" ? "INCOMPLETE · FAILED" : "PROVISIONAL");
       expect(badge.textContent).not.toContain("PASS");
       expect(badge.getAttribute("aria-label")).toContain(
-        completenessState === "failed" ? "INVESTIGATION FAILED" : "INVESTIGATION INCOMPLETE",
+        completenessState === "failed" ? "INVESTIGATION FAILED" : "ASSESSMENT PROVISIONAL",
       );
     },
   );
@@ -168,7 +168,7 @@ describe("WatchlistPage decision-safe verdicts", () => {
 
     const badge = await renderPage();
 
-    expect(badge.textContent).toBe("INCOMPLETE");
+    expect(badge.textContent).toBe("PROVISIONAL");
     expect(container.textContent).toContain("⚠ changed");
   });
 

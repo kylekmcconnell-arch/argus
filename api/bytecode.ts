@@ -165,6 +165,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       capabilities, verdict: { tone, line },
     });
   } catch (e) {
-    res.status(200).json({ address, chain, available: true, error: String(e), note: "Bytecode fingerprint failed." });
+    res.status(200).json({ address, chain, available: false, error: String(e), note: "Bytecode fingerprint failed." });
   }
 }

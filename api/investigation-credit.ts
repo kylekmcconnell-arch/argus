@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { consumeInvestigationQuota, requireArgusAuth } from "./_auth.js";
-import { recordScanReceipt } from "./_scanReceipts.js";
+import { claimScanReceipt } from "./_scanReceipts.js";
 
 const KEY = /^[A-Za-z0-9:_-]{8,180}$/;
 const KINDS = new Set(["token", "investigation"]);
@@ -49,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     return;
   }
-  const receiptRecorded = await recordScanReceipt(auth, {
+  const claim = await claimScanReceipt(auth, {
     runKey: idempotencyKey,
     route: "/app/scan",
     kind: kind as "token" | "investigation",
@@ -60,10 +60,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     creditsCharged: quota.used,
     startedAt,
   });
+  if (claim !== "written") {
+    res.status(claim === "duplicate" ? 409 : 503).json({
+      error: claim === "duplicate" ? "scan_run_already_claimed" : "scan_run_claim_unavailable",
+      message: "This scan could not be started. Open its saved result or use a new scan identifier.",
+    });
+    return;
+  }
+
   res.status(200).json({
     allowed: true,
     chargedCredits: quota.used,
     remainingCredits: quota.remaining,
-    receiptRecorded,
+    receiptRecorded: true,
   });
 }

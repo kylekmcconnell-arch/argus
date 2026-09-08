@@ -13,6 +13,29 @@ const dossiers = SUBJECTS.map((s) => buildReport(s));
 const first = dossiers[0];
 
 describe("reportToHtml", () => {
+  it("exports a provisional score with its coverage and missing areas", () => {
+    const dossier: Dossier = {
+      ...first,
+      completeness_state: "partial",
+      headline: "Unqualified final clearance",
+      report: {
+        ...first.report,
+        composite_verdict: "PROVISIONAL",
+        governing_score: 70,
+        score_coverage: {
+          assessedAxes: 2, totalAxes: 6, assessedWeight: 40, totalWeight: 100,
+          missingAxes: ["P3_token_conduct"], provisional: true,
+        },
+      },
+    };
+    const html = reportToHtml(dossier);
+    expect(html).toContain("PROVISIONAL SCORE");
+    expect(html).toContain("70<span>/100</span>");
+    expect(html).toContain("2 of 6 scoring areas assessed (40% of the methodology weight)");
+    expect(html).toContain("Not assessed: token conduct");
+    expect(html).not.toContain("Unqualified final clearance");
+  });
+
   it("produces a self-contained HTML document with the subject and verdict", () => {
     const html = reportToHtml(first);
     expect(html.startsWith("<!doctype html>")).toBe(true);

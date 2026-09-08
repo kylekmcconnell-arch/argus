@@ -10,13 +10,14 @@ export interface CaseResult {
   groundTruth: GroundTruth;
   pass: boolean;
   expected: GoldenCase["expect"];
-  actual: { verdict: string; governing: string | null; cap: string | null; score: number | null };
+  actual: { verdict: string; governing: string | null; cap: string | null; score: number | null; provisional: boolean };
   mismatches: string[];
 }
 
 export function runCase(c: GoldenCase): CaseResult {
   const report = assembleDossier(c.evidence, false).report;
   const actual = {
+    provisional: report.score_coverage?.provisional === true,
     verdict: report.composite_verdict,
     governing: report.governing_role,
     cap: report.cap_applied,
@@ -71,7 +72,8 @@ export function summarizeQuality(results: CaseResult[]): QualitySummary {
       .filter((result) => result.groundTruth === "clean" && ["FAIL", "AVOID", "UNVERIFIABLE_IDENTITY"].includes(result.actual.verdict))
       .map((result) => result.name),
     unsafeConclusions: results
-      .filter((result) => result.groundTruth === "insufficient-evidence" && result.actual.verdict !== "INCOMPLETE")
+      .filter((result) => result.groundTruth === "insufficient-evidence" && result.actual.verdict !== "INCOMPLETE"
+        && !(result.actual.verdict === "PROVISIONAL" && result.actual.provisional))
       .map((result) => result.name),
     identityMisses: results
       .filter((result) => result.groundTruth === "identity-fraud" && result.actual.verdict !== "UNVERIFIABLE_IDENTITY")

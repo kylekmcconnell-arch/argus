@@ -1,3 +1,4 @@
+import { requireArgusAuth } from "./_auth.js";
 // Full-scan cache for sharing. A shared ?threat= link should open the REPORT,
 // not re-run a multi-minute scan - so the completed scan object is stored
 // (one row per token, kind='threat-scan' in the reports table) and served back
@@ -22,9 +23,11 @@ function creds() {
   return url && key ? { url: url.replace(/\/$/, ""), key } : null;
 }
 const headers = (key: string) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
-const norm = (s: unknown) => String(s ?? "").trim().toLowerCase();
+const norm = (s: unknown) => { const value = String(s ?? "").trim(); return /^0x[0-9a-f]+$/i.test(value) ? value.toLowerCase() : value; };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
   const c = creds();
   if (!c) { res.status(200).json({ available: false }); return; }
 
@@ -40,19 +43,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Bound the stored blob; a full scan is tens of KB - reject absurd bodies.
     if (JSON.stringify(scan).length > 400_000) { res.status(413).json({ error: "too large" }); return; }
     const row = {
+      organization_id: auth.organizationId,
       ref: address, kind: KIND,
       query: scan.symbol ? `$${scan.symbol}` : address,
       verdict: scan.call.verdict ?? null,
       score: typeof scan.call.risk === "number" ? scan.call.risk : null,
       payload: { ...scan, __build: BUILD }, ts: new Date().toISOString(),
     };
-    const r = await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
+    const r = await fetch(`${c.url}/rest/v1/reports?on_conflict=organization_id,ref,kind`, {
       method: "POST",
       headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify(row),
       signal: AbortSignal.timeout(8000),
     }).catch(() => null);
-    res.status(200).json({ ok: !!r?.ok });
+    res.status(r?.ok ? 200 : 503).json({ available: !!r?.ok, ok: !!r?.ok });
     return;
   }
 
@@ -60,10 +64,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!address) { res.status(400).json({ error: "address required" }); return; }
   try {
     const r = await fetch(
-      `${c.url}/rest/v1/reports?select=payload,ts&kind=eq.${KIND}&ref=eq.${encodeURIComponent(address)}&limit=1`,
+      `${c.url}/rest/v1/reports?organization_id=eq.${encodeURIComponent(auth.organizationId)}&select=payload,ts&kind=eq.${KIND}&ref=eq.${encodeURIComponent(address)}&limit=1`,
       { headers: headers(c.key), signal: AbortSignal.timeout(8000) },
     );
-    if (!r.ok) { res.status(200).json({ available: true, hit: false }); return; }
+    if (!r.ok) { res.status(503).json({ available: false, hit: false }); return; }
     const rows = (await r.json()) as { payload?: Partial<ThreatScan> & { __build?: string }; ts?: string }[];
     const row = rows?.[0];
     const scannedAt = typeof row?.payload?.scannedAt === "number" ? row.payload.scannedAt : row?.ts ? Date.parse(row.ts) : 0;
@@ -74,6 +78,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     delete scan.__build;
     res.status(200).json({ available: true, hit: true, ageMs, scan });
   } catch {
-    res.status(200).json({ available: true, hit: false });
+    res.status(503).json({ available: false, hit: false });
   }
 }

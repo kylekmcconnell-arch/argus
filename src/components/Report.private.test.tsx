@@ -2353,7 +2353,7 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("6 of 6 areas have sources");
     expect(container.textContent).toContain("3 follow-up questions");
     expect(container.textContent).toContain("Follow up on: 3 important questions");
-    expect(container.textContent).toContain("Do not rely on this result");
+    expect(container.textContent).toContain("The score may change as gaps are resolved");
     expect(container.textContent).toContain("This score uses the facts collected so far");
     expect(container.textContent).toContain("Current score 71");
     expect(container.textContent).not.toContain("score withheld");

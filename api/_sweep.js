@@ -9,6 +9,44 @@ var GROK_ANALYST_MODEL = process.env.ARGUS_GROK_ANALYST_MODEL || process.env.ARG
 var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
+// src/lib/officialXProfile.ts
+var X_RESERVED_PATHS = /* @__PURE__ */ new Set([
+  "i",
+  "home",
+  "search",
+  "intent",
+  "share",
+  "hashtag",
+  "explore",
+  "settings",
+  "messages",
+  "notifications",
+  "compose",
+  "login",
+  "signup",
+  "privacy",
+  "tos",
+  "about",
+  "download",
+  "jobs",
+  "help"
+]);
+function officialXProfileHandle(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (!["https:", "http:"].includes(url.protocol) || host !== "x.com" && host !== "twitter.com") return null;
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length !== 1) return null;
+    const handle = segments[0];
+    if (!/^[A-Za-z0-9_]{2,30}$/.test(handle) || X_RESERVED_PATHS.has(handle.toLowerCase())) return null;
+    return handle;
+  } catch {
+    return null;
+  }
+}
+
 // src/lib/decisionBoundary.ts
 var CAP_BOUNDARIES = {
   honeypot_confirmed: {
@@ -1322,9 +1360,8 @@ function band(score) {
   return score >= 70 ? "PASS" : score >= 40 ? "CAUTION" : "FAIL";
 }
 function handleFromUrl(url) {
-  if (!url) return null;
-  const m = url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i);
-  return m ? "@" + m[1].toLowerCase() : null;
+  const handle = officialXProfileHandle(url);
+  return handle ? "@" + handle.toLowerCase() : null;
 }
 var isBurnAddr = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
 var isBurnTag = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");

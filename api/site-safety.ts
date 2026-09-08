@@ -11,6 +11,7 @@
 //      off-domain redirect (cloaking), a stub/redirector page, and drainer-kit
 //      / seed-phrase phishing signatures in the returned HTML. Catches fresh
 //      drainers no blocklist has indexed yet.
+import { fetchPublicText } from "./_collector.js";
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
@@ -48,7 +49,8 @@ async function goplusPhishing(url: string): Promise<boolean | null> {
     const r = await fetch(`https://api.gopluslabs.io/api/v1/phishing_site?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null;
     const d = (await r.json()) as { result?: { phishing_site?: unknown } };
-    return d.result?.phishing_site === 1;
+    const value = d.result?.phishing_site;
+    return value === 1 || value === "1" ? true : value === 0 || value === "0" ? false : null;
   } catch { return null; }
 }
 
@@ -112,19 +114,20 @@ export function drainerHit(body: string): boolean {
   return !!weak && new Set(weak.map((s) => s.toLowerCase())).size >= 2;
 }
 
-async function pageHeuristics(url: string, wantHost: string): Promise<{ flags: string[]; finalHost: string | null }> {
+async function pageHeuristics(url: string, wantHost: string): Promise<{ flags: string[]; finalHost: string | null; checked: boolean; reason?: string }> {
   const flags: string[] = [];
   try {
-    const r = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(9000), headers: { "user-agent": "Mozilla/5.0 ARGUS-safety" } });
+    const r = await fetchPublicText(url);
+    if (r.status !== "ok") return { flags, finalHost: null, checked: false, reason: r.reason };
     const finalHost = host(r.url);
     if (finalHost && regDomain(finalHost) !== regDomain(wantHost)) {
       flags.push(`redirects off-domain to ${finalHost} - a token site that bounces you to another domain is a common cloaking/drainer pattern`);
     }
-    const body = (await r.text()).slice(0, 200_000);
+    const body = r.text.slice(0, 200_000);
     if (drainerHit(body)) flags.push("the page asks for wallet secrets / shows drainer-style phishing copy (private key, seed/recovery phrase, or 'verify wallet' prompts)");
     if (body.replace(/\s+/g, "").length < 400 && /location|redirect|window\.open/i.test(body)) flags.push("the linked site is a near-empty redirector stub, not a real project site");
-  } catch { /* unreachable = its own weak signal, handled by caller */ }
-  return { flags, finalHost: null };
+    return { flags, finalHost, checked: true };
+  } catch { return { flags, finalHost: null, checked: false, reason: "page_fetch_failed" }; }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -144,11 +147,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (uh) { flags.push("Host appears on the URLhaus malware feed"); sources.push("URLhaus"); }
   flags.push(...page.flags);
 
+  const checked = [gsb !== null ? "Google Safe Browsing" : null, gp !== null ? "GoPlus" : null, uh !== null ? "URLhaus" : null, page.checked ? "page" : null].filter(Boolean);
+  const unavailable = [...(process.env.GOOGLE_SAFE_BROWSING_KEY && gsb === null ? ["Google Safe Browsing"] : []), ...(gp === null ? ["GoPlus"] : []), ...(uh === null ? ["URLhaus"] : []), ...(!page.checked ? [`page: ${page.reason ?? "unavailable"}`] : [])];
   const blocklisted = !!(gsb || gp || uh);
   const verdict = blocklisted ? "malicious"
     : page.flags.length ? "suspicious"
-    : (gsb === null && gp === null && uh === null) ? "unknown"
+    : unavailable.length > 0 ? "unknown"
     : "clean";
 
-  res.status(200).json({ available: true, url, host: h, verdict, flags, sources, gsbConfigured: !!process.env.GOOGLE_SAFE_BROWSING_KEY });
+  res.status(200).json({ available: true, url, host: h, verdict, flags, sources, checked, unavailable, checkedAt: new Date().toISOString(), gsbConfigured: !!process.env.GOOGLE_SAFE_BROWSING_KEY });
 }

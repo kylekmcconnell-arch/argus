@@ -562,7 +562,12 @@ function RoleCard({ rr, governing, scoreState }: { rr: RoleReport; governing: bo
             {governing && <span className="chip">score used</span>}
           </div>
           <div className="mt-1 flex items-center gap-2">
-            <VerdictPill verdict={rr.verdict} />
+            <VerdictPill verdict={rr.score_coverage?.provisional && rr.verdict !== "AVOID" && rr.verdict !== "UNVERIFIABLE_IDENTITY" && rr.score_total !== null ? "PROVISIONAL" : rr.verdict} />
+            {rr.score_coverage?.provisional && (
+              <span className="mono text-[11px] text-ink-dim">
+                {rr.score_coverage.assessedAxes} of {rr.score_coverage.totalAxes} areas assessed
+              </span>
+            )}
             {!coverageReady && rr.verdict === "PASS" && (
               <span className="mono text-[11px] font-medium uppercase tracking-wide text-caution">
                 {provisional ? "checks still open" : "score not ready"}
@@ -2053,6 +2058,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const presentation = presentPublicReport({
     verdict: report.composite_verdict,
     score: report.governing_score,
+    scoreCoverage: report.score_coverage,
     completeness: presentationCompleteness,
     readiness: {
       status: readiness.status,

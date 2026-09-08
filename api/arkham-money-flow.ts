@@ -211,7 +211,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const chain = chainName(typeof req.query.chain === "string" ? req.query.chain : "");
   if (!address || address.length < 8) { res.status(400).json({ error: "address required" }); return; }
 
-  const cacheKey = `arkham-money-flow:${chain ?? "all"}:${providerAddressKey(address)}:v1`;
+  const cacheKey = `arkham-money-flow:${chain ?? "all"}:${providerAddressKey(address)}:v2`;
   const cached = await cacheGetJson<MoneyFlowStory>(cacheKey);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
@@ -251,8 +251,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       get(`${FLOW}${encodeURIComponent(address)}${chainQuery}`),
       get(`${TRANSFERS}?${transferQuery.toString()}`),
     ]);
-    if (!flow && !transfers) {
-      res.status(200).json({ available: false, note: "Arkham money-flow lookup failed." });
+    if (!flow || !transfers) {
+      res.status(200).json({ available: false, note: "Arkham money-flow coverage is partial or unavailable.", coverage: { flow: flow != null, transfers: transfers != null } });
       return;
     }
     const output: MoneyFlowStory = {

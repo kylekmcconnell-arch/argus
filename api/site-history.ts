@@ -1,3 +1,4 @@
+import { fetchPublicText } from "./_collector.js";
 // Deleted-content archaeology. GET /api/site-history?url=<domain>
 //
 // What a project REMOVED from its site is the highest-signal content there is: a
@@ -48,14 +49,9 @@ function seedFor(domain: string) {
   return s ? { domain, available: true, comparedTo: "archive", lastArchived: "", cached: true, ...s } : null;
 }
 
-async function getText(url: string, ms: number, ua?: string): Promise<string | null> {
-  try {
-    const r = await fetch(url, { signal: AbortSignal.timeout(ms), headers: ua ? { "user-agent": ua } : undefined });
-    if (!r.ok) return null;
-    return await r.text();
-  } catch {
-    return null;
-  }
+async function getText(url: string, _ms: number, _ua?: string): Promise<string | null> {
+  const result = await fetchPublicText(url);
+  return result.status === "ok" ? result.text : null;
 }
 
 interface Snap { timestamp: string; original: string }
@@ -234,7 +230,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const lastYear = newest?.timestamp.slice(0, 4) ?? "";
-    if (!earliest || !current) { res.status(200).json({ domain, available: true, note: "Could not fetch enough page content to diff." }); return; }
+    if (!earliest || !current) { res.status(200).json({ domain, available: false, note: "Could not fetch enough page content to diff." }); return; }
 
     const removedSections = diff(earliest.sections, current.sections);
     const removedHeadings = diff(earliest.headings, current.headings).slice(0, 12);

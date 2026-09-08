@@ -145,7 +145,7 @@ describe("Open Graph report presentation", () => {
     const text = renderedText(ogCapture.element);
 
     expect(response.status).toBe(200);
-    expect(text).toContain("INCOMPLETE");
+    expect(text).toContain("PROVISIONAL");
     expect(text).not.toContain("VERDICT PASS");
     expect(String(fetchMock.mock.calls[3]?.[0])).toContain("select=state,stale_at,metadata");
   });

@@ -28,6 +28,7 @@ import {
   GapInvestigationAuthorizationError,
   type AuthorizedResearchScope,
 } from "../src/lib/gapInvestigation.js";
+import { gapInvestigationReserves } from "../src/lib/investigationRuntime.js";
 import type { Dossier } from "../src/data/dossier.js";
 import type { TraceStep } from "../src/data/evidence.js";
 import type { RunnableTokenInput } from "../src/lib/resolveInput.js";
@@ -373,6 +374,7 @@ async function authorizeAndExecute(
         organizationId: auth.organizationId,
         intent: savedIntent(payload),
         analystDeadlineAt: startedAt + scope.timeBudgetSeconds * 1_000 - 30_000,
+        ...gapInvestigationReserves(scope.timeBudgetSeconds),
         authorizedResearchScope: {
           taskIds: scope.taskIds,
           capabilities: scope.capabilities,

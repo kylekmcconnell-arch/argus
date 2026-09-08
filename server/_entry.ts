@@ -7,3 +7,5 @@ export { runAudit } from "./orchestrate";
 export { auditToken } from "../src/token/audit";
 export { collectSocialActivity } from "./socialActivity";
 export { resolveInput } from "../src/lib/resolveInput";
+
+export { fetchPublicText, fetchPublicAssetHash } from "./publicWeb";

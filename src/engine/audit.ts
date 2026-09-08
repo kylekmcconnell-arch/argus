@@ -54,6 +54,15 @@ export interface AxisLineage {
   gaps?: string[];
 }
 
+export interface ScoreCoverage {
+  assessedAxes: number;
+  totalAxes: number;
+  assessedWeight: number;
+  totalWeight: number;
+  missingAxes: string[];
+  provisional: boolean;
+}
+
 export interface RoleReport {
   role: string;
   verdict: string;
@@ -66,6 +75,7 @@ export interface RoleReport {
   axis_applicability?: Record<string, TokenApplicabilitySnapshot>;
   /** Maximum applicable weighted points before normalization to 100. */
   applicable_weight?: number;
+  score_coverage?: ScoreCoverage;
 }
 
 export type EvidenceOrigin = "deterministic" | "model_lead" | "human_verified";
@@ -308,6 +318,7 @@ export interface Associate extends EvidenceProvenance {
 }
 
 export interface AuditReport {
+  score_coverage?: ScoreCoverage;
   audit_id: string;
   handle: string;
   roles: string[];
@@ -718,28 +729,6 @@ export class Audit {
         : undefined;
       const applicableWeight = expectedAxes.reduce((sum, axis) =>
         sum + (getProfile(role).axes[axis] ?? 0), 0);
-      const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
-      if (!complete || Object.keys(axes).length !== expectedAxes.length) {
-        roleReports.push({
-          role,
-          verdict: "INCOMPLETE",
-          raw_total: null,
-          score_total: null,
-          cap_applied: null,
-          dox_bonus: doxBonus,
-          axes,
-          ...(axisApplicability ? { axis_applicability: axisApplicability } : {}),
-          applicable_weight: applicableWeight,
-        });
-        continue;
-      }
-      const earnedPoints = Object.values(axes).reduce((a, x) => a + x.score, 0);
-      // Project axes are weighted to 100 in the full methodology. When a
-      // frozen applicability decision removes P3, normalize the five remaining
-      // axes over their 80 applicable points. Token absence therefore neither
-      // rewards nor penalizes the project.
-      const raw = Math.round(applicableWeight > 0 ? (earnedPoints / applicableWeight) * 100 : 0);
-      const base = raw + doxBonus;
       const caps = effectiveCaps(role);
       const triggered: [number, string][] = [
         ...this.roleCapsTriggered(role).map((k) => [caps[k], k] as [number, string]),
@@ -748,9 +737,41 @@ export class Audit {
 
       let ceiling: number | null = null;
       let applied: string | null = null;
-      let total: number;
       if (triggered.length) {
         [ceiling, applied] = triggered.reduce((m, c) => (c[0] < m[0] ? c : m));
+      }
+      const provisionalToken = role === SubjectClass.PROJECT
+        && this.tokenApplicability?.axisTreatment === "provisional";
+      if (provisionalToken) delete axes.P3_token_conduct;
+      const assessedAxes = expectedAxes.filter((axis) => axes[axis] && Number.isFinite(axes[axis].score));
+      const assessedWeight = assessedAxes.reduce((sum, axis) => sum + getProfile(role).axes[axis], 0);
+      const missingAxes = expectedAxes.filter((axis) => !assessedAxes.includes(axis));
+      const provisional = missingAxes.length > 0 || provisionalToken;
+      const scoreCoverage: ScoreCoverage = {
+        assessedAxes: assessedAxes.length, totalAxes: expectedAxes.length,
+        assessedWeight, totalWeight: applicableWeight, missingAxes, provisional,
+      };
+      if (assessedWeight === 0) {
+        roleReports.push({
+          role,
+          verdict: this.identityBlocks() ? "UNVERIFIABLE_IDENTITY"
+            : applied && ceiling! <= 10 ? "AVOID" : "INCOMPLETE",
+          raw_total: null, score_total: null, cap_applied: applied,
+          dox_bonus: 0, axes, score_coverage: scoreCoverage,
+          ...(axisApplicability ? { axis_applicability: axisApplicability } : {}),
+          applicable_weight: applicableWeight,
+        });
+        continue;
+      }
+      // Unknown axes are neither zeros nor positive evidence. Normalize only
+      // assessed weighted points and publish the denominator alongside the score.
+      const earnedPoints = assessedAxes.reduce((sum, axis) => sum + axes[axis].score, 0);
+      const raw = Math.round((earnedPoints / assessedWeight) * 100);
+      const appliedBonus = provisional ? 0 : doxBonus;
+      const base = raw + appliedBonus;
+
+      let total: number;
+      if (ceiling !== null) {
         total = Math.min(base, ceiling);
       } else {
         total = Math.min(100, base);
@@ -772,7 +793,8 @@ export class Audit {
         role,
         axes,
         raw_total: raw,
-        dox_bonus: doxBonus,
+        dox_bonus: appliedBonus,
+        score_coverage: scoreCoverage,
         cap_applied: applied,
         score_total: published,
         verdict,
@@ -786,8 +808,10 @@ export class Audit {
     let govRole: string | null = null;
     let govScore: number | null = null;
     let govCap: string | null = null;
-    if (scored.length === roleReports.length && roleReports.length > 0) {
-      const governing = scored.reduce((current, candidate) => {
+    const blocking = scored.filter((role) => role.verdict === "AVOID" || role.verdict === "UNVERIFIABLE_IDENTITY");
+    const candidates = blocking.length ? blocking : scored;
+    if (candidates.length > 0) {
+      const governing = candidates.reduce((current, candidate) => {
         const candidateSeverity = SEVERITY[candidate.verdict];
         const currentSeverity = SEVERITY[current.verdict];
         if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity ? candidate : current;
@@ -807,7 +831,18 @@ export class Audit {
       govCap = governing.cap_applied;
     }
 
+    const scoreCoverage: ScoreCoverage = {
+      assessedAxes: roleReports.reduce((sum, role) => sum + (role.score_coverage?.assessedAxes ?? 0), 0),
+      totalAxes: roleReports.reduce((sum, role) => sum + (role.score_coverage?.totalAxes ?? 0), 0),
+      assessedWeight: roleReports.reduce((sum, role) => sum + (role.score_coverage?.assessedWeight ?? 0), 0),
+      totalWeight: roleReports.reduce((sum, role) => sum + (role.score_coverage?.totalWeight ?? 0), 0),
+      missingAxes: roleReports.flatMap((role) => role.score_coverage?.missingAxes ?? []),
+      provisional: roleReports.some((role) => role.score_coverage?.provisional),
+    };
+    if (scoreCoverage.provisional && govScore !== null && !blocking.length) composite = "PROVISIONAL";
+
     const report: AuditReport = {
+      score_coverage: scoreCoverage,
       audit_id: this.audit_id,
       handle: this.handle,
       roles: this.roles,

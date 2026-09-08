@@ -42,3 +42,5 @@ export function providerStatus(): Array<{
   feeds: string;
   configured: boolean;
 }>;
+
+export { fetchPublicText, fetchPublicAssetHash } from "../server/publicWeb";

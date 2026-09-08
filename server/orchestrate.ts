@@ -1,3 +1,4 @@
+import { withWallClockBox } from "./boundedProvider";
 // The collector orchestrator: @handle -> populated evidence -> verdict.
 //
 // Strategy (hybrid, honest):
@@ -229,15 +230,6 @@ const SECURITY_AUDITS_BUDGET_MS = 45_000;
 // request count and tries the configured fallback only when a block-consistent
 // capture cannot be completed on the first endpoint.
 const EVM_CONTROL_RPC_TIMEOUT_MS = 2_500;
-const withWallClockBox = <T>(work: Promise<T>, budgetMs: number): Promise<T | null> =>
-  Promise.race([
-    work,
-    new Promise<null>((resolve) => {
-      const timer = setTimeout(() => resolve(null), budgetMs);
-      // Do not hold the event loop open for the box itself.
-      if (typeof timer === "object" && "unref" in timer) timer.unref();
-    }),
-  ]);
 
 const VERIFIED_EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 
@@ -2155,9 +2147,9 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // investing (vocabulary was the only investor evidence), the fund
   // methodology is the wrong lens and would starve the scan into INCOMPLETE.
   if (roles.has(SubjectClass.INVESTOR)) {
-    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null) && !investorBeyondBio) {
+    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null || projectBound) && !investorBeyondBio) {
       roles.delete(SubjectClass.INVESTOR);
-    } else if (!evidence.projectToken?.verified) {
+    } else if (!evidence.projectToken?.verified && !projectBound) {
       roles.delete(SubjectClass.PROJECT);
     }
   }
@@ -2849,6 +2841,7 @@ const PROJECT_TRANSPARENCY_FACT_PREDICATES = new Set([
 export interface ProjectCoreEvidenceOutcomeOptions {
   /** A disclosure search completed and explicitly returned no candidate facts. */
   transparencySearchExplicitlyEmpty?: boolean;
+  basicFactsCompleted?: boolean;
 }
 
 /**
@@ -2921,8 +2914,8 @@ export function collectProjectCoreEvidenceOutcomes(
       || ctx.evidence.profile.site_substance_status === "live";
     ctx.recordCheck?.({
       id: "project-backing-partners",
-      status: assessable ? "finding" : "checked-empty",
-      note: assessable
+      status: options.basicFactsCompleted === false ? "unavailable" : assessable ? "finding" : "checked-empty",
+      note: options.basicFactsCompleted === false ? "The backing search did not complete; collected material does not establish absence." : assessable
         ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified funding, investor, advisor, counterparty, or operating-partner evidence appears. Project-only partnership claims and model-only leads were excluded. This is a null result on this axis, not adverse evidence."
         : "bounded scan of up to 32 frozen first-party team and account records found no verified funding, investor, advisor, counterparty, or operating-partner evidence; project-only partnership claims and model-only leads were excluded",
       provider: "project-core-evidence",
@@ -2957,11 +2950,11 @@ export function collectProjectCoreEvidenceOutcomes(
       note: "bounded disclosure search completed with an explicit no-match; no source-linked legal, governance, token-economic, repository, or security disclosure candidate was returned",
       provider: "basic-facts-web",
     });
-  } else if (
+  } else if (options.basicFactsCompleted !== false && (
     (ctx.evidence.basicFacts ?? []).length > 0
     || (ctx.evidence.webTeam ?? []).length > 0
     || ctx.evidence.profile.site_substance_status === "live"
-  ) {
+  )) {
     ctx.recordCheck?.({
       id: "project-transparency",
       status: "finding",
@@ -3349,20 +3342,21 @@ export async function adverseSignalsAndTooling(
   const gap = unanswered
     ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.`
     : "";
-  if (totalSigs || toolingLeads) {
+  if (!subjectScreen.completed) {
+    record({
+      id: "adverse-screen",
+      status: "unavailable",
+      note: `The subject's own adverse search returned no readable answer. ${answered} of ${screens.length} target searches completed, but related targets cannot clear the unscreened subject. ${totalSigs + toolingLeads} candidate leads were retained for follow-up.${gap}`,
+      provider: "adverse-sweep",
+    });
+
+  } else if (totalSigs || toolingLeads) {
     record({
       id: "adverse-screen",
       status: "finding",
       note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: ${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}${toolingLeads ? ` and ${toolingLeads} manipulation-tooling lead${toolingLeads === 1 ? "" : "s"}` : ""} surfaced. Each is an unverified candidate source for follow-up, not a verified finding.${gap}`,
       provider: "adverse-sweep",
       sourceCount: totalSigs + toolingLeads,
-    });
-  } else if (!answered) {
-    record({
-      id: "adverse-screen",
-      status: "unavailable",
-      note: `the model search returned no readable answer for any of the ${screens.length} adverse-screen target${screens.length === 1 ? "" : "s"}, so no rug, scam, or drain search was completed`,
-      provider: "adverse-sweep",
     });
   } else {
     record({
@@ -3722,6 +3716,9 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
 interface RunAuditOptions {
   organizationId?: string;
   analystDeadlineAt?: number;
+  /** Server-derived reserves for authorized bounded follow-ups. */
+  collectionReserveMs?: number;
+  graphScreenReserveMs?: number;
   intent?: ResearchIntent;
   /** Server-derived from one frozen saved plan. Never accept these values directly from a browser. */
   authorizedResearchScope?: {
@@ -3843,14 +3840,15 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // than mid-run, so no in-flight adapter is abandoned while it mutates evidence.
   const analystDeadlineAt = options?.analystDeadlineAt
     ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000 - ANALYST_FINALIZATION_RESERVE_MS;
-  const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
+  const collectionDeadlineAt = analystDeadlineAt - (options?.collectionReserveMs ?? COLLECTION_ANALYST_RESERVE_MS);
   const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
   // The never-waive trust-graph screen runs AFTER general collection stops, in a
   // dedicated window carved from the reserve. General adapters halt at
   // collectionDeadlineAt; the bounded graph screen may still run until here, so a
   // high-connectivity subject's flagged-subject screen is recorded instead of
-  // skipped. Still leaves ANALYST_SCORING_TIMEOUT_MS before analystDeadlineAt.
-  const graphScreenDeadlineAt = collectionDeadlineAt + TRUST_GRAPH_SCREEN_RESERVE_MS;
+  // skipped. Full scans retain the full analyst window; bounded gap scans
+  // explicitly share their shorter budget with the deadline-aware scorer.
+  const graphScreenDeadlineAt = collectionDeadlineAt + (options?.graphScreenReserveMs ?? TRUST_GRAPH_SCREEN_RESERVE_MS);
   const graphScreenOverBudget = () => Date.now() >= graphScreenDeadlineAt;
   const startRuntimeStage = (stage: string) => {
     const stageStartedAt = Date.now();
@@ -4006,7 +4004,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   };
 
   const projectTokenPass = async () => {
-    const providers = ["coingecko", "dexscreener", "geckoterminal"] as const;
+    const providers = ["coingecko", "dexscreener", "geckoterminal", "site-fetch"] as const;
     const before = attemptTotals(providers);
     try {
       const result = await collectProjectTokenIdentity(ctx);
@@ -4217,13 +4215,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         {
           const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
           const auditsResult = await withWallClockBox(
-            collectSecurityAudits(
+            (fetcher) => collectSecurityAudits(
               projectName,
-              evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
+              evidence.projectToken!.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
               auditLinks.available ? auditLinks.value.auditLinks : [],
-              { canonicalContractAddress: evidence.projectToken.address },
+              { canonicalContractAddress: evidence.projectToken!.address, fetcher },
             ),
-            SECURITY_AUDITS_BUDGET_MS,
+            Math.min(SECURITY_AUDITS_BUDGET_MS, collectionDeadlineAt - Date.now()),
           );
           if (auditsResult?.available) {
             evidence.securityAudits = {
@@ -4259,11 +4257,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           if (companyLookup) {
             const sections = projectCompanyEnrichmentSections(evidence);
             const enrichment = await withWallClockBox(
-              collectProjectCompanyEnrichment(companyLookup, {
+              (fetcher) => collectProjectCompanyEnrichment(companyLookup, {
+                fetcher,
                 sections,
                 officialName: projectName,
               }),
-              MONID_ENRICHMENT_BUDGET_MS,
+              Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now()),
             );
             if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, companyLookup)) {
               evidence.companyEnrichment = { ...enrichment.value };
@@ -4673,11 +4672,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       const sections = projectCompanyEnrichmentSections(evidence);
       const enrichment = sections.length
         ? await withWallClockBox(
-            collectProjectCompanyEnrichment(recoveredCompanyLookup, {
+            (fetcher) => collectProjectCompanyEnrichment(recoveredCompanyLookup!, {
+              fetcher,
               sections,
               officialName: evidence.profile.resolved_name ?? evidence.profile.display_name,
             }),
-            MONID_ENRICHMENT_BUDGET_MS,
+            Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now()),
           )
         : null;
       if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, recoveredCompanyLookup)) {
@@ -4715,11 +4715,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       try {
         const enrichment = primaryVenture.domain
           ? await withWallClockBox(
-              collectProjectCompanyEnrichment(primaryVenture.domain, {
+              (fetcher) => collectProjectCompanyEnrichment(primaryVenture.domain!, {
+                fetcher,
                 sections: ["funding_detail", "firmographic"],
                 officialName: primaryVenture.project_name.trim(),
               }),
-              MONID_ENRICHMENT_BUDGET_MS,
+              Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now()),
             )
           : null;
         if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, primaryVenture.domain)) {
@@ -4924,6 +4925,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // allowed to complete transparency.
   try {
     const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx, {
+      basicFactsCompleted: adapterResults.get("basic-facts")?.state === "executed",
       transparencySearchExplicitlyEmpty: adapterResults
         .get("basic-facts")
         ?.explicitEmptyChecks
@@ -5470,6 +5472,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // axis set is still a useful report, but it must remain partial and cannot
   // poison later trust-graph reconciliation with an INCOMPLETE verdict.
   dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE"
+    || dossier.report.score_coverage?.provisional === true
+    || dossier.report.role_reports.some((role) => role.raw_total === null)
     ? "partial"
     : checkCompleteness;
   // "Since last scan": one bounded read of the prior persisted outcome so a

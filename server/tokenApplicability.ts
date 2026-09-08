@@ -98,17 +98,6 @@ export function deriveTokenApplicability(
     };
   }
 
-  if (PRELAUNCH_TOKEN.test(prelaunchText(evidence))) {
-    evidenceLines.push("A bound first-party source describes a token as planned or not yet live.");
-    if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
-    return {
-      state: "prelaunch_token_deferred",
-      axisTreatment: "deferred",
-      reason: "The project describes a future token, but no live token conduct surface exists yet; P3 is deferred without penalty.",
-      evidence: evidenceLines,
-      determinedAt,
-    };
-  }
 
   const unresolvedLine = unresolvedCandidateLine(evidence);
   if (!tokenCheck || !completed(tokenCheck.status) || unresolvedLine) {
@@ -119,6 +108,18 @@ export function deriveTokenApplicability(
       axisTreatment: "provisional",
       reason: "Token identity did not reach a completed, attributable result, so the project verdict remains provisional.",
       evidence: evidenceLines.length ? evidenceLines : ["No completed project-token identity result was frozen."],
+      determinedAt,
+    };
+  }
+
+  if (PRELAUNCH_TOKEN.test(prelaunchText(evidence))) {
+    evidenceLines.push("A bound first-party source describes a token as planned or not yet live.");
+    if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
+    return {
+      state: "prelaunch_token_deferred",
+      axisTreatment: "deferred",
+      reason: "The project describes a future token, but no live token conduct surface exists yet; P3 is deferred without penalty.",
+      evidence: evidenceLines,
       determinedAt,
     };
   }

@@ -39,3 +39,5 @@ export function ledgerRecentAlerts(limit?: number): Promise<ThreatAlert[]>;
 export function ledgerGetAlert(address: string): Promise<ThreatAlert | null>;
 export function ledgerRecordHolderEdges(token: string, symbol: string | null, verdict: string | null, wallets: string[]): Promise<boolean>;
 export function ledgerWalletReputation(wallets: string[]): Promise<Record<string, { held: number; dead: number; deadSymbols: string[] }>>;
+
+export function withLedgerOrganization<T>(organizationId: string, work: () => Promise<T>): Promise<T>;

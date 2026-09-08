@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
+  fetchPublicAssetHash,
   fetchPublicText,
   fetchPublicTextWithRecovery,
   fetchCompatibleResponseStatus,
@@ -548,5 +549,24 @@ describe("public web evidence fetcher", () => {
       request: requestMock,
       lookup: publicLookup,
     })).resolves.toEqual({ status: "failed", reason: "response_stream_error" });
+  });
+});
+
+
+describe("public favicon fingerprints", () => {
+  it.each([0, 1, 120])("does not fingerprint a %i-byte empty or tiny icon", async (size) => {
+    const request = vi.fn(async () => new Response(new Uint8Array(size), { headers: { "content-type": "image/x-icon" } }));
+    expect(await fetchPublicAssetHash("https://example.com/favicon.ico", { request, lookup: publicLookup })).toBeNull();
+  });
+  it("hashes eligible bytes deterministically", async () => {
+    const bytes = new Uint8Array(121).fill(42);
+    const request = vi.fn(async () => new Response(bytes, { headers: { "content-type": "image/x-icon" } }));
+    expect(await fetchPublicAssetHash("https://example.com/favicon.ico", { request, lookup: publicLookup }))
+      .toBe(createHash("sha256").update(bytes).digest("hex"));
+  });
+  it("blocks an icon redirect into a private network", async () => {
+    const request = vi.fn(async () => new Response(null, { status: 302, headers: { location: "http://127.0.0.1/favicon.ico" } }));
+    expect(await fetchPublicAssetHash("https://example.com/favicon.ico", { request, lookup: publicLookup })).toBeNull();
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });
