@@ -4006,7 +4006,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   };
 
   const projectTokenPass = async () => {
-    const providers = ["coingecko", "dexscreener", "geckoterminal"] as const;
+    const providers = ["coingecko", "dexscreener", "geckoterminal", "site-fetch"] as const;
     const before = attemptTotals(providers);
     try {
       const result = await collectProjectTokenIdentity(ctx);

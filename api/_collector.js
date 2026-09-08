@@ -28868,11 +28868,11 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
           recordCall("site-fetch", "token-declaration", 0, `reader_recovery_after_http_${response.status}`, "succeeded");
         } else {
           recordCall("site-fetch", "token-declaration", 0, `http_${response.status} \xB7 ${recovered.reason}`, "failed");
-          return null;
+          return { state: "failed" };
         }
       } else {
         recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
-        return null;
+        return { state: "failed" };
       }
     } else {
       html = (await response.text()).slice(0, 4e5);
@@ -28882,7 +28882,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
     const recovered = await recoverOfficialText(scope.canonicalUrl);
     if (recovered.status !== "ok") {
       recordCall("site-fetch", "token-declaration", 0, `transport_error \xB7 ${recovered.reason}`, "failed");
-      return null;
+      return { state: "failed" };
     }
     html = recovered.text.slice(0, 4e5);
     identityCapturedAt = captureTimestamp();
@@ -28891,12 +28891,12 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
   const candidates = siteContractCandidates(html);
   if (!candidates.length) {
     recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
-    return null;
+    return { state: "empty" };
   }
   const batch = await dexTokenPairs(candidates);
   if (!batch) {
     recordCall("site-fetch", "token-declaration", 0, "candidate_resolution_failed", "failed");
-    return null;
+    return { state: "failed" };
   }
   const pairsByAddress = /* @__PURE__ */ new Map();
   const candidateKeys = new Set(candidates.map(addressKey));
@@ -28910,7 +28910,11 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
     for (const address of candidates) {
       if (pairsByAddress.has(addressKey(address))) continue;
       const pairs = await dexPairs(address);
-      if (pairs && pairs.length) pairsByAddress.set(addressKey(address), pairs);
+      if (!pairs) {
+        recordCall("site-fetch", "token-declaration", 0, "candidate_followup_failed", "failed");
+        return { state: "failed" };
+      }
+      if (pairs.length) pairsByAddress.set(addressKey(address), pairs);
     }
   }
   const capturedAt = captureTimestamp();
@@ -28919,8 +28923,8 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
     return pairs && pairs.length ? [{ address, pairs, capturedAt }] : [];
   });
   if (resolved.length !== 1) {
-    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", "succeeded");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", resolved.length ? "partial" : "succeeded");
+    return { state: resolved.length ? "failed" : "empty" };
   }
   const [only] = resolved;
   const best = [...only.pairs].sort((left, right) => {
@@ -28934,7 +28938,10 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
   const chain = cleanText2(best.chainId);
   const pairAddress = cleanText2(best.pairAddress);
   const pairCreatedAt = finiteNumber2(best.pairCreatedAt);
-  if (!symbol || !chain) return null;
+  if (!symbol || !chain) {
+    recordCall("site-fetch", "token-declaration", 0, "candidate_metadata_incomplete", "failed");
+    return { state: "failed" };
+  }
   const info = isRecord4(best.info) ? best.info : {};
   const priceUsd = finiteNumber2(best.priceUsd);
   const liquidityUsd = isRecord4(best.liquidity) ? finiteNumber2(best.liquidity.usd) : void 0;
@@ -28945,6 +28952,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
   const hasMarketRead = priceUsd !== void 0 || marketCapUsd !== void 0 || fdvUsd !== void 0 || volume24hUsd !== void 0;
   const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: void 0, attempts: 0 };
   return {
+    state: "declared",
     sourceUrl: scope.canonicalUrl,
     snapshot: {
       verified: true,
@@ -28984,17 +28992,20 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
 }
 async function collectSiteDeclaredToken(ctx, fetchImpl = fetch, extraOfficialUrls = [], recoverOfficialText = fetchPublicTextWithRecovery) {
   const scopes = officialWebsiteScopes(ctx, extraOfficialUrls);
-  if (!scopes.length) return null;
+  if (!scopes.length) return { state: "empty" };
   const declared = [];
+  let failed = false;
   for (const scope of scopes) {
     const found = await resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialText);
-    if (found) declared.push(found);
+    if (found.state === "declared") declared.push(found);
+    if (found.state === "failed") failed = true;
   }
-  if (!declared.length) return null;
+  if (failed) return { state: "failed" };
+  if (!declared.length) return { state: "empty" };
   const addresses = new Set(declared.map((row) => row.snapshot.address.toLowerCase()));
   if (addresses.size !== 1) {
-    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "succeeded");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "partial");
+    return { state: "failed" };
   }
   return declared[0];
 }
@@ -29516,7 +29527,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       registryHomepages,
       dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery
     );
-    if (declared && declaredOutcome && !sameAddress(declared.snapshot.address, declaredOutcome.candidate.address)) {
+    if (declared.state === "declared" && declaredOutcome && !sameAddress(declared.snapshot.address, declaredOutcome.candidate.address)) {
       return recordDeclaredConflict(ctx, declaredOutcome, {
         provider: "official_site",
         address: declared.snapshot.address,
@@ -29526,7 +29537,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
         sourceUrl: declared.sourceUrl
       }, attempts + 1);
     }
-    if (declared) {
+    if (declared.state === "declared") {
       ctx.evidence.projectToken = declared.snapshot;
       ctx.recordCheck?.({
         id: "project-token-identity",
@@ -29547,6 +29558,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
     const coinSearchIncomplete = registryQueries.length > 0 && (!search || searchFailures > 0);
     const gaps = [
+      declared.state === "failed" ? "official site token declarations could not be fully resolved" : null,
       contractLookupFailed ? "CoinGecko contract lookup failed" : null,
       coinSearchIncomplete ? !search ? "CoinGecko search failed" : `CoinGecko search failed for ${searchFailures} of ${registryQueries.length} queries` : null,
       coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
@@ -35752,7 +35764,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     }
   };
   const projectTokenPass = async () => {
-    const providers = ["coingecko", "dexscreener", "geckoterminal"];
+    const providers = ["coingecko", "dexscreener", "geckoterminal", "site-fetch"];
     const before = attemptTotals(providers);
     try {
       const result = await collectProjectTokenIdentity(ctx);

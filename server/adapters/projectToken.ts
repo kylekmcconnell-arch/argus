@@ -981,12 +981,16 @@ function officialWebsiteScopes(
   return scopes;
 }
 
+type SiteDeclarationResult =
+  | { state: "declared"; snapshot: ProjectTokenSnapshot; sourceUrl: string }
+  | { state: "empty" | "failed" };
+
 async function resolveSiteDeclaredOnPage(
   ctx: CollectContext,
   scope: OfficialWebsiteScope,
   fetchImpl: typeof fetch,
   recoverOfficialText: (url: string) => Promise<PublicTextWithRecoveryResult>,
-): Promise<{ snapshot: ProjectTokenSnapshot; sourceUrl: string } | null> {
+): Promise<SiteDeclarationResult> {
   let html: string;
   let identityCapturedAt: string;
   try {
@@ -1004,11 +1008,11 @@ async function resolveSiteDeclaredOnPage(
           recordCall("site-fetch", "token-declaration", 0, `reader_recovery_after_http_${response.status}`, "succeeded");
         } else {
           recordCall("site-fetch", "token-declaration", 0, `http_${response.status} · ${recovered.reason}`, "failed");
-          return null;
+          return { state: "failed" };
         }
       } else {
         recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
-        return null;
+        return { state: "failed" };
       }
     } else {
       html = (await response.text()).slice(0, 400_000);
@@ -1018,7 +1022,7 @@ async function resolveSiteDeclaredOnPage(
     const recovered = await recoverOfficialText(scope.canonicalUrl);
     if (recovered.status !== "ok") {
       recordCall("site-fetch", "token-declaration", 0, `transport_error · ${recovered.reason}`, "failed");
-      return null;
+      return { state: "failed" };
     }
     html = recovered.text.slice(0, 400_000);
     identityCapturedAt = captureTimestamp();
@@ -1027,7 +1031,7 @@ async function resolveSiteDeclaredOnPage(
   const candidates = siteContractCandidates(html);
   if (!candidates.length) {
     recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
-    return null;
+    return { state: "empty" };
   }
   // One batched DexScreener read settles which of the page's strings is a
   // token (the endpoint accepts up to 30 addresses). Hashed asset names and
@@ -1035,7 +1039,7 @@ async function resolveSiteDeclaredOnPage(
   const batch = await dexTokenPairs(candidates);
   if (!batch) {
     recordCall("site-fetch", "token-declaration", 0, "candidate_resolution_failed", "failed");
-    return null;
+    return { state: "failed" };
   }
   const pairsByAddress = new Map<string, JsonRecord[]>();
   const candidateKeys = new Set(candidates.map(addressKey));
@@ -1053,7 +1057,11 @@ async function resolveSiteDeclaredOnPage(
     for (const address of candidates) {
       if (pairsByAddress.has(addressKey(address))) continue;
       const pairs = await dexPairs(address);
-      if (pairs && pairs.length) pairsByAddress.set(addressKey(address), pairs);
+      if (!pairs) {
+        recordCall("site-fetch", "token-declaration", 0, "candidate_followup_failed", "failed");
+        return { state: "failed" };
+      }
+      if (pairs.length) pairsByAddress.set(addressKey(address), pairs);
     }
   }
   const capturedAt = captureTimestamp();
@@ -1062,8 +1070,8 @@ async function resolveSiteDeclaredOnPage(
     return pairs && pairs.length ? [{ address, pairs, capturedAt }] : [];
   });
   if (resolved.length !== 1) {
-    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", "succeeded");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", resolved.length ? "partial" : "succeeded");
+    return { state: resolved.length ? "failed" : "empty" };
   }
   const [only] = resolved;
   // Deepest pool represents the token; a dust pair must not name the chain.
@@ -1078,7 +1086,10 @@ async function resolveSiteDeclaredOnPage(
   const chain = cleanText(best.chainId);
   const pairAddress = cleanText(best.pairAddress);
   const pairCreatedAt = finiteNumber(best.pairCreatedAt);
-  if (!symbol || !chain) return null;
+  if (!symbol || !chain) {
+    recordCall("site-fetch", "token-declaration", 0, "candidate_metadata_incomplete", "failed");
+    return { state: "failed" };
+  }
   const info = isRecord(best.info) ? best.info as JsonRecord : {};
   const priceUsd = finiteNumber(best.priceUsd);
   const liquidityUsd = isRecord(best.liquidity) ? finiteNumber(best.liquidity.usd) : undefined;
@@ -1096,6 +1107,7 @@ async function resolveSiteDeclaredOnPage(
   // than depending on a live refresh, exactly as the other binding paths do.
   const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: undefined, attempts: 0 };
   return {
+    state: "declared",
     sourceUrl: scope.canonicalUrl,
     snapshot: {
       verified: true,
@@ -1144,7 +1156,8 @@ async function resolveSiteDeclaredOnPage(
  * Bind the token a project publishes on its OWN verified domains.
  *
  * Walks every first-party official website already bound to this subject,
- * not just profile.website. A page with 0 or >1 tradeable tokens is skipped.
+ * not just profile.website. Empty pages are skipped; unread or ambiguous
+ * pages leave the declaration unresolved.
  * The first page that yields exactly one tradeable token wins unless a later
  * official page declares a different tradeable token (same ambiguity rule
  * as a single page with two tokens).
@@ -1154,20 +1167,24 @@ async function collectSiteDeclaredToken(
   fetchImpl: typeof fetch = fetch,
   extraOfficialUrls: readonly string[] = [],
   recoverOfficialText: (url: string) => Promise<PublicTextWithRecoveryResult> = fetchPublicTextWithRecovery,
-): Promise<{ snapshot: ProjectTokenSnapshot; sourceUrl: string } | null> {
+): Promise<SiteDeclarationResult> {
   const scopes = officialWebsiteScopes(ctx, extraOfficialUrls);
-  if (!scopes.length) return null;
+  if (!scopes.length) return { state: "empty" };
 
-  const declared: Array<{ snapshot: ProjectTokenSnapshot; sourceUrl: string }> = [];
+  const declared: Array<Extract<SiteDeclarationResult, { state: "declared" }>> = [];
+  let failed = false;
   for (const scope of scopes) {
     const found = await resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialText);
-    if (found) declared.push(found);
+    if (found.state === "declared") declared.push(found);
+    if (found.state === "failed") failed = true;
   }
-  if (!declared.length) return null;
+  // An unread scope could declare a different token, so uniqueness is unresolved.
+  if (failed) return { state: "failed" };
+  if (!declared.length) return { state: "empty" };
   const addresses = new Set(declared.map((row) => row.snapshot.address.toLowerCase()));
   if (addresses.size !== 1) {
-    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "succeeded");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "partial");
+    return { state: "failed" };
   }
   // First official page that declared this unique tradeable token wins.
   return declared[0];
@@ -1853,7 +1870,7 @@ export async function collectProjectTokenIdentity(
       registryHomepages,
       dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery,
     );
-    if (declared && declaredOutcome && !sameAddress(declared.snapshot.address, declaredOutcome.candidate.address)) {
+    if (declared.state === "declared" && declaredOutcome && !sameAddress(declared.snapshot.address, declaredOutcome.candidate.address)) {
       return recordDeclaredConflict(ctx, declaredOutcome, {
         provider: "official_site",
         address: declared.snapshot.address,
@@ -1863,7 +1880,7 @@ export async function collectProjectTokenIdentity(
         sourceUrl: declared.sourceUrl,
       }, attempts + 1);
     }
-    if (declared) {
+    if (declared.state === "declared") {
       ctx.evidence.projectToken = declared.snapshot;
       ctx.recordCheck?.({
         id: "project-token-identity",
@@ -1885,6 +1902,7 @@ export async function collectProjectTokenIdentity(
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
     const coinSearchIncomplete = registryQueries.length > 0 && (!search || searchFailures > 0);
     const gaps = [
+      declared.state === "failed" ? "official site token declarations could not be fully resolved" : null,
       contractLookupFailed ? "CoinGecko contract lookup failed" : null,
       coinSearchIncomplete
         ? !search
