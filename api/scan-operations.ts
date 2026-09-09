@@ -68,7 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const receiptUrl = new URL(`${credentials.url}/rest/v1/scan_run_receipts`);
-    receiptUrl.searchParams.set("select", "id,run_key,initiated_by,route,kind,canonical_ref,display_query,private_run,status,credits_charged_millis,report_version_id,provider_cost_usd,cost_basis,started_at,finished_at,duration_ms,failure_code,failure_detail");
+    receiptUrl.searchParams.set("select", "id,run_key,initiated_by,route,kind,canonical_ref,display_query,private_run,status,credits_charged_millis,report_version_id,provider_cost_usd,cost_basis,started_at,finished_at,duration_ms,failure_code,failure_detail,metadata");
     receiptUrl.searchParams.set("organization_id", `eq.${auth.organizationId}`);
     receiptUrl.searchParams.set("order", "started_at.desc,id.desc");
     receiptUrl.searchParams.set("limit", String(limit));
@@ -78,7 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const [versions, usage, checks, members] = await Promise.all([
       versionIds.length
-        ? rows(`${credentials.url}/rest/v1/report_versions?select=id,case_id,version,completeness_state,verdict,score,created_at&organization_id=eq.${encodeURIComponent(auth.organizationId)}&id=${inFilter(versionIds)}`, credentials.key)
+        ? rows(`${credentials.url}/rest/v1/report_versions?select=id,case_id,version,completeness_state,verdict,score,created_at,methodology_version&organization_id=eq.${encodeURIComponent(auth.organizationId)}&id=${inFilter(versionIds)}`, credentials.key)
         : Promise.resolve([]),
       versionIds.length
         ? rows(`${credentials.url}/rest/v1/provider_usage_events?select=id,report_version_id,provider,operation,calls,usd,status,meta,created_at&organization_id=eq.${encodeURIComponent(auth.organizationId)}&report_version_id=${inFilter(versionIds)}&order=created_at.asc,id.asc&limit=${EVENT_PAGE_LIMIT}`, credentials.key)
@@ -180,6 +180,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return {
         id: text(receipt.id, 36),
         runKey: text(receipt.run_key, 220),
+        deployment: text(asRecord(receipt.metadata).deployment, 80) || null,
+        methodology: text(version?.methodology_version, 100) || text(asRecord(receipt.metadata).methodology, 100) || null,
         route: text(receipt.route, 160),
         kind: text(receipt.kind, 30),
         ref: text(receipt.canonical_ref, 500),

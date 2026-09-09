@@ -139,8 +139,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Bank the holder -> token edges (fire-and-forget) so wallet reputation
   // compounds from now, and read back any prior track record for these holders.
   const holderAddrs = holders.map((h) => h);
-  void ledgerRecordHolderEdges(address, symbol, verdict, holderAddrs).catch(() => {});
-  const repMap = await ledgerWalletReputation(holderAddrs).catch(() => ({}));
+  void ledgerRecordHolderEdges(address, symbol, verdict, holderAddrs, chain).catch(() => {});
+  const repMap = await ledgerWalletReputation(holderAddrs, chain).catch(() => ({}));
   const repd = Object.values(repMap as Record<string, { held: number; dead: number }>);
   const reputation = {
     holdersWithHistory: repd.filter((r) => r.held > 0).length,

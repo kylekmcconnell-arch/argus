@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Direct team-page reader. Grok's web search summarizes; it can miss the one page
 // that matters — the project's own /team roster (e.g. docs.vulcanforged.com/team).
 // This fetches the likely team/about pages directly, strips them to text, and has
@@ -22,10 +23,10 @@ const normalizedApex = (domain: string) =>
  */
 async function fetchWithOneRetry(url: string, init: () => RequestInit): Promise<Response> {
   try {
-    return await fetch(url, init());
+    return await deadlineFetch(url, init());
   } catch {
     await new Promise((resolve) => setTimeout(resolve, 600));
-    return fetch(url, init());
+    return deadlineFetch(url, init());
   }
 }
 
@@ -764,7 +765,7 @@ async function discoverFounderAuthoredForumUrls(domain: string, verifiedTeam: Te
   const hosts = [`discuss.${apex}`, `forum.${apex}`];
   const results = await Promise.all(hosts.flatMap((host) => searches.map(async (query) => {
     try {
-      const response = await fetch(`https://${host}/search.json?q=${encodeURIComponent(query)}`, {
+      const response = await deadlineFetch(`https://${host}/search.json?q=${encodeURIComponent(query)}`, {
         headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "application/json" },
         redirect: "follow",
         signal: AbortSignal.timeout(8000),

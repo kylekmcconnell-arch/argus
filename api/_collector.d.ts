@@ -24,14 +24,14 @@ export function runAudit(
 export function auditToken(
   input: RunnableTokenInput,
   emit?: (step: TraceStep) => void,
-  options?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
+  options?: { chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
 ): Promise<TokenDossier | null>;
 
 export function collectSocialActivity(identity: {
   handle: string;
   ticker?: string | null;
   projectName?: string | null;
-}): Promise<SocialActivitySnapshot>;
+}, options?: { fetchImpl?: typeof fetch; deadlineAt?: number }): Promise<SocialActivitySnapshot>;
 
 export function resolveInput(raw: string): ResolvedInput;
 

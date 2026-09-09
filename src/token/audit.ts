@@ -19,14 +19,14 @@ import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
 import { classifyMarketAddress } from "../lib/marketAddresses";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
 import {
-  dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
+  dexByPairResult, dexByTokenResult, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
   GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource, rugcheckReport,
   largestInsiderClusterPercent, hasCompleteGoplusTradeability,
   type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo, type ExplorerHolder,
   type ExplorerContractSource, type RugcheckReport,
 } from "./sources";
 
-export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string }
+export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string; assessed?: boolean; nominalWeight?: number }
 export interface Holder { address: string; percent: number; tag?: string; isContract?: boolean }
 
 export interface NormalizedSafety {
@@ -34,6 +34,8 @@ export interface NormalizedSafety {
   /** Whether a contract-property provider answered. A successful trade
    * simulation alone cannot establish mint, ownership, or source-code state. */
   contractPropertiesAssessed?: boolean;
+  taxesAssessed?: boolean;
+  holderCountAssessed?: boolean;
   simChecked: boolean;
   /** Whether tradeability received a definitive recorded outcome. A supported
    * simulation is strongest; observed two-sided market activity is a bounded
@@ -126,6 +128,7 @@ export function deployerRoleLabel(
 }
 
 export interface TokenDossier {
+  cost?: import("../data/dossier").Dossier["cost"];
   address: string; chain: string; dexId: string; dexLabels?: string[]; pairAddress?: string; symbol: string; name: string;
   imageUrl?: string; priceUsd?: number; mcap?: number; fdv?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
   /** Which headline market fields DexScreener actually returned. Older frozen
@@ -154,6 +157,7 @@ export interface TokenDossier {
   priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
   /** Frozen GeckoTerminal series captured during the scan for snapshot-safe rendering. */
   priceHistory?: PriceHistory;
+  assessment?: { assessedWeight: number; applicableWeight: number; provisional: boolean; gaps: string[] };
   verdict: string; score: number | null; capApplied: string | null; headline: string;
   axes: TokenAxis[];
   safety: NormalizedSafety;
@@ -222,6 +226,8 @@ export interface SanctionsScreenOutcome {
 export type ScreenSanctionsFn = (
   chain: string,
   addresses: readonly (string | null | undefined)[],
+  fetchImpl?: typeof fetch,
+  signal?: AbortSignal,
 ) => Promise<SanctionsScreenOutcome | undefined>;
 
 // Arkham risk-path exposure recorded for the deployer wallet at scan time: who
@@ -261,7 +267,7 @@ export type CollectTokenSocialActivityFn = (identity: {
   ticker: string;
   projectName: string;
   contractAddress?: string;
-}) => Promise<SocialActivitySnapshot>;
+}, options?: { fetchImpl?: typeof fetch; deadlineAt?: number }) => Promise<SocialActivitySnapshot>;
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
@@ -432,8 +438,10 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
   const creatorShare = num(gp?.creator_percent);
   return {
-    available: !!gp || !!s,
-    contractPropertiesAssessed: !!gp,
+    available: !!gp && Object.values(gp).some((v) => v != null && v !== "") || simulationCompleted,
+    contractPropertiesAssessed: !!gp && [gp.is_open_source, gp.is_mintable, gp.transfer_pausable, gp.selfdestruct].every((v) => v === "0" || v === "1") && typeof gp.owner_address === "string",
+    taxesAssessed: simulationCompleted ? Number.isFinite(s?.buyTax) && Number.isFinite(s?.sellTax) : [num(gp?.buy_tax), num(gp?.sell_tax)].every((v) => v != null && Number.isFinite(v) && v >= 0),
+    holderCountAssessed: num(gp?.holder_count) != null && Number.isFinite(num(gp?.holder_count)),
     simChecked: simulationCompleted,
     tradeabilityAssessed: simulationCompleted || goplusTradeabilityAssessed,
     tradeabilityMethod: simulationCompleted
@@ -508,8 +516,10 @@ function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
   const mintable = solFlag(sol?.mintable);
   const freezable = solFlag(sol?.freezable);
   return {
-    available: !!sol,
-    contractPropertiesAssessed: !!sol,
+    available: !!sol && Object.values(sol).some((v) => v != null && v !== ""),
+    contractPropertiesAssessed: !!sol && [sol.mintable?.status, sol.freezable?.status, sol.metadata_mutable?.status].every((v) => v === "0" || v === "1") && Array.isArray(sol.transfer_hook),
+    taxesAssessed: sol?.transfer_fee != null && typeof sol.transfer_fee === "object",
+    holderCountAssessed: num(sol?.holder_count) != null && Number.isFinite(num(sol?.holder_count)),
     simChecked: false,
     honeypot: !!sol?.non_transferable && sol.non_transferable === "1",
     honeypotOnchain: sol?.non_transferable === "1",
@@ -564,14 +574,24 @@ const CACHE_TTL = 60_000;
 export async function auditToken(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
+  opts?: { chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
-  const key = `${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}`;
+  const key = `${opts?.chain ?? ""}:${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}`;
   const hit = opts?.force ? undefined : _cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
-  const d = await runTokenAudit(input, emit, opts);
+  const signal = opts?.deadlineAt != null
+    ? AbortSignal.any([...(opts.signal ? [opts.signal] : []), AbortSignal.timeout(Math.max(0, opts.deadlineAt - Date.now()))])
+    : opts?.signal;
+  signal?.throwIfAborted();
+  const baseFetch = opts?.fetchImpl ?? fetch;
+  const fetchImpl: typeof fetch = (url, init) => {
+    signal?.throwIfAborted();
+    return baseFetch(url, { ...init, signal: signal ? AbortSignal.any([signal, ...(init?.signal ? [init.signal] : [])]) : init?.signal });
+  };
+  const d = await runTokenAudit(input, emit, { ...opts, signal, fetchImpl });
+  signal?.throwIfAborted();
   _cache.set(key, { at: Date.now(), d });
   return d;
 }
@@ -579,11 +599,12 @@ export async function auditToken(
 async function runTokenAudit(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
+  opts?: { chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
+  const fetcher = opts?.fetchImpl ?? fetch;
   const trace: TraceStep[] = [];
-  const step = (s: TraceStep) => { trace.push(s); emit?.(s); };
+  const step = (s: TraceStep) => { opts?.signal?.throwIfAborted(); trace.push(s); emit?.(s); };
 
   step({ phase: "P0 · Intake", label: "Resolve token", detail: `Resolving ${input.ref.slice(0, 42)} on DexScreener…`, tone: "neutral" });
 
@@ -593,14 +614,29 @@ async function runTokenAudit(
   let allPairs: DexPair[] = [];
   if (input.via === "dexscreener") {
     const m = input.ref.match(/dexscreener\.com\/([a-z0-9]+)\/([a-zA-Z0-9]+)/i);
-    if (m) pair = await dexByPair(m[1], m[2]);
+    if (m) {
+      const resolved = await dexByPairResult(m[1], m[2], fetcher);
+      if (!resolved.ok) throw new Error("token_market_unavailable");
+      pair = resolved.pair;
+      if (pair && (pair.chainId !== m[1] || !sameWalletAddress(pair.pairAddress ?? "", m[2]))) throw new Error("token_market_identity_mismatch");
+    }
     if (!pair && m) {
-      allPairs = await dexByToken(m[2]);
+      const resolved = await dexByTokenResult(m[2], fetcher);
+      if (!resolved.ok) throw new Error("token_market_unavailable");
+      allPairs = resolved.pairs.filter((p) => p.chainId === m[1]);
       pair = pickPair(allPairs, m[2]);
     }
   } else {
-    allPairs = await dexByToken(input.ref);
+    const resolved = await dexByTokenResult(input.ref, fetcher);
+    if (!resolved.ok) throw new Error("token_market_unavailable");
+    allPairs = resolved.pairs.filter((p) => input.via === "solana" ? p.chainId === "solana" : p.chainId !== "solana");
+    if (opts?.chain) allPairs = allPairs.filter((p) => p.chainId === opts.chain);
     pair = pickPair(allPairs, input.ref);
+  }
+  // A Solana mint has a known chain even when no DEX market exists. Preserve
+  // contract-only evidence; market fields remain explicitly unmeasured.
+  if (!pair && input.via === "solana" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(input.ref)) {
+    pair = { chainId: "solana", dexId: "unlisted", pairAddress: "", baseToken: { address: input.ref, name: input.ref, symbol: "TOKEN" } };
   }
   if (!pair || !pair.baseToken) {
     step({ phase: "P0 · Intake", label: "Not found", detail: "No DEX pair found for this contract.", tone: "warn" });
@@ -623,7 +659,7 @@ async function runTokenAudit(
   // thin meme tokens, so it is NOT wash trading on its own — the signature is
   // heavy churn with the price going nowhere (volume that does not move price).
   const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
-  const washSignature = volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
+  const washSignature = pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
   step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
 
   // ---- safety (chain-specific) ----
@@ -643,8 +679,13 @@ async function runTokenAudit(
   let lpLockSource: "goplus" | "rugcheck" = "goplus";
   if (chain === "solana") {
     step({ phase: "Contract", label: "Solana safety", detail: "GoPlus Solana: mint authority, freeze authority, transfer hooks, holders…", tone: "neutral" });
-    sol = await goplusSolana(address);
+    sol = await goplusSolana(address, fetcher);
     safety = solanaSafety(sol);
+    if (pair.dexId === "unlisted") {
+      if (!safety.available) return null;
+      pair.baseToken.name = sol?.metadata?.name || input.ref;
+      pair.baseToken.symbol = sol?.metadata?.symbol || "TOKEN";
+    }
     // GoPlus returns an empty creators array for every Solana mint, which left
     // the token with no deployer, no deployer forensics, and a creator holding
     // hardcoded to zero. ARGUS's own resolver answers first; RugCheck is the
@@ -653,10 +694,10 @@ async function runTokenAudit(
     // The resolver route spends metered Helius credits per mint, so the fast
     // bulk scan (Radar sweeps 16 tokens at a time) takes the keyless answer
     // only. RugCheck is free, so the creator's balance is measured either way.
-    const routeResolver = goplusCreator || opts?.skipSim ? Promise.resolve(null) : resolveDeployerViaRoute(address).catch(() => null);
+    const routeResolver = goplusCreator || opts?.skipSim ? Promise.resolve(null) : resolveDeployerViaRoute(address, fetcher).catch(() => null);
     const [routed, rug] = await Promise.all([
       routeResolver,
-      rugcheckReport(address).catch((): RugcheckReport | null => null),
+      rugcheckReport(address, fetcher).catch((): RugcheckReport | null => null),
     ]);
     rugcheck = rug;
     deployerAttribution = goplusCreator
@@ -699,14 +740,14 @@ async function runTokenAudit(
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders…" : "GoPlus + honeypot.is buy/sell simulation…", tone: "neutral" });
     const [gp, sim, explorer, source] = await Promise.all([
-      goplus(gpChain, address),
-      opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address),
+      goplus(gpChain, address, fetcher),
+      opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address, fetcher),
       // Where GoPlus cannot order holders, the chain's own explorer is the
       // only correct distribution source. Runs in parallel: no added latency.
-      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address) : Promise.resolve(null),
+      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address, fetcher) : Promise.resolve(null),
       // What the deployer wrote about their own contract. Free, and the only
       // place an intent to defeat safety scanners is ever stated outright.
-      blockscoutContractSource(chain, address),
+      blockscoutContractSource(chain, address, fetcher),
     ]);
     gpEvm = gp;
     explorerHolders = explorer;
@@ -748,7 +789,7 @@ async function runTokenAudit(
   let cg: CgInfo | null = null;
   if (!opts?.skipSim) {
     step({ phase: "Corroborate", label: "CoinGecko cross-check", detail: "Independent listing, CEX markets, market-cap vs FDV…", tone: "neutral" });
-    cg = await coingeckoToken(chain, address);
+    cg = await coingeckoToken(chain, address, fetcher);
   }
   // Independent evidence that holders can actually sell: a honeypot cannot
   // produce genuine sell transactions against deep liquidity, and cannot be
@@ -919,7 +960,7 @@ async function runTokenAudit(
       });
     }
   }
-  if (liquidityUsd < 15000) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
+  if (pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd) && liquidityUsd < 15000) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
   // ---- manipulation & price-action signals ----
   if (washSignature) findings.push({ claim: `Volume is ${volLiq.toFixed(0)}x liquidity in 24h while the price moved only ${pc24.toFixed(1)}%: a wash-trading or fake-volume signature.`, tone: "bad", source: "dexscreener" });
@@ -1147,29 +1188,50 @@ async function runTokenAudit(
   axes.push({ key: "T6", label: "Maturity & presence", score: aT6, weight: 10, rationale: `${ageDays != null ? (ageDays < 1 ? "<1 day" : Math.round(ageDays) + " days") + " old" : "age unknown"}${socials.length ? `, ${socials.length} socials` : ", no socials"}${cg?.cexCount ? `, ${cg.cexCount} CEX listings` : cg && !cg.listed ? ", not on CoinGecko" : ""}.` });
 
   // ---- verdict ----
-  const raw = Math.round(axes.reduce((a, x) => a + x.score, 0));
+  const measured = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  const assessed = [
+    measured(pair.liquidity?.usd),
+    s.contractPropertiesAssessed === true,
+    s.taxesAssessed === true,
+    s.holderCountAssessed === true && holdersReliable,
+    measured(pair.volume?.h24) && measured(pair.liquidity?.usd) && measured(pair.txns?.h24?.buys) && measured(pair.txns?.h24?.sells) && typeof pair.priceChange?.h24 === "number" && Number.isFinite(pair.priceChange.h24),
+    measured(pair.pairCreatedAt),
+  ];
+  for (const [index, axis] of axes.entries()) {
+    axis.nominalWeight = axis.weight;
+    axis.assessed = assessed[index];
+    if (!axis.assessed) {
+      axis.weight = 0;
+      axis.score = 0;
+      axis.rationale = "Evidence needed to assess this area was not returned. Excluded from the score.";
+    }
+  }
+  const assessedWeight = axes.reduce((sum, axis) => sum + axis.weight, 0);
+  const assessment = { assessedWeight, applicableWeight: 100, provisional: assessedWeight < 100, gaps: axes.filter((axis) => !axis.assessed).map((axis) => axis.label) };
+  const raw = assessedWeight > 0 ? Math.round(100 * axes.reduce((a, x) => a + x.score, 0) / assessedWeight) : null;
   let capApplied: string | null = null;
   let score = raw;
   let verdict: string;
   if (caps.length) {
     const [ceiling, key] = caps.reduce((m, c) => (c[0] < m[0] ? c : m));
-    score = Math.min(raw, ceiling);
+    score = raw == null ? null : Math.min(raw, ceiling);
     capApplied = key;
-    verdict = ceiling <= 10 ? "AVOID" : band(score);
-  } else verdict = band(score);
+    verdict = ceiling <= 10 ? "AVOID" : score == null ? "UNVERIFIABLE" : band(score);
+  } else verdict = score == null ? "UNVERIFIABLE" : band(score);
 
   // ---- people & provenance ----
   const projectX =
     handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) ||
     handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) ||
     (cg?.twitter ? "@" + cg.twitter : null); // CoinGecko's official X account (blue-chip fallback)
+  opts?.signal?.throwIfAborted();
   const socialActivity = projectX && opts?.collectSocialActivity
     ? await opts.collectSocialActivity({
         handle: projectX,
         ticker: pair.baseToken.symbol,
         projectName: pair.baseToken.name,
         contractAddress: pair.baseToken.address,
-      }).catch(() => undefined)
+      }, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt }).catch(() => undefined)
     : undefined;
   const deployer = deployerAttribution?.address ?? null;
   // What the report is allowed to call this wallet. Only a source that saw the
@@ -1184,8 +1246,8 @@ async function runTokenAudit(
   })).filter((h) => h.address);
 
   // ---- Deployer forensics: OFAC is required; provider funding risk is optional.
-  const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
-  const deployerRiskFn = opts?.screenDeployerRisk ?? screenDeployerRisk;
+  const screenFn = opts?.screenSanctions ?? ((chain, addresses) => screenAddressSanctions(chain, addresses, fetcher));
+  const deployerRiskFn = opts?.screenDeployerRisk ?? ((address) => screenDeployerRisk(address, fetcher));
   const deployerRiskEnabled = Boolean(opts?.screenDeployerRisk) || arkhamProviderEnabled();
   step({
     phase: "Screen",
@@ -1195,15 +1257,16 @@ async function runTokenAudit(
       : "Screening deployer and top holders against OFAC.",
     tone: "neutral",
   });
+  opts?.signal?.throwIfAborted();
   const [sanctionsScreen, deployerRisk, priceHistory] = await Promise.all([
-    screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
+    screenFn(chain, [deployer, ...topHolders.map((h) => h.address)], fetcher, opts?.signal),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
     // Contract-as-wallet gate: do not Arkham-risk the token mint/CA as if it were a team wallet.
     deployer && deployerRiskEnabled && !sameWalletAddress(deployer, address)
       ? deployerRiskFn(deployer).catch(() => undefined)
       : Promise.resolve(undefined),
-    fetchPriceHistory(address, chain, pair.pairAddress).catch(() => null),
+    fetchPriceHistory(address, chain, pair.pairAddress, fetcher).catch(() => null),
   ]);
   if (deployerRisk?.available && deployerRisk.paths.length) {
     // Every path Arkham returns is already a risk exposure. Surface both
@@ -1236,7 +1299,7 @@ async function runTokenAudit(
     // A sanctioned deployer or holder is the hardest AVOID signal there is; it
     // overrides any market score. Recompute the verdict so the headline can
     // never render PASS over a confirmed sanctions hit.
-    score = Math.min(score, 5);
+    score = score == null ? null : Math.min(score, 5);
     capApplied = "ofac_sanctioned_address";
     verdict = "AVOID";
     step({ phase: "Finalize", label: "OFAC sanctions", detail: `${sanctionsScreen.sanctioned.length} sanctioned address(es): verdict forced to AVOID.`, tone: "bad" });
@@ -1245,13 +1308,13 @@ async function runTokenAudit(
   // Ticker collisions. A buyer who typed a ticker instead of pasting an address
   // is the person this check is for, so it runs on every audit and its result is
   // frozen into the report rather than recomputed at read time.
-  const cloneCheck = await checkForClones({
+  const cloneCheck = pair.dexId === "unlisted" && pair.baseToken.symbol === "TOKEN" ? null : await checkForClones({
     mint: address,
     symbol: pair.baseToken.symbol,
     chain,
     pairCreatedAt: pair.pairCreatedAt ?? null,
     liquidityUsd,
-  }).catch(() => null);
+  }, { fetchImpl: fetcher }).catch(() => null);
   if (cloneCheck?.checked && cloneCheck.clones.length) {
     // Only "later" is a claim about this mint. "earliest" and "only" are floors
     // on what a capped search listed, so neither is published as reassurance.
@@ -1275,7 +1338,9 @@ async function runTokenAudit(
   const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployerAttribution, topHolders, socials);
 
   const decisionBoundary = deriveTokenDecisionBoundary({ score, capApplied, axes });
-  const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
+  const headline = assessment.provisional && !capApplied
+    ? `Score based on ${assessedWeight}/100 of the assessment weight. Evidence gaps: ${assessment.gaps.join(", ")}.`
+    : buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} · ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
 
   return {
@@ -1298,7 +1363,7 @@ async function runTokenAudit(
     // The pool exclusion has to reach the number a reader actually sees. Leaving
     // the raw provider top holder on the dossier put "top holder 37%" on the same
     // page as the finding explaining that the 37% line is the pool itself.
-    verdict, score, capApplied, headline, axes, ...(decisionBoundary ? { decisionBoundary } : {}), safety: { ...s, topHolderPct: concentrationTopPct }, socials,
+    verdict, score, assessment, capApplied, headline, axes, ...(decisionBoundary ? { decisionBoundary } : {}), safety: { ...s, topHolderPct: concentrationTopPct }, socials,
     holdersAssessed: holdersReliable,
     projectX, ...(socialActivity ? { socialActivity } : {}), deployer, ...(deployerAttribution ? { deployerAttribution } : {}),
     topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,

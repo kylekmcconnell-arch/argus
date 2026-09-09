@@ -95,3 +95,10 @@ describe("blockscoutHolders", () => {
     expect(GOPLUS_CHAIN.robinhood).toBe("4663");
   });
 });
+
+it("rejects an unrelated base asset for an exact address request", () => {
+  const wanted = "0x1111111111111111111111111111111111111111";
+  const other = { chainId: "ethereum", baseToken: { address: "0x2222222222222222222222222222222222222222" }, quoteToken: { address: wanted }, liquidity: { usd: 100000 } } as DexPair;
+  expect(pickPair([other], wanted)).toBeNull();
+  expect(pickPair([other])).toBe(other);
+});

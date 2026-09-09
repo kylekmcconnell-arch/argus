@@ -1,3 +1,4 @@
+import { deadlineFetch } from "./providerDeadline.js";
 import { env } from "./config";
 import { recordCall } from "./cost";
 import { cacheGet, cacheSet } from "./cache";
@@ -624,7 +625,7 @@ export async function collectSocialActivity(
     SOCIAL_ACTIVITY_MAX_POSTS,
     Math.max(SOCIAL_ACTIVITY_MIN_POSTS, Math.round(options.maxPosts ?? configuredMax)),
   );
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = options.fetchImpl ?? deadlineFetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1000));
   const cacheKey = `social-activity:v3:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
   if (!options.fetchImpl) {

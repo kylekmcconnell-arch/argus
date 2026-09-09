@@ -24,11 +24,13 @@ const ALERT_KIND = "threat-alert";
 
 function creds() {
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
   return url && key ? { url: url.replace(/\/$/, ""), key } : null;
 }
-const headers = (key) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
+const headers = (key) => ({ apikey: key, ...(key.startsWith("sb_secret_") ? {} : { authorization: `Bearer ${key}` }), "content-type": "application/json" });
 const normAddr = (s) => { const value = String(s || "").trim(); return /^0x[0-9a-f]+$/i.test(value) ? value.toLowerCase() : value; };
+
+const assetKey = (chain, address) => `${String(chain || "unknown").trim().toLowerCase()}:${normAddr(address)}`;
 
 export function ledgerAvailable() {
   return !!creds();
@@ -42,7 +44,7 @@ export async function ledgerUpsert(receipt) {
   try {
     const row = {
       organization_id: organizationId(),
-      ref: normAddr(receipt.address),
+      ref: assetKey(receipt.chain, receipt.address),
       kind: KIND,
       query: receipt.symbol ? `$${receipt.symbol}` : normAddr(receipt.address),
       verdict: receipt.verdict ?? null,
@@ -86,15 +88,15 @@ export async function ledgerRecent(limit = 100) {
 
 // Every token a given deployer wallet has shipped that we've scanned — the
 // shared rug-factory memory. PostgREST JSON filter on payload->>deployer.
-export async function ledgerByDeployer(deployer) {
+export async function ledgerByDeployer(deployer, chain) {
   const d = normAddr(deployer);
   if (!d) return [];
-  return query(`select=payload&kind=eq.${KIND}&payload->>deployer=eq.${encodeURIComponent(d)}&order=ts.desc&limit=100`);
+  return query(`select=payload&kind=eq.${KIND}&payload->>deployer=eq.${encodeURIComponent(d)}${chain ? `&payload->>chain=eq.${encodeURIComponent(chain)}` : ""}&order=ts.desc&limit=100`);
 }
 
 // A single token's receipt, if we've scanned it before.
-export async function ledgerGet(address) {
-  const a = normAddr(address);
+export async function ledgerGet(address, chain) {
+  const a = chain ? assetKey(chain, address) : normAddr(address);
   if (!a) return null;
   const rows = await query(`select=payload&kind=eq.${KIND}&ref=eq.${encodeURIComponent(a)}&limit=1`);
   return rows[0] ?? null;
@@ -122,7 +124,7 @@ export async function ledgerRecordAlert(alert) {
   try {
     const row = {
       organization_id: organizationId(),
-      ref: normAddr(alert.address),
+      ref: assetKey(alert.chain, alert.address),
       kind: ALERT_KIND,
       query: alert.symbol ? `$${alert.symbol}` : normAddr(alert.address),
       verdict: alert.type ?? null,
@@ -148,8 +150,8 @@ export async function ledgerRecentAlerts(limit = 60) {
 
 // The current alert (if any) recorded for a token — so the cron doesn't re-emit
 // the same alert on every run.
-export async function ledgerGetAlert(address) {
-  const a = normAddr(address);
+export async function ledgerGetAlert(address, chain) {
+  const a = chain ? assetKey(chain, address) : normAddr(address);
   if (!a) return null;
   const rows = await query(`select=payload&kind=eq.${ALERT_KIND}&ref=eq.${encodeURIComponent(a)}&limit=1`);
   return rows[0] ?? null;
@@ -172,14 +174,14 @@ export async function ledgerByFingerprint(fingerprint) {
 // (wallet, token) edge so a re-scan overwrites rather than piling up.
 const EDGE_KIND = "holder-edge";
 
-export async function ledgerRecordHolderEdges(token, symbol, verdict, wallets) {
+export async function ledgerRecordHolderEdges(token, symbol, verdict, wallets, chain) {
   const c = creds();
   const t = normAddr(token);
-  if (!c || !t || !Array.isArray(wallets) || !wallets.length) return false;
+  if (!chain || !c || !t || !Array.isArray(wallets) || !wallets.length) return false;
   const at = new Date().toISOString();
   const rows = wallets.slice(0, 40).map((w) => {
     const wl = normAddr(w);
-    return { organization_id: organizationId(), ref: `${wl}|${t}`, kind: EDGE_KIND, query: symbol ? `$${symbol}` : t, verdict: verdict ?? null, payload: { wallet: wl, token: t, symbol: symbol ?? null, verdictAtScan: verdict ?? null, at } };
+    return { organization_id: organizationId(), ref: `${assetKey(chain, wl)}|${assetKey(chain, t)}`, kind: EDGE_KIND, query: symbol ? `$${symbol}` : t, verdict: verdict ?? null, payload: { chain, wallet: wl, token: t, symbol: symbol ?? null, verdictAtScan: verdict ?? null, at } };
   }).filter((r) => r.payload.wallet);
   if (!rows.length) return false;
   try {
@@ -199,27 +201,27 @@ export async function ledgerRecordHolderEdges(token, symbol, verdict, wallets) {
 // For a set of wallets: their prior token edges joined with each token's current
 // outcome (a threat-receipt with status 'dead' = it went to zero). Returns a map
 // wallet -> { held, dead, deadSymbols }.
-export async function ledgerWalletReputation(wallets) {
+export async function ledgerWalletReputation(wallets, chain) {
   const c = creds();
-  if (!c || !Array.isArray(wallets) || !wallets.length) return {};
+  if (!chain || !c || !Array.isArray(wallets) || !wallets.length) return {};
   const ws = wallets.map(normAddr).filter(Boolean).slice(0, 40);
   if (!ws.length) return {};
-  const edges = await query(`select=payload&kind=eq.${EDGE_KIND}&payload->>wallet=in.(${ws.map(encodeURIComponent).join(",")})&limit=2000`);
+  const edges = await query(`select=payload&kind=eq.${EDGE_KIND}&payload->>chain=eq.${encodeURIComponent(chain)}&payload->>wallet=in.(${ws.map(encodeURIComponent).join(",")})&limit=2000`);
   if (!edges.length) return {};
   // Outcome per token: pull the threat-receipts for the tokens seen in the edges.
-  const tokens = [...new Set(edges.map((e) => e.token).filter(Boolean))];
+  const tokens = [...new Set(edges.map((e) => assetKey(e.chain, e.token)).filter(Boolean))];
   const statusOf = new Map();
   for (let i = 0; i < tokens.length; i += 40) {
     const slice = tokens.slice(i, i + 40);
     const recs = await query(`select=payload&kind=eq.${KIND}&ref=in.(${slice.map(encodeURIComponent).join(",")})`);
-    for (const r of recs) if (r.address) statusOf.set(normAddr(r.address), r.status ?? "alive");
+    for (const r of recs) if (r.address) statusOf.set(assetKey(r.chain, r.address), r.status ?? "alive");
   }
   const rep = {};
   for (const e of edges) {
     const w = e.wallet; if (!w) continue;
     const r = rep[w] || (rep[w] = { held: 0, dead: 0, deadSymbols: [] });
     r.held += 1;
-    if (statusOf.get(e.token) === "dead") { r.dead += 1; if (e.symbol && r.deadSymbols.length < 5) r.deadSymbols.push(e.symbol); }
+    if (statusOf.get(assetKey(e.chain, e.token)) === "dead") { r.dead += 1; if (e.symbol && r.deadSymbols.length < 5) r.deadSymbols.push(e.symbol); }
   }
   return rep;
 }

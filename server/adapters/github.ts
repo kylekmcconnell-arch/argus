@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // GitHub forensics. For a builder, GitHub is the affiliation signal that is
 // hardest to scrub and most precise to attribute: a person's public org
 // memberships and the org repos they push to are a near-permanent record of who
@@ -39,7 +40,7 @@ async function ghJson<T>(path: string, key: string): Promise<T | null> {
   const tier = "subscription/keyed";
   let res: Response;
   try {
-    res = await fetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(8000) });
+    res = await deadlineFetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(8000) });
   } catch {
     recordCall("github", op, 0, `${tier} · transport_error`, "failed");
     return null;

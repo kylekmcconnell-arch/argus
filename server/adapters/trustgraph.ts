@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 import { createHash } from "node:crypto";
 import type { Finding, PanoptesEdge, PanoptesNode } from "../../src/engine";
 import type {
@@ -178,7 +179,7 @@ async function readExactRows(
   const op = `trust-graph/${table.replace(/_/g, "-")}`;
   let response: Response;
   try {
-    response = await fetch(queryUrl(c.url, table, { ...params, limit: String(QUERY_LIMIT) }), {
+    response = await deadlineFetch(queryUrl(c.url, table, { ...params, limit: String(QUERY_LIMIT) }), {
       headers: headers(c.key, { prefer: "count=exact" }),
       signal: AbortSignal.timeout(12_000),
     });

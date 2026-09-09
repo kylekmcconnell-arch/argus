@@ -30,7 +30,7 @@ export interface DecisionCanvasCompositionRow {
   tone?: "pass" | "caution" | "fail";
   sublabel?: string;
   countsLine?: string;
-  applicability?: "not_applicable" | "deferred";
+  applicability?: "not_applicable" | "deferred" | "unassessed";
 }
 
 export interface DecisionCanvasScore {

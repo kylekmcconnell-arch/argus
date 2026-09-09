@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Snapshot governance: who actually decides, and on how few wallets.
 //
 // WHAT THIS ANSWERS. A token report can say the top ten wallets hold 31% of
@@ -327,7 +328,7 @@ export async function fetchGovernance(
   subject: GovernanceSubject,
   opts: { fetchImpl?: typeof fetch } = {},
 ): Promise<GovernanceReading> {
-  const fetchImpl = opts.fetchImpl ?? fetch;
+  const fetchImpl = opts.fetchImpl ?? deadlineFetch;
   const supplied = subject.spaceId?.trim();
   const candidates = supplied ? [supplied] : candidateSpaceIds(subject.name);
   if (!candidates.length) {

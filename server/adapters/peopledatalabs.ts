@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // People Data Labs adapter. The defensible LinkedIn-derived layer (Proxycurl is
 // dead; PDL is licensed/compiled data). Feeds F1 identity verifiability and
 // F2 career history. Gated on PDL_API_KEY.
@@ -141,7 +142,7 @@ export async function enrichPersonOutcome(
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
   let res: Response;
   try {
-    res = await fetch(`${BASE}/person/enrich?${qs}`, {
+    res = await deadlineFetch(`${BASE}/person/enrich?${qs}`, {
       headers: { "X-Api-Key": key },
       signal: AbortSignal.timeout(10_000),
     });

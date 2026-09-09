@@ -1,3 +1,4 @@
+import { assetIdentity } from "../lib/assetIdentity";
 // The threat scan orchestrator: token ref in → mechanical audit (src/token) →
 // code review (AI read layer) → deployer memory → one risk call. Output model:
 // risk points 0–100 (higher = worse), a verdict bucket, a one-line action, and
@@ -35,14 +36,14 @@ const money = (n: number) =>
 export async function threatScan(
   input: ResolvedInput,
   emit?: (s: TraceStep) => void,
-  options?: { force?: boolean },
+  options?: { force?: boolean; chain?: string },
 ): Promise<ThreatScan | null> {
   // auditToken needs an already-resolved runnable token (main tightened
   // RunnableTokenInput.via to solana|evm|dexscreener). A bare ticker or
   // address-candidate isn't runnable - the caller resolves those first.
   if (!isRunnableTokenInput(input)) return null;
 
-  const dossier = await auditToken(input, emit, { force: options?.force });
+  const dossier = await auditToken(input, emit, { force: options?.force, chain: options?.chain });
   if (!dossier) return null;
   // The report must be about the token that was ASKED for. If the market
   // resolver ever falls back to a different base token (search fallback, stale
@@ -97,7 +98,7 @@ export async function threatScan(
   // Chart posture: a generic technical read for tickers that also trade on
   // major venues (matched by symbol with a market-cap sanity guard). Most fresh
   // CAs are not covered and the lane stays silent.
-  const posture = await technicalPosture(dossier.symbol, dossier.mcap ?? null);
+  const posture = await technicalPosture(dossier.symbol, dossier.mcap ?? null, dossier.chain, dossier.address);
   if (posture) {
     emit?.({
       phase: "ARGUS · Chart",
@@ -208,7 +209,7 @@ export async function threatScan(
 
 async function deployerRep(d: TokenDossier): Promise<DeployerRep> {
   const prior = d.deployer
-    ? (await sharedByDeployer(d.deployer)).filter((r) => r.address.toLowerCase() !== d.address.toLowerCase())
+    ? (await sharedByDeployer(d.deployer, d.chain)).filter((r) => assetIdentity(r.chain, r.address) !== assetIdentity(d.chain, d.address))
     : [];
   return {
     address: d.deployer,
@@ -570,20 +571,20 @@ export function judge( // exported for unit tests only
 
   // --- corroboration positives ---
   if (d.cg?.listed) positives.push(`Listed on CoinGecko${d.cg.rank ? ` (rank #${d.cg.rank})` : ""}${d.cg.cexCount ? `, ${d.cg.cexCount} CEX market${d.cg.cexCount === 1 ? "" : "s"}` : ""}`);
-  if (s.ownerRenounced && !s.mintable && !s.freezable && !s.takeBack)
+  if (s.contractPropertiesAssessed !== false && s.ownerRenounced && !s.mintable && !s.freezable && !s.takeBack)
     positives.push(d.chain === "solana" ? "Mint and freeze authority revoked - the token is set in stone" : "Ownership renounced - no owner powers remain");
 
   // --- verdict ---
   risk = trap ? 100 : Math.min(100, Math.round(risk));
-  const unknown = !s.available && !code.verified;
+  const unknown = s.contractPropertiesAssessed === false || (!s.available && !code.verified);
   // RUG is reserved for a CONFIRMED trap (honeypot-class or already rugged);
   // everything else, however dark, is DANGER - a claim we can defend.
-  const verdict: ThreatVerdict = trap ? "RUG" : unknown ? "UNKNOWN" : risk >= 40 ? "DANGER" : risk >= 16 ? "CAUTION" : "SAFE";
+  const verdict: ThreatVerdict = trap ? "RUG" : risk >= 40 ? "DANGER" : unknown ? "UNKNOWN" : risk >= 16 ? "CAUTION" : "SAFE";
   const action =
     verdict === "RUG" ? "DON'T TOUCH IT"
     : verdict === "DANGER" ? "Walk away - the trap doors outnumber the exits"
     : verdict === "CAUTION" ? "Tradeable, but size it like it can go to zero"
-    : verdict === "UNKNOWN" ? "Could not verify - treat unverifiable as hostile"
+    : verdict === "UNKNOWN" ? "Safety evidence is partial; review the recorded risks and data gaps"
     : "No mechanical red flags (not financial advice)";
 
   return { verdict, risk, action, flags, warnings, positives };

@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Crunchbase adapter. Funding/venture truth: rounds, investors, acquirers — the
 // raw material for F2 track record, F3 repeat backing, I2 portfolio quality.
 // Gated on CRUNCHBASE_API_KEY. Full entity resolution (which orgs belong to the
@@ -15,7 +16,7 @@ export async function lookupOrganization(name: string) {
   const meta = "plan-billed";
   let res: Response;
   try {
-    res = await fetch(`${BASE}/searches/organizations`, {
+    res = await deadlineFetch(`${BASE}/searches/organizations`, {
       method: "POST",
       headers: { "X-cb-user-key": key, "content-type": "application/json" },
       body: JSON.stringify({

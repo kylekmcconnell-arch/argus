@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 import { createHash } from "node:crypto";
 import type {
   EvmAuthorityObservation,
@@ -165,7 +166,7 @@ const captureChainIdentity = async (
 
 export function createHttpEvmRpcTransport(
   rpcUrl: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = deadlineFetch,
   timeoutMs = 9_000,
 ): EvmRpcTransport {
   let calls = 0;

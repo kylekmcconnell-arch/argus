@@ -89,6 +89,7 @@ const directSubjectFinding = (value: JsonRecord): boolean => {
 };
 
 const reportObject = (kind: string, payload: JsonRecord): JsonRecord => {
+  if (kind === "token") return payload;
   if (kind === "investigation") return record(record(payload.token).report);
   return record(payload.report);
 };
@@ -188,7 +189,7 @@ export function auditStoredReportQuality(
   }
 
   const reportVerdict = text(report.composite_verdict) || text(report.verdict);
-  const reportScore = numeric(report.governing_score) ?? numeric(report.score_total);
+  const reportScore = numeric(report.governing_score) ?? numeric(report.score_total) ?? numeric(report.score);
   if (reportVerdict && input.verdict && reportVerdict !== input.verdict) {
     findings.push(finding(
       "error",
@@ -202,6 +203,17 @@ export function auditStoredReportQuality(
       "stored_score_mismatch",
       `Stored score ${input.score} differs from payload score ${reportScore}.`,
     ));
+  }
+
+  if (input.kind === "token" || input.kind === "investigation") {
+    const token = input.kind === "token" ? payload : record(payload.token);
+    const assessment = record(token.assessment);
+    if (!Object.keys(assessment).length) findings.push(finding("warning", "legacy_token_assessment", "Token assessment predates explicit measured-axis coverage; rescan to use current methodology."));
+    if (assessment.provisional === true && input.completeness === "complete") findings.push(finding("error", "token_coverage_contradiction", "Token score excludes unassessed areas but the stored version claims complete coverage."));
+    for (const raw of array(token.axes)) {
+      const axis = record(raw);
+      if (axis.assessed === false && ((numeric(axis.score) ?? 0) !== 0 || (numeric(axis.weight) ?? 0) !== 0)) findings.push(finding("error", "unmeasured_token_points", "An unassessed token axis contributes points or weight."));
+    }
   }
 
   const finalizedAt = text(report.finalized_at);

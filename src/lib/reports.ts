@@ -145,6 +145,11 @@ export function reportCompleteness(
   payload: unknown,
   checks = reportChecks(kind, payload),
 ): ReportCompletenessState {
+  const tokenAssessment = payload && typeof payload === "object"
+    ? kind === "token" ? (payload as { assessment?: { provisional?: boolean } }).assessment
+      : kind === "investigation" ? (payload as { token?: { assessment?: { provisional?: boolean } } }).token?.assessment : undefined
+    : undefined;
+  if (tokenAssessment?.provisional) return "partial";
   const dossier = kind === "person" ? payload as Dossier : null;
   if (dossier?.checkRuns?.length && dossier.completeness_state === "failed") return "failed";
   if (dossier?.checkRuns?.length

@@ -1,3 +1,4 @@
+import { deadlineFetch } from "./providerDeadline.js";
 // AI analyst agent. The engine needs axis scores with rationales, venture
 // outcome classifications, and a one-line headline. Raw provider data is messy;
 // this is the step where judgement lives. Every provider is constrained to the
@@ -108,7 +109,7 @@ async function structuredClaude<T>(
   };
   let res: Response;
   try {
-    res = await fetch(ANTHROPIC_URL, {
+    res = await deadlineFetch(ANTHROPIC_URL, {
       method: "POST",
       headers: {
         "x-api-key": key,
@@ -251,7 +252,7 @@ async function structuredGrok<T>(
   };
   let response: Response;
   try {
-    response = await fetch(XAI_CHAT_URL, {
+    response = await deadlineFetch(XAI_CHAT_URL, {
       method: "POST",
       headers: {
         authorization: `Bearer ${key}`,

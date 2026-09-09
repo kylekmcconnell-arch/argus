@@ -228,9 +228,9 @@ function contractSafetyConcerns(dossier: TokenDossier): string[] {
   if (safety.nonTransferable || safety.cannotSellAll) concerns.push("transfer restriction");
   if (safety.mintable) concerns.push("mint authority active");
   if (safety.freezable) concerns.push("freeze authority active");
-  if (!safety.ownerRenounced) concerns.push(dossier.chain === "solana" ? "authorities retained" : "owner active");
+  if (safety.contractPropertiesAssessed !== false && !safety.ownerRenounced) concerns.push(dossier.chain === "solana" ? "authorities retained" : "owner active");
   if (safety.hiddenOwner || safety.takeBack) concerns.push("owner-control risk");
-  if (dossier.chain !== "solana" && !safety.openSource) concerns.push("source not verified");
+  if (safety.contractPropertiesAssessed !== false && dossier.chain !== "solana" && !safety.openSource) concerns.push("source not verified");
   if (safety.selfdestruct) concerns.push("contract can self-destruct/close");
   if (safety.pausable) concerns.push("transfers can be paused");
   if (safety.proxy) concerns.push("upgradeable proxy");
@@ -275,7 +275,7 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
   const checks: ScanCheck[] = [];
 
   checks.push(
-    safety.available
+    (safety.contractPropertiesAssessed === true || contractSafetyConcerns(dossier).length > 0)
       ? {
           checkId: "contract-safety",
           decisionCritical: true,

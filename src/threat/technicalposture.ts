@@ -7,10 +7,10 @@ import type { TechnicalPosture } from "./types";
 
 const STANCES = new Set(["bullish", "bearish", "mixed", "neutral"]);
 
-export async function technicalPosture(symbol: string, mcap: number | null): Promise<TechnicalPosture | null> {
+export async function technicalPosture(symbol: string, mcap: number | null, chain?: string, address?: string): Promise<TechnicalPosture | null> {
   if (!symbol || !/^[A-Za-z0-9]{1,15}$/.test(symbol)) return null;
   try {
-    const q = `symbol=${encodeURIComponent(symbol)}${mcap && mcap > 0 ? `&mcap=${Math.round(mcap)}` : ""}`;
+    const q = `chain=${encodeURIComponent(chain ?? "")}&address=${encodeURIComponent(address ?? "")}&symbol=${encodeURIComponent(symbol)}${mcap && mcap > 0 ? `&mcap=${Math.round(mcap)}` : ""}`;
     const r = await apiFetch(`/api/technical-posture?${q}`, { signal: AbortSignal.timeout(12_000) });
     if (!r.ok) return null;
     const d = (await r.json()) as {

@@ -19,6 +19,7 @@ function res() {
 
 const upstream = (rows: Array<Record<string, unknown>>) => ({ covered: true, rows });
 const row = (overrides: Record<string, unknown> = {}) => ({
+  chain: "ethereum", address: "0x1111111111111111111111111111111111111111",
   ticker: "BTC-USD", timeframe: "1d",
   signals: ["big_green_arrows", "green_bars", "volume_extreme"],
   high_low: ["52w_high"], green_dot_count: 12, red_dot_count: 0,
@@ -51,7 +52,7 @@ describe("the technical posture route", () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const { api, sent } = res();
-    await handler({ method: "GET", query: { symbol: "BTC" } } as never, api as never);
+    await handler({ method: "GET", query: { chain: "ethereum", address: "0x1111111111111111111111111111111111111111", symbol: "BTC" } } as never, api as never);
     const body = sent.body as { available: boolean; note: string };
     expect(sent.status).toBe(200);
     expect(body.available).toBe(false);
@@ -64,7 +65,7 @@ describe("the technical posture route", () => {
     vi.stubEnv("CHART_SIGNALS_TOKEN", "t");
     stubOk(upstream([row()]));
     const { api, sent } = res();
-    await handler({ method: "GET", query: { symbol: "BTC" } } as never, api as never);
+    await handler({ method: "GET", query: { chain: "ethereum", address: "0x1111111111111111111111111111111111111111", symbol: "BTC" } } as never, api as never);
 
     const body = sent.body as { available: boolean; covered: boolean; stance: string; readings: Array<{ observations: string[] }> };
     expect(body.covered).toBe(true);
@@ -84,7 +85,7 @@ describe("the technical posture route", () => {
       row({ ticker: "BTC-USD", signals: ["green_bars"] }),
     ]));
     const { api, sent } = res();
-    await handler({ method: "GET", query: { symbol: "BTC" } } as never, api as never);
+    await handler({ method: "GET", query: { chain: "ethereum", address: "0x1111111111111111111111111111111111111111", symbol: "BTC" } } as never, api as never);
     const body = sent.body as { readings: Array<{ observations: string[] }> };
     expect(body.readings[0].observations.join(" ")).toContain("uptrend");
   });
@@ -94,7 +95,7 @@ describe("the technical posture route", () => {
     vi.stubEnv("CHART_SIGNALS_TOKEN", "t");
     stubOk(upstream([row()])); // listed asset at $1.5T
     const { api, sent } = res();
-    await handler({ method: "GET", query: { symbol: "BTC", mcap: "250000" } } as never, api as never);
+    await handler({ method: "GET", query: { chain: "ethereum", address: "0x1111111111111111111111111111111111111111", symbol: "BTC", mcap: "250000" } } as never, api as never);
     const body = sent.body as { covered: boolean; note: string };
     expect(body.covered).toBe(false);
     expect(body.note).toContain("misattribution");
@@ -105,9 +106,17 @@ describe("the technical posture route", () => {
     vi.stubEnv("CHART_SIGNALS_TOKEN", "t");
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 500 })));
     const { api, sent } = res();
-    await handler({ method: "GET", query: { symbol: "BTC" } } as never, api as never);
+    await handler({ method: "GET", query: { chain: "ethereum", address: "0x1111111111111111111111111111111111111111", symbol: "BTC" } } as never, api as never);
     const body = sent.body as { available: boolean; note: string };
     expect(body.available).toBe(false);
     expect(body.note).toContain("500");
   });
+});
+
+it.each([{ address: undefined }, { address: "0x2222222222222222222222222222222222222222" }, { chain: "base" }])("rejects unbound or namesake chart rows even with similar cap", async (identity) => {
+  vi.stubEnv("CHART_SIGNALS_URL", "http://signals.local"); vi.stubEnv("CHART_SIGNALS_TOKEN", "t");
+  stubOk(upstream([row({ ...identity, market_cap_usd: null })]));
+  const { api, sent } = res();
+  await handler({ method: "GET", query: { symbol: "BTC", chain: "ethereum", address: "0x1111111111111111111111111111111111111111" } } as never, api as never);
+  expect(sent.body).toMatchObject({ covered: false, binding: "unresolved" });
 });

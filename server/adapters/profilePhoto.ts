@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 import { createHash } from "node:crypto";
 import { ANALYST_MODEL, GROK_ANALYST_MODEL, env, providerFallbacksEnabled } from "../config";
 import { addClaudeUsage, addGrokUsage, recordCall } from "../cost";
@@ -112,7 +113,7 @@ export async function fetchTrustedProfileImage(rawUrl: string): Promise<TrustedI
   for (let redirect = 0; redirect <= 3; redirect += 1) {
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await deadlineFetch(url, {
         redirect: "manual",
         signal: AbortSignal.timeout(7_000),
         headers: { "user-agent": "argus-osint/1.0" },
@@ -199,7 +200,7 @@ async function classifyImage(image: TrustedImage): Promise<ReturnType<typeof val
   if (grokKey) {
     let response: Response;
     try {
-      response = await fetch(XAI_CHAT_URL, {
+      response = await deadlineFetch(XAI_CHAT_URL, {
         method: "POST",
         headers: { authorization: `Bearer ${grokKey}`, "content-type": "application/json" },
         body: JSON.stringify({
@@ -270,7 +271,7 @@ async function classifyImage(image: TrustedImage): Promise<ReturnType<typeof val
   if (!key) return null;
   let response: Response;
   try {
-    response = await fetch(ANTHROPIC_URL, {
+    response = await deadlineFetch(ANTHROPIC_URL, {
       method: "POST",
       headers: {
         "x-api-key": key,

@@ -38,7 +38,7 @@ export const config = { maxDuration: 600 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const METHODOLOGY_VERSION = "argus-person-v5-project-strength-bands";
-const TOKEN_METHODOLOGY_VERSION = "argus-token-v2-terminal-outcomes";
+const TOKEN_METHODOLOGY_VERSION = "argus-token-v3-assessed-evidence";
 const INVESTIGATION_METHODOLOGY_VERSION = "argus-investigation-v2-terminal-outcomes";
 type JsonRecord = Record<string, unknown>;
 type SupportedGapReportKind = "person" | "token" | "investigation";
@@ -116,7 +116,7 @@ function proposalPayload<T extends JsonRecord>(
   authorizationId: string,
   sourceReportVersionId: string,
   scope: AuthorizedResearchScope,
-  observedCostUsd: number,
+  observedCostUsd: number | null,
 ): T & { gapInvestigation: JsonRecord } {
   return {
     ...payload,
@@ -135,7 +135,7 @@ function proposalPayload<T extends JsonRecord>(
       timeBudgetSeconds: scope.timeBudgetSeconds,
       estimatedCostCeilingUsd: scope.estimatedCostCeilingUsd,
       observedCostUsd,
-      budgetOutcome: observedCostUsd > scope.estimatedCostCeilingUsd ? "estimate_exceeded" : "within_estimate",
+      budgetOutcome: observedCostUsd == null ? "unknown" : observedCostUsd > scope.estimatedCostCeilingUsd ? "estimate_exceeded" : "within_estimate",
       createdAt: new Date().toISOString(),
     },
   };
@@ -350,6 +350,7 @@ async function authorizeAndExecute(
     let dossier: Dossier | TokenDossier | null;
     if (supportedKind === "token") {
       const deadlineMs = Math.max(1_000, scope.timeBudgetSeconds * 1_000 - 15_000);
+      const controller = new AbortController();
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
         dossier = await Promise.race([
@@ -357,15 +358,18 @@ async function authorizeAndExecute(
             if (receipts.length < 199) receipts.push(traceReceipt(step));
           }, {
             force: true,
+            signal: controller.signal,
+            deadlineAt: startedAt + deadlineMs,
             screenSanctions: screenSanctionedAddresses,
             collectSocialActivity,
           }),
           new Promise<never>((_, reject) => {
-            timeout = setTimeout(() => reject(new Error("bounded token collector exceeded its authorized time budget")), deadlineMs);
+            timeout = setTimeout(() => { controller.abort(); reject(new Error("bounded token collector exceeded its authorized time budget")); }, deadlineMs);
           }),
         ]);
       } finally {
         if (timeout) clearTimeout(timeout);
+        controller.abort();
       }
     } else {
       dossier = await runAudit(handle as string, (step) => {
@@ -385,10 +389,10 @@ async function authorizeAndExecute(
     if (!dossier) throw new Error("bounded collector returned no dossier");
 
     const personDossier = supportedKind === "token" ? null : dossier as Dossier;
-    const costRecord = record(personDossier?.cost);
+    const costRecord = record(dossier.cost);
     const observedCostUsd = typeof costRecord.usd === "number" && Number.isFinite(costRecord.usd)
       ? Math.max(0, costRecord.usd)
-      : 0;
+      : null;
     const proposedBase = proposedReportPayload(supportedKind, payload, dossier);
     const proposed = proposalPayload(
       proposedBase,
@@ -408,7 +412,7 @@ async function authorizeAndExecute(
     const requestedCompleteness = supportedKind === "person"
       ? personDossier?.completeness_state === "complete" ? "complete" : "partial"
       : reportCompleteness(supportedKind, proposed, checks);
-    const completenessState = observedCostUsd > scope.estimatedCostCeilingUsd
+    const completenessState = observedCostUsd != null && observedCostUsd > scope.estimatedCostCeilingUsd
       ? "partial" as const
       : coverageQualifiedCompleteness({
           completeness: requestedCompleteness,
@@ -449,7 +453,7 @@ async function authorizeAndExecute(
             ? TOKEN_METHODOLOGY_VERSION
             : INVESTIGATION_METHODOLOGY_VERSION),
       providerSnapshot: personDossier?.providerSnapshot ?? {},
-      cost: personDossier?.cost ?? {},
+      cost: dossier.cost ?? { basis: "unknown" },
       executionReceipts: receipts.slice(0, 200),
     });
     const costLines = Array.isArray(costRecord.calls) ? costRecord.calls as PanelCostLine[] : [];
@@ -468,7 +472,7 @@ async function authorizeAndExecute(
       timeBudgetSeconds: scope.timeBudgetSeconds,
       estimatedCostCeilingUsd: scope.estimatedCostCeilingUsd,
       observedCostUsd,
-      costOutcome: observedCostUsd > scope.estimatedCostCeilingUsd ? "estimate_exceeded" : "within_estimate",
+      costOutcome: observedCostUsd == null ? "unknown" : observedCostUsd > scope.estimatedCostCeilingUsd ? "estimate_exceeded" : "within_estimate",
       reviewPath: `/?version=${encodeURIComponent(proposedReportVersionId)}`,
     });
   } catch (error) {

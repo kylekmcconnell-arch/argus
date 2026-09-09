@@ -3,13 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   auditToken: vi.fn(),
   reserveInvestigationCredit: vi.fn(),
-  collectTokenSocialActivity: vi.fn(),
+  scanScopedFetch: vi.fn(() => fetch), collectTokenSocialActivity: vi.fn(),
   streamInvestigation: vi.fn(),
 }));
 
 vi.mock("../token/audit", () => ({ auditToken: mocks.auditToken }));
 vi.mock("./investigationCredits", () => ({ reserveInvestigationCredit: mocks.reserveInvestigationCredit }));
-vi.mock("./socialActivityClient", () => ({ collectTokenSocialActivity: mocks.collectTokenSocialActivity }));
+vi.mock("./socialActivityClient", () => ({ scanScopedFetch: mocks.scanScopedFetch, collectTokenSocialActivity: mocks.collectTokenSocialActivity }));
 vi.mock("./investigation", () => ({ streamInvestigation: mocks.streamInvestigation }));
 
 import { getScanRun, startInvestigationScan, startTokenScan } from "./scanrunner";

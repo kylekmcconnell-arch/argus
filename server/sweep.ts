@@ -1,3 +1,4 @@
+import { deadlineFetch } from "./providerDeadline.js";
 // On-demand watchlist sweep — runs ONLY when explicitly triggered (the "Sweep
 // now" button); there is deliberately no cron and no background monitoring.
 //
@@ -41,7 +42,7 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0,
 
 async function pg(c: { url: string; key: string }, path: string, init?: RequestInit): Promise<unknown | null> {
   try {
-    const r = await fetch(`${c.url}/rest/v1/${path}`, { ...init, headers: { ...headers(c.key), ...(init?.headers as Record<string, string>) }, signal: AbortSignal.timeout(10000) });
+    const r = await deadlineFetch(`${c.url}/rest/v1/${path}`, { ...init, headers: { ...headers(c.key), ...(init?.headers as Record<string, string>) }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const t = await r.text();
     return t ? JSON.parse(t) : [];
@@ -55,7 +56,7 @@ async function telegram(text: string): Promise<void> {
   const chat = env("TELEGRAM_CHAT_ID");
   if (!token || !chat) return; // push delivery is strictly opt-in
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    await deadlineFetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ chat_id: chat, text }),

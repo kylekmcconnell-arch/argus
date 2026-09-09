@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // CoinGecko adapter. Source-of-record token market data by contract address,
 // used for call-performance (K2). Free Demo key works; gated on COINGECKO_API_KEY.
 
@@ -33,7 +34,7 @@ export async function tokenByContract(chain: string, address: string) {
   const tier = key ? "subscription/keyed" : "keyless";
   let res: Response;
   try {
-    res = await fetch(`${base}/coins/${platform}/contract/${address}`, {
+    res = await deadlineFetch(`${base}/coins/${platform}/contract/${address}`, {
       headers,
       signal: AbortSignal.timeout(10_000),
     });

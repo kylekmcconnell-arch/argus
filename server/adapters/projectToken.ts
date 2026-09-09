@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 import { officialXProfileHandle } from "../../src/lib/officialXProfile";
 import type { LaunchedProductLead, ProjectTokenSnapshot, UnresolvedProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
 import { canonicalOfficialWebsite, type OfficialWebsiteScope } from "../../src/lib/fundScaleEvidence";
@@ -296,7 +297,7 @@ async function coingeckoFetch(url: string, headers: Record<string, string>, labe
   for (let attempt = 0; attempt < 2; attempt++) {
     let response: Response;
     try {
-      response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+      response = await deadlineFetch(url, { headers, signal: AbortSignal.timeout(10_000) });
     } catch {
       return null;
     }
@@ -420,7 +421,7 @@ async function coinByContract(platform: string, address: string): Promise<
   const url = `${base}/coins/${encodeURIComponent(platform)}/contract/${encodeURIComponent(address)}`;
   let response: Response;
   try {
-    response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+    response = await deadlineFetch(url, { headers, signal: AbortSignal.timeout(10_000) });
   } catch {
     recordCall("coingecko", "project-contract", 0, `${tier} · transport_error`, "failed");
     return { state: "failed" };
@@ -698,7 +699,7 @@ export function siteContractCandidates(html: string, limit = 10): string[] {
 async function dexSearch(query: string): Promise<JsonRecord[] | null> {
   let response: Response;
   try {
-    response = await fetch(`${DEXSCREENER_SEARCH}?q=${encodeURIComponent(query)}`, {
+    response = await deadlineFetch(`${DEXSCREENER_SEARCH}?q=${encodeURIComponent(query)}`, {
       signal: AbortSignal.timeout(8_000),
     });
   } catch {
@@ -1129,7 +1130,7 @@ async function resolveSiteDeclaredOnPage(
  */
 async function collectSiteDeclaredToken(
   ctx: CollectContext,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = deadlineFetch,
   extraOfficialUrls: readonly string[] = [],
   recoverOfficialText: (url: string) => Promise<PublicTextWithRecoveryResult> = fetchPublicTextWithRecovery,
 ): Promise<SiteDeclarationResult> {
@@ -1173,7 +1174,7 @@ async function dexTokenPairs(
 ): Promise<{ pairs: JsonRecord[]; capped: boolean } | null> {
   let response: Response;
   try {
-    response = await fetch(`${DEXSCREENER}/${addresses.map((address) => encodeURIComponent(address)).join(",")}`, {
+    response = await deadlineFetch(`${DEXSCREENER}/${addresses.map((address) => encodeURIComponent(address)).join(",")}`, {
       signal: AbortSignal.timeout(8_000),
     });
   } catch {
@@ -1269,7 +1270,7 @@ async function ohlcv(
   if (!url) return null;
   let response: Response;
   try {
-    response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+    response = await deadlineFetch(url, { signal: AbortSignal.timeout(8_000) });
   } catch {
     recordCall("geckoterminal", `project-token-ohlcv-${timeframe}`, 0, "keyless · transport_error", "failed");
     return null;

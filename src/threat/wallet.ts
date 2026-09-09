@@ -59,9 +59,9 @@ async function holdings(address: string): Promise<{ positions: RawPosition[]; ch
 }
 
 // A cached verdict from the shared ledger (no fresh scan).
-async function cachedVerdict(address: string): Promise<{ verdict: ThreatVerdict; risk: number; at: number } | null> {
+async function cachedVerdict(address: string, chain: string): Promise<{ verdict: ThreatVerdict; risk: number; at: number } | null> {
   try {
-    const res = await apiFetch(`/api/threat-receipts?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(5000) });
+    const res = await apiFetch(`/api/threat-receipts?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     const d = (await res.json()) as { available?: boolean; receipt?: { verdict: ThreatVerdict; risk: number; flaggedAt: number } | null };
     if (!d.available || !d.receipt) return null;
@@ -89,11 +89,11 @@ export async function scanWallet(
 
   // Enrich each position with live liquidity + a cached verdict.
   const positions: WalletPosition[] = await Promise.all(raw.map(async (p) => {
-    const pair = pickPair(await dexByToken(p.address), p.address);
+    const pair = pickPair((await dexByToken(p.address)).filter((pair) => pair.chainId === p.chain), p.address);
     const liquidityUsd = pair?.liquidity?.usd ?? null;
     const priceUsd = p.priceUsd ?? (pair?.priceUsd ? Number(pair.priceUsd) : null);
     const valueUsd = priceUsd != null ? p.balance * priceUsd : p.valueUsd;
-    const cached = await cachedVerdict(p.address);
+    const cached = await cachedVerdict(p.address, p.chain);
     return {
       address: p.address, chain: p.chain, symbol: p.symbol, name: p.name,
       balance: p.balance, priceUsd, valueUsd,
@@ -115,7 +115,7 @@ export async function scanWallet(
   if (unknowns.length) emit?.({ phase: "Wallet", label: "Scan unknowns", detail: `Freshly scanning the ${unknowns.length} largest unrated position${unknowns.length === 1 ? "" : "s"}…`, tone: "neutral" });
   for (const u of unknowns) {
     const via = u.chain === "solana" ? "solana" : "evm";
-    const scan = await threatScan({ kind: "token", ref: u.address, via }).catch(() => null);
+    const scan = await threatScan({ kind: "token", ref: u.address, via }, undefined, { chain: u.chain }).catch(() => null);
     if (scan) { u.verdict = scan.call.verdict; u.risk = scan.call.risk; u.verdictAt = scan.scannedAt; u.fresh = true; }
   }
 

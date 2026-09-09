@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // "Since last scan": read the most recent persisted report version for this
 // same subject in this organization, so a re-run can state its own delta
 // (score, verdict, completeness) instead of leaving the repeat user to diff
@@ -43,7 +44,7 @@ export async function readPriorOutcome(
       + `&kind=eq.person`
       + `&ref=in.(${encodeURIComponent(`"${ref}","@${ref}"`)})`
       + "&select=report_version_id&order=ts.desc&limit=1";
-    const projectionRes = await fetch(projectionUrl, {
+    const projectionRes = await deadlineFetch(projectionUrl, {
       headers: authHeaders(c.key),
       signal: AbortSignal.timeout(5_000),
     });
@@ -57,7 +58,7 @@ export async function readPriorOutcome(
       + `&organization_id=eq.${encodeURIComponent(organizationId)}`
       + "&select=id,version,score,verdict,completeness_state,created_at,payload"
       + "&limit=1";
-    const versionRes = await fetch(versionUrl, { headers: authHeaders(c.key), signal: AbortSignal.timeout(5_000) });
+    const versionRes = await deadlineFetch(versionUrl, { headers: authHeaders(c.key), signal: AbortSignal.timeout(5_000) });
     if (!versionRes.ok) return null;
     const rows = (await versionRes.json()) as Array<{
       id?: string; version?: number; score?: number | string | null; verdict?: string | null;

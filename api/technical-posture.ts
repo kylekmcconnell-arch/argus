@@ -1,3 +1,4 @@
+import { assetIdentity } from "../src/lib/assetIdentity.js";
 // Chart posture. GET /api/technical-posture?symbol=PEPE&mcap=1234567
 //
 // Reads a self-hosted chart-signal service (major-venue market data for assets
@@ -51,6 +52,7 @@ const ALIASES: Record<string, string> = {
 };
 
 interface UpstreamRow {
+  chain?: unknown; address?: unknown;
   ticker?: unknown; timeframe?: unknown; signals?: unknown; high_low?: unknown;
   green_dot_count?: unknown; red_dot_count?: unknown;
   bottoms_last_count?: unknown; bottoms_last_age?: unknown;
@@ -99,6 +101,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const symbol = String(req.query.symbol ?? "").trim().toUpperCase();
   if (!/^[A-Z0-9]{1,15}$/.test(symbol)) return res.status(400).json({ error: "bad symbol" });
   const scanMcap = num(req.query.mcap);
+  const chain = typeof req.query.chain === "string" ? req.query.chain.trim() : "";
+  const address = typeof req.query.address === "string" ? req.query.address.trim() : "";
 
   const base = process.env.CHART_SIGNALS_URL;
   const token = process.env.CHART_SIGNALS_TOKEN;
@@ -122,6 +126,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const byTf = new Map<string, UpstreamRow>();
     const pref = (t: string) => (t.endsWith("-USD") ? 0 : t.endsWith("-USDT") ? 1 : 2);
     for (const raw of d.rows as UpstreamRow[]) {
+      if (!raw || !chain || !address || typeof raw.chain !== "string" || typeof raw.address !== "string"
+        || assetIdentity(raw.chain, raw.address) !== assetIdentity(chain, address)) continue;
       const tf = String(raw.timeframe ?? "");
       const cur = byTf.get(tf);
       if (!cur || pref(String(raw.ticker ?? "")) < pref(String(cur.ticker ?? ""))) byTf.set(tf, raw);
@@ -130,6 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // namesake guard: the scanned token and the listed asset must be the same
     // order of magnitude, or the ticker match is a different asset entirely
     let rows = [...byTf.values()];
+    if (!rows.length) return res.status(200).json({ available: true, covered: false, binding: "unresolved", note: "Chart candidates could not be bound to this chain and contract address." });
     if (scanMcap != null && scanMcap > 0) {
       rows = rows.filter((row) => {
         const feedCap = num(row.market_cap_usd);

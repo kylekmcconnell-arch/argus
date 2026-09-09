@@ -101,7 +101,7 @@ async function writeScanReceipt(auth: AuthContext, input: ScanReceiptWrite): Pro
       private_run: input.privateRun === true,
       credits_charged_millis: Math.max(0, Math.round((input.creditsCharged ?? 0) * 1000)),
       started_at: startedAt,
-      metadata: {},
+      metadata: { deployment: process.env.VERCEL_GIT_COMMIT_SHA ?? null, methodology: "argus-reliability-20260909" },
       ...outcome,
     }
     : outcome;

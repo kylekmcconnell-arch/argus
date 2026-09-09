@@ -18,7 +18,7 @@ export interface DexPair {
   txns?: { h24?: { buys: number; sells: number } };
   priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
   baseToken?: { address: string; name: string; symbol: string };
-  quoteToken?: { symbol: string };
+  quoteToken?: { address?: string; symbol?: string };
   labels?: string[];
   info?: { imageUrl?: string; websites?: { url: string }[]; socials?: { type: string; url: string }[] };
 }
@@ -168,13 +168,16 @@ export async function radarTokens(): Promise<RadarRef[]> {
   return out;
 }
 
-export async function dexByTokenResult(address: string): Promise<DexPairsResult> {
+export async function dexByTokenResult(address: string, fetchImpl: typeof fetch = fetch): Promise<DexPairsResult> {
+  const request = (url: string, init?: RequestInit) => retryFetch(url, init, 3, fetchImpl);
   try {
-    const res = await retryFetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+    const res = await request(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
       signal: AbortSignal.timeout(8_000),
     });
     if (!res.ok) return { ok: false, pairs: [] };
     const d = (await res.json()) as { pairs?: DexPair[] };
+    if (d.pairs !== null && !Array.isArray(d.pairs)) return { ok: false, pairs: [] };
+    if (d.pairs?.some((p) => !p || typeof p.chainId !== "string" || typeof p.baseToken?.address !== "string")) return { ok: false, pairs: [] };
     return { ok: true, pairs: d.pairs ?? [] };
   } catch {
     return { ok: false, pairs: [] };
@@ -277,10 +280,11 @@ function cleanBlurb(raw: unknown): string | null {
 }
 // Tier-1 CEXes carry the most weight (real listings = real diligence + KYC trail).
 const CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
-export async function coingeckoToken(chain: string, address: string): Promise<CgInfo | null> {
+export async function coingeckoToken(chain: string, address: string, fetchImpl: typeof fetch = fetch): Promise<CgInfo | null> {
+  const request = (url: string, init?: RequestInit) => retryFetch(url, init, 3, fetchImpl);
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
-    const res = await retryFetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
+    const res = await request(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
       signal: AbortSignal.timeout(8_000),
     });
     if (res.status === 404) return { listed: false, id: null, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null, categories: [] };
@@ -329,12 +333,13 @@ export async function coingeckoToken(chain: string, address: string): Promise<Cg
   }
 }
 
-export async function dexByPairResult(chain: string, pair: string): Promise<{
+export async function dexByPairResult(chain: string, pair: string, fetchImpl: typeof fetch = fetch): Promise<{
   ok: boolean;
   pair: DexPair | null;
 }> {
+  const request = (url: string, init?: RequestInit) => retryFetch(url, init, 3, fetchImpl);
   try {
-    const res = await retryFetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
+    const res = await request(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
       signal: AbortSignal.timeout(8_000),
     });
     if (!res.ok) return { ok: false, pair: null };
@@ -360,6 +365,7 @@ export function pickPair(pairs: DexPair[], wantAddress?: string): DexPair | null
       ? byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase())
       : undefined;
     if (match) return match;
+    return null; // An exact request must never adopt a different base asset.
   }
   return byLiq[0];
 }
@@ -422,9 +428,10 @@ interface HoneypotResponse {
   simulationResult?: { buyTax?: number; sellTax?: number };
   flags?: Array<{ description?: string; flag?: string } | string>;
 }
-export async function honeypotIs(chainId: string, address: string): Promise<HoneypotSim | null> {
+export async function honeypotIs(chainId: string, address: string, fetchImpl: typeof fetch = fetch): Promise<HoneypotSim | null> {
+  const request = (url: string, init?: RequestInit) => retryFetch(url, init, 3, fetchImpl);
   try {
-    const res = await retryFetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
+    const res = await request(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
     if (!res.ok) return null;
     const d = (await res.json()) as HoneypotResponse;
     return {
@@ -460,12 +467,13 @@ export interface SolanaSecurity {
   metadata?: { name?: string; symbol?: string };
   trusted_token?: number;
 }
-export async function goplusSolana(mint: string): Promise<SolanaSecurity | null> {
+export async function goplusSolana(mint: string, fetchImpl: typeof fetch = fetch): Promise<SolanaSecurity | null> {
+  const request = (url: string, init?: RequestInit) => retryFetch(url, init, 3, fetchImpl);
   try {
-    const res = await retryFetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
+    const res = await request(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
     if (!res.ok) return null;
     const d = (await res.json()) as { result?: Record<string, SolanaSecurity> };
-    const row = d.result?.[mint] ?? (d.result ? Object.values(d.result)[0] : undefined);
+    const row = d.result?.[mint];
     return row ?? null;
   } catch {
     return null;
@@ -665,13 +673,14 @@ export async function rugcheckReport(mint: string, fetchImpl: typeof fetch = fet
   }
 }
 
-export async function goplus(chainId: string, address: string): Promise<GoPlusSecurity | null> {
+export async function goplus(chainId: string, address: string, fetchImpl: typeof fetch = fetch): Promise<GoPlusSecurity | null> {
+  const request = (url: string, init?: RequestInit) => retryFetch(url, init, 3, fetchImpl);
   const once = async (): Promise<GoPlusSecurity | null> => {
     try {
-      const res = await retryFetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
+      const res = await request(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
       if (!res.ok) return null;
       const d = (await res.json()) as { result?: Record<string, GoPlusSecurity> };
-      return d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : undefined) ?? null;
+      return d.result?.[address.toLowerCase()] ?? d.result?.[address] ?? null;
     } catch {
       return null;
     }

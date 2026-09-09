@@ -37,7 +37,7 @@ export interface SanctionsScreenOutcome extends SanctionsScreenResult {
   completedAt: string;
 }
 
-export async function sanctionedSet(family: SanctionsFamily): Promise<Set<string>> {
+export async function sanctionedSet(family: SanctionsFamily, fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<Set<string>> {
   // EVM addresses are case-insensitive, so the set is lowercased and the query
   // is lowercased to match. Solana base58 addresses ARE case-sensitive (and
   // real ones almost always carry uppercase), so the Solana set must be stored
@@ -47,12 +47,13 @@ export async function sanctionedSet(family: SanctionsFamily): Promise<Set<string
   // a union assembled while one or more constituent lists were unreachable,
   // so it must never be reused for a clean sanctions result.
   const ck = `ofac:${family}:v3`;
-  const cached = await cacheGetJson<string[]>(ck);
+  signal?.throwIfAborted();
+  const cached = signal ? null : await cacheGetJson<string[]>(ck);
   if (cached && cached.length) return new Set(cached);
   const loaded = await Promise.all(
     LISTS[family].map(async (asset) => {
       try {
-        const r = await fetch(`${RAW}${asset}.txt`, { signal: AbortSignal.timeout(9000) });
+        const r = await fetchImpl(`${RAW}${asset}.txt`, { signal: AbortSignal.timeout(9000) });
         if (!r.ok) return null;
         const t = await r.text();
         const addresses: string[] = [];
@@ -74,7 +75,8 @@ export async function sanctionedSet(family: SanctionsFamily): Promise<Set<string
   if (loaded.some((addresses) => addresses === null)) return new Set();
 
   const set = new Set(loaded.flatMap((addresses) => addresses ?? []));
-  if (set.size) await cacheSetJson(ck, [...set]);
+  signal?.throwIfAborted();
+  if (set.size && !signal) await cacheSetJson(ck, [...set]);
   return set;
 }
 
@@ -82,11 +84,11 @@ export async function sanctionedSet(family: SanctionsFamily): Promise<Set<string
  * Screen an already-normalized address list against the OFAC SDN set. Returns
  * available:false (never a false clean) when the list cannot be loaded.
  */
-export async function screenAddresses(chain: string, addresses: readonly string[]): Promise<SanctionsScreenResult> {
+export async function screenAddresses(chain: string, addresses: readonly string[], fetchImpl: typeof fetch = fetch, signal?: AbortSignal): Promise<SanctionsScreenResult> {
   const family = sanctionsFamily(chain);
   const unique = [...new Set(addresses.map((a) => a.trim()).filter(Boolean))].slice(0, 40);
   if (!unique.length) return { available: false, checked: 0, sanctioned: [] };
-  const set = await sanctionedSet(family);
+  const set = await sanctionedSet(family, fetchImpl, signal);
   if (!set.size) return { available: false, checked: unique.length, sanctioned: [] };
   // Solana is matched case-sensitively; EVM case-insensitively.
   const sanctioned = unique.filter((a) => (family === "solana" ? set.has(a) : set.has(a.toLowerCase())));
@@ -102,12 +104,14 @@ export async function screenAddresses(chain: string, addresses: readonly string[
 export async function screenSanctionedAddresses(
   chain: string,
   addresses: readonly (string | null | undefined)[],
+  fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<SanctionsScreenOutcome | undefined> {
   const clean = [...new Set(addresses.filter((a): a is string => typeof a === "string" && a.length > 8))].slice(0, 40);
   if (!clean.length) return undefined;
   const completedAt = new Date().toISOString();
   try {
-    const result = await screenAddresses(chain, clean);
+    const result = await screenAddresses(chain, clean, fetchImpl, signal);
     return { ...result, completedAt };
   } catch {
     return { available: false, checked: clean.length, sanctioned: [], completedAt };

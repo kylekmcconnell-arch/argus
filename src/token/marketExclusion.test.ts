@@ -257,7 +257,7 @@ describe("what the engine refuses to claim, the report must not print", () => {
   it("reports the Token-2022 transfer fee rather than asserting a 0% tax nothing measured", async () => {
     stubNetwork();
     const clean = await auditToken({ kind: "token", ref: MINT, via: "solana" }, undefined, { skipSim: true, force: true });
-    expect(clean!.axes.find((axis) => axis.key === "T3")?.rationale).toBe("no Token-2022 transfer fee is configured.");
+    expect(clean!.axes.find((axis) => axis.key === "T3")).toMatchObject({ assessed: false, weight: 0 });
 
     vi.unstubAllGlobals();
     stubNetwork({

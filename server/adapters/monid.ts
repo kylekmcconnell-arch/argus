@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Monid / Akta adapter: keyed, PitchBook-grade private-company enrichment.
 // Akta (served through Monid's run API) fills the private-market gaps a
 // diligence report otherwise leaves blank: institutional funding rounds and
@@ -687,7 +688,7 @@ export async function collectCompanyEnrichment(
     }
   }
 
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const sections = normalizeSections(options.sections);
 
   // 1) Free resolution via /v1/company/search. Some providers index a company
@@ -960,7 +961,7 @@ const PERSON_ENRICH_TIMEOUT_MS = 12_000;
  */
 export async function enrichPersonViaMonid(
   params: { profile?: string; name?: string; company?: string; minLikelihood?: number },
-  fetcher: typeof fetch = fetch,
+  fetcher: typeof fetch = deadlineFetch,
 ): Promise<MonidPersonOutcome> {
   const key = env("MONID_API_KEY");
   if (!key) return { outcome: "error", note: "no_key" };
@@ -1086,7 +1087,7 @@ export async function collectCompanyNews(
     return { available: false, reason: "no_match", note: "No company name or website supplied." };
   }
 
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const limit = clampNewsLimit(options.limit);
 
   // Resolve to a company identifier: url/uuid pass through, a bare name is
@@ -1224,7 +1225,7 @@ export async function collectTokenContractRisk(
     return { available: false, reason: "unavailable", note: "No token id supplied." };
   }
 
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const body: Record<string, unknown> = {
     token_id: tokenId,
     chain_id: isNonEmptyString(options.chainId) ? options.chainId.trim() : "1",

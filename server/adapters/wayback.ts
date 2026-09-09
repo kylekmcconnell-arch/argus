@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Wayback Machine corroboration. An off-LinkedIn role often left a fingerprint
 // that was later scrubbed: a name on a /team page, an /about blurb, a launch post.
 // archive.org keeps those snapshots forever. Given a candidate venture's domain
@@ -74,7 +75,7 @@ async function waybackSnapshots(urlPath: string): Promise<SnapshotIndexOutcome> 
     // ignores the rest, so pairing it with collapse=digest returned the full
     // unbounded index instead (verified against the live endpoint).
     const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=timestamp:4`;
-    response = await fetch(CDX + qs, { signal: AbortSignal.timeout(4000) });
+    response = await deadlineFetch(CDX + qs, { signal: AbortSignal.timeout(4000) });
   } catch {
     return { snapshots: [], state: "failed", detail: "transport_error" };
   }
@@ -121,7 +122,7 @@ async function arquivoSnapshots(urlPath: string): Promise<SnapshotIndexOutcome> 
     // Arquivo's CDX endpoint is a separate public archive and returns JSONL.
     // limit=100 is a hard response bound; ARGUS still samples at most four.
     const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&limit=100`;
-    response = await fetch(ARQUIVO_CDX + qs, { signal: AbortSignal.timeout(8000) });
+    response = await deadlineFetch(ARQUIVO_CDX + qs, { signal: AbortSignal.timeout(8000) });
   } catch {
     return { snapshots: [], state: "failed", detail: "transport_error" };
   }
@@ -189,7 +190,7 @@ async function readCapture(snap: Snapshot): Promise<CaptureRead> {
     const archiveUrl = snap.provider === "arquivo"
       ? `https://arquivo.pt/wayback/${snap.timestamp}id_/${snap.original}`
       : `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
-    const response = await fetch(archiveUrl, { signal: AbortSignal.timeout(5000) });
+    const response = await deadlineFetch(archiveUrl, { signal: AbortSignal.timeout(5000) });
     if (!response.ok) {
       recordCall(snap.provider, "snapshot-fetch", 0, `http_${response.status}`, "failed");
       return { snap, text: null };

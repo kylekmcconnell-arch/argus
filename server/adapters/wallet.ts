@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Wallet resolution: turn an identity into wallet address(es), several ways, so a
 // people-audit (and the standalone /api/find-wallet) can connect a person to their
 // on-chain footprint. Bridge: identity in -> wallet out -> on-chain forensics.
@@ -22,7 +23,7 @@ async function getJson(url: string): Promise<unknown> {
   catch { return null; }
   let response: Response;
   try {
-    response = await fetch(url, { signal: AbortSignal.timeout(9000) });
+    response = await deadlineFetch(url, { signal: AbortSignal.timeout(9000) });
   } catch {
     recordCall("wallet-resolve", operation, 0, "transport_error", "failed");
     return null;

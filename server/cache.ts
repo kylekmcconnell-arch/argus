@@ -1,3 +1,4 @@
+import { deadlineFetch } from "./providerDeadline.js";
 // 24h read-through cache for public provider results. Cache entries live in a
 // service-only table, never in tenant report projections.
 // A subject's team/affiliations/acknowledgments don't change hour-to-hour, but a
@@ -28,7 +29,7 @@ export async function cacheGet(
   const c = creds();
   if (!c) return null;
   try {
-    const r = await fetch(
+    const r = await deadlineFetch(
       `${c.url}/rest/v1/provider_cache?select=payload,expires_at&cache_key=eq.${encodeURIComponent(hash(key))}&limit=1`,
       { headers: headers(c.key), signal: AbortSignal.timeout(4000) },
     );
@@ -49,7 +50,7 @@ export async function cacheSet(key: string, text: string): Promise<void> {
   if (!c || !text) return;
   try {
     const now = Date.now();
-    await fetch(`${c.url}/rest/v1/provider_cache?on_conflict=cache_key`, {
+    await deadlineFetch(`${c.url}/rest/v1/provider_cache?on_conflict=cache_key`, {
       method: "POST",
       headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify({
