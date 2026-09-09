@@ -1,0 +1,113 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('@vercel/functions', () => ({ next: vi.fn(() => new Response(null, {status:204})) }));
+import middleware from '../middleware';
+import threat from './threat-recheck';
+import { ledgerUpsert, withLedgerOrganization } from './_ledger.js';
+import { auditToken } from '../src/token/audit';
+const org='00000000-0000-4000-8000-000000000001';
+const address='0x1111111111111111111111111111111111111111';
+const receipt={address,chain:'ethereum',symbol:'TEST',verdict:'SAFE',risk:1,liqThen:10000,checkedAt:1,flaggedAt:1};
+beforeEach(()=>{vi.stubEnv('SUPABASE_URL','https://db.example');vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY','test');vi.stubEnv('SUPABASE_PUBLISHABLE_KEY','test');vi.stubEnv('CRON_SECRET','cron');vi.stubEnv('THREAT_ALERT_WEBHOOK','');vi.stubEnv('INTERNAL_API_SECRET','');});
+afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();});
+async function recheck(pairs:unknown[]) {
+ const writes:any[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(input,init)=>{
+  const url=String(input);
+  if(url.includes('dexscreener')) return Response.json({pairs});
+  if(init?.body){writes.push(JSON.parse(String(init.body)));return Response.json({});}
+  return Response.json(new URL(url).searchParams.get('select')==='organization_id,payload'?[{organization_id:org,payload:receipt}]:[]);
+ }));
+ let body:any;
+ await threat({headers:{authorization:'Bearer cron'}} as never,{status(){return this;},json(v:any){body=v;return this;}} as never);
+ return {body,writes};
+}
+describe('controlled audit reproductions, no live requests',()=>{
+ it('missing liquidity currently produces a false dead-market alert',async()=>{
+  const result=await recheck([{chainId:'ethereum',baseToken:{address}}]);
+  expect(result.body).toMatchObject({outcomes:{dead:1},alerts:1});
+  console.log('PROOF missing liquidity =>',JSON.stringify(result.body));
+ });
+ it('another chain currently hides collapse on the scanned chain',async()=>{
+  const result=await recheck([{chainId:'ethereum',baseToken:{address},liquidity:{usd:0}},{chainId:'base',baseToken:{address},liquidity:{usd:50000}}]);
+  expect(result.body).toMatchObject({outcomes:{alive:1},alerts:0});
+  console.log('PROOF other chain liquidity =>',JSON.stringify(result.body));
+ });
+ it('chain-distinct ledger rows currently share the same database conflict key',async()=>{
+  const rows:any[]=[];vi.stubGlobal('fetch',vi.fn(async(_,init)=>{rows.push(JSON.parse(String(init?.body)));return Response.json({});}));
+  await withLedgerOrganization(org,async()=>{await ledgerUpsert(receipt as never);await ledgerUpsert({...receipt,chain:'base'} as never);});
+  expect(rows[0].ref).toBe(rows[1].ref);expect(rows[0].kind).toBe(rows[1].kind);
+  console.log('PROOF chain collision: same organization, ref, kind');
+ });
+ it('owner JWT cannot reach the manual recheck handler',async()=>{
+  const fetchMock=vi.fn();vi.stubGlobal('fetch',fetchMock);
+  const r=await middleware(new Request('https://app.example/api/threat-recheck',{headers:{authorization:'Bearer owner-session'}}));
+  expect(r.status).toBe(401);expect(fetchMock).not.toHaveBeenCalled();
+  console.log('PROOF owner recheck blocked before auth lookup:',r.status);
+ });
+ it('allowed CORS origin is not allowed the documented idempotency header',async()=>{
+  vi.stubEnv('ARGUS_CORS_ORIGINS','https://client.example');
+  const r=await middleware(new Request('https://app.example/api/v1/token',{method:'OPTIONS',headers:{origin:'https://client.example','access-control-request-headers':'authorization,idempotency-key'}}));
+  expect(r.headers.get('access-control-allow-origin')).toBe('https://client.example');expect(r.headers.get('access-control-allow-headers')?.toLowerCase()).not.toContain('idempotency-key');
+  console.log('PROOF CORS allowed headers:',r.headers.get('access-control-allow-headers'));
+ });
+ it('paid social-activity currently bypasses the supplemental quota reservation',async()=>{
+  const calls:string[]=[];vi.stubGlobal('fetch',vi.fn(async(input)=>{const url=String(input);calls.push(url);return Response.json(url.includes('/auth/')?{id:'user',email_confirmed_at:'2026-01-01'}:[{organization_id:org,role:'analyst',active:true}]);}));
+  const r=await middleware(new Request('https://app.example/api/social-activity',{method:'POST',headers:{authorization:'Bearer session'}}));
+  expect(r.status).toBe(204);expect(calls.filter(x=>x.includes('/rpc/'))).toHaveLength(0);
+  console.log('PROOF social activity admitted without budget RPC');
+ });
+ it('DEX outage currently returns the same null result as not found',async()=>{
+  vi.stubGlobal('fetch',vi.fn(async()=>new Response('',{status:503})));
+  expect(await auditToken({kind:'token',via:'evm',ref:address},undefined,{force:true,skipSim:true})).toBeNull();
+  console.log('PROOF DexScreener 503 => null not-found result');
+ });
+ it('unmeasured token axes currently contribute 18 points to the numeric score',async()=>{
+  const pair={chainId:'sui',pairAddress:'pool',baseToken:{address,name:'Test',symbol:'TEST'},liquidity:{usd:1000000},volume:{h24:100000},txns:{h24:{buys:100,sells:100}},priceChange:{h24:5},pairCreatedAt:Date.now()-365*86400000};
+  vi.stubGlobal('fetch',vi.fn(async(input)=>Response.json(String(input).includes('/latest/dex/tokens/')?{pairs:[pair]}:{})));
+  const d=await auditToken({kind:'token',via:'evm',ref:address},undefined,{force:true,skipSim:true});
+  expect(d?.safety.available).toBe(false);
+  expect(d?.axes.filter(x=>['T2','T3','T4'].includes(x.key)).map(x=>x.score)).toEqual([9,6,3]);
+  console.log('PROOF missing-safety score:',d?.score,'axes:',JSON.stringify(d?.axes.map(x=>({key:x.key,score:x.score,weight:x.weight}))));
+ });
+});
+import { renderToStaticMarkup } from 'react-dom/server';
+import { productionReportRenderers } from '../src/reports/production/renderers';
+import chart from './technical-posture';
+it('report fallback claims no open check even with partial coverage',()=>{
+ const html=renderToStaticMarkup(productionReportRenderers.decisionCanvas!({subjectName:'Example',verdictLabel:'Provisional',score:67,scoreIsProvisional:true,favorable:false,verdictTone:'caution',supports:[],concerns:[],nextSteps:[],verified:[],coveragePercent:50,successful:2,applicable:4}));
+ expect(html).toContain('No required check remains open.');
+ expect(html).toContain('No checks remain open.');
+ console.log('PROOF 2/4 checks => no required check remains open');
+});
+it('ticker-only chart accepts an unbound source row without its market cap',async()=>{
+ vi.stubEnv('CHART_SIGNALS_URL','https://charts.example');vi.stubEnv('CHART_SIGNALS_TOKEN','test');
+ vi.stubGlobal('fetch',vi.fn(async()=>Response.json({covered:true,rows:[{ticker:'TEST-USD',timeframe:'1d',signals:['big_green_arrows']}]})));
+ let body:any;await chart({method:'GET',query:{symbol:'TEST',mcap:'100000'}} as never,{setHeader(){return this;},status(){return this;},json(v:any){body=v;return this;}} as never);
+ expect(body).toMatchObject({covered:true,stance:'bullish'});console.log('PROOF unbound ticker chart accepted:',JSON.stringify(body));
+});
+it('empty GoPlus object marks contract properties assessed and yields full tax points',async()=>{
+ const pair={chainId:'ethereum',pairAddress:'pool',baseToken:{address,name:'Test',symbol:'TEST'},liquidity:{usd:1000000},volume:{h24:100000}};
+ vi.stubGlobal('fetch',vi.fn(async(input)=>{const url=String(input);return Response.json(url.includes('/latest/dex/tokens/')?{pairs:[pair]}:url.includes('gopluslabs')?{code:1,result:{[address]:{}}}:{});}));
+ const d=await auditToken({kind:'token',via:'evm',ref:address},undefined,{force:true,skipSim:true});
+ expect(d?.safety.contractPropertiesAssessed).toBe(true);expect(d?.axes.find(x=>x.key==='T3')?.score).toBe(12);
+ console.log('PROOF empty GoPlus accepted:',JSON.stringify({assessed:d?.safety.contractPropertiesAssessed,taxPoints:d?.axes.find(x=>x.key==='T3')?.score}));
+});
+import { sharedByDeployer } from '../src/threat/receipts';
+import { pickPair } from '../src/token/sources';
+it('client deployer memory collapses case-distinct Solana mints',async()=>{
+ const a='So11111111111111111111111111111111111111112';
+ const b='so11111111111111111111111111111111111111112';
+ vi.stubGlobal('fetch',vi.fn(async()=>Response.json({available:true,receipts:[{...receipt,address:a,chain:'solana',flaggedAt:1},{...receipt,address:b,chain:'solana',flaggedAt:2}]})));
+ expect(await sharedByDeployer('some-deployer')).toHaveLength(1);
+});
+it('exact token selection falls back to a different base token',()=>{
+ const other='0x2222222222222222222222222222222222222222';
+ const pair={chainId:'ethereum',pairAddress:'pool',baseToken:{address:other,name:'Other',symbol:'OTHER'},quoteToken:{address},liquidity:{usd:100000}};
+ expect(pickPair([pair] as never,address)?.baseToken.address).toBe(other);
+});
+it('FDV substitutes into mcap even when market evidence says market cap is absent',async()=>{
+ const pair={chainId:'sui',pairAddress:'pool',baseToken:{address,name:'Test',symbol:'TEST'},fdv:100000000,liquidity:{usd:100000}};
+ vi.stubGlobal('fetch',vi.fn(async(input)=>Response.json(String(input).includes('/latest/dex/tokens/')?{pairs:[pair]}:{})));
+ const d=await auditToken({kind:'token',via:'evm',ref:address},undefined,{force:true,skipSim:true});
+ expect(d?.mcap).toBe(100000000);expect(d?.marketEvidence?.mcap).toBe(false);
+});
