@@ -191,7 +191,7 @@ describe("report case lifecycle API", () => {
         canonicalRef: address,
         completenessState: "partial",
         checks: [{ label: "Contract safety", status: "unknown" }],
-        methodologyVersion: "argus-token-v2-terminal-outcomes",
+        methodologyVersion: "argus-token-v3-assessed-evidence",
         runId: clientRunId,
       }),
     );

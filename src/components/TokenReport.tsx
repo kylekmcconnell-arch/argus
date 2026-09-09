@@ -199,7 +199,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const presentation = presentPublicReport({
     verdict: d.verdict,
     score: d.score,
-    completeness: presentationCompleteness,
+    completeness: d.assessment?.provisional ? "partial" : presentationCompleteness,
   });
   const presentedVerdict = presentation.displayVerdict === "UNVERIFIABLE"
     ? "UNVERIFIABLE_IDENTITY"
@@ -238,6 +238,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     label: plainAxisLabel(a.key, a.label),
     score: a.score,
     weight: a.weight,
+    ...(a.assessed === false ? { applicability: "unassessed" as const } : {}),
     rationale: a.rationale,
     evidenceHref: `#dimension-${a.key}` as const,
   })));
@@ -498,7 +499,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           score={d.score}
           scoreLabel="Token safety score"
           scoreContext="Contract, tradeability, liquidity, holders, market data and sanctions."
-          scoreIsProvisional={readiness.status !== "ready"}
+          scoreIsProvisional={d.assessment?.provisional === true || readiness.status !== "ready"}
           favorable={favorableVerdict}
           verdictTone={decisionCanvasTone}
           argument={verdictArgument}
@@ -585,7 +586,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         {!gp && (
           <div className="mt-3 panel px-4 py-3 text-[12.5px] text-ink-dim">
-            Contract-internal safety (honeypot, mint authority, ownership, tax) could not be verified by a supported collector on <span className="capitalize">{d.chain}</span>. Those axes are scored conservatively; this report cannot claim that path is complete.
+            Contract-internal safety (honeypot, mint authority, ownership, tax) could not be verified by a supported collector on <span className="capitalize">{d.chain}</span>. Unassessed areas are excluded from the score; this report cannot claim that path is complete.
           </div>
         )}
 
@@ -644,7 +645,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               )}
               {isSol
                 ? <Check label="Transfer fee" ok={!s.transferFee} value={gp ? (s.transferFee ? "configured" : "none") : undefined} na={!gp} />
-                : <Check label="Taxes" ok={s.buyTax + s.sellTax < 10} value={gp ? `${s.buyTax.toFixed(0)}/${s.sellTax.toFixed(0)}%` : undefined} na={!gp} />}
+                : <Check label="Taxes" ok={s.buyTax + s.sellTax < 10} value={s.taxesAssessed ? `${s.buyTax.toFixed(0)}/${s.sellTax.toFixed(0)}%` : undefined} na={!s.taxesAssessed} />}
               {!isSol && <Check label="Tax not modifiable" ok={!s.slippageModifiable} na={!gp} />}
             </div>
           </Card>

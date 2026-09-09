@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 import { createHash } from "node:crypto";
 import { captureTimestamp } from "../captureTime";
 import { isIP } from "node:net";
@@ -1495,7 +1496,7 @@ export async function discoverBasicFactLeadsDetailed(
   const canonicalSubject = subjectName(ctx);
   const cacheRead = dependencies.cacheRead ?? ((key: string) => cacheGet(key, { operation: "basic-facts-hit", meta: "24h Claude web-search cache" }));
   const cacheWrite = dependencies.cacheWrite ?? cacheSet;
-  const request = dependencies.request ?? fetch;
+  const request = dependencies.request ?? deadlineFetch;
   const audience = questions[0]?.audience ?? researchAudience(ctx);
   const grouped = questionSearchGroups(questions, phase);
   let providerHttpCalls = 0;
@@ -3779,7 +3780,7 @@ const SEC_EXCHANGE_REGISTRY_URL = "https://www.sec.gov/files/company_tickers_exc
 async function fetchSecExchangeRegistry(): Promise<PublicTextResult> {
   let response: Response;
   try {
-    response = await fetch(SEC_EXCHANGE_REGISTRY_URL, {
+    response = await deadlineFetch(SEC_EXCHANGE_REGISTRY_URL, {
       headers: {
         accept: "application/json",
         // SEC.gov's fair-access policy rejects requests without a

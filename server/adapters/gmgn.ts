@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // GMGN OpenAPI: holder cost basis, trader PnL, and GMGN's own wallet tags.
 //
 // WHAT THIS IS FOR. Two things here exist nowhere else in ARGUS. The first is
@@ -303,7 +304,7 @@ export async function fetchGmgnTokenIntel(
     "/v1/market/token_top_traders",
     { chain: gmgnChain, address, limit: String(limit) },
     "holder reading",
-    opts.fetchImpl ?? fetch,
+    opts.fetchImpl ?? deadlineFetch,
     key,
   );
   if (!call.ok) return EMPTY(call.note);
@@ -419,7 +420,7 @@ export async function fetchGmgnBundleReading(
     "/v1/token/info",
     { chain: gmgnChain, address },
     "launch-pattern reading",
-    opts.fetchImpl ?? fetch,
+    opts.fetchImpl ?? deadlineFetch,
     key,
   );
   if (!call.ok) return EMPTY_BUNDLE(call.note);

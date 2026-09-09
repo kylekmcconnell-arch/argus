@@ -1,3 +1,4 @@
+import { readAllCorpusRows } from "../src/lib/corpusPagination";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -26,11 +27,11 @@ if (!supabaseUrl || !supabaseKey) {
 
 const headers = {
   apikey: supabaseKey,
-  authorization: `Bearer ${supabaseKey}`,
+  ...(supabaseKey.startsWith("sb_secret_") ? {} : { authorization: `Bearer ${supabaseKey}` }),
   accept: "application/json",
 };
 
-async function readRows(path: string): Promise<Record<string, unknown>[]> {
+async function readPage(path: string): Promise<Record<string, unknown>[]> {
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     headers,
     signal: AbortSignal.timeout(30_000),
@@ -39,19 +40,20 @@ async function readRows(path: string): Promise<Record<string, unknown>[]> {
     throw new Error(`Report corpus read failed (${response.status}): ${(await response.text()).slice(0, 240)}`);
   }
   const rows = await response.json() as unknown;
-  return Array.isArray(rows)
-    ? rows.filter((value): value is Record<string, unknown> =>
-      value !== null && typeof value === "object" && !Array.isArray(value))
-    : [];
+  if (!Array.isArray(rows) || rows.some((r) => !r || typeof r !== "object" || Array.isArray(r))) throw new Error("Malformed report corpus page");
+  return rows as Record<string, unknown>[];
 }
+
 
 const expectations = JSON.parse(
   readFileSync(join(process.cwd(), "eval", "expectations.json"), "utf8"),
 ) as Record<string, ReportQualityExpectation>;
 
+const snapshotAt = new Date().toISOString();
+const readRows = (path: string) => readAllCorpusRows(`${path}&created_at=lte.${encodeURIComponent(snapshotAt)}`, readPage);
 const [cases, versions] = await Promise.all([
-  readRows("cases?select=id,kind,canonical_ref,display_query,status&order=updated_at.desc&limit=1000"),
-  readRows("report_versions?select=id,case_id,version,verdict,score,completeness_state,attestation_state,created_at,payload&order=case_id.asc,version.desc&limit=1000"),
+  readRows("cases?select=id,kind,canonical_ref,display_query,status"),
+  readRows("report_versions?select=id,case_id,version,verdict,score,completeness_state,attestation_state,created_at,methodology_version,payload"),
 ]);
 
 const latestByCase = new Map<string, Record<string, unknown>>();
@@ -85,24 +87,29 @@ const results = cases.flatMap((reportCase) => {
     createdAt: typeof version.created_at === "string" ? version.created_at : null,
     payload: version.payload,
   };
-  return [auditStoredReportQuality(sample, expectations[ref.toLowerCase().replace(/^@/, "")])];
+  return [{ ...auditStoredReportQuality(sample, expectations[ref.toLowerCase().replace(/^@/, "")]), caseId, reportVersionId: version.id, kind: sample.kind, attestation: sample.attestation }];
 });
 
-const serverCollected = results.filter((result) => {
-  const reportCase = cases.find((value) =>
-    (typeof value.display_query === "string" ? value.display_query : value.canonical_ref) === result.subject);
-  const caseId = typeof reportCase?.id === "string" ? reportCase.id : "";
-  return latestByCase.get(caseId)?.attestation_state === "server_collected";
-});
-const errorCount = serverCollected.reduce((sum, result) => sum + result.errorCount, 0);
-const warningCount = serverCollected.reduce((sum, result) => sum + result.warningCount, 0);
+const missingVersions = cases.length - results.length;
+const cohorts = new Map<string, number>();
+for (const result of results) {
+  const key = `${result.kind}/${result.attestation ?? "unknown"}`;
+  cohorts.set(key, (cohorts.get(key) ?? 0) + 1);
+}
+const rescanCandidates = results.filter((result) => {
+  const version = latestByCase.get(result.caseId);
+  return result.errorCount > 0 || version?.score == null || (version?.methodology_version !== "argus-token-v3-assessed-evidence" && result.kind === "token");
+}).sort((a, b) => Number(latestByCase.get(b.caseId)?.score == null) - Number(latestByCase.get(a.caseId)?.score == null));
+console.log(JSON.stringify({ snapshotAt, boundedRescanPlan: rescanCandidates.slice(0, 12).map((r) => ({ caseId: r.caseId, reportVersionId: r.reportVersionId, kind: r.kind, reason: latestByCase.get(r.caseId)?.score == null ? "historical_missing_score" : "methodology_changed", estimatedCostUsd: null })), rescanCandidates: rescanCandidates.length, cases: cases.length, versionsRead: versions.length, assessedLatest: results.length, missingVersions, cohorts: Object.fromEntries(cohorts) }));
+const errorCount = results.reduce((sum, result) => sum + result.errorCount, 0);
+const warningCount = results.reduce((sum, result) => sum + result.warningCount, 0);
 
-console.log(`ARGUS report quality corpus · ${serverCollected.length} server-collected latest reports`);
-for (const result of serverCollected.filter((item) => item.findings.length)) {
+console.log(`ARGUS report quality corpus · ${results.length} latest reports across all attestations`);
+for (const result of results.filter((item) => item.findings.length)) {
   console.log(`\n${result.subject} · v${result.version}`);
   for (const item of result.findings) {
     console.log(`  ${item.severity === "error" ? "ERROR" : "WARN "} ${item.code}: ${item.message}`);
   }
 }
 console.log(`\nResult: ${errorCount} error${errorCount === 1 ? "" : "s"} · ${warningCount} warning${warningCount === 1 ? "" : "s"}`);
-process.exitCode = errorCount > 0 ? 1 : 0;
+process.exitCode = errorCount > 0 || missingVersions > 0 ? 1 : 0;

@@ -4,7 +4,7 @@
 // have no unresolved cross-directory ESM imports at runtime.
 export { providerStatus } from "./config";
 export { runAudit } from "./orchestrate";
-export { auditToken } from "../src/token/audit";
+export { auditToken } from "./tokenAudit";
 export { collectSocialActivity } from "./socialActivity";
 export { resolveInput } from "../src/lib/resolveInput";
 

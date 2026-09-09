@@ -1,0 +1,19 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions, pg_catalog;
+select plan(5);
+insert into organizations(id,slug,name) values ('00000000-0000-4000-8000-000000009401','chain-test','Chain test');
+insert into reports(organization_id,ref,kind,payload,ts) values
+('00000000-0000-4000-8000-000000009401','legacy','threat-receipt','{"chain":"solana","address":"So11111111111111111111111111111111111111112","marker":"new"}','2026-09-09'),
+('00000000-0000-4000-8000-000000009401','solana:So11111111111111111111111111111111111111112','threat-receipt','{"chain":"solana","address":"So11111111111111111111111111111111111111112","marker":"old"}','2026-09-08'),
+('00000000-0000-4000-8000-000000009401','other-chain','threat-receipt','{"chain":"base","address":"0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}','2026-09-09'),
+('00000000-0000-4000-8000-000000009401','unknown','holder-edge','{"wallet":"So111","token":"So222"}','2026-09-09');
+-- MIGRATION
+select is((select payload->>'marker' from reports where organization_id='00000000-0000-4000-8000-000000009401' and ref='solana:So11111111111111111111111111111111111111112' and kind='threat-receipt'),'new','newest exact-case observation survives collision');
+select is((select count(*)::int from reports where organization_id='00000000-0000-4000-8000-000000009401' and kind='threat-receipt-chain-history'),1,'history preserved');
+select is((select ref from reports where organization_id='00000000-0000-4000-8000-000000009401' and payload->>'chain'='base'),'base:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','EVM normalization retains chain');
+select is((select kind from reports where organization_id='00000000-0000-4000-8000-000000009401' and ref='unknown'),'holder-edge-chain-unresolved','unknown chain is not guessed');
+-- MIGRATION
+select is((select count(*)::int from reports where organization_id='00000000-0000-4000-8000-000000009401'),4,'rerun preserves all history');
+select * from finish();
+rollback;

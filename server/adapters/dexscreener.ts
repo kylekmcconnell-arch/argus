@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // DexScreener adapter — FREE, keyless, real. Resolves a token by contract
 // address to live DEX liquidity / volume / price, the signal that surfaces thin
 // liquidity and fresh-pair rug risk. Used to enrich any promotion the subject
@@ -43,7 +44,7 @@ export interface DexTokenSnapshot {
 export async function lookupToken(address: string): Promise<DexTokenSnapshot | null> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}/latest/dex/tokens/${address}`, {
+    res = await deadlineFetch(`${BASE}/latest/dex/tokens/${address}`, {
       signal: AbortSignal.timeout(8_000),
     });
   } catch {
@@ -125,7 +126,7 @@ export async function detectTokenLifecycle(ticker: string, knownAddress?: string
   if (!sym) return null;
   let res: Response;
   try {
-    res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`, {
+    res = await deadlineFetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`, {
       signal: AbortSignal.timeout(8_000),
     });
   } catch {

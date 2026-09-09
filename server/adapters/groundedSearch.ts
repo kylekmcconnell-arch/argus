@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Grounded search: the ultimate decoupled discovery path. Instead of paying a
 // frontier model (Sonnet) to run web searches AND read whole pages into its
 // context (the dominant audit cost), split the job across the right-cost tool
@@ -211,7 +212,7 @@ function asRec(v: unknown): Record<string, unknown> {
 
 async function serperSearch(query: string, key: string): Promise<SerperSearchOutcome> {
   try {
-    const res = await fetch(SERPER, {
+    const res = await deadlineFetch(SERPER, {
       method: "POST",
       headers: { "X-API-KEY": key, "content-type": "application/json" },
       body: JSON.stringify({ q: query, num: 10 }),
@@ -247,7 +248,7 @@ async function serperSearch(query: string, key: string): Promise<SerperSearchOut
 
 async function serperNews(query: string, key: string): Promise<SerperSearchOutcome> {
   try {
-    const res = await fetch(SERPER_NEWS, {
+    const res = await deadlineFetch(SERPER_NEWS, {
       method: "POST",
       headers: { "X-API-KEY": key, "content-type": "application/json" },
       body: JSON.stringify({ q: query, num: 10 }),
@@ -286,7 +287,7 @@ async function callGrokExtract(system: string, user: string, maxTokens: number, 
   const model = GROK_EXTRACT_MODEL();
   let res: Response;
   try {
-    res = await fetch(XAI_CHAT, {
+    res = await deadlineFetch(XAI_CHAT, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
@@ -341,7 +342,7 @@ async function callOpenRouter(system: string, user: string, maxTokens: number, o
   if (!key) return null;
   let res: Response;
   try {
-    res = await fetch(OPENROUTER, {
+    res = await deadlineFetch(OPENROUTER, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "X-Title": "ARGUS due-diligence" },
       body: JSON.stringify({
@@ -399,7 +400,7 @@ async function callExtractModel(system: string, user: string, maxTokens: number,
   const model = CLAUDE_EXTRACT_MODEL();
   let res: Response;
   try {
-    res = await fetch(ANTHROPIC, {
+    res = await deadlineFetch(ANTHROPIC, {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }),

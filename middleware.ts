@@ -37,9 +37,10 @@ const VIEWER_GET_PATHS = new Set([
   // screen (and per-report readiness) once a batch sweep exhausts the budget.
   "/api/sanctions",
 ]);
-const OWNER_PATHS = new Set(["/api/reclassify", "/api/members", "/api/waitlist"]);
+const OWNER_PATHS = new Set(["/api/reclassify", "/api/members", "/api/waitlist", "/api/threat-recheck"]);
 // Admission budget for bounded paid panels/chat; scan credits remain separate.
 const SUPPLEMENTAL_PATHS = new Set([
+  "social-activity", "find-wallet", "x-authenticity",
   "ask", "arkham", "arkham-money-flow", "arkham-counterparties", "arkham-holdings", "arkham-token-holders", "arkham-risk-paths",
   "project-docs", "recon-team", "github-forensics", "resolve-github", "x-find", "pfp-check", "kol-signals", "token-identity",
   "identity-sweep", "challenge-verdict", "vc-portfolio", "call-performance", "namesake", "cluster", "funder", "deployer",
@@ -76,7 +77,7 @@ export default async function middleware(request: Request): Promise<Response> {
     const allowed = new Set((process.env.ARGUS_CORS_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean));
     const headers: Record<string, string> = {
       "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-      "access-control-allow-headers": "Authorization, Content-Type",
+      "access-control-allow-headers": "Authorization, Content-Type, Idempotency-Key",
       "access-control-max-age": "600",
       vary: "Origin",
     };
@@ -97,10 +98,7 @@ export default async function middleware(request: Request): Promise<Response> {
     const cronSecret = process.env.CRON_SECRET;
     const authz = request.headers.get("authorization") || "";
     if (cronSecret && timingSafeEqual(authz, `Bearer ${cronSecret}`)) return next();
-    return Response.json(
-      { error: "authentication_required", message: "This endpoint is cron-only." },
-      { status: 401, headers: { "cache-control": "no-store", "www-authenticate": 'Bearer realm="ARGUS"' } },
-    );
+    // Manual requests continue through normal owner authentication below.
   }
 
   // OENBOT's provider-cost view is a server-to-server read-only feed. Its
@@ -226,6 +224,20 @@ export default async function middleware(request: Request): Promise<Response> {
           : "analyst");
   if (ROLE_RANK[role] < ROLE_RANK[requiredRole]) {
     return Response.json({ error: "insufficient_role", requiredRole }, { status: 403 });
+  }
+
+  const scanKey = request.headers.get("x-argus-scan-key");
+  if (scanKey && (pathname === "/api/social-activity" || pathname === "/api/x-authenticity")) {
+    const body = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
+    const subject = pathname === "/api/social-activity" ? body.contractAddress : requestUrl.searchParams.get("address");
+    const claim = await fetch(`${supabaseUrl}/rest/v1/rpc/claim_scan_supplement`, {
+      method: "POST", headers: { ...serviceHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ p_organization_id: organizationId, p_user_id: user.id, p_run_key: scanKey, p_route: pathname, p_subject: typeof subject === "string" ? subject : "" }),
+      signal: AbortSignal.timeout(8000),
+    }).catch(() => null);
+    if (!claim?.ok) return Response.json({ error: "scan_supplement_unavailable" }, { status: 503 });
+    if (await claim.json() === true) return next();
+    // Invalid/used scope cannot bypass the ordinary daily allowance.
   }
 
   if (SUPPLEMENTAL_PATHS.has(pathname) || (pathname === "/api/augment" && request.method === "POST")) {

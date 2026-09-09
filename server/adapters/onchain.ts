@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // On-chain forensics adapter. Helius covers attributed Solana wallets. A
 // Bitquery credential may be configured for future work, but there is no
 // Bitquery collector in this adapter yet and it must never make a run live.
@@ -40,7 +41,7 @@ async function collectHeliusWalletActivity(address: string): Promise<HeliusOutco
   }
   let res: Response;
   try {
-    res = await fetch(
+    res = await deadlineFetch(
       `https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${key}&limit=50`,
       { signal: AbortSignal.timeout(8_000) },
     );

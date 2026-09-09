@@ -250,7 +250,7 @@ describe("investigation token readiness end to end", () => {
       bundleCount: 1,
       bundleRisk: "low",
       safety: {
-        available: true, simChecked: true, honeypot: false, cannotSellAll: false,
+        available: true, contractPropertiesAssessed: true, simChecked: true, honeypot: false, cannotSellAll: false,
         buyTax: 0, sellTax: 0, holderCount: 140755, topHolderPct: 12,
         ownerRenounced: true, mintable: false, freezable: false, nonTransferable: false,
         takeBack: false, hiddenOwner: false, selfdestruct: false, pausable: false,

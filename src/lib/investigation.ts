@@ -17,7 +17,7 @@
 //   - recon.team.state drives the founder section verbatim; a coverage gap is a
 //     gap, not an absence claim.
 import { auditToken, type TokenDossier } from "../token/audit";
-import { collectTokenSocialActivity } from "./socialActivityClient";
+import { collectTokenSocialActivity, scanScopedFetch } from "./socialActivityClient";
 import type { RunnableTokenInput } from "./resolveInput";
 import { runRecon, type Recon } from "../collect/recon";
 import { streamAudit, probeBackend } from "./live";
@@ -293,7 +293,8 @@ export function streamInvestigation(
 ): () => void {
   let aborted = false;
   let abortLive: (() => void) | null = null;
-  const abort = () => { aborted = true; abortLive?.(); };
+  const tokenController = new AbortController();
+  const abort = () => { aborted = true; tokenController.abort(); abortLive?.(); };
 
   (async () => {
     try {
@@ -303,7 +304,7 @@ export function streamInvestigation(
       const token = await auditToken(
         input,
         (s) => { if (!aborted) h.onStep(s); },
-        { force: opts?.forceTokenAudit, collectSocialActivity: collectTokenSocialActivity },
+        { signal: tokenController.signal, deadlineAt: Date.now() + 120_000, force: opts?.forceTokenAudit, collectSocialActivity: collectTokenSocialActivity, fetchImpl: scanScopedFetch(opts?.creditKey) },
       );
       if (aborted) return;
       if (!token) { h.onError("Could not resolve that contract on any DEX."); return; }
@@ -381,7 +382,7 @@ export function streamInvestigation(
         // check, and recorded so check crediting can cite it.
         try {
           const bindingHandle = projectX.replace(/^@/, "");
-          const r = await fetch(
+          const r = await scanScopedFetch(opts?.creditKey)(
             `/api/x-authenticity?handle=${encodeURIComponent(bindingHandle)}&address=${encodeURIComponent(token.address)}&chain=${encodeURIComponent(token.chain)}`,
             { signal: AbortSignal.timeout(12000) },
           );

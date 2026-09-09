@@ -249,9 +249,9 @@ export function summarizeCandles(candles: Candle[], timeframe: string): CandleSu
   };
 }
 
-async function gt(path: string): Promise<unknown | null> {
+async function gt(path: string, fetchImpl: typeof fetch = fetch): Promise<unknown | null> {
   try {
-    const r = await fetch(`${GT}${path}`, {
+    const r = await fetchImpl(`${GT}${path}`, {
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(8_000),
     });
@@ -262,8 +262,8 @@ async function gt(path: string): Promise<unknown | null> {
 }
 
 // Resolve the deepest pool for a token when we weren't handed a pair address.
-async function topPool(network: string, address: string): Promise<string | null> {
-  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
+async function topPool(network: string, address: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
+  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`, fetchImpl);
   const rows = record(d).data;
   const first = Array.isArray(rows) ? record(rows[0]) : {};
   const attributes = record(first.attributes);
@@ -279,16 +279,17 @@ export async function fetchPriceHistory(
   address: string,
   chain: string,
   pairAddress?: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<PriceHistory | null> {
   const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
   if (!network || !address) return null;
-  const pool = pairAddress || (await topPool(network, address));
+  const pool = pairAddress || (await topPool(network, address, fetchImpl));
   if (!pool) return null;
 
   // Prefer daily candles for a real history; fall back to hourly for young
   // tokens that have no daily data yet.
   for (const timeframe of ["day", "hour"]) {
-    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`, fetchImpl);
     const rawList = record(record(record(d).data).attributes).ohlcv_list;
     const candles = Array.isArray(rawList)
       ? rawList.map(readCandle).filter((candle): candle is Candle => candle !== null)

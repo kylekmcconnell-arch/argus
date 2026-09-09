@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // X adapter — the signature data path, split into two layers per our provider
 // review:
 //   - twitterapi.io (TWITTERAPI_KEY): profile + the follow graph. The official
@@ -95,7 +96,7 @@ export async function grokSearch(system: string, user: string, opts?: {
     }
     let res: Response;
     try {
-      res = await fetch("https://api.x.ai/v1/responses", {
+      res = await deadlineFetch("https://api.x.ai/v1/responses", {
         method: "POST",
         headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
         body: JSON.stringify({
@@ -184,7 +185,7 @@ export async function claudeWebSearch(system: string, user: string, opts?: {
   }
   let res: Response;
   try {
-    res = await fetch(ANTHROPIC, {
+    res = await deadlineFetch(ANTHROPIC, {
       method: "POST",
       headers: {
         "x-api-key": key,
@@ -285,7 +286,7 @@ async function twFetch(url: string, key: string, tries = 2): Promise<Response | 
   for (let i = 0; i < tries; i++) {
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await deadlineFetch(url, {
         headers: { "x-api-key": key },
         signal: AbortSignal.timeout(10_000),
       });
@@ -340,7 +341,7 @@ export interface XProfile {
  */
 export async function publicXAccountState(
   handle: string,
-  fetcher: typeof fetch = fetch,
+  fetcher: typeof fetch = deadlineFetch,
 ): Promise<Pick<XProfile, "handle" | "accountStatus" | "statusSourceUrl" | "statusCapturedAt"> | null> {
   const u = handle.replace(/^@/, "");
   const statusSourceUrl = `https://x.com/${encodeURIComponent(u)}`;
@@ -486,7 +487,7 @@ export async function handleHistory(handle: string): Promise<{ priorHandles: str
   const u = handle.replace(/^@/, "");
   let response: Response;
   try {
-    response = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8000) });
+    response = await deadlineFetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8000) });
   } catch {
     recordCall("memory.lol", "tw-history", 0, "transport_error", "failed");
     return null;
@@ -1163,7 +1164,7 @@ export async function dynamicNotable(organizationId?: string): Promise<{ handle:
   const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
   if (!url || !key) return [];
   try {
-    const r = await fetch(`${url.replace(/\/$/, "")}/rest/v1/reports?select=ref,score&organization_id=eq.${encodeURIComponent(org)}&kind=eq.person&verdict=eq.PASS&order=score.desc&limit=600`, {
+    const r = await deadlineFetch(`${url.replace(/\/$/, "")}/rest/v1/reports?select=ref,score&organization_id=eq.${encodeURIComponent(org)}&kind=eq.person&verdict=eq.PASS&order=score.desc&limit=600`, {
       headers: { apikey: key, ...(!key.startsWith("sb_secret_") ? { authorization: `Bearer ${key}` } : {}) }, signal: AbortSignal.timeout(8000),
     });
     if (!r.ok) return [];

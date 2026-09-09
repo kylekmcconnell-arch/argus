@@ -222,3 +222,11 @@ describe("Kyle intelligence report opening", () => {
     expect(teamHit?.getAttribute("aria-pressed")).toBe("true");
   });
 });
+
+ it("does not turn missing next steps into complete checks", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} favorable concerns={[]} nextSteps={[]} successful={2} applicable={4} coveragePercent={50} />));
+    expect(container.textContent).not.toContain("No required check remains open");
+    expect(container.textContent).not.toContain("No checks remain open");
+    expect(container.textContent).not.toContain("No decision-critical gap is recorded");
+    expect(container.textContent).toContain("2 checks still lack evidence");
+  });

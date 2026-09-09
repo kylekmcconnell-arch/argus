@@ -42,7 +42,7 @@ const CASE_KINDS = new Set(["person", "token", "investigation", "site"]);
 const STORED_KINDS = new Set([...CASE_KINDS, "watch"]);
 const CLIENT_METHODOLOGY_VERSION: Record<"person" | "token" | "investigation" | "site", string> = {
   person: "argus-person-client-v1",
-  token: "argus-token-v2-terminal-outcomes",
+  token: "argus-token-v3-assessed-evidence",
   investigation: "argus-investigation-v2-terminal-outcomes",
   site: "argus-site-v1",
 };

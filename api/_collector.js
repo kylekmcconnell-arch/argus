@@ -42,6 +42,35 @@ var providerFallbacksEnabled = () => {
 };
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
+// server/providerDeadline.ts
+import { AsyncLocalStorage } from "node:async_hooks";
+var context = new AsyncLocalStorage();
+async function withProviderDeadline(deadlineAt, work) {
+  const controller = new AbortController();
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) throw new Error("collection_deadline_reached");
+  const timer = setTimeout(() => controller.abort(new Error("collection_deadline_reached")), remaining);
+  timer.unref?.();
+  try {
+    return await context.run(controller.signal, async () => {
+      const result = await work();
+      controller.signal.throwIfAborted();
+      return result;
+    });
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
+var deadlineFetch = (input, init) => {
+  const signal2 = context.getStore();
+  signal2?.throwIfAborted();
+  return globalThis.fetch(input, { ...init, signal: signal2 ? AbortSignal.any([signal2, ...init?.signal ? [init.signal] : []]) : init?.signal });
+};
+function providerDeadlineSignal() {
+  return context.getStore();
+}
+
 // server/boundedProvider.ts
 async function withWallClockBox(work, budgetMs) {
   if (budgetMs <= 0) return null;
@@ -49,7 +78,7 @@ async function withWallClockBox(work, budgetMs) {
   let timer;
   const fetcher = (input, init) => {
     controller.signal.throwIfAborted();
-    return fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal });
+    return deadlineFetch(input, { ...init, signal: init?.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal });
   };
   const timeout = new Promise((resolve) => {
     timer = setTimeout(() => {
@@ -1555,9 +1584,9 @@ var sourceMatchesOfficialWebsiteScope = (sourceValue, profileWebsite) => {
   const scopePath = scopeUrl.pathname.replace(/\/$/, "");
   return cleanHost(source2.hostname) === scope.domain && (sourcePath === scopePath || sourcePath.startsWith(`${scopePath}/`));
 };
-var validatedPacketProfile = (context, now, artifactCapturedAt) => {
-  const profile = asRecord(context.profile);
-  const expectedHandle = canonicalHandle(context.subjectHandle);
+var validatedPacketProfile = (context2, now, artifactCapturedAt) => {
+  const profile = asRecord(context2.profile);
+  const expectedHandle = canonicalHandle(context2.subjectHandle);
   const profileCapturedAt = validDate(profile?.profile_captured_at);
   if (!profile || !expectedHandle || canonicalHandle(profile.handle) !== expectedHandle || profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi" || !profileCapturedAt || profileCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || profileCapturedAt.getTime() > artifactCapturedAt.getTime() + CLOCK_SKEW_MS || artifactCapturedAt.getTime() - profileCapturedAt.getTime() > 7 * DAY_MS) return null;
   return profile;
@@ -1628,7 +1657,7 @@ var hasOfficialInvestorDomainProof = (value, capturedAt, now, profile) => {
   const path = source2.pathname.split("/").filter(Boolean);
   return (host2 === "x.com" || host2 === "twitter.com") && path.length === 1 && path[0].toLowerCase() === fundHandle && !source2.search && !source2.hash;
 };
-var structurallyStrictFundScaleArtifact = (value, now, context) => {
+var structurallyStrictFundScaleArtifact = (value, now, context2) => {
   if (value.kind !== "fund_scale" || value.provider !== "fund-scale-web" || value.match !== "fund_scale_confirmed") return false;
   const sourceUrl2 = boundedWebUrl(value.sourceUrl);
   const capturedAt = validDate(value.capturedAt);
@@ -1643,12 +1672,12 @@ var structurallyStrictFundScaleArtifact = (value, now, context) => {
   const temporalState = value.fundScaleTemporalState;
   const claimId = typeof value.fundScaleClaimId === "string" ? value.fundScaleClaimId : "";
   if (!SHA256_HEX.test(typeof value.contentHash === "string" ? value.contentHash : "") || !SHA256_HEX.test(typeof value.sourceContentHash === "string" ? value.sourceContentHash : "") || !sourceUrl2 || !capturedAt || capturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 1e5 || amount > 1e13 || !fundName || !investorName || !namesExactlyMatch(value.fundName, value.investorEntityName) || attribution !== "direct_subject" && attribution !== "affiliated_fund" || !["first_party_subject", "first_party_investor", "public_primary", "independent_press"].includes(String(sourceClass4)) || !["regulatory_aum", "reported_aum", "fund_vehicle", "first_close", "final_close"].includes(String(metric)) || !["exact", "at_least", "approximate"].includes(String(qualifier)) || !["regulatory", "manager_reported", "press_corroborated"].includes(String(basis)) || !CLAIM_ID.test(claimId)) return false;
-  const expectedSubjectHandle = context.subjectHandle;
+  const expectedSubjectHandle = context2.subjectHandle;
   if (expectedSubjectHandle) {
     const observedHandle = canonicalHandle(value.subjectHandle);
     if (!observedHandle || observedHandle !== canonicalHandle(expectedSubjectHandle)) return false;
   }
-  const profile = expectedSubjectHandle ? validatedPacketProfile(context, now, capturedAt) : null;
+  const profile = expectedSubjectHandle ? validatedPacketProfile(context2, now, capturedAt) : null;
   if (expectedSubjectHandle && !profile) return false;
   if (attribution === "direct_subject") {
     if (!namesExactlyMatch(value.subjectName, value.fundName)) return false;
@@ -1684,13 +1713,13 @@ var compatiblePressClaim = (left, right) => {
   const rightAsOf = validDate(right.fundScaleAsOf);
   return Boolean(leftAsOf && rightAsOf && Math.abs(leftAsOf.getTime() - rightAsOf.getTime()) <= AUM_CORROBORATION_WINDOW_MS);
 };
-function isStrictFundScaleArtifact(value, peers = [], context = {}) {
-  const now = context.now ?? /* @__PURE__ */ new Date();
+function isStrictFundScaleArtifact(value, peers = [], context2 = {}) {
+  const now = context2.now ?? /* @__PURE__ */ new Date();
   const record5 = asRecord(value);
-  if (!record5 || !Number.isFinite(now.getTime()) || !structurallyStrictFundScaleArtifact(record5, now, context)) return false;
+  if (!record5 || !Number.isFinite(now.getTime()) || !structurallyStrictFundScaleArtifact(record5, now, context2)) return false;
   if (record5.sourceClass !== "independent_press") return true;
   if (typeof record5.fundScaleSourceCount !== "number" || record5.fundScaleSourceCount < 2) return false;
-  const compatible = [record5, ...peers.map(asRecord).filter((peer) => Boolean(peer))].filter((peer, index, rows) => rows.indexOf(peer) === index).filter((peer) => peer.sourceClass === "independent_press" && structurallyStrictFundScaleArtifact(peer, now, context) && compatiblePressClaim(record5, peer));
+  const compatible = [record5, ...peers.map(asRecord).filter((peer) => Boolean(peer))].filter((peer, index, rows) => rows.indexOf(peer) === index).filter((peer) => peer.sourceClass === "independent_press" && structurallyStrictFundScaleArtifact(peer, now, context2) && compatiblePressClaim(record5, peer));
   const domains = /* @__PURE__ */ new Set();
   const hashes = /* @__PURE__ */ new Set();
   const prose = /* @__PURE__ */ new Set();
@@ -7664,7 +7693,7 @@ function emptyEvidence(handle) {
 import { createHash } from "node:crypto";
 
 // server/cost.ts
-import { AsyncLocalStorage } from "node:async_hooks";
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "node:async_hooks";
 var PRICE = {
   // Fallback only. Successful xAI responses now return their exact billed
   // cost in usage.cost_in_usd_ticks, which always takes precedence. Grok 4.3
@@ -7688,7 +7717,7 @@ var createState = () => ({
   grok: { in: 0, out: 0, calls: 0, sources: 0 },
   claude: { in: 0, out: 0, calls: 0 }
 });
-var auditCostState = new AsyncLocalStorage();
+var auditCostState = new AsyncLocalStorage2();
 var fallbackState = createState();
 var currentState = () => auditCostState.getStore() ?? fallbackState;
 function withCostLedger(work) {
@@ -7902,7 +7931,7 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs, onFail
   };
   let res;
   try {
-    res = await fetch(ANTHROPIC_URL, {
+    res = await deadlineFetch(ANTHROPIC_URL, {
       method: "POST",
       headers: {
         "x-api-key": key,
@@ -8021,7 +8050,7 @@ Return exactly one ${tool.name} object. ${tool.description}` },
   };
   let response;
   try {
-    response = await fetch(XAI_CHAT_URL, {
+    response = await deadlineFetch(XAI_CHAT_URL, {
       method: "POST",
       headers: {
         authorization: `Bearer ${key}`,
@@ -11756,7 +11785,7 @@ async function cacheGet(key, usage = {}) {
   const c = creds();
   if (!c) return null;
   try {
-    const r = await fetch(
+    const r = await deadlineFetch(
       `${c.url}/rest/v1/provider_cache?select=payload,expires_at&cache_key=eq.${encodeURIComponent(hash(key))}&limit=1`,
       { headers: headers(c.key), signal: AbortSignal.timeout(4e3) }
     );
@@ -11776,7 +11805,7 @@ async function cacheSet(key, text2) {
   if (!c || !text2) return;
   try {
     const now = Date.now();
-    await fetch(`${c.url}/rest/v1/provider_cache?on_conflict=cache_key`, {
+    await deadlineFetch(`${c.url}/rest/v1/provider_cache?on_conflict=cache_key`, {
       method: "POST",
       headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify({
@@ -12077,7 +12106,9 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
   const request = dependencies.request ?? defaultRequestForMode();
   const lookup2 = dependencies.lookup ?? defaultLookupForMode();
   let target = initialTarget;
-  const signal2 = dependencies.signal ?? AbortSignal.timeout(8e3);
+  const stageSignal = providerDeadlineSignal();
+  const signal2 = AbortSignal.any([dependencies.signal ?? AbortSignal.timeout(8e3), ...stageSignal ? [stageSignal] : []]);
+  signal2.throwIfAborted();
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     let response;
     try {
@@ -12333,7 +12364,7 @@ function asRec(v) {
 }
 async function serperSearch(query, key) {
   try {
-    const res = await fetch(SERPER, {
+    const res = await deadlineFetch(SERPER, {
       method: "POST",
       headers: { "X-API-KEY": key, "content-type": "application/json" },
       body: JSON.stringify({ q: query, num: 10 }),
@@ -12361,7 +12392,7 @@ async function serperSearch(query, key) {
 }
 async function serperNews(query, key) {
   try {
-    const res = await fetch(SERPER_NEWS, {
+    const res = await deadlineFetch(SERPER_NEWS, {
       method: "POST",
       headers: { "X-API-KEY": key, "content-type": "application/json" },
       body: JSON.stringify({ q: query, num: 10 }),
@@ -12393,7 +12424,7 @@ async function callGrokExtract(system, user, maxTokens, op) {
   const model = GROK_EXTRACT_MODEL();
   let res;
   try {
-    res = await fetch(XAI_CHAT, {
+    res = await deadlineFetch(XAI_CHAT, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
@@ -12435,7 +12466,7 @@ async function callOpenRouter(system, user, maxTokens, op, model) {
   if (!key) return null;
   let res;
   try {
-    res = await fetch(OPENROUTER, {
+    res = await deadlineFetch(OPENROUTER, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "X-Title": "ARGUS due-diligence" },
       body: JSON.stringify({
@@ -12490,7 +12521,7 @@ async function callExtractModel(system, user, maxTokens, op) {
   const model = CLAUDE_EXTRACT_MODEL();
   let res;
   try {
-    res = await fetch(ANTHROPIC, {
+    res = await deadlineFetch(ANTHROPIC, {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }),
@@ -12615,7 +12646,7 @@ ${r.url}
 ${r.snippet}`).join("\n\n");
   const pagesBlock = fetched.filter((p) => Boolean(p)).map((p) => `SOURCE ${p.url}
 ${p.text}`).join("\n\n---\n\n");
-  const context = `=== SEARCH RESULTS ===
+  const context2 = `=== SEARCH RESULTS ===
 ${resultsBlock}
 
 === FETCHED PAGE EXCERPTS ===
@@ -12623,7 +12654,7 @@ ${pagesBlock || "(none fetched successfully)"}`;
   const wrapSystem = "You are given Google search results and fetched page excerpts for a due-diligence research task. Answer ONLY from what these sources actually support; cite their exact URLs as the source of each item; omit anything the sources do not back. Do not use prior knowledge as evidence. Follow the task's output contract exactly.\n\nTASK INSTRUCTIONS:\n" + system;
   const answer = await callExtractModel(wrapSystem, `${user}
 
-${context}`, 3e3, "grounded-extract");
+${context2}`, 3e3, "grounded-extract");
   if (answer === null) opts?.onProviderUnavailable?.();
   if (answer && cacheKey && !opts?.bypassCache) void cacheSet(cacheKey, answer);
   return answer;
@@ -12671,7 +12702,7 @@ async function grokSearch(system, user, opts) {
     }
     let res;
     try {
-      res = await fetch("https://api.x.ai/v1/responses", {
+      res = await deadlineFetch("https://api.x.ai/v1/responses", {
         method: "POST",
         headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
         body: JSON.stringify({
@@ -12740,7 +12771,7 @@ async function claudeWebSearch(system, user, opts) {
   }
   let res;
   try {
-    res = await fetch(ANTHROPIC2, {
+    res = await deadlineFetch(ANTHROPIC2, {
       method: "POST",
       headers: {
         "x-api-key": key,
@@ -12822,7 +12853,7 @@ async function twFetch(url, key, tries = 2) {
   for (let i = 0; i < tries; i++) {
     let res;
     try {
-      res = await fetch(url, {
+      res = await deadlineFetch(url, {
         headers: { "x-api-key": key },
         signal: AbortSignal.timeout(1e4)
       });
@@ -12849,7 +12880,7 @@ async function twFetch(url, key, tries = 2) {
   }
   return null;
 }
-async function publicXAccountState(handle, fetcher = fetch) {
+async function publicXAccountState(handle, fetcher = deadlineFetch) {
   const u = handle.replace(/^@/, "");
   const statusSourceUrl = `https://x.com/${encodeURIComponent(u)}`;
   let response;
@@ -12969,7 +13000,7 @@ async function handleHistory(handle) {
   const u = handle.replace(/^@/, "");
   let response;
   try {
-    response = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8e3) });
+    response = await deadlineFetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8e3) });
   } catch {
     recordCall("memory.lol", "tw-history", 0, "transport_error", "failed");
     return null;
@@ -13605,8 +13636,8 @@ function projectRoleClaimInBio(bio, projectHandle) {
   const role = /we[- ]?built/.test(raw) ? "builder" : /co-?founder/.test(raw) ? /coo/.test(raw) ? "co-founder, coo" : "co-founder" : /founder/.test(raw) ? "founder" : /ceo/.test(raw) ? "ceo" : /coo/.test(raw) ? "coo" : /cto/.test(raw) ? "cto" : "founder";
   return { role, phrase: match[0].trim().slice(0, 160) };
 }
-function orgClassFromProfile(name, bio, context) {
-  const text2 = `${name ?? ""} ${bio ?? ""} ${context ?? ""}`;
+function orgClassFromProfile(name, bio, context2) {
+  const text2 = `${name ?? ""} ${bio ?? ""} ${context2 ?? ""}`;
   if (/\bincubator|\baccelerator\b/i.test(text2)) return "incubator";
   if (/\bventure\s+capital|\bvc\b/i.test(text2)) return "vc";
   if (/\bfunds?\b/i.test(text2)) return "fund";
@@ -14335,7 +14366,7 @@ function parseTeamJSON(text2, selfHandle, source2) {
   }
 }
 var ADVERSE_NOT_ANSWERED = { completed: false, signals: [] };
-async function searchAdverseSignals(handle, kind, context, ticker, contractAddress) {
+async function searchAdverseSignals(handle, kind, context2, ticker, contractAddress) {
   const h = handle.replace(/^@/, "");
   const targetEntityKey = `@${h.toLowerCase()}`;
   const subject = kind === "project" ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}${contractAddress ? ` (verified contract ${contractAddress})` : ""}` : `the person behind X account @${h}`;
@@ -14355,8 +14386,8 @@ async function searchAdverseSignals(handle, kind, context, ticker, contractAddre
       source_url: typeof s.source_url === "string" && /^https?:\/\//.test(s.source_url) ? s.source_url : void 0,
       target_entity_key: targetEntityKey,
       target_entity_type: kind,
-      relationship_to_subject: context.relationship_to_subject,
-      relationship_label: context.relationship_label?.trim() || void 0
+      relationship_to_subject: context2.relationship_to_subject,
+      relationship_label: context2.relationship_label?.trim() || void 0
     })).slice(0, 12);
     return { completed: true, signals };
   } catch {
@@ -14524,10 +14555,10 @@ var xAdapter = {
 var normalizedApex = (domain) => domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./i, "").toLowerCase();
 async function fetchWithOneRetry(url, init) {
   try {
-    return await fetch(url, init());
+    return await deadlineFetch(url, init());
   } catch {
     await new Promise((resolve) => setTimeout(resolve, 600));
-    return fetch(url, init());
+    return deadlineFetch(url, init());
   }
 }
 function candidateUrlTiers(domain) {
@@ -15063,7 +15094,7 @@ async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
   const hosts = [`discuss.${apex}`, `forum.${apex}`];
   const results = await Promise.all(hosts.flatMap((host2) => searches.map(async (query) => {
     try {
-      const response = await fetch(`https://${host2}/search.json?q=${encodeURIComponent(query)}`, {
+      const response = await deadlineFetch(`https://${host2}/search.json?q=${encodeURIComponent(query)}`, {
         headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "application/json" },
         redirect: "follow",
         signal: AbortSignal.timeout(8e3)
@@ -15217,7 +15248,7 @@ async function readBody(response, maxBytes) {
 async function get(url, opts, retryAccessDenied = true) {
   let response;
   try {
-    response = await fetch(url, {
+    response = await deadlineFetch(url, {
       headers: {
         "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)",
         accept: "text/html,application/javascript"
@@ -15841,7 +15872,7 @@ function classifyFetchError(err) {
   if (name === "TimeoutError" || name === "AbortError" || /timeout/i.test(message)) return "timeout";
   return "transport_error";
 }
-async function collectDomainRegistration(website, fetchImpl = fetch, now = /* @__PURE__ */ new Date()) {
+async function collectDomainRegistration(website, fetchImpl = deadlineFetch, now = /* @__PURE__ */ new Date()) {
   const scope = resolveDomainScope(website);
   if (scope.sharedHost) {
     return {
@@ -16409,7 +16440,7 @@ async function fetchProtocol(slug, fetcher) {
 var strArray = (value) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim()) : [];
 var NON_CHAIN_SEGMENT = /(?:^|[-])(?:borrowed|staking|pool2|vesting|treasury|offers|options)(?:$|[-])/i;
 async function collectProtocolTvl(projectName2, options = {}) {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const slug = options.slug ?? defiLlamaSlug(projectName2);
   if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
   const result = await fetchProtocol(slug, fetcher);
@@ -16499,7 +16530,7 @@ var parseAuditFields = (data) => ({
   links: strArray(data.audit_links).filter((link) => /^https?:\/\//i.test(link))
 });
 async function collectProtocolAuditLinks(projectName2, options = {}) {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const slug = options.slug ?? defiLlamaSlug(projectName2);
   if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
   const parent = await fetchProtocol(slug, fetcher);
@@ -16526,7 +16557,7 @@ async function collectProtocolAuditLinks(projectName2, options = {}) {
   return { available: false, note: "No audit links listed on DeFiLlama for this protocol." };
 }
 async function collectProtocolFees(projectName2, options = {}) {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const slug = options.slug ?? defiLlamaSlug(projectName2);
   if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
   const read2 = await fetchJsonOnce(`${API_BASE}/summary/fees/${encodeURIComponent(slug)}`, fetcher);
@@ -16579,7 +16610,7 @@ var fundingRoundFromRaise = (entry) => {
   };
 };
 async function collectProtocolFunding(projectName2, options = {}) {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const slug = options.slug ?? defiLlamaSlug(projectName2);
   if (!slug) return { available: false, reason: "no_data", note: "No resolvable DeFiLlama protocol slug." };
   const result = await fetchProtocol(slug, fetcher);
@@ -17018,7 +17049,7 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
       };
     }
   }
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const sections = normalizeSections(options.sections);
   const queryDomain = hostOf2(query);
   const rootDomain = queryDomain ? registrableProjectDomain(queryDomain) : null;
@@ -17172,7 +17203,7 @@ async function startRunFor(provider, key, endpoint, input, fetcher) {
   return resolveRun(run, key, fetcher);
 }
 var PERSON_ENRICH_TIMEOUT_MS = 12e3;
-async function enrichPersonViaMonid(params, fetcher = fetch) {
+async function enrichPersonViaMonid(params, fetcher = deadlineFetch) {
   const key = env("MONID_API_KEY");
   if (!key) return { outcome: "error", note: "no_key" };
   const body = {
@@ -17307,7 +17338,7 @@ async function enrichPersonOutcome(params) {
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
   let res;
   try {
-    res = await fetch(`${BASE}/person/enrich?${qs}`, {
+    res = await deadlineFetch(`${BASE}/person/enrich?${qs}`, {
       headers: { "X-Api-Key": key },
       signal: AbortSignal.timeout(1e4)
     });
@@ -17654,7 +17685,7 @@ async function fetchTrustedProfileImage(rawUrl) {
   for (let redirect = 0; redirect <= 3; redirect += 1) {
     let response;
     try {
-      response = await fetch(url, {
+      response = await deadlineFetch(url, {
         redirect: "manual",
         signal: AbortSignal.timeout(7e3),
         headers: { "user-agent": "argus-osint/1.0" }
@@ -17737,7 +17768,7 @@ async function classifyImage(image) {
   if (grokKey) {
     let response2;
     try {
-      response2 = await fetch(XAI_CHAT_URL2, {
+      response2 = await deadlineFetch(XAI_CHAT_URL2, {
         method: "POST",
         headers: { authorization: `Bearer ${grokKey}`, "content-type": "application/json" },
         body: JSON.stringify({
@@ -17802,7 +17833,7 @@ async function classifyImage(image) {
   if (!key) return null;
   let response;
   try {
-    response = await fetch(ANTHROPIC_URL2, {
+    response = await deadlineFetch(ANTHROPIC_URL2, {
       method: "POST",
       headers: {
         "x-api-key": key,
@@ -18111,7 +18142,7 @@ var recordDex = (op, status, detail) => {
 async function lookupToken(address) {
   let res;
   try {
-    res = await fetch(`${BASE2}/latest/dex/tokens/${address}`, {
+    res = await deadlineFetch(`${BASE2}/latest/dex/tokens/${address}`, {
       signal: AbortSignal.timeout(8e3)
     });
   } catch {
@@ -18162,7 +18193,7 @@ async function detectTokenLifecycle(ticker, knownAddress) {
   if (!sym) return null;
   let res;
   try {
-    res = await fetch(`${BASE2}/latest/dex/search?q=${encodeURIComponent(sym)}`, {
+    res = await deadlineFetch(`${BASE2}/latest/dex/search?q=${encodeURIComponent(sym)}`, {
       signal: AbortSignal.timeout(8e3)
     });
   } catch {
@@ -19053,15 +19084,15 @@ function buildResearchPlan(evidence, intent = "investment_due_diligence") {
 function researchPlanAllows(plan, capability) {
   return plan.tasks.some((task) => task.capability === capability && task.state !== "skipped" && task.blockedBy.length === 0);
 }
-function finalizeResearchPlan(plan, checks, providerRuns = [], context = {}) {
+function finalizeResearchPlan(plan, checks, providerRuns = [], context2 = {}) {
   const tasks = plan.tasks.map((task) => {
     if (task.blockedBy.length) {
       return { ...task, state: "skipped", outcome: `blocked by ${task.blockedBy.length} unresolved identity gate${task.blockedBy.length === 1 ? "" : "s"}` };
     }
-    if (task.capability === "role_resolution" && context.roleResolved) {
+    if (task.capability === "role_resolution" && context2.roleResolved) {
       return { ...task, state: "completed", outcome: "subject type and report methodology were resolved" };
     }
-    if (task.capability === "analyst_synthesis" && context.analystConclusionRecorded) {
+    if (task.capability === "analyst_synthesis" && context2.analystConclusionRecorded) {
       return { ...task, state: "completed", outcome: "a frozen analyst conclusion was recorded" };
     }
     const taskChecks = checks.filter((check) => check.checkId && task.checkIds.includes(check.checkId));
@@ -19117,7 +19148,7 @@ async function ghJson(path, key) {
   const tier = "subscription/keyed";
   let res;
   try {
-    res = await fetch(GH + path, { headers: headers2(key), signal: AbortSignal.timeout(8e3) });
+    res = await deadlineFetch(GH + path, { headers: headers2(key), signal: AbortSignal.timeout(8e3) });
   } catch {
     recordCall("github", op, 0, `${tier} \xB7 transport_error`, "failed");
     return null;
@@ -19447,7 +19478,7 @@ async function tokenByContract(chain, address) {
   const tier = key ? "subscription/keyed" : "keyless";
   let res;
   try {
-    res = await fetch(`${base}/coins/${platform}/contract/${address}`, {
+    res = await deadlineFetch(`${base}/coins/${platform}/contract/${address}`, {
       headers: headers4,
       signal: AbortSignal.timeout(1e4)
     });
@@ -19550,7 +19581,7 @@ async function collectHeliusWalletActivity(address) {
   }
   let res;
   try {
-    res = await fetch(
+    res = await deadlineFetch(
       `https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${key}&limit=50`,
       { signal: AbortSignal.timeout(8e3) }
     );
@@ -19889,7 +19920,7 @@ var captureChainIdentity = async (chain, transport) => {
     receipt: { ...base, state: "verified", observedChainId, rawResult }
   };
 };
-function createHttpEvmRpcTransport(rpcUrl, fetchImpl = fetch, timeoutMs = 9e3) {
+function createHttpEvmRpcTransport(rpcUrl, fetchImpl = deadlineFetch, timeoutMs = 9e3) {
   let calls = 0;
   const providerHost = (() => {
     try {
@@ -20373,7 +20404,7 @@ var CONTROL_TEST_CHAINS = ["ethereum", "base"];
 function screenableWallets(evidence) {
   return evidence.wallets.filter((wallet) => Boolean(wallet.binding) && ATTRIBUTABLE.includes(wallet.binding)).sort((a, b) => BINDING_STRENGTH[b.binding] - BINDING_STRENGTH[a.binding]).slice(0, MAX_SCREENED_WALLETS);
 }
-async function probeEvmControl(address, fetchImpl = fetch) {
+async function probeEvmControl(address, fetchImpl = deadlineFetch) {
   let answered = false;
   for (const chain of CONTROL_TEST_CHAINS) {
     for (const url of PUBLIC_EVM_RPC[chain] ?? []) {
@@ -20737,7 +20768,7 @@ async function readEntityFacts(organizationId, canonicalKey, maxAgeMs) {
   if (!c || !organizationId || !canonicalKey) return null;
   try {
     const url = `${c.url}/rest/v1/${TABLE}?organization_id=eq.${encodeURIComponent(organizationId)}&canonical_key=eq.${encodeURIComponent(canonicalKey)}&select=facts,entity_type,audit_count,updated_at&limit=1`;
-    const res = await fetch(url, { headers: authHeaders(c.key), signal: AbortSignal.timeout(5e3) });
+    const res = await deadlineFetch(url, { headers: authHeaders(c.key), signal: AbortSignal.timeout(5e3) });
     if (!res.ok) return null;
     const rows = await res.json();
     const row = rows?.[0];
@@ -20755,7 +20786,7 @@ async function writeEntityFacts(organizationId, canonicalKey, entry) {
   try {
     let auditCount = 1;
     try {
-      const existing = await fetch(
+      const existing = await deadlineFetch(
         `${c.url}/rest/v1/${TABLE}?organization_id=eq.${encodeURIComponent(organizationId)}&canonical_key=eq.${encodeURIComponent(canonicalKey)}&select=audit_count&limit=1`,
         { headers: authHeaders(c.key), signal: AbortSignal.timeout(5e3) }
       );
@@ -20765,7 +20796,7 @@ async function writeEntityFacts(organizationId, canonicalKey, entry) {
       }
     } catch {
     }
-    const res = await fetch(`${c.url}/rest/v1/${TABLE}?on_conflict=organization_id,canonical_key`, {
+    const res = await deadlineFetch(`${c.url}/rest/v1/${TABLE}?on_conflict=organization_id,canonical_key`, {
       method: "POST",
       headers: { ...authHeaders(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify([{
@@ -21947,7 +21978,7 @@ async function discoverBasicFactLeadsDetailed(ctx, dependencies = {}, questions 
   const canonicalSubject = subjectName(ctx);
   const cacheRead = dependencies.cacheRead ?? ((key) => cacheGet(key, { operation: "basic-facts-hit", meta: "24h Claude web-search cache" }));
   const cacheWrite = dependencies.cacheWrite ?? cacheSet;
-  const request = dependencies.request ?? fetch;
+  const request = dependencies.request ?? deadlineFetch;
   const audience = questions[0]?.audience ?? researchAudience(ctx);
   const grouped = questionSearchGroups(questions, phase);
   let providerHttpCalls = 0;
@@ -22973,8 +23004,8 @@ function governingClaimClause(passage, lead, aliases, trustedContextTokens) {
   const direct = directClaimClause(clauses, lead, aliases, trustedContextTokens);
   if (direct && anchors.some((anchor) => anchorGovernsClaimClause(direct, lead, anchor) || safeHostContextForSentence(direct, trustedContextTokens).has(anchor))) return direct;
   const relationEstablished = clauses.some((clause) => {
-    const context = safeHostContextForSentence(clause, trustedContextTokens);
-    return hasSubjectAlias(clause, aliases) && RELATION_LANGUAGE.test(clause) && anchors.some((anchor) => looseContainsPhrase(clause, anchor) && !subjectComparisonIsDisqualified(clause, anchor) || context.has(anchor));
+    const context2 = safeHostContextForSentence(clause, trustedContextTokens);
+    return hasSubjectAlias(clause, aliases) && RELATION_LANGUAGE.test(clause) && anchors.some((anchor) => looseContainsPhrase(clause, anchor) && !subjectComparisonIsDisqualified(clause, anchor) || context2.has(anchor));
   });
   if (!relationEstablished) return null;
   return clauses.find((clause) => anchors.some((anchor) => anchorGovernsClaimClause(clause, lead, anchor))) ?? null;
@@ -23735,7 +23766,7 @@ var SEC_EXCHANGE_REGISTRY_URL = "https://www.sec.gov/files/company_tickers_excha
 async function fetchSecExchangeRegistry() {
   let response;
   try {
-    response = await fetch(SEC_EXCHANGE_REGISTRY_URL, {
+    response = await deadlineFetch(SEC_EXCHANGE_REGISTRY_URL, {
       headers: {
         accept: "application/json",
         // SEC.gov's fair-access policy rejects requests without a
@@ -25633,7 +25664,7 @@ async function waybackSnapshots(urlPath) {
   let response;
   try {
     const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=timestamp:4`;
-    response = await fetch(CDX + qs, { signal: AbortSignal.timeout(4e3) });
+    response = await deadlineFetch(CDX + qs, { signal: AbortSignal.timeout(4e3) });
   } catch {
     return { snapshots: [], state: "failed", detail: "transport_error" };
   }
@@ -25674,7 +25705,7 @@ async function arquivoSnapshots(urlPath) {
   let response;
   try {
     const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&limit=100`;
-    response = await fetch(ARQUIVO_CDX + qs, { signal: AbortSignal.timeout(8e3) });
+    response = await deadlineFetch(ARQUIVO_CDX + qs, { signal: AbortSignal.timeout(8e3) });
   } catch {
     return { snapshots: [], state: "failed", detail: "transport_error" };
   }
@@ -25730,7 +25761,7 @@ function spreadSample(all, max) {
 async function readCapture(snap) {
   try {
     const archiveUrl = snap.provider === "arquivo" ? `https://arquivo.pt/wayback/${snap.timestamp}id_/${snap.original}` : `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
-    const response = await fetch(archiveUrl, { signal: AbortSignal.timeout(5e3) });
+    const response = await deadlineFetch(archiveUrl, { signal: AbortSignal.timeout(5e3) });
     if (!response.ok) {
       recordCall(snap.provider, "snapshot-fetch", 0, `http_${response.status}`, "failed");
       return { snap, text: null };
@@ -25828,7 +25859,7 @@ async function getJson(url) {
   }
   let response;
   try {
-    response = await fetch(url, { signal: AbortSignal.timeout(9e3) });
+    response = await deadlineFetch(url, { signal: AbortSignal.timeout(9e3) });
   } catch {
     recordCall("wallet-resolve", operation, 0, "transport_error", "failed");
     return null;
@@ -26117,7 +26148,7 @@ async function readExactRows(c, table, params) {
   const op = `trust-graph/${table.replace(/_/g, "-")}`;
   let response;
   try {
-    response = await fetch(queryUrl(c.url, table, { ...params, limit: String(QUERY_LIMIT) }), {
+    response = await deadlineFetch(queryUrl(c.url, table, { ...params, limit: String(QUERY_LIMIT) }), {
       headers: headers3(c.key, { prefer: "count=exact" }),
       signal: AbortSignal.timeout(12e3)
     });
@@ -27645,16 +27676,16 @@ function canonicalFundVehicle(segment) {
 function metricAroundAmount(segment, amount) {
   const before = segment.slice(Math.max(0, amount.start - 130), amount.start);
   const after = segment.slice(amount.end, Math.min(segment.length, amount.end + 150));
-  const context = `${before} __amount__ ${after}`.toLowerCase();
+  const context2 = `${before} __amount__ ${after}`.toLowerCase();
   const localContext = `${before.slice(-90)} __amount__ ${after.slice(0, 90)}`.toLowerCase();
   if (TARGET_OR_NEGATED.test(localContext) || NON_SCALE_RELATION.some((pattern) => pattern.test(localContext))) return null;
-  const aum = /\b(?:assets under management|aum)\s*(?::|of|total(?:ing)?|were|was|is|stood at|reached)?\s*__amount__/.test(context) || /__amount__\s+(?:in\s+)?(?:assets under management|aum|managed assets)\b/.test(context) || /\b(?:manages?|managed|oversees?|oversaw)\s*__amount__\s+(?:in\s+)?(?:assets under management|aum|managed assets)\b/.test(context);
+  const aum = /\b(?:assets under management|aum)\s*(?::|of|total(?:ing)?|were|was|is|stood at|reached)?\s*__amount__/.test(context2) || /__amount__\s+(?:in\s+)?(?:assets under management|aum|managed assets)\b/.test(context2) || /\b(?:manages?|managed|oversees?|oversaw)\s*__amount__\s+(?:in\s+)?(?:assets under management|aum|managed assets)\b/.test(context2);
   if (aum) return "reported_aum";
-  const committed = /\bcommitted capital\b/.test(context) && (/\bcommitted capital[^.;]{0,70}__amount__/.test(context) || /__amount__[^.;]{0,70}\b(?:in )?committed capital\b/.test(context));
-  const fundVehicle = committed || /__amount__\s+(?:(?:crypto|venture|growth|opportunity|seed|flagship|web3|blockchain|digital asset|private equity|investment)\s+){0,3}fund\b/.test(context) || /\bfund\b[^.;]{0,55}\b(?:size(?:d)?(?: at| is)?|of|at|with|total(?:ing|led)?|closed at)\s*__amount__/.test(context) || /\b(?:raised|closed|secured|launched|announced|completed)[^.;]{0,110}__amount__[^.;]{0,100}\bfund\b/.test(context);
+  const committed = /\bcommitted capital\b/.test(context2) && (/\bcommitted capital[^.;]{0,70}__amount__/.test(context2) || /__amount__[^.;]{0,70}\b(?:in )?committed capital\b/.test(context2));
+  const fundVehicle = committed || /__amount__\s+(?:(?:crypto|venture|growth|opportunity|seed|flagship|web3|blockchain|digital asset|private equity|investment)\s+){0,3}fund\b/.test(context2) || /\bfund\b[^.;]{0,55}\b(?:size(?:d)?(?: at| is)?|of|at|with|total(?:ing|led)?|closed at)\s*__amount__/.test(context2) || /\b(?:raised|closed|secured|launched|announced|completed)[^.;]{0,110}__amount__[^.;]{0,100}\bfund\b/.test(context2);
   if (!fundVehicle) return null;
-  if (/\bfirst close\b/.test(context)) return "first_close";
-  if (/\bfinal close\b|\bclosed (?:its|the|a)[^.;]{0,70}fund\b/.test(context)) return "final_close";
+  if (/\bfirst close\b/.test(context2)) return "first_close";
+  if (/\bfinal close\b|\bclosed (?:its|the|a)[^.;]{0,70}fund\b/.test(context2)) return "final_close";
   return "fund_vehicle";
 }
 function isAumMetric2(metric) {
@@ -28262,9 +28293,9 @@ function summarizeCandles(candles, timeframe) {
     ...windowShape(series, points.length, timeframe)
   };
 }
-async function gt(path) {
+async function gt(path, fetchImpl = fetch) {
   try {
-    const r = await fetch(`${GT}${path}`, {
+    const r = await fetchImpl(`${GT}${path}`, {
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(8e3)
     });
@@ -28273,21 +28304,21 @@ async function gt(path) {
     return null;
   }
 }
-async function topPool(network, address) {
-  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
+async function topPool(network, address, fetchImpl = fetch) {
+  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`, fetchImpl);
   const rows = record3(d).data;
   const first = Array.isArray(rows) ? record3(rows[0]) : {};
   const attributes = record3(first.attributes);
   const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
   return id ? id.replace(`${network}_`, "") : null;
 }
-async function fetchPriceHistory(address, chain, pairAddress) {
+async function fetchPriceHistory(address, chain, pairAddress, fetchImpl = fetch) {
   const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
   if (!network || !address) return null;
-  const pool = pairAddress || await topPool(network, address);
+  const pool = pairAddress || await topPool(network, address, fetchImpl);
   if (!pool) return null;
   for (const timeframe of ["day", "hour"]) {
-    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`, fetchImpl);
     const rawList = record3(record3(record3(d).data).attributes).ohlcv_list;
     const candles = Array.isArray(rawList) ? rawList.map(readCandle).filter((candle) => candle !== null) : [];
     if (candles.length < 3) continue;
@@ -28437,7 +28468,7 @@ async function coingeckoFetch(url, headers4, label, tier) {
   for (let attempt = 0; attempt < 2; attempt++) {
     let response;
     try {
-      response = await fetch(url, { headers: headers4, signal: AbortSignal.timeout(1e4) });
+      response = await deadlineFetch(url, { headers: headers4, signal: AbortSignal.timeout(1e4) });
     } catch {
       return null;
     }
@@ -28543,7 +28574,7 @@ async function coinByContract(platform, address) {
   const url = `${base}/coins/${encodeURIComponent(platform)}/contract/${encodeURIComponent(address)}`;
   let response;
   try {
-    response = await fetch(url, { headers: headers4, signal: AbortSignal.timeout(1e4) });
+    response = await deadlineFetch(url, { headers: headers4, signal: AbortSignal.timeout(1e4) });
   } catch {
     recordCall("coingecko", "project-contract", 0, `${tier} \xB7 transport_error`, "failed");
     return { state: "failed" };
@@ -28735,7 +28766,7 @@ function siteContractCandidates(html, limit = 10) {
 async function dexSearch(query) {
   let response;
   try {
-    response = await fetch(`${DEXSCREENER_SEARCH}?q=${encodeURIComponent(query)}`, {
+    response = await deadlineFetch(`${DEXSCREENER_SEARCH}?q=${encodeURIComponent(query)}`, {
       signal: AbortSignal.timeout(8e3)
     });
   } catch {
@@ -29058,7 +29089,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
     }
   };
 }
-async function collectSiteDeclaredToken(ctx, fetchImpl = fetch, extraOfficialUrls = [], recoverOfficialText = fetchPublicTextWithRecovery) {
+async function collectSiteDeclaredToken(ctx, fetchImpl = deadlineFetch, extraOfficialUrls = [], recoverOfficialText = fetchPublicTextWithRecovery) {
   const scopes = officialWebsiteScopes(ctx, extraOfficialUrls);
   if (!scopes.length) return { state: "empty" };
   const declared = [];
@@ -29085,7 +29116,7 @@ async function dexPairs(address) {
 async function dexTokenPairs(addresses) {
   let response;
   try {
-    response = await fetch(`${DEXSCREENER}/${addresses.map((address) => encodeURIComponent(address)).join(",")}`, {
+    response = await deadlineFetch(`${DEXSCREENER}/${addresses.map((address) => encodeURIComponent(address)).join(",")}`, {
       signal: AbortSignal.timeout(8e3)
     });
   } catch {
@@ -29164,7 +29195,7 @@ async function ohlcv(chain, poolAddress, timeframe) {
   if (!url) return null;
   let response;
   try {
-    response = await fetch(url, { signal: AbortSignal.timeout(8e3) });
+    response = await deadlineFetch(url, { signal: AbortSignal.timeout(8e3) });
   } catch {
     recordCall("geckoterminal", `project-token-ohlcv-${timeframe}`, 0, "keyless \xB7 transport_error", "failed");
     return null;
@@ -31013,11 +31044,12 @@ function enforceProjectFactCoherence(evidence) {
 }
 
 // src/lib/retry.ts
-async function retryFetch(input, init, attempts = 3) {
+async function retryFetch(input, init, attempts = 3, fetchImpl = fetch) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
     try {
-      const res = await fetch(input, init);
+      init?.signal?.throwIfAborted();
+      const res = await fetchImpl(input, init);
       if (res.ok || res.status !== 429 && res.status < 500) return res;
       lastErr = new Error(`HTTP ${res.status}`);
     } catch (e) {
@@ -31117,21 +31149,20 @@ async function blockscoutHolders(chain, address, fetchImpl = fetch) {
     return null;
   }
 }
-async function dexByTokenResult(address) {
+async function dexByTokenResult(address, fetchImpl = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
   try {
-    const res = await retryFetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+    const res = await request(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
       signal: AbortSignal.timeout(8e3)
     });
     if (!res.ok) return { ok: false, pairs: [] };
     const d = await res.json();
+    if (d.pairs !== null && !Array.isArray(d.pairs)) return { ok: false, pairs: [] };
+    if (d.pairs?.some((p) => !p || typeof p.chainId !== "string" || typeof p.baseToken?.address !== "string")) return { ok: false, pairs: [] };
     return { ok: true, pairs: d.pairs ?? [] };
   } catch {
     return { ok: false, pairs: [] };
   }
-}
-async function dexByToken(address) {
-  const result = await dexByTokenResult(address);
-  return result.pairs;
 }
 var CG_PLATFORM = {
   ethereum: "ethereum",
@@ -31154,10 +31185,11 @@ function cleanBlurb(raw) {
   return s;
 }
 var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
-async function coingeckoToken(chain, address) {
+async function coingeckoToken(chain, address, fetchImpl = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
-    const res = await retryFetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
+    const res = await request(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
       signal: AbortSignal.timeout(8e3)
     });
     if (res.status === 404) return { listed: false, id: null, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null, categories: [] };
@@ -31199,9 +31231,10 @@ async function coingeckoToken(chain, address) {
     return null;
   }
 }
-async function dexByPairResult(chain, pair) {
+async function dexByPairResult(chain, pair, fetchImpl = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
   try {
-    const res = await retryFetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
+    const res = await request(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
       signal: AbortSignal.timeout(8e3)
     });
     if (!res.ok) return { ok: false, pair: null };
@@ -31211,10 +31244,6 @@ async function dexByPairResult(chain, pair) {
     return { ok: false, pair: null };
   }
 }
-async function dexByPair(chain, pair) {
-  const result = await dexByPairResult(chain, pair);
-  return result.pair;
-}
 function pickPair(pairs, wantAddress) {
   if (!pairs.length) return null;
   const byLiq = [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
@@ -31223,6 +31252,7 @@ function pickPair(pairs, wantAddress) {
     if (exact) return exact;
     const match = /^0x[0-9a-f]{40}$/i.test(wantAddress) ? byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase()) : void 0;
     if (match) return match;
+    return null;
   }
   return byLiq[0];
 }
@@ -31230,9 +31260,10 @@ function hasCompleteGoplusTradeability(result) {
   const reported = (value) => typeof value === "string" && value.trim().length > 0;
   return result?.is_in_dex === "1" && reported(result.buy_tax) && reported(result.sell_tax) && reported(result.cannot_sell_all);
 }
-async function honeypotIs(chainId, address) {
+async function honeypotIs(chainId, address, fetchImpl = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
   try {
-    const res = await retryFetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
+    const res = await request(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
     if (!res.ok) return null;
     const d = await res.json();
     return {
@@ -31246,12 +31277,13 @@ async function honeypotIs(chainId, address) {
     return null;
   }
 }
-async function goplusSolana(mint) {
+async function goplusSolana(mint, fetchImpl = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
   try {
-    const res = await retryFetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
+    const res = await request(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
     if (!res.ok) return null;
     const d = await res.json();
-    const row = d.result?.[mint] ?? (d.result ? Object.values(d.result)[0] : void 0);
+    const row = d.result?.[mint];
     return row ?? null;
   } catch {
     return null;
@@ -31333,13 +31365,14 @@ async function rugcheckReport(mint, fetchImpl = fetch) {
     return null;
   }
 }
-async function goplus(chainId, address) {
+async function goplus(chainId, address, fetchImpl = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
   const once = async () => {
     try {
-      const res = await retryFetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
+      const res = await request(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
       if (!res.ok) return null;
       const d = await res.json();
-      return d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : void 0) ?? null;
+      return d.result?.[address.toLowerCase()] ?? d.result?.[address] ?? null;
     } catch {
       return null;
     }
@@ -31531,7 +31564,7 @@ async function readPriorOutcome(organizationId, handle) {
   if (!c || !organizationId || !ref) return null;
   try {
     const projectionUrl = `${c.url}/rest/v1/reports?organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.person&ref=in.(${encodeURIComponent(`"${ref}","@${ref}"`)})&select=report_version_id&order=ts.desc&limit=1`;
-    const projectionRes = await fetch(projectionUrl, {
+    const projectionRes = await deadlineFetch(projectionUrl, {
       headers: authHeaders2(c.key),
       signal: AbortSignal.timeout(5e3)
     });
@@ -31540,7 +31573,7 @@ async function readPriorOutcome(organizationId, handle) {
     const reportVersionId = projectionRows?.[0]?.report_version_id;
     if (!reportVersionId) return null;
     const versionUrl = `${c.url}/rest/v1/report_versions?id=eq.${encodeURIComponent(reportVersionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=id,version,score,verdict,completeness_state,created_at,payload&limit=1`;
-    const versionRes = await fetch(versionUrl, { headers: authHeaders2(c.key), signal: AbortSignal.timeout(5e3) });
+    const versionRes = await deadlineFetch(versionUrl, { headers: authHeaders2(c.key), signal: AbortSignal.timeout(5e3) });
     if (!versionRes.ok) return null;
     const rows = await versionRes.json();
     const row = rows?.[0];
@@ -31813,7 +31846,7 @@ function engagementEvidence(text2, needle, officialHost2, canonicalContractAddre
 }
 var escapeRegExp2 = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, deps = {}) {
-  const fetcher = deps.fetcher ?? fetch;
+  const fetcher = deps.fetcher ?? deadlineFetch;
   const capturedAt = captureTimestamp();
   const name = subjectName3.trim();
   const officialHost2 = officialSite ? registrableHost(officialSite) : null;
@@ -31954,7 +31987,7 @@ var GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2";
 var REQUEST_TIMEOUT_MS = 12e3;
 async function getJson2(url) {
   try {
-    const res = await fetch(url, {
+    const res = await deadlineFetch(url, {
       headers: { accept: "application/json", "user-agent": "argus-diligence" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     });
@@ -33100,7 +33133,7 @@ async function collectSocialActivity(rawIdentity, options = {}) {
     SOCIAL_ACTIVITY_MAX_POSTS,
     Math.max(SOCIAL_ACTIVITY_MIN_POSTS, Math.round(options.maxPosts ?? configuredMax))
   );
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = options.fetchImpl ?? deadlineFetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1e3));
   const cacheKey = `social-activity:v3:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
   if (!options.fetchImpl) {
@@ -36124,7 +36157,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     const stageStartedAt = startRuntimeStage(`adapter:${a.id}`);
     try {
       const before = attemptTotals(providers);
-      const result = await a.run(ctx);
+      const result = await withProviderDeadline(collectionDeadlineAt, () => a.run(ctx));
       if (result) adapterResults.set(a.id, result);
       const attempts = attemptDelta(before, attemptTotals(providers));
       const state = adapterRunState(result, attempts);
@@ -37263,14 +37296,14 @@ var lookup = (map, address) => {
   }
   return void 0;
 };
-function classifyMarketAddress(address, context = {}) {
+function classifyMarketAddress(address, context2 = {}) {
   const value = String(address ?? "").trim();
   if (!value) return null;
-  const pool = (context.poolAddresses ?? []).some((candidate) => normalize3(candidate) === normalize3(value));
+  const pool = (context2.poolAddresses ?? []).some((candidate) => normalize3(candidate) === normalize3(value));
   if (pool) return { label: "liquidity pool", kind: "pool" };
   const exchange = lookup(SOLANA_CEX_WALLETS, value) ?? lookup(EVM_CEX_WALLETS, value);
   if (exchange) return { label: exchange, kind: "exchange" };
-  const known = context.knownAccounts?.[value];
+  const known = context2.knownAccounts?.[value];
   const type = String(known?.type ?? "").toUpperCase();
   if (type === "AMM" || type === "MARKET" || type === "POOL") {
     return { label: known?.name?.trim() || "liquidity pool", kind: "pool" };
@@ -37659,8 +37692,10 @@ function evmSafety(gp, sim) {
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
   const creatorShare = num4(gp?.creator_percent);
   return {
-    available: !!gp || !!s,
-    contractPropertiesAssessed: !!gp,
+    available: !!gp && Object.values(gp).some((v) => v != null && v !== "") || simulationCompleted,
+    contractPropertiesAssessed: !!gp && [gp.is_open_source, gp.is_mintable, gp.transfer_pausable, gp.selfdestruct].every((v) => v === "0" || v === "1") && typeof gp.owner_address === "string",
+    taxesAssessed: simulationCompleted ? Number.isFinite(s?.buyTax) && Number.isFinite(s?.sellTax) : [num4(gp?.buy_tax), num4(gp?.sell_tax)].every((v) => v != null && Number.isFinite(v) && v >= 0),
+    holderCountAssessed: num4(gp?.holder_count) != null && Number.isFinite(num4(gp?.holder_count)),
     simChecked: simulationCompleted,
     tradeabilityAssessed: simulationCompleted || goplusTradeabilityAssessed,
     tradeabilityMethod: simulationCompleted ? "simulation" : goplusTradeabilityAssessed ? "goplus-screen" : void 0,
@@ -37727,8 +37762,10 @@ function solanaSafety(sol) {
   const mintable = solFlag(sol?.mintable);
   const freezable = solFlag(sol?.freezable);
   return {
-    available: !!sol,
-    contractPropertiesAssessed: !!sol,
+    available: !!sol && Object.values(sol).some((v) => v != null && v !== ""),
+    contractPropertiesAssessed: !!sol && [sol.mintable?.status, sol.freezable?.status, sol.metadata_mutable?.status].every((v) => v === "0" || v === "1") && Array.isArray(sol.transfer_hook),
+    taxesAssessed: sol?.transfer_fee != null && typeof sol.transfer_fee === "object",
+    holderCountAssessed: num4(sol?.holder_count) != null && Number.isFinite(num4(sol?.holder_count)),
     simChecked: false,
     honeypot: !!sol?.non_transferable && sol.non_transferable === "1",
     honeypotOnchain: sol?.non_transferable === "1",
@@ -37818,17 +37855,27 @@ var CACHE_TTL = 6e4;
 async function auditToken(input, emit, opts) {
   if (input.kind !== "token") return null;
   const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
-  const key = `${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}`;
+  const key = `${opts?.chain ?? ""}:${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}`;
   const hit = opts?.force ? void 0 : _cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
-  const d = await runTokenAudit(input, emit, opts);
+  const signal2 = opts?.deadlineAt != null ? AbortSignal.any([...opts.signal ? [opts.signal] : [], AbortSignal.timeout(Math.max(0, opts.deadlineAt - Date.now()))]) : opts?.signal;
+  signal2?.throwIfAborted();
+  const baseFetch = opts?.fetchImpl ?? fetch;
+  const fetchImpl = (url, init) => {
+    signal2?.throwIfAborted();
+    return baseFetch(url, { ...init, signal: signal2 ? AbortSignal.any([signal2, ...init?.signal ? [init.signal] : []]) : init?.signal });
+  };
+  const d = await runTokenAudit(input, emit, { ...opts, signal: signal2, fetchImpl });
+  signal2?.throwIfAborted();
   _cache.set(key, { at: Date.now(), d });
   return d;
 }
 async function runTokenAudit(input, emit, opts) {
   if (input.kind !== "token") return null;
+  const fetcher = opts?.fetchImpl ?? fetch;
   const trace = [];
   const step = (s2) => {
+    opts?.signal?.throwIfAborted();
     trace.push(s2);
     emit?.(s2);
   };
@@ -37837,14 +37884,27 @@ async function runTokenAudit(input, emit, opts) {
   let allPairs = [];
   if (input.via === "dexscreener") {
     const m = input.ref.match(/dexscreener\.com\/([a-z0-9]+)\/([a-zA-Z0-9]+)/i);
-    if (m) pair = await dexByPair(m[1], m[2]);
+    if (m) {
+      const resolved = await dexByPairResult(m[1], m[2], fetcher);
+      if (!resolved.ok) throw new Error("token_market_unavailable");
+      pair = resolved.pair;
+      if (pair && (pair.chainId !== m[1] || !sameWalletAddress(pair.pairAddress ?? "", m[2]))) throw new Error("token_market_identity_mismatch");
+    }
     if (!pair && m) {
-      allPairs = await dexByToken(m[2]);
+      const resolved = await dexByTokenResult(m[2], fetcher);
+      if (!resolved.ok) throw new Error("token_market_unavailable");
+      allPairs = resolved.pairs.filter((p) => p.chainId === m[1]);
       pair = pickPair(allPairs, m[2]);
     }
   } else {
-    allPairs = await dexByToken(input.ref);
+    const resolved = await dexByTokenResult(input.ref, fetcher);
+    if (!resolved.ok) throw new Error("token_market_unavailable");
+    allPairs = resolved.pairs.filter((p) => input.via === "solana" ? p.chainId === "solana" : p.chainId !== "solana");
+    if (opts?.chain) allPairs = allPairs.filter((p) => p.chainId === opts.chain);
     pair = pickPair(allPairs, input.ref);
+  }
+  if (!pair && input.via === "solana" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(input.ref)) {
+    pair = { chainId: "solana", dexId: "unlisted", pairAddress: "", baseToken: { address: input.ref, name: input.ref, symbol: "TOKEN" } };
   }
   if (!pair || !pair.baseToken) {
     step({ phase: "P0 \xB7 Intake", label: "Not found", detail: "No DEX pair found for this contract.", tone: "warn" });
@@ -37861,7 +37921,7 @@ async function runTokenAudit(input, emit, opts) {
   const pc24 = pair.priceChange?.h24 ?? 0;
   const ageDays = pair.pairCreatedAt ? (Date.now() - pair.pairCreatedAt) / 864e5 : void 0;
   const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
-  const washSignature = volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
+  const washSignature = pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
   step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15e3 ? "warn" : "neutral" });
   const gpChain = GOPLUS_CHAIN[chain];
   let safety = emptySafety();
@@ -37874,13 +37934,18 @@ async function runTokenAudit(input, emit, opts) {
   let lpLockSource = "goplus";
   if (chain === "solana") {
     step({ phase: "Contract", label: "Solana safety", detail: "GoPlus Solana: mint authority, freeze authority, transfer hooks, holders\u2026", tone: "neutral" });
-    sol = await goplusSolana(address);
+    sol = await goplusSolana(address, fetcher);
     safety = solanaSafety(sol);
+    if (pair.dexId === "unlisted") {
+      if (!safety.available) return null;
+      pair.baseToken.name = sol?.metadata?.name || input.ref;
+      pair.baseToken.symbol = sol?.metadata?.symbol || "TOKEN";
+    }
     const goplusCreator = (sol?.creators ?? []).map((c) => c?.address).find((a) => typeof a === "string" && a.trim().length > 0)?.trim() ?? null;
-    const routeResolver = goplusCreator || opts?.skipSim ? Promise.resolve(null) : resolveDeployerViaRoute(address).catch(() => null);
+    const routeResolver = goplusCreator || opts?.skipSim ? Promise.resolve(null) : resolveDeployerViaRoute(address, fetcher).catch(() => null);
     const [routed, rug] = await Promise.all([
       routeResolver,
-      rugcheckReport(address).catch(() => null)
+      rugcheckReport(address, fetcher).catch(() => null)
     ]);
     rugcheck = rug;
     deployerAttribution = goplusCreator ? { address: goplusCreator, source: "goplus", method: "metadata creator", kind: "attributed" } : routed ?? (rug?.creator ? { address: rug.creator, source: "rugcheck", method: "creator field", kind: "attributed" } : null);
@@ -37908,14 +37973,14 @@ async function runTokenAudit(input, emit, opts) {
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders\u2026" : "GoPlus + honeypot.is buy/sell simulation\u2026", tone: "neutral" });
     const [gp, sim, explorer, source2] = await Promise.all([
-      goplus(gpChain, address),
-      opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address),
+      goplus(gpChain, address, fetcher),
+      opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address, fetcher),
       // Where GoPlus cannot order holders, the chain's own explorer is the
       // only correct distribution source. Runs in parallel: no added latency.
-      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address) : Promise.resolve(null),
+      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address, fetcher) : Promise.resolve(null),
       // What the deployer wrote about their own contract. Free, and the only
       // place an intent to defeat safety scanners is ever stated outright.
-      blockscoutContractSource(chain, address)
+      blockscoutContractSource(chain, address, fetcher)
     ]);
     gpEvm = gp;
     explorerHolders = explorer;
@@ -37939,7 +38004,7 @@ async function runTokenAudit(input, emit, opts) {
   let cg = null;
   if (!opts?.skipSim) {
     step({ phase: "Corroborate", label: "CoinGecko cross-check", detail: "Independent listing, CEX markets, market-cap vs FDV\u2026", tone: "neutral" });
-    cg = await coingeckoToken(chain, address);
+    cg = await coingeckoToken(chain, address, fetcher);
   }
   const provablySellable = sells >= 10 && liquidityUsd >= 25e4;
   const broadlyTraded = (cg?.cexCount ?? 0) >= 5 || provablySellable;
@@ -38051,7 +38116,7 @@ async function runTokenAudit(input, emit, opts) {
       });
     }
   }
-  if (liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
+  if (pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd) && liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
   if (washSignature) findings.push({ claim: `Volume is ${volLiq.toFixed(0)}x liquidity in 24h while the price moved only ${pc24.toFixed(1)}%: a wash-trading or fake-volume signature.`, tone: "bad", source: "dexscreener" });
   if (pc24 <= -60) findings.push({ claim: `Down ${Math.abs(pc24).toFixed(0)}% in 24h. The token appears to have already dumped.`, tone: "bad", source: "dexscreener" });
@@ -38212,23 +38277,44 @@ async function runTokenAudit(input, emit, opts) {
   if (socials.length) aT6 = clamp2(aT6 + 1, 0, 10);
   if (cg?.cexCount) aT6 = clamp2(aT6 + 2, 0, 10);
   axes.push({ key: "T6", label: "Maturity & presence", score: aT6, weight: 10, rationale: `${ageDays != null ? (ageDays < 1 ? "<1 day" : Math.round(ageDays) + " days") + " old" : "age unknown"}${socials.length ? `, ${socials.length} socials` : ", no socials"}${cg?.cexCount ? `, ${cg.cexCount} CEX listings` : cg && !cg.listed ? ", not on CoinGecko" : ""}.` });
-  const raw = Math.round(axes.reduce((a, x) => a + x.score, 0));
+  const measured = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  const assessed = [
+    measured(pair.liquidity?.usd),
+    s.contractPropertiesAssessed === true,
+    s.taxesAssessed === true,
+    s.holderCountAssessed === true && holdersReliable,
+    measured(pair.volume?.h24) && measured(pair.liquidity?.usd) && measured(pair.txns?.h24?.buys) && measured(pair.txns?.h24?.sells) && typeof pair.priceChange?.h24 === "number" && Number.isFinite(pair.priceChange.h24),
+    measured(pair.pairCreatedAt)
+  ];
+  for (const [index, axis] of axes.entries()) {
+    axis.nominalWeight = axis.weight;
+    axis.assessed = assessed[index];
+    if (!axis.assessed) {
+      axis.weight = 0;
+      axis.score = 0;
+      axis.rationale = "Evidence needed to assess this area was not returned. Excluded from the score.";
+    }
+  }
+  const assessedWeight = axes.reduce((sum, axis) => sum + axis.weight, 0);
+  const assessment = { assessedWeight, applicableWeight: 100, provisional: assessedWeight < 100, gaps: axes.filter((axis) => !axis.assessed).map((axis) => axis.label) };
+  const raw = assessedWeight > 0 ? Math.round(100 * axes.reduce((a, x) => a + x.score, 0) / assessedWeight) : null;
   let capApplied = null;
   let score = raw;
   let verdict;
   if (caps.length) {
     const [ceiling, key] = caps.reduce((m, c) => c[0] < m[0] ? c : m);
-    score = Math.min(raw, ceiling);
+    score = raw == null ? null : Math.min(raw, ceiling);
     capApplied = key;
-    verdict = ceiling <= 10 ? "AVOID" : band(score);
-  } else verdict = band(score);
+    verdict = ceiling <= 10 ? "AVOID" : score == null ? "UNVERIFIABLE" : band(score);
+  } else verdict = score == null ? "UNVERIFIABLE" : band(score);
   const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) || (cg?.twitter ? "@" + cg.twitter : null);
+  opts?.signal?.throwIfAborted();
   const socialActivity = projectX && opts?.collectSocialActivity ? await opts.collectSocialActivity({
     handle: projectX,
     ticker: pair.baseToken.symbol,
     projectName: pair.baseToken.name,
     contractAddress: pair.baseToken.address
-  }).catch(() => void 0) : void 0;
+  }, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt }).catch(() => void 0) : void 0;
   const deployer = deployerAttribution?.address ?? null;
   const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
   const topHolders = rawHolders.slice(0, 10).map((h) => ({
@@ -38237,8 +38323,8 @@ async function runTokenAudit(input, emit, opts) {
     tag: h.tag || void 0,
     isContract: h.is_contract === 1 || h.is_contract === "1"
   })).filter((h) => h.address);
-  const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
-  const deployerRiskFn = opts?.screenDeployerRisk ?? screenDeployerRisk;
+  const screenFn = opts?.screenSanctions ?? ((chain2, addresses) => screenAddressSanctions(chain2, addresses, fetcher));
+  const deployerRiskFn = opts?.screenDeployerRisk ?? ((address2) => screenDeployerRisk(address2, fetcher));
   const deployerRiskEnabled = Boolean(opts?.screenDeployerRisk) || arkhamProviderEnabled();
   step({
     phase: "Screen",
@@ -38246,13 +38332,14 @@ async function runTokenAudit(input, emit, opts) {
     detail: deployerRiskEnabled ? "Screening deployer and top holders against OFAC, and tracing funding provenance." : "Screening deployer and top holders against OFAC.",
     tone: "neutral"
   });
+  opts?.signal?.throwIfAborted();
   const [sanctionsScreen, deployerRisk, priceHistory] = await Promise.all([
-    screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
+    screenFn(chain, [deployer, ...topHolders.map((h) => h.address)], fetcher, opts?.signal),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
     // Contract-as-wallet gate: do not Arkham-risk the token mint/CA as if it were a team wallet.
     deployer && deployerRiskEnabled && !sameWalletAddress(deployer, address) ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0),
-    fetchPriceHistory(address, chain, pair.pairAddress).catch(() => null)
+    fetchPriceHistory(address, chain, pair.pairAddress, fetcher).catch(() => null)
   ]);
   if (deployerRisk?.available && deployerRisk.paths.length) {
     for (const p of deployerRisk.paths.slice(0, 3)) {
@@ -38275,18 +38362,18 @@ async function runTokenAudit(input, emit, opts) {
       tone: "bad",
       source: "ofac"
     });
-    score = Math.min(score, 5);
+    score = score == null ? null : Math.min(score, 5);
     capApplied = "ofac_sanctioned_address";
     verdict = "AVOID";
     step({ phase: "Finalize", label: "OFAC sanctions", detail: `${sanctionsScreen.sanctioned.length} sanctioned address(es): verdict forced to AVOID.`, tone: "bad" });
   }
-  const cloneCheck = await checkForClones({
+  const cloneCheck = pair.dexId === "unlisted" && pair.baseToken.symbol === "TOKEN" ? null : await checkForClones({
     mint: address,
     symbol: pair.baseToken.symbol,
     chain,
     pairCreatedAt: pair.pairCreatedAt ?? null,
     liquidityUsd
-  }).catch(() => null);
+  }, { fetchImpl: fetcher }).catch(() => null);
   if (cloneCheck?.checked && cloneCheck.clones.length) {
     if (cloneCheck.audited === "later") {
       findings.push({ claim: cloneCheck.note, tone: "bad", source: "dexscreener" });
@@ -38306,7 +38393,7 @@ async function runTokenAudit(input, emit, opts) {
   }
   const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployerAttribution, topHolders, socials);
   const decisionBoundary = deriveTokenDecisionBoundary({ score, capApplied, axes });
-  const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
+  const headline = assessment.provisional && !capApplied ? `Score based on ${assessedWeight}/100 of the assessment weight. Evidence gaps: ${assessment.gaps.join(", ")}.` : buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} \xB7 ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
   return {
     address,
@@ -38341,6 +38428,7 @@ async function runTokenAudit(input, emit, opts) {
     // page as the finding explaining that the 37% line is the pool itself.
     verdict,
     score,
+    assessment,
     capApplied,
     headline,
     axes,
@@ -38444,6 +38532,14 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
   return "Falls short on the forensic checks. Treat as high risk.";
 }
 
+// server/tokenAudit.ts
+async function auditToken2(...args) {
+  return withCostLedger(async () => {
+    const dossier = await auditToken(...args);
+    return dossier ? { ...dossier, cost: getCost() } : null;
+  });
+}
+
 // src/polymarket/trader.ts
 var EVM_ADDRESS6 = /^0x[0-9a-f]{40}$/i;
 var PROFILE_PATH = /^\/profile\/(0x[0-9a-f]{40})\/?$/i;
@@ -38511,7 +38607,7 @@ function resolveInput(raw) {
   return { kind: "handle", ref: s.replace(/^@/, "") };
 }
 export {
-  auditToken,
+  auditToken2 as auditToken,
   collectSocialActivity,
   fetchPublicAssetHash,
   fetchPublicText,

@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Arkham audit lane for addresses the subject actually bound to itself.
 // Attribution is gated here, before provider risk can become report context.
 import { recordCall } from "../cost";
@@ -41,7 +42,7 @@ export type ControlProbe = "eoa" | "contract" | "inconclusive" | "established";
 
 export async function probeEvmControl(
   address: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = deadlineFetch,
 ): Promise<ControlProbe> {
   let answered = false;
   for (const chain of CONTROL_TEST_CHAINS) {

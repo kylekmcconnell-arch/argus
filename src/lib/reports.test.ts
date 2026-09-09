@@ -416,7 +416,7 @@ describe("stored token and investigation checks", () => {
     const token = {
       address: "0x7777777777777777777777777777777777777777",
       chain: "ethereum",
-      safety: { available: true, simChecked: true, tradeabilityAssessed: true, buyTax: 0, sellTax: 0, holderCount: 900, topHolderPct: 9, ownerRenounced: true, openSource: true },
+      safety: { available: true, contractPropertiesAssessed: true, simChecked: true, tradeabilityAssessed: true, buyTax: 0, sellTax: 0, holderCount: 900, topHolderPct: 9, ownerRenounced: true, openSource: true },
       topHolders: [{ address: "0xholder1", percent: 9 }],
       holdersAssessed: true,
       bundleCount: 0,

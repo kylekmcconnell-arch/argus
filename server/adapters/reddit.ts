@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Reddit adapter. Community FUD / reputation signal (F5 / I5 / AG4). Free tier
 // works via OAuth client credentials. Gated on REDDIT_CLIENT_ID + SECRET.
 
@@ -22,7 +23,7 @@ async function getToken(): Promise<string | null> {
   if (cachedToken && cachedToken.exp > Date.now()) return cachedToken.token;
   let res: Response;
   try {
-    res = await fetch("https://www.reddit.com/api/v1/access_token", {
+    res = await deadlineFetch("https://www.reddit.com/api/v1/access_token", {
       method: "POST",
       headers: {
         authorization: "Basic " + Buffer.from(`${id}:${secret}`).toString("base64"),
@@ -69,7 +70,7 @@ export async function searchMentions(query: string): Promise<{ title: string; su
   if (!token) return [];
   let res: Response;
   try {
-    res = await fetch(`https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=15&t=year`, {
+    res = await deadlineFetch(`https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=15&t=year`, {
       headers: { authorization: `Bearer ${token}`, "user-agent": "argus-dd/1.0" },
       signal: AbortSignal.timeout(10_000),
     });

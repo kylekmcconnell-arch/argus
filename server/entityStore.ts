@@ -1,3 +1,4 @@
+import { deadlineFetch } from "./providerDeadline.js";
 // Entity knowledge base: a durable, per-organization store of the VERIFIED
 // facts an audit resolves about an entity, keyed by canonicalEntityKey. Every
 // audit writes its verified facts here; a later audit of the same or an
@@ -47,7 +48,7 @@ export async function readEntityFacts(
       + `?organization_id=eq.${encodeURIComponent(organizationId)}`
       + `&canonical_key=eq.${encodeURIComponent(canonicalKey)}`
       + `&select=facts,entity_type,audit_count,updated_at&limit=1`;
-    const res = await fetch(url, { headers: authHeaders(c.key), signal: AbortSignal.timeout(5_000) });
+    const res = await deadlineFetch(url, { headers: authHeaders(c.key), signal: AbortSignal.timeout(5_000) });
     if (!res.ok) return null;
     const rows = (await res.json()) as Array<{ facts?: Record<string, unknown>; entity_type?: string | null; audit_count?: number; updated_at?: string }>;
     const row = rows?.[0];
@@ -74,7 +75,7 @@ export async function writeEntityFacts(
     // under-counts by one, which is cosmetic.
     let auditCount = 1;
     try {
-      const existing = await fetch(
+      const existing = await deadlineFetch(
         `${c.url}/rest/v1/${TABLE}?organization_id=eq.${encodeURIComponent(organizationId)}&canonical_key=eq.${encodeURIComponent(canonicalKey)}&select=audit_count&limit=1`,
         { headers: authHeaders(c.key), signal: AbortSignal.timeout(5_000) },
       );
@@ -84,7 +85,7 @@ export async function writeEntityFacts(
       }
     } catch { /* treat as first write */ }
 
-    const res = await fetch(`${c.url}/rest/v1/${TABLE}?on_conflict=organization_id,canonical_key`, {
+    const res = await deadlineFetch(`${c.url}/rest/v1/${TABLE}?on_conflict=organization_id,canonical_key`, {
       method: "POST",
       headers: { ...authHeaders(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify([{

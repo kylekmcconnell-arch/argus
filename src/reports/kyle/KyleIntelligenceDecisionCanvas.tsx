@@ -103,6 +103,7 @@ function executiveText(value: string | null | undefined): string {
 }
 
 function evidenceBand(row: CompositionRow): "Strong" | "Moderate" | "Limited" | "Unresolved" | "Not applicable" | "Deferred" {
+  if (row.applicability === "unassessed") return "Unresolved";
   if (row.applicability === "not_applicable") return "Not applicable";
   if (row.applicability === "deferred") return "Deferred";
   const ratio = row.weight > 0 ? row.score / row.weight : 0;
@@ -147,6 +148,7 @@ function verdictHeadline(
   adverseCount: number,
   unresolvedCount: number,
   nextSteps: KyleDecisionItem[],
+  checksComplete: boolean,
 ): string {
   const strongest = [...rows]
     .filter((row) => row.weight > 0 && (row.supportCount ?? 0) > 0)
@@ -156,7 +158,7 @@ function verdictHeadline(
       return (right.score / right.weight) - (left.score / left.weight);
     })[0];
   const lead = strongest ? `${strongest.label} leads the evidence.` : "The available evidence establishes a starting position.";
-  if (favorable && unresolvedCount === 0 && adverseCount === 0) return `${lead} No decision-critical gap is recorded.`;
+  if (checksComplete && favorable && unresolvedCount === 0 && adverseCount === 0) return `${lead} No decision-critical gap is recorded.`;
   if (adverseCount > 0) return `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`;
   const unresolvedText = nextSteps.map((item) => `${item.label} ${item.detail ?? ""}`).join(" ").toLowerCase();
   const unresolvedEvidence = /audit|security|governance|treasury|control/.test(unresolvedText)
@@ -298,7 +300,7 @@ function CheckRegisterRail({
         </p>
         {capturedAt && <p className="kyle-check-saved mono">Saved {capturedAt}.</p>}
       </section>
-      {ledger(openItemsLabel, nextSteps, methodologyHref, applicable === 0 ? "No required check results were saved." : "No checks remain open.")}
+      {ledger(openItemsLabel, nextSteps, methodologyHref, applicable === 0 ? "No required check results were saved." : openCount > 0 ? `${openCount} checks still lack evidence; specific next steps were not recorded.` : "No checks remain open.")}
       {ledger("Finished checks", verified, evidenceHref, "No check has finished yet.")}
     </aside>
   );
@@ -407,7 +409,7 @@ function AnimatedVerdictScore({
   size: number;
 }) {
   const buildRows = rows.filter((row) => row.score > 0);
-  const applicableWeight = buildRows.reduce((sum, row) => sum + Math.max(0, row.weight), 0) || 100;
+  const applicableWeight = rows.reduce((sum, row) => sum + Math.max(0, row.weight), 0) || 100;
   const hasExcludedAxis = rows.some((row) => row.applicability !== undefined);
   const ringRows = hasExcludedAxis && applicableWeight < 100
     ? buildRows.map((row) => ({
@@ -629,7 +631,9 @@ export function KyleIntelligenceDecisionCanvas({
   const topNextStep = nextSteps[0];
   const thesis = sentence(reportSummary) || sentence(argument?.againstLine) || sentence(mainConcern?.label) || "ARGUS assembled the available evidence into a decision-ready view.";
   const summary = sentence(neutralizeProductCopy(subjectSummary ?? ""));
-  const headline = verdictHeadline(composition, favorable, adverseCount, unresolvedCount, nextSteps);
+  const checksComplete = applicable > 0 && successful >= applicable;
+  const nextCheckFallback = checksComplete ? "No required check remains open." : "Review the check ledger for evidence gaps; a specific next step was not recorded.";
+  const headline = verdictHeadline(composition, favorable, adverseCount, unresolvedCount, nextSteps, checksComplete);
   const coverage = coverageLabel(coveragePercent);
 
   const sortedComposition = useMemo(() => [...composition].sort((left, right) => right.weight - left.weight), [composition]);
@@ -667,7 +671,7 @@ export function KyleIntelligenceDecisionCanvas({
             </div>
             <div>
               <span className="mono">HIGHEST-VALUE NEXT CHECK</span>
-              <strong>{sentence(topNextStep?.label) || "No required check remains open."}</strong>
+              <strong>{sentence(topNextStep?.label) || nextCheckFallback}</strong>
             </div>
           </div>
         </div>
@@ -771,7 +775,7 @@ export function KyleIntelligenceDecisionCanvas({
                     <strong>{row.label}</strong>
                     <small>{band} evidence</small>
                   </span>
-                  <span className="kyle-composition-points mono">{excluded ? <strong>N/A</strong> : <><strong>{Math.round(row.score)}</strong> / {row.weight}</>}</span>
+                  <span className="kyle-composition-points mono">{excluded ? <strong>{row.applicability === "unassessed" ? "Unknown" : "N/A"}</strong> : <><strong>{Math.round(row.score)}</strong> / {row.weight}</>}</span>
                   <span className="kyle-composition-open mono">{excluded ? "not scored" : open > 0 ? `${Math.round(open)} ${Math.round(open) === 1 ? "pt" : "pts"} not earned` : "fully earned"}</span>
                   <ArrowDown size={15} weight="bold" aria-hidden="true" />
                 </summary>

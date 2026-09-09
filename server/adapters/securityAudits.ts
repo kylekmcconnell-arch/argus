@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Security-audit collector: bounded counterparty corroboration.
 //
 // A project's own /security page listing "Trail of Bits, CertiK, ..." is
@@ -221,7 +222,7 @@ export async function collectSecurityAudits(
   candidateUrls: string[],
   deps: SecurityAuditsDependencies = {},
 ): Promise<SecurityAuditsResult> {
-  const fetcher = deps.fetcher ?? fetch;
+  const fetcher = deps.fetcher ?? deadlineFetch;
   const capturedAt = captureTimestamp();
   const name = subjectName.trim();
   const officialHost = officialSite ? registrableHost(officialSite) : null;

@@ -1,3 +1,4 @@
+import { providerDeadlineSignal } from "./providerDeadline.js";
 import { createHash } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpRequest, type RequestOptions } from "node:http";
@@ -426,7 +427,9 @@ async function fetchValidatedPublicText(
   const request = dependencies.request ?? defaultRequestForMode();
   const lookup = dependencies.lookup ?? defaultLookupForMode();
   let target: ValidatedPublicTarget | null = initialTarget;
-  const signal = dependencies.signal ?? AbortSignal.timeout(8_000);
+  const stageSignal = providerDeadlineSignal();
+  const signal = AbortSignal.any([dependencies.signal ?? AbortSignal.timeout(8_000), ...(stageSignal ? [stageSignal] : [])]);
+  signal.throwIfAborted();
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     let response: Response;

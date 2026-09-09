@@ -1,5 +1,5 @@
 {
   "crons": [
-    { "path": "/api/threat-recheck", "schedule": "0 6 * * *" }
+    { "path": "/api/threat-recheck", "schedule": "*/15 * * * *" }
   ]
 }

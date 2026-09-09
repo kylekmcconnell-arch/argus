@@ -1,3 +1,4 @@
+import { deadlineFetch } from "./providerDeadline.js";
 /** Cancel provider requests at the stage deadline and ignore late results. */
 export async function withWallClockBox<T>(work: (fetcher: typeof fetch) => Promise<T>, budgetMs: number): Promise<T | null> {
   if (budgetMs <= 0) return null;
@@ -5,7 +6,7 @@ export async function withWallClockBox<T>(work: (fetcher: typeof fetch) => Promi
   let timer: ReturnType<typeof setTimeout> | undefined;
   const fetcher: typeof fetch = (input, init) => {
     controller.signal.throwIfAborted();
-    return fetch(input, { ...init, signal: init?.signal
+    return deadlineFetch(input, { ...init, signal: init?.signal
       ? AbortSignal.any([controller.signal, init.signal]) : controller.signal });
   };
   const timeout = new Promise<null>((resolve) => {

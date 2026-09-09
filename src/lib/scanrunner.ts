@@ -6,7 +6,7 @@
 // onComplete does the data-side work (cache / persist / log / graph) regardless
 // of what the user is looking at.
 import { auditToken, type TokenDossier } from "../token/audit";
-import { collectTokenSocialActivity } from "./socialActivityClient";
+import { collectTokenSocialActivity, scanScopedFetch } from "./socialActivityClient";
 import { streamInvestigation, type Investigation } from "./investigation";
 import type { RunnableTokenInput } from "./resolveInput";
 import type { TraceStep } from "../data/evidence";
@@ -84,7 +84,8 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
   emit();
 
   let cancelled = false;
-  aborts.set(key, () => { cancelled = true; });
+  const controller = new AbortController();
+  aborts.set(key, () => { cancelled = true; controller.abort(); });
   (async () => {
     try {
       await reserveInvestigationCredit(run.creditKey, "token", run.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
@@ -97,7 +98,7 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
       const d = await auditToken(
         input,
         (s) => { if (cancelled) return; count += 1; run.steps = [...run.steps, s]; run.pct = Math.min(92, count * 18); emit(); },
-        { force: opts?.force, collectSocialActivity: collectTokenSocialActivity },
+        { signal: controller.signal, deadlineAt: run.startedAt + 120_000, force: opts?.force, collectSocialActivity: collectTokenSocialActivity, fetchImpl: scanScopedFetch(run.creditKey) },
       );
       if (cancelled) return;
       if (!d) {

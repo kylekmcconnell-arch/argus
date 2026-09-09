@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Site substance / liveness reader. This adapter classifies what the fetch
 // actually proved. A denied automated request is not evidence that a site is
 // offline, and a transport failure is not evidence that a project is unshipped.
@@ -197,7 +198,7 @@ async function get(
 ): Promise<PageResult> {
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await deadlineFetch(url, {
       headers: {
         "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)",
         accept: "text/html,application/javascript",

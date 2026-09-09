@@ -1,3 +1,4 @@
+import { canonicalAddress } from "../src/lib/assetIdentity.js";
 import { requireArgusAuth } from "./_auth.js";
 import { withLedgerOrganization } from "./_ledger.js";
 // Threat scanner receipts ledger — the shared, server-side track record and
@@ -49,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       risk: Number.isFinite(body.risk) ? Math.max(0, Math.min(100, Math.round(body.risk))) : 0,
       flaggedAt: Number.isFinite(body.flaggedAt) ? body.flaggedAt : Date.now(),
       liqThen: Number.isFinite(body.liqThen) ? body.liqThen : 0,
-      deployer: body.deployer ? s(body.deployer).toLowerCase() : null,
+      deployer: body.deployer ? canonicalAddress(s(body.deployer)) : null,
       codeVerified: !!body.codeVerified,
       flagCount: Number.isFinite(body.flagCount) ? body.flagCount : 0,
       codeFingerprint: body.codeFingerprint ? s(body.codeFingerprint).toLowerCase().replace(/[^0-9a-f]/g, "") || null : null,
@@ -61,8 +62,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const deployer = s(req.query.deployer);
   if (deployer) {
-    const rows = await ledgerByDeployer(deployer);
-    res.status(200).json({ available: true, deployer: deployer.toLowerCase(), receipts: rows, stats: statsOf(rows) });
+    const rows = await ledgerByDeployer(deployer, s(req.query.chain) || undefined);
+    res.status(200).json({ available: true, deployer: canonicalAddress(deployer), receipts: rows, stats: statsOf(rows) });
     return;
   }
   const fingerprint = s(req.query.fingerprint);
@@ -73,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const address = s(req.query.address);
   if (address) {
-    const row = await ledgerGet(address);
+    const row = await ledgerGet(address, s(req.query.chain) || undefined);
     res.status(200).json({ available: true, receipt: row });
     return;
   }

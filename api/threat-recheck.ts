@@ -1,3 +1,4 @@
+import { marketObservation } from "../src/lib/assetIdentity.js";
 import { withLedgerOrganization } from "./_ledger.js";
 import { requireArgusAuth } from "./_auth.js";
 // Receipts re-check cron. GET /api/threat-recheck  (Vercel cron, nightly)
@@ -18,15 +19,12 @@ export const config = { maxDuration: 120 };
 const MAX_PER_RUN = 120;
 const RUN_BUDGET_MS = 80_000;
 
-async function liquidityNow(address: string): Promise<number | null> {
+async function liquidityNow(chain: string, address: string): Promise<number | null> {
   try {
     const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, { signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null;
-    const d = (await r.json()) as { pairs?: { liquidity?: { usd?: number } }[] | null };
-    if (d.pairs !== null && !Array.isArray(d.pairs)) return null;
-    const pairs = d.pairs ?? [];
-    if (!pairs.length) return 0; // no pair left = dead market
-    return Math.max(...pairs.map((p) => p.liquidity?.usd ?? 0));
+    const observation = marketObservation(await r.json(), chain, address);
+    return "liquidityUsd" in observation ? observation.liquidityUsd : null;
   } catch {
     return null;
   }
@@ -36,7 +34,7 @@ async function liquidityNow(address: string): Promise<number | null> {
 // (a generic JSON POST — the user wires it to Telegram/Slack/Discord on their
 // side; ARGUS never holds a bot token).
 async function emitAlert(alert: ThreatAlert, organizationId: string): Promise<boolean> {
-  const existing = await ledgerGetAlert(alert.address);
+  const existing = await ledgerGetAlert(alert.address, alert.chain);
   if (existing) return false; // already alerted on this token — don't re-spam
   const ok = await ledgerRecordAlert(alert);
   const hook = process.env.THREAT_ALERT_WEBHOOK;
@@ -79,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const slice = queue.slice(i, i + BATCH);
     await Promise.all(slice.map(({ organizationId, receipt: r }) => withLedgerOrganization(organizationId, async () => {
       processed++;
-      const liqNow = await liquidityNow(r.address);
+      const liqNow = await liquidityNow(r.chain, r.address);
       if (liqNow == null) {
         // Preserve measured outcomes; defer failed provider retries for ten minutes.
         failures++;
@@ -107,6 +105,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })));
   }
 
-  res.status(200).json({ available: failures === 0, considered: queue.length, processed, deferred: queue.length - processed, failures, updated, alerts, outcomes: { dead, bleeding, alive } });
+  res.status(200).json({ freshnessTargetHours: 12, oldestDueAgeMs: queue.length ? Math.max(...queue.map(({ receipt }) => Math.max(0, now - (receipt.checkedAt ?? receipt.flaggedAt)))) : 0, capacityReached: queue.length === MAX_PER_RUN, available: failures === 0, considered: queue.length, processed, deferred: queue.length - processed, failures, updated, alerts, outcomes: { dead, bleeding, alive } });
   } catch { res.status(503).json({ available: false, error: "threat_ledger_unavailable" }); }
 }

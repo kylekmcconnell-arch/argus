@@ -1,3 +1,4 @@
+import { withProviderDeadline } from "./providerDeadline.js";
 import { withWallClockBox } from "./boundedProvider";
 // The collector orchestrator: @handle -> populated evidence -> verdict.
 //
@@ -4388,7 +4389,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     const stageStartedAt = startRuntimeStage(`adapter:${a.id}`);
     try {
       const before = attemptTotals(providers);
-      const result = await a.run(ctx);
+      const result = await withProviderDeadline(collectionDeadlineAt, () => a.run(ctx));
       if (result) adapterResults.set(a.id, result);
       const attempts = attemptDelta(before, attemptTotals(providers));
       const state = adapterRunState(result, attempts);

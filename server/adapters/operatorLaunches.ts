@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // PRIOR LAUNCHES: what happened to the operator's earlier tokens?
 //
 // A launchpad token's real risk is rarely in its own contract, which is
@@ -62,7 +63,7 @@ export interface PriorLaunch {
 
 async function getJson(url: string): Promise<unknown | null> {
   try {
-    const res = await fetch(url, {
+    const res = await deadlineFetch(url, {
       headers: { accept: "application/json", "user-agent": "argus-diligence" },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });

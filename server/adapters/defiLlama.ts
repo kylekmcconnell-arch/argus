@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // DeFiLlama adapters: free, keyless enrichment from api.llama.fi.
 //   - collectProtocolTvl:     total value locked + per-chain breakdown (the
 //     on-chain usage metric CoinGecko market signals lack).
@@ -251,7 +252,7 @@ export async function collectProtocolTvl(
   projectName: string,
   options: { fetcher?: typeof fetch; slug?: string } = {},
 ): Promise<TvlOutcome> {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const slug = options.slug ?? defiLlamaSlug(projectName);
   if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
 
@@ -399,7 +400,7 @@ export async function collectProtocolAuditLinks(
   projectName: string,
   options: { fetcher?: typeof fetch; slug?: string; maxChildren?: number } = {},
 ): Promise<AuditLinksOutcome> {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const slug = options.slug ?? defiLlamaSlug(projectName);
   if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
   const parent = await fetchProtocol(slug, fetcher);
@@ -466,7 +467,7 @@ export async function collectProtocolFees(
   projectName: string,
   options: { fetcher?: typeof fetch; slug?: string } = {},
 ): Promise<FeesOutcome> {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const slug = options.slug ?? defiLlamaSlug(projectName);
   if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
   // Same coalescing as the protocol document. This endpoint is read once per
@@ -589,7 +590,7 @@ export async function collectProtocolFunding(
   projectName: string,
   options: { fetcher?: typeof fetch; slug?: string } = {},
 ): Promise<FundingOutcome> {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? deadlineFetch;
   const slug = options.slug ?? defiLlamaSlug(projectName);
   if (!slug) return { available: false, reason: "no_data", note: "No resolvable DeFiLlama protocol slug." };
 

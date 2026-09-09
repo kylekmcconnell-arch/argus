@@ -1264,6 +1264,7 @@ describe("App routing safety", () => {
       ...tokenResult(address, "fully covered token"),
       safety: {
         available: true,
+        contractPropertiesAssessed: true,
         simChecked: true,
         tradeabilityAssessed: true,
         buyTax: 0,

@@ -1,3 +1,4 @@
+import { deadlineFetch } from "../providerDeadline.js";
 // Domain registration age via RDAP: the free, keyless successor to WHOIS that
 // every registry now serves. Paired with the X account creation date it brackets
 // when a project could have launched, and the GAP between the two dates is its
@@ -192,7 +193,7 @@ function classifyFetchError(err: unknown): "timeout" | "transport_error" {
 
 export async function collectDomainRegistration(
   website: string | null | undefined,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = deadlineFetch,
   now: Date = new Date(),
 ): Promise<DomainRegistrationOutcome> {
   const scope = resolveDomainScope(website);

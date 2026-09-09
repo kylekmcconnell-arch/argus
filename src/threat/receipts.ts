@@ -1,3 +1,4 @@
+import { assetIdentity, canonicalAddress, marketObservation } from "../lib/assetIdentity";
 // Receipts: the scanner's recorded track record (localStorage, same pattern as
 // lib/watchlist). Every scan is recorded with the liquidity AT flag time; a
 // later re-check turns a flagged call into a receipt — "flagged DANGER at $32K
@@ -6,7 +7,7 @@
 // every new scan.
 
 import type { Receipt, ThreatAlert, ThreatVerdict } from "./types";
-import { dexByToken, pickPair } from "../token/sources";
+import { dexByTokenResult } from "../token/sources";
 import { apiFetch, hasLocalStorage } from "./net";
 
 const KEY = "argus.threat.receipts.v1";
@@ -32,7 +33,7 @@ function save(items: Receipt[]) {
 
 export function recordReceipt(r: Receipt) {
   const items = getReceipts().filter(
-    (x) => !(x.address.toLowerCase() === r.address.toLowerCase() && x.chain === r.chain),
+    (x) => !(assetIdentity(x.chain, x.address) === assetIdentity(r.chain, r.address)),
   );
   items.unshift(r);
   save(items);
@@ -53,18 +54,18 @@ export function recordReceipt(r: Receipt) {
 }
 
 // Prior scans by the same deployer — the LOCAL "rug factory" memory (sync).
-export function byDeployer(deployer: string): Receipt[] {
-  const d = deployer.toLowerCase();
-  return getReceipts().filter((r) => r.deployer?.toLowerCase() === d);
+export function byDeployer(deployer: string, chain?: string): Receipt[] {
+  const d = canonicalAddress(deployer);
+  return getReceipts().filter((r) => (!chain || r.chain === chain) && r.deployer != null && canonicalAddress(r.deployer) === d);
 }
 
 // The SHARED deployer memory: this browser's local receipts merged with every
 // analyst's, from the server ledger. Async; falls back to local-only when the
 // server is unreachable. Deduped by address, newest kept.
-export async function sharedByDeployer(deployer: string): Promise<Receipt[]> {
-  const local = byDeployer(deployer);
+export async function sharedByDeployer(deployer: string, chain?: string): Promise<Receipt[]> {
+  const local = byDeployer(deployer, chain);
   try {
-    const res = await apiFetch(`/api/threat-receipts?deployer=${encodeURIComponent(deployer)}`, {
+    const res = await apiFetch(`/api/threat-receipts?deployer=${encodeURIComponent(deployer)}${chain ? `&chain=${encodeURIComponent(chain)}` : ""}`, {
       signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) return local;
@@ -72,7 +73,8 @@ export async function sharedByDeployer(deployer: string): Promise<Receipt[]> {
     if (!d.available || !Array.isArray(d.receipts)) return local;
     const byAddr = new Map<string, Receipt>();
     for (const r of [...d.receipts, ...local]) {
-      const k = r.address.toLowerCase();
+      if (chain && r.chain !== chain) continue;
+      const k = assetIdentity(r.chain, r.address);
       const prev = byAddr.get(k);
       if (!prev || (r.flaggedAt ?? 0) > (prev.flaggedAt ?? 0)) byAddr.set(k, r);
     }
@@ -89,15 +91,18 @@ const BAD: ThreatVerdict[] = ["DANGER", "RUG"];
 // and is shown just the same — a track record only means something with the
 // misses left in.
 export async function checkReceipt(r: Receipt): Promise<Receipt> {
-  const pair = pickPair(await dexByToken(r.address), r.address);
-  const liqNow = pair?.liquidity?.usd ?? 0;
+  const result = await dexByTokenResult(r.address);
+  if (!result.ok) return r;
+  const observation = marketObservation(result, r.chain, r.address);
+  if (!("liquidityUsd" in observation)) return r;
+  const liqNow = observation.liquidityUsd;
   const priceDropPct =
     r.liqThen > 0 ? Math.max(0, Math.min(100, Math.round((1 - liqNow / r.liqThen) * 100))) : undefined;
   const status: Receipt["status"] =
     liqNow < 1000 ? "dead" : liqNow < r.liqThen * 0.2 ? "bleeding" : "alive";
   const updated: Receipt = { ...r, liqNow, priceDropPct, status, checkedAt: Date.now() };
   const items = getReceipts().map((x) =>
-    x.address.toLowerCase() === r.address.toLowerCase() && x.chain === r.chain ? updated : x,
+    assetIdentity(x.chain, x.address) === assetIdentity(r.chain, r.address) ? updated : x,
   );
   save(items);
   return updated;

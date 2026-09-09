@@ -33,7 +33,7 @@ export interface CompositionRow {
   /** Replaces the sources/questions counts line under the rationale. */
   countsLine?: string;
   /** The dimension was deliberately excluded before scoring, never scored zero. */
-  applicability?: "not_applicable" | "deferred";
+  applicability?: "not_applicable" | "deferred" | "unassessed";
 }
 
 function bandColor(ratio: number): string {
@@ -99,7 +99,7 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
               </span>
             </span>
             {excluded ? (
-              <span className="mono text-[11px] uppercase tracking-wide text-ink-dim">N/A · not scored</span>
+              <span className="mono text-[11px] uppercase tracking-wide text-ink-dim">{row.applicability === "unassessed" ? "Unknown" : "N/A"} · not scored</span>
             ) : row.tone ? (
               <span className="mono text-[11px] tabular text-ink-dim">
                 <span className="font-semibold" style={{ color }}>{row.score}</span>
