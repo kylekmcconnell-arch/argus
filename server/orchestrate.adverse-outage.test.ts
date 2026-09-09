@@ -47,6 +47,32 @@ function context(handles: string[] = []) {
 const row = (recorded: ChecklistObservation[]) => recorded.find((o) => o.id === "adverse-screen");
 
 describe("an adverse sweep that never answered is not an empty sweep", () => {
+  it.each(["satellite", "tooling", "team"])("retains subject findings when %s throws", async (failure) => {
+    harness.adverse.mockImplementation(async (handle: string) => {
+      if (handle !== "@subject" && failure === "satellite") throw new Error("provider failed");
+      return { completed: true, signals: handle === "@subject" ? [{ category: "rug", claim: "Candidate complaint", source: "example", source_url: "https://example.com", target_entity_key: "@subject", target_entity_type: "person", relationship_to_subject: "self", relationship_label: "subject" }] : [] };
+    });
+    harness.tooling.mockImplementation(async () => { if (failure === "tooling") throw new Error("failed"); return null; });
+    harness.team.mockImplementation(async () => { if (failure === "team") throw new Error("failed"); return []; });
+    const { ctx, recorded, record } = context(["@one", "@two"]);
+    await adverseSignalsAndTooling(ctx, record);
+    expect(row(recorded)?.status).toBe("finding");
+    expect(row(recorded)?.note).toContain("Failed searches:");
+    expect(ctx.evidence.findings).toHaveLength(1);
+    harness.team.mockResolvedValue([]);
+    harness.tooling.mockResolvedValue(null);
+  });
+
+  it("records a thrown subject search as unavailable while preserving related leads", async () => {
+    harness.adverse.mockImplementation(async (handle: string) => {
+      if (handle === "@subject") throw new Error("failed");
+      return { completed: true, signals: [] };
+    });
+    const { ctx, recorded, record } = context(["@one"]);
+    await adverseSignalsAndTooling(ctx, record);
+    expect(row(recorded)?.status).toBe("unavailable");
+  });
+
   it("records unavailable when the search provider answered nothing", async () => {
     harness.adverse.mockResolvedValue({ completed: false, signals: [] });
     harness.tooling.mockResolvedValue(null);

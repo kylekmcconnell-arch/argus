@@ -3244,22 +3244,30 @@ export async function adverseSignalsAndTooling(
 
   // All searches + the tooling probe run concurrently and time-boxed, so the
   // whole sweep costs one slow call, not the sum.
+  const failedSearches: string[] = [];
+  const settled = async <T,>(label: string, work: Promise<T>, fallback: T): Promise<T> => {
+    const [result] = await Promise.allSettled([work]);
+    if (result.status === "fulfilled") return result.value;
+    failedSearches.push(label);
+    return fallback;
+  };
+  const unansweredScreen = { completed: false, signals: [] as AdverseSignal[] };
   const [tooling, subjectScreen, projectScreens, assocScreens, ventureTeams] = await Promise.all([
-    detectManipulationTooling(ctx.handle, evidence.profile.display_name),
-    searchAdverseSignals(ctx.handle, subjectKind, {
+    settled("manipulation-tooling search", detectManipulationTooling(ctx.handle, evidence.profile.display_name), null),
+    settled("subject search", searchAdverseSignals(ctx.handle, subjectKind, {
       relationship_to_subject: "self",
       relationship_label: "audited subject",
-    }, ticker, evidence.projectToken?.address),
-    Promise.all(projectTargets.map((p) => searchAdverseSignals(p.handle!, "project", {
+    }, ticker, evidence.projectToken?.address), unansweredScreen),
+    Promise.all(projectTargets.map((p) => settled(`project ${p.handle}`, searchAdverseSignals(p.handle!, "project", {
       relationship_to_subject: "venture",
       relationship_label: [p.role, p.name].filter(Boolean).join(" at ") || p.name,
-    }))),
-    Promise.all(associateTargets.map((a) => searchAdverseSignals(a.handle, "person", {
+    }), unansweredScreen))),
+    Promise.all(associateTargets.map((a) => settled(`associate ${a.handle}`, searchAdverseSignals(a.handle, "person", {
       relationship_to_subject: "associate",
       relationship_label: a.relation || "recorded associate",
-    }))),
+    }), unansweredScreen))),
     projectTargets.length >= 2
-      ? Promise.all(projectTargets.map((p) => findTeam(p.handle!, p.name)))
+      ? Promise.all(projectTargets.map((p) => settled(`team ${p.handle}`, findTeam(p.handle!, p.name), [] as TeamMember[])))
       : Promise.resolve([] as TeamMember[][]),
   ]);
 
@@ -3340,9 +3348,9 @@ export async function adverseSignalsAndTooling(
   const swept = `the subject, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}`;
   // The empty answer covers only the targets that answered, so the gap is named
   // beside it rather than left for the reader to assume away.
-  const gap = unanswered
+  const gap = (unanswered
     ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.`
-    : "";
+    : "") + (failedSearches.length ? ` Failed searches: ${failedSearches.join(", ")}. Successful results were retained.` : "");
   if (!subjectScreen.completed) {
     record({
       id: "adverse-screen",

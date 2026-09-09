@@ -4,7 +4,7 @@ import type {
 } from "../src/data/evidence";
 import type { ScanCheck } from "../src/lib/scanChecklist";
 
-const PRELAUNCH_TOKEN = /\b(?:token|coin)\b[\s\S]{0,45}\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched|TGE)\b|\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched|TGE)\b[\s\S]{0,45}\b(?:token|coin)\b/i;
+const PRELAUNCH_TOKEN = /\b(?:token|coin)\b[\s\S]{0,45}\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched)\b|\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched)\b[\s\S]{0,45}\b(?:token|coin)\b/i;
 
 const completed = (status: ScanCheck["status"] | undefined): boolean =>
   status === "confirmed" || status === "reported" || status === "finding" || status === "checked-empty";
@@ -39,15 +39,14 @@ const continuityHasTokenLineage = (evidence: CollectedEvidence): boolean => {
   );
 };
 
-const prelaunchText = (evidence: CollectedEvidence): string => [
+const prelaunchText = (evidence: CollectedEvidence): string[] => [
   evidence.profile.bio,
   evidence.profile.self_post_sample,
-  evidence.subjectOrientation?.what,
-  ...(evidence.basicFacts ?? []).flatMap((fact) => [
-    String(fact.value ?? ""),
-    ...(fact.sources ?? []).map((source) => source.excerpt),
-  ]),
-].filter(Boolean).join("\n");
+  ...(evidence.basicFacts ?? []).flatMap((fact) =>
+    (fact.sources ?? [])
+      .filter((source) => source.sourceClass === "official_subject" && source.artifactVerified && source.relation === "supports")
+      .map((source) => source.excerpt)),
+].filter((text): text is string => Boolean(text));
 
 /**
  * Decide whether token conduct applies before constructing the scorecard.
@@ -112,7 +111,7 @@ export function deriveTokenApplicability(
     };
   }
 
-  if (PRELAUNCH_TOKEN.test(prelaunchText(evidence))) {
+  if (prelaunchText(evidence).some((text) => PRELAUNCH_TOKEN.test(text))) {
     evidenceLines.push("A bound first-party source describes a token as planned or not yet live.");
     if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
     return {

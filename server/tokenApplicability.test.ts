@@ -58,6 +58,23 @@ const anyoneLineage = (): EntityContinuitySnapshot => ({
 });
 
 describe("deriveTokenApplicability", () => {
+  it("does not treat a historical TGE mention as a future launch", () => {
+    const evidence = project("@live", "Project");
+    evidence.profile.bio = "Live since TGE. Our token trades on Base.";
+    expect(deriveTokenApplicability(evidence, [tokenCheck("checked-empty", "No bound token")])?.state).toBe("confirmed_tokenless");
+  });
+
+  it("does not use synthesized orientation text to defer token conduct", () => {
+    const evidence = project("@press", "A token is coming soon.");
+    expect(deriveTokenApplicability(evidence, [tokenCheck("checked-empty", "No bound token")])?.state).toBe("confirmed_tokenless");
+  });
+
+  it.each(["independent_press", "official_subject"] as const)("only uses fetched first-party excerpts: %s", (sourceClass) => {
+    const evidence = project("@press", "Project");
+    evidence.basicFacts = [{ factId: "f", evidence_origin: "deterministic", artifact_verified: true, provider: "public-web", subjectKey: "@press", predicate: "official_token", value: "token coming soon", normalizedValue: "token", status: "verified", critical: true, sources: [{ url: "https://example.com", sourceClass, relation: "supports", excerpt: "Our token is coming soon", contentHash: "hash", capturedAt: "2026-09-09", provider: "web", artifactVerified: true }] }];
+    expect(deriveTokenApplicability(evidence, [tokenCheck("checked-empty", "No bound token")])?.state).toBe(sourceClass === "official_subject" ? "prelaunch_token_deferred" : "confirmed_tokenless");
+  });
+
   it.each(["unavailable", "unknown"] as const)("prelaunch wording cannot override a %s identity check", (status) => {
     const evidence = project("@prelaunch", "The token launch is planned after mainnet.");
     expect(deriveTokenApplicability(evidence, [tokenCheck(status, "Identity unresolved")])).toMatchObject({ axisTreatment: "provisional" });
@@ -82,7 +99,8 @@ describe("deriveTokenApplicability", () => {
   });
 
   it("defers a first-party prelaunch token without treating it as absent conduct", () => {
-    const evidence = project("@prelaunch", "Developer network with a token launch planned after mainnet.");
+    const evidence = project("@prelaunch", "Developer network.");
+    evidence.profile.bio = "Our token launch is planned after mainnet.";
     expect(deriveTokenApplicability(evidence, [tokenCheck("checked-empty", "No live token found.")]))
       .toMatchObject({ state: "prelaunch_token_deferred", axisTreatment: "deferred" });
   });
