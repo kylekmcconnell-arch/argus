@@ -11668,7 +11668,7 @@ var PersonCheckTracker = class {
 };
 
 // server/tokenApplicability.ts
-var PRELAUNCH_TOKEN = /\b(?:token|coin)\b[\s\S]{0,45}\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched|TGE)\b|\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched|TGE)\b[\s\S]{0,45}\b(?:token|coin)\b/i;
+var PRELAUNCH_TOKEN = /\b(?:token|coin)\b[\s\S]{0,45}\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched)\b|\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched)\b[\s\S]{0,45}\b(?:token|coin)\b/i;
 var completed = (status) => status === "confirmed" || status === "reported" || status === "finding" || status === "checked-empty";
 var unresolvedCandidateLine = (evidence) => {
   const candidate = evidence.unresolvedProjectToken;
@@ -11692,12 +11692,8 @@ var continuityHasTokenLineage = (evidence) => {
 var prelaunchText = (evidence) => [
   evidence.profile.bio,
   evidence.profile.self_post_sample,
-  evidence.subjectOrientation?.what,
-  ...(evidence.basicFacts ?? []).flatMap((fact) => [
-    String(fact.value ?? ""),
-    ...(fact.sources ?? []).map((source2) => source2.excerpt)
-  ])
-].filter(Boolean).join("\n");
+  ...(evidence.basicFacts ?? []).flatMap((fact) => (fact.sources ?? []).filter((source2) => source2.sourceClass === "official_subject" && source2.artifactVerified && source2.relation === "supports").map((source2) => source2.excerpt))
+].filter((text2) => Boolean(text2));
 function deriveTokenApplicability(evidence, checks, determinedAt = (/* @__PURE__ */ new Date()).toISOString()) {
   if (!evidence.roles.some((role) => String(role) === "PROJECT")) return void 0;
   const tokenCheck = checks.find((check) => check.checkId === "project-token-identity");
@@ -11745,7 +11741,7 @@ function deriveTokenApplicability(evidence, checks, determinedAt = (/* @__PURE__
       determinedAt
     };
   }
-  if (PRELAUNCH_TOKEN.test(prelaunchText(evidence))) {
+  if (prelaunchText(evidence).some((text2) => PRELAUNCH_TOKEN.test(text2))) {
     evidenceLines.push("A bound first-party source describes a token as planned or not yet live.");
     if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
     return {
@@ -35252,21 +35248,29 @@ async function adverseSignalsAndTooling(ctx, record5) {
   })).filter((v) => v.handle && v.handle.toLowerCase() !== self).slice(0, 4);
   const associateTargets = evidence.associates.filter((associate) => associate.artifact_verified === true && associate.evidence_origin !== "model_lead").map((a) => ({ handle: a.associate_handle, relation: a.relation })).filter((a) => a.handle && a.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 4);
   ctx.emit({ phase: "Adverse", label: "Scam / rug sweep", detail: `Searching for rug, slow-rug, liquidity-pull, drain, and FUD signals across the subject${ticker ? `, $${ticker.replace(/^\$/, "")}` : ""}, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}\u2026`, source: "grok", tone: "neutral" });
+  const failedSearches = [];
+  const settled = async (label, work, fallback) => {
+    const [result] = await Promise.allSettled([work]);
+    if (result.status === "fulfilled") return result.value;
+    failedSearches.push(label);
+    return fallback;
+  };
+  const unansweredScreen = { completed: false, signals: [] };
   const [tooling, subjectScreen, projectScreens, assocScreens, ventureTeams] = await Promise.all([
-    detectManipulationTooling(ctx.handle, evidence.profile.display_name),
-    searchAdverseSignals(ctx.handle, subjectKind, {
+    settled("manipulation-tooling search", detectManipulationTooling(ctx.handle, evidence.profile.display_name), null),
+    settled("subject search", searchAdverseSignals(ctx.handle, subjectKind, {
       relationship_to_subject: "self",
       relationship_label: "audited subject"
-    }, ticker, evidence.projectToken?.address),
-    Promise.all(projectTargets.map((p) => searchAdverseSignals(p.handle, "project", {
+    }, ticker, evidence.projectToken?.address), unansweredScreen),
+    Promise.all(projectTargets.map((p) => settled(`project ${p.handle}`, searchAdverseSignals(p.handle, "project", {
       relationship_to_subject: "venture",
       relationship_label: [p.role, p.name].filter(Boolean).join(" at ") || p.name
-    }))),
-    Promise.all(associateTargets.map((a) => searchAdverseSignals(a.handle, "person", {
+    }), unansweredScreen))),
+    Promise.all(associateTargets.map((a) => settled(`associate ${a.handle}`, searchAdverseSignals(a.handle, "person", {
       relationship_to_subject: "associate",
       relationship_label: a.relation || "recorded associate"
-    }))),
-    projectTargets.length >= 2 ? Promise.all(projectTargets.map((p) => findTeam(p.handle, p.name))) : Promise.resolve([])
+    }), unansweredScreen))),
+    projectTargets.length >= 2 ? Promise.all(projectTargets.map((p) => settled(`team ${p.handle}`, findTeam(p.handle, p.name), []))) : Promise.resolve([])
   ]);
   if (tooling?.tools.length) {
     const list = tooling.tools.map((t) => `${t.name} (${t.kind.replace(/_/g, " ")})`).join(", ");
@@ -35324,7 +35328,7 @@ async function adverseSignalsAndTooling(ctx, record5) {
   const answered = screens.filter((screen2) => screen2.completed).length;
   const unanswered = screens.length - answered;
   const swept = `the subject, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}`;
-  const gap = unanswered ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.` : "";
+  const gap = (unanswered ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.` : "") + (failedSearches.length ? ` Failed searches: ${failedSearches.join(", ")}. Successful results were retained.` : "");
   if (!subjectScreen.completed) {
     record5({
       id: "adverse-screen",
