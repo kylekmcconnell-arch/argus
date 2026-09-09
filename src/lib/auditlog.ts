@@ -48,9 +48,34 @@ export function hasCoverageGap(entry: Pick<LogEntry, "kind" | "verdict" | "cover
 const KEY = "argus:auditlog";
 const CAP = 250;
 const SYNC_URL = "/api/auditlog";
+const FAILED_ENIGMAFUNGE_CLEANUP_KEY = "argus:auditlog-cleanup:2026-08-28-enigmafund";
+
+// The Aug 28 EnigmaFunge run failed before an immutable report version was
+// saved, but an older client build had already left a local recent-history
+// entry behind. There is no durable case or shared audit row to archive. Remove
+// that exact orphan once per browser; setting the marker means a later,
+// successfully persisted @enigmafund investigation is retained normally.
+function removeFailedEnigmaFungeOrphan(): void {
+  try {
+    if (localStorage.getItem(FAILED_ENIGMAFUNGE_CLEANUP_KEY) === "1") return;
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const rows = JSON.parse(raw) as LogEntry[];
+      const normalized = (value?: string) => (value ?? "").trim().toLowerCase().replace(/^[@$]/, "");
+      const retained = Array.isArray(rows)
+        ? rows.filter((entry) => !(entry.kind === "person" && normalized(entry.ref ?? entry.query) === "enigmafund"))
+        : [];
+      if (retained.length !== rows.length) localStorage.setItem(KEY, JSON.stringify(retained));
+    }
+    localStorage.setItem(FAILED_ENIGMAFUNGE_CLEANUP_KEY, "1");
+  } catch {
+    /* malformed or unavailable local storage must never block the app */
+  }
+}
 
 export function getLog(): LogEntry[] {
   try {
+    removeFailedEnigmaFungeOrphan();
     const raw = localStorage.getItem(KEY);
     return raw ? (JSON.parse(raw) as LogEntry[]) : [];
   } catch {
@@ -164,6 +189,65 @@ export function applyRoles(ref: string, roles: string[]): void {
   emitLogChange();
 }
 
+const CASE_FAMILY_FLAG = "case-family:";
+const CASE_TITLE_FLAG = "case-title:";
+const pendingCaseFamilies = new Map<string, {
+  subjects: readonly { kind: AuditKind; ref: string }[];
+  family: string;
+  title?: string;
+}>();
+
+/**
+ * Bind separately scored report facets to one user-facing case family.
+ * The binding is written only from a verified project-token snapshot; callers
+ * must never manufacture it from a matching name or ticker.
+ */
+export function applyAuditCaseFamily(
+  subjects: readonly { kind: AuditKind; ref: string }[],
+  family: string,
+  title?: string,
+): void {
+  const familyKey = family.trim().toLowerCase();
+  if (!familyKey || subjects.length === 0) return;
+  pendingCaseFamilies.set(familyKey, { subjects, family, ...(title ? { title } : {}) });
+  const targets = new Set(subjects.map((subject) => `${subject.kind}:${normalizeFamilyRef(subject.ref)}`));
+  const familyFlag = `${CASE_FAMILY_FLAG}${familyKey}`;
+  const titleFlag = title?.trim() ? `${CASE_TITLE_FLAG}${title.trim().slice(0, 160)}` : null;
+  const rewrite = (entry: LogEntry): LogEntry => ({
+    ...entry,
+    flags: [
+      ...(entry.flags ?? []).filter((flag) => !flag.startsWith(CASE_FAMILY_FLAG) && !flag.startsWith(CASE_TITLE_FLAG)),
+      familyFlag,
+      ...(titleFlag ? [titleFlag] : []),
+    ],
+  });
+  const matches = (entry: LogEntry) => targets.has(`${entry.kind}:${normalizeFamilyRef(entry.ref ?? entry.query)}`);
+  let changed = false;
+  try {
+    const local = getLog();
+    const next = local.map((entry) => {
+      if (!matches(entry)) return entry;
+      changed = true;
+      const updated = rewrite(entry);
+      void syncEntryUpdate(updated, false);
+      return updated;
+    });
+    if (changed) localStorage.setItem(KEY, JSON.stringify(next));
+  } catch { /* storage unavailable */ }
+  sharedCache = sharedCache.map((entry) => {
+    if (!matches(entry)) return entry;
+    changed = true;
+    const updated = rewrite(entry);
+    void syncEntryUpdate(updated, true);
+    return updated;
+  });
+  if (changed) emitLogChange();
+}
+
+function normalizeFamilyRef(value?: string): string {
+  return (value ?? "").trim().toLowerCase().replace(/^[@$]/, "");
+}
+
 // Reconcile the NEWEST logged row for a subject with the ACTIVE stored outcome.
 // The sidebar chip reads the newest row -- i.e. "the last RUN this browser saw"
 // -- while the case page shows the server's active (best-qualified) version.
@@ -231,6 +315,12 @@ export async function hydrateSharedLog(): Promise<void> {
     const d = await r.json() as { available?: boolean; entries?: LogEntry[] };
     if (d?.available === false || !Array.isArray(d?.entries)) return;
     sharedCache = d.entries as LogEntry[];
+    // Report restoration and shared-feed hydration race on startup. Reapply
+    // verified bindings learned from an already opened report after the feed
+    // arrives so a fresh browser session groups the same facets immediately.
+    for (const binding of pendingCaseFamilies.values()) {
+      applyAuditCaseFamily(binding.subjects, binding.family, binding.title);
+    }
     emitLogChange();
     // "Recent cases" is a case navigator, not a record of whichever run this
     // browser happened to see last. Fold the active immutable report outcome

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AxisEvidenceRecord } from "../data/evidence";
 import type { RoleReport } from "../engine";
-import { buildDecisionBasis } from "./decisionBasis";
+import { buildDecisionBasis, verifiedDecisionPressureArtifact } from "./decisionBasis";
 
 const hashFor = (value: string): string => Array.from(value)
   .map((character) => character.charCodeAt(0).toString(16).padStart(2, "0"))
@@ -163,6 +163,58 @@ describe("buildDecisionBasis", () => {
       gapArtifacts: [],
       gaps: [],
     });
+  });
+
+  it("never turns a low score, official-only support, or an open question into decision pressure", () => {
+    const officialTeam = artifact("official-team", "P1_team_and_identity", {
+      provider: "official-project-site",
+      operation: "project-team-identity",
+      section: "team",
+      title: "The official site names eleven team members and advisors",
+    });
+    const model = buildDecisionBasis(report({
+      P1_team_and_identity: {
+        score: 9,
+        weight: 16,
+        role: "PROJECT",
+        rationale: "The official team page lists named leads and advisors with direct role statements.",
+        evidenceRefs: [officialTeam.artifactId],
+        counterEvidenceRefs: [],
+        gaps: ["Which roles have independent employment or authority confirmation?"],
+      },
+    }), [officialTeam], 1);
+
+    expect(model.rows[0]).toMatchObject({ status: "partial", score: 9, weight: 16 });
+    expect(verifiedDecisionPressureArtifact(model.rows[0]!)).toBeNull();
+  });
+
+  it("admits only direct, verified, explicitly score-limiting records as decision pressure", () => {
+    const verifiedLimit = artifact("verified-limit", "P6_transparency_integrity", {
+      provider: "official-registry",
+      operation: "project-transparency",
+      section: "governance",
+      title: "A sole administrator retains unilateral control",
+      counterEligibleAxes: ["P6_transparency_integrity"],
+    });
+    const reportedLimit = artifact("reported-limit", "P6_transparency_integrity", {
+      verification: "reported",
+      counterEligibleAxes: ["P6_transparency_integrity"],
+    });
+    const relatedLimit = artifact("related-limit", "P6_transparency_integrity", {
+      scope: "subject_context",
+      counterEligibleAxes: ["P6_transparency_integrity"],
+    });
+
+    expect(verifiedDecisionPressureArtifact({
+      axis: "P6_transparency_integrity",
+      support: [],
+      counter: [reportedLimit, relatedLimit, verifiedLimit],
+    })).toEqual(verifiedLimit);
+    expect(verifiedDecisionPressureArtifact({
+      axis: "P6_transparency_integrity",
+      support: [reportedLimit, relatedLimit],
+      counter: [],
+    })).toBeNull();
   });
 
   it("never infers lineage for legacy or unsupported versions", () => {

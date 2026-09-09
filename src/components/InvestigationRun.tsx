@@ -9,11 +9,13 @@ import type { RunnableTokenInput } from "../lib/resolveInput";
 // investigation still lands in the library.
 export function InvestigationRun({
   input,
+  privateRun = false,
   onDone,
   onError,
   expectedRunId,
 }: {
   input: RunnableTokenInput;
+  privateRun?: boolean;
   onDone: (inv: Investigation, priv: boolean, scanId: string) => void;
   onError: (message: string) => void;
   /** When set, ignore a stale done/error run left over from the previous scan of this address. */
@@ -27,7 +29,7 @@ export function InvestigationRun({
     return unsub; // detach the view only — the run continues in the background
   }, [input]);
 
-  const run = getScanRun("investigation", input.ref);
+  const run = getScanRun("investigation", input.ref, privateRun);
   const attached = expectedRunId ? (run?.id === expectedRunId ? run : undefined) : run;
 
   useEffect(() => {
@@ -50,6 +52,7 @@ export function InvestigationRun({
       mode="live"
       kind="investigation"
       hop={attached?.hop}
+      startedAt={attached?.startedAt}
     />
   );
 }

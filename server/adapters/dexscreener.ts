@@ -61,22 +61,27 @@ export async function lookupToken(address: string): Promise<DexTokenSnapshot | n
     recordDex("token-pairs", "failed", "response_json_error");
     return null;
   }
-  if (!isRecord(data) || !Array.isArray(data.pairs)) {
+  // DexScreener answers an address with no market as `{"pairs": null}`, not an
+  // empty array. A promoted token whose every pool is gone is the exact rug
+  // outcome this screen exists to record; reading that answer as a shape error
+  // left the KOL's promoted-token-performance row silently unwritten.
+  if (!isRecord(data) || (data.pairs !== null && !Array.isArray(data.pairs))) {
     recordDex("token-pairs", "partial", "result_shape_error");
     return null;
   }
-  if (!data.pairs.length) {
+  const rawPairs = Array.isArray(data.pairs) ? data.pairs : [];
+  if (!rawPairs.length) {
     recordDex("token-pairs", "succeeded", "no_pairs");
     return { address };
   }
-  const pairs = data.pairs.filter(isPair);
+  const pairs = rawPairs.filter(isPair);
   if (!pairs.length) {
     recordDex("token-pairs", "partial", "invalid_pair_rows");
     return null;
   }
   // pick the deepest-liquidity pair as canonical
   const top = pairs.reduce((a, b) => ((b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a));
-  const incomplete = pairs.length !== data.pairs.length
+  const incomplete = pairs.length !== rawPairs.length
     || (!top.chainId && !top.baseToken?.symbol && top.priceUsd == null && top.liquidity?.usd == null);
   recordDex("token-pairs", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : undefined);
   return {

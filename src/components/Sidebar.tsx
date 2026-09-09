@@ -40,6 +40,8 @@ import { normalizeSubjectRef } from "../lib/subjectRef";
 import { recentReportHref } from "../lib/recentReportRoute";
 import { currentArgusTheme, nextArgusTheme, setArgusTheme, type ArgusTheme } from "../lib/theme";
 import { profilePhotoForName } from "../lib/profilePhotos";
+import { buildAliasResolver } from "../graph/network";
+import { getContributions } from "../graph/store";
 
 // Subject thumbnail: the real logo/photo, falling back to a letter if it is
 // missing or fails to load (unavatar/favicon/dexscreener can 404).
@@ -66,7 +68,7 @@ function AuditAvatar({ src, letter }: { src: string | null; letter: string }) {
 
 // Most recent audits (mine + the shared community feed), de-duped by what was
 // audited (one row per subject, newest).
-function recentAudits(max: number): LogEntry[] {
+function dedupedRecentAudits(): LogEntry[] {
   const seen = new Set<string>();
   const out: LogEntry[] = [];
   for (const e of mergedLog()) {
@@ -74,9 +76,55 @@ function recentAudits(max: number): LogEntry[] {
     if (seen.has(k)) continue;
     seen.add(k);
     out.push(e);
-    if (out.length >= max) break;
   }
   return out;
+}
+
+interface RecentCaseGroup {
+  key: string;
+  entries: LogEntry[];
+}
+
+// A project account and its verified token are two report facets, not two
+// unrelated cases. The graph resolver only joins them when saved evidence has
+// established a unique identity binding; ticker/name resemblance is never
+// enough. This lets the rail explain the two scores without merging them.
+export function recentCaseGroups(
+  entries: LogEntry[],
+  max: number,
+  resolve: (key: string) => string,
+): RecentCaseGroup[] {
+  const groups = new Map<string, RecentCaseGroup>();
+  for (const entry of entries) {
+    const explicitFamily = entry.flags?.find((flag) => flag.startsWith("case-family:"))?.slice("case-family:".length).trim();
+    const query = normalizeSubjectRef(entry.query);
+    const ref = normalizeSubjectRef(entry.ref ?? entry.query);
+    const resolvedQuery = resolve(query);
+    const resolvedRef = resolve(ref);
+    const key = explicitFamily
+      ? `family:${explicitFamily}`
+      : resolvedQuery !== query
+      ? resolvedQuery
+      : resolvedRef !== ref
+        ? resolvedRef
+        : `${entry.kind}:${ref}`;
+    const group = groups.get(key) ?? { key, entries: [] };
+    group.entries.push(entry);
+    groups.set(key, group);
+  }
+  return [...groups.values()].slice(0, max);
+}
+
+function linkedCaseTitle(entries: LogEntry[]): string {
+  const explicit = entries
+    .flatMap((entry) => entry.flags ?? [])
+    .find((flag) => flag.startsWith("case-title:"))
+    ?.slice("case-title:".length)
+    .trim();
+  if (explicit) return explicit;
+  const token = entries.find((entry) => entry.kind === "token");
+  if (token) return token.query.replace(/^\$/, "");
+  return entries[0]?.query.replace(/^https?:\/\//, "").replace(/\/$/, "") ?? "Case";
 }
 
 function reportScopeLabel(entry: Pick<LogEntry, "kind" | "flags">): string {
@@ -296,10 +344,15 @@ export function Sidebar({
   ];
   // A subject being scanned right now shows only its live chip, not its old row.
   const scanRefs = new Set(scans.map((s) => normalizeSubjectRef(s.ref)));
-  const recent = recentAudits(compact ? 3 : 5).filter((e) => {
+  const recentEntries = dedupedRecentAudits().filter((e) => {
     const ref = normalizeSubjectRef(e.ref ?? e.query);
     return !runningKeys.has(ref) && !scanRefs.has(ref);
   });
+  const recent = recentCaseGroups(
+    recentEntries,
+    compact ? 3 : 5,
+    buildAliasResolver(getContributions()),
+  );
   const me = getAnalyst();
   const accountControls = (
     <div className={`${mobile ? "mt-4" : "mt-auto"} border-t border-line py-2.5 ${compact ? "px-2" : "px-2.5"}`} data-sidebar-account>
@@ -464,7 +517,59 @@ export function Sidebar({
             Nothing yet. Audit a handle, token, or site and it lands here.
           </div>
         ) : (
-          recent.map((e) => {
+          recent.map((caseGroup) => {
+            const linked = caseGroup.entries.length > 1
+              && caseGroup.entries.some((entry) => entry.kind === "token")
+              && caseGroup.entries.some((entry) => entry.kind === "person" && reportScopeLabel(entry) === "project diligence");
+            if (linked) {
+              const entries = [...caseGroup.entries].sort((a, b) => {
+                const rank = (entry: LogEntry) => reportScopeLabel(entry) === "project diligence" ? 0 : entry.kind === "token" ? 1 : 2;
+                return rank(a) - rank(b);
+              });
+              const tokenEntry = entries.find((entry) => entry.kind === "token") ?? entries[0];
+              const avatar = (linkedCaseTitle(entries)[0] ?? "?").toUpperCase();
+              return (
+                <div key={caseGroup.key} className={`rounded-md border border-line/70 bg-panel/35 ${compact ? "px-0 py-1" : "px-2 py-1.5"}`}>
+                  <div className={compact ? "flex justify-center" : "mb-1 flex items-center gap-2 px-0.5"}>
+                    <AuditAvatar src={auditImage(tokenEntry)} letter={avatar} />
+                    <span className={compact ? "sr-only" : "min-w-0 flex-1"}>
+                      <span className="mono block truncate text-[12px] font-semibold text-ink">{linkedCaseTitle(entries)}</span>
+                      <span className="block truncate text-[10.5px] text-ink-faint">linked project + token</span>
+                    </span>
+                  </div>
+                  <div className={compact ? "sr-only" : "space-y-0.5"}>
+                    {entries.map((e) => {
+                      const ref = e.ref ?? e.query;
+                      const kind = e.flags?.some((flag) => flag.toLowerCase() === "investigation") ? "investigation" : e.kind;
+                      const readinessLabel = auditReadinessLabel(e);
+                      const vm = readinessLabel ? verdictMeta(readinessLabel) : null;
+                      const active = activeHandle === ref || activeHandle === e.query;
+                      const facet = reportScopeLabel(e) === "project diligence" ? "Project" : e.kind === "token" ? "Token" : "Report";
+                      return (
+                        <a
+                          key={e.id}
+                          href={recentReportHref(ref, kind)}
+                          onClick={(event) => {
+                            if (!onOpenRecent) return;
+                            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                            event.preventDefault();
+                            onOpenRecent(ref, kind);
+                            onClose?.();
+                          }}
+                          className={`flex min-h-7 items-center gap-1.5 rounded px-1.5 py-1 text-[11px] transition ${active ? "sidebar-case-active" : "hover:bg-panel/80"}`}
+                        >
+                          <span className="w-11 shrink-0 text-ink-dim">{facet}</span>
+                          <span className="mono min-w-0 flex-1 truncate text-ink">{e.query}</span>
+                          <span className="mono shrink-0 tabular text-ink-dim">{typeof e.score === "number" ? e.score : "N/A"}</span>
+                          {vm && <span className="tint-var h-1.5 w-1.5 shrink-0 rounded-full" style={{ "--tint": vm.color } as CSSProperties} />}
+                        </a>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
+            const e = caseGroup.entries[0];
             const ref = e.ref ?? e.query;
             const kind = e.flags?.some((flag) => flag.toLowerCase() === "investigation") ? "investigation" : e.kind;
             const readinessLabel = auditReadinessLabel(e);

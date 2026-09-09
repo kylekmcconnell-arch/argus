@@ -10,7 +10,7 @@ import { recordScanReceipt } from "./_scanReceipts";
 const auth = { userId: "00000000-0000-4000-8000-000000000010", organizationId: "00000000-0000-4000-8000-000000000001", role: "analyst", email: "a@example.com", displayName: "A" } as const;
 
 beforeEach(() => vi.stubGlobal("fetch", vi.fn(async (_url: string | URL | Request, init?: RequestInit) => (
-  init?.method === "PATCH" ? new Response(JSON.stringify([{ id: "receipt" }]), { status: 200 }) : new Response(null, { status: 201 })
+  init?.method === "PATCH" ? new Response(JSON.stringify([{ id: "receipt" }]), { status: 200 }) : new Response(JSON.stringify([{ id: "receipt" }]), { status: 201 })
 ))));
 afterEach(() => vi.unstubAllGlobals());
 

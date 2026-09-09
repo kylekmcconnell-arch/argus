@@ -1,3 +1,4 @@
+import { withWallClockBox } from "./boundedProvider";
 // The collector orchestrator: @handle -> populated evidence -> verdict.
 //
 // Strategy (hybrid, honest):
@@ -26,6 +27,7 @@ import {
   extractClaims,
   extractScoringEvidenceCatalog,
   inspectAnalystScoringPreflight,
+  reconcileAnalystVerdictLineage,
   scanContradictions,
 } from "./agent";
 import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cost";
@@ -36,7 +38,10 @@ import {
   tokenFromVerifiedProjectToken,
 } from "../src/lib/projectTokenLeg";
 import { teamIdentityKeys } from "../src/lib/teamIdentity";
+import { teamCandidateSourceMatchesIdentity } from "../src/lib/teamCandidateIdentity";
+import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
+import { deriveTokenApplicability } from "./tokenApplicability";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
@@ -44,6 +49,7 @@ import { checkSiteSubstance, isConfirmedOfficialSiteAccessDenial, officialSiteAc
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
 import { shouldAnnounceOfficialXAccountStatus, xAccountIdentityEstablished } from "../src/lib/xAccountState";
 import { collectDomainRegistration, deriveLaunchWindow } from "./adapters/domainAge";
+import { collectEntityContinuity } from "./adapters/entityContinuity";
 import { checkLeaderDepartures, type LeaderDepartureCheck } from "./adapters/peopledatalabs";
 import { enrichFirstPartyTeamAvatars } from "./adapters/teamEnrichment";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
@@ -89,8 +95,12 @@ import { resolveForHandle } from "./adapters/wallet";
 import { collectTrustGraph } from "./adapters/trustgraph";
 import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
-import { collectProjectTokenIdentity, collectVentureTokenIdentity } from "./adapters/projectToken";
-import { hydrateProjectTeamFromVerifiedFacts, projectProviderBackedBasicFacts } from "./basicFactsProjection";
+import { collectProjectTokenIdentity, collectVentureTokenIdentity, launchedProductSearchQueries } from "./adapters/projectToken";
+import {
+  hydrateProjectTeamFromVerifiedFacts,
+  isInstitutionalOrganizationSubject,
+  projectProviderBackedBasicFacts,
+} from "./basicFactsProjection";
 import { enforceProjectFactCoherence } from "./projectFactCoherence";
 import {
   collectProtocolAuditLinks,
@@ -220,15 +230,6 @@ const SECURITY_AUDITS_BUDGET_MS = 45_000;
 // request count and tries the configured fallback only when a block-consistent
 // capture cannot be completed on the first endpoint.
 const EVM_CONTROL_RPC_TIMEOUT_MS = 2_500;
-const withWallClockBox = <T>(work: Promise<T>, budgetMs: number): Promise<T | null> =>
-  Promise.race([
-    work,
-    new Promise<null>((resolve) => {
-      const timer = setTimeout(() => resolve(null), budgetMs);
-      // Do not hold the event loop open for the box itself.
-      if (typeof timer === "object" && "unref" in timer) timer.unref();
-    }),
-  ]);
 
 const VERIFIED_EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 
@@ -391,6 +392,7 @@ export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): 
       merged.projects = secondary.projects;
       merged.projects_evidence_origin = secondary.projects_evidence_origin;
     }
+    if (!merged.biography && secondary.biography) merged.biography = secondary.biography;
     if (
       secondary.identity_link_evidence_origin !== "model_lead"
       && preferred.identity_link_evidence_origin === "model_lead"
@@ -640,11 +642,19 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
       ctx.evidence.profile.avatar_source_state = "none";
     }
     ctx.evidence.profile.bio = prof.bio ?? "";
-    const profileWebsite = canonicalPublicProfileWebsite(prof.website) ?? undefined;
-    ctx.evidence.profile.website = profileWebsite;
     const officialWebsites = (prof.officialWebsites ?? [])
       .map((url) => canonicalPublicProfileWebsite(url))
       .filter((url): url is string => Boolean(url));
+    // The official website is the first CREDIBLE first-party domain on the
+    // provider-frozen record. When the first profile URL is a shared host
+    // (t.me, youtube.com, discord.gg) the real site is usually the next URL on
+    // the same record; leaving the shared host in place disabled every
+    // official-domain gate for the run.
+    const firstWebsite = canonicalPublicProfileWebsite(prof.website) ?? undefined;
+    const profileWebsite = firstWebsite && canonicalOfficialWebsite(firstWebsite)
+      ? firstWebsite
+      : officialWebsites.find((url) => canonicalOfficialWebsite(url) !== null) ?? firstWebsite;
+    ctx.evidence.profile.website = profileWebsite;
     if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
     // A link aggregator is a pointer, not a website: left as-is it kills
     // PROJECT routing, official-site verification, and token binding for the
@@ -737,8 +747,13 @@ export function applySiteSubstanceOutcome(
 
   // A personal profile URL is not automatically the website of a project the
   // person founded, advised, or invested in. Preserve the observed page state,
-  // but do not create project counter-evidence without a project route.
+  // but do not create project counter-evidence without a project route. The
+  // same holds for a fund or agency brand account: its site is not a product
+  // surface, and the copy must not call the organization a person.
   if (!isProject) {
+    const organization = isOrganizationAccount(ctx.evidence);
+    const profileKind = organization ? "organization-profile" : "personal-profile";
+    const subjectNoun = organization ? "organization" : "person";
     ctx.emit({
       phase: "P2 · Substance",
       label: verifiedNotLive
@@ -747,10 +762,10 @@ export function applySiteSubstanceOutcome(
           ? "Profile website check unavailable"
           : "Profile website checked",
       detail: verifiedNotLive
-        ? `${domain} serves a verified coming-soon or parked page. This personal-profile URL is not treated as project counter-evidence.`
+        ? `${domain} serves a verified coming-soon or parked page. This ${profileKind} URL is not treated as project counter-evidence.`
         : site.status === "coming_soon"
           ? `${domain} returned an ungrounded coming-soon label. No profile or project-liveness conclusion was drawn.`
-        : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this person profile.`,
+        : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this ${subjectNoun} profile.`,
       source: "site-fetch",
       tone: "neutral",
     });
@@ -882,10 +897,22 @@ async function collectProjectSiteSubstance(ctx: CollectContext, domain: string):
 // make gmail.com the subject's official website, which seeds product-substance
 // credit, official-source classification, and team-page fetches. Emails are
 // stripped before matching. Exported for tests.
+//
+// The TLD list is an allow-list on purpose (a bare "node.js" or "web3.summit"
+// in prose must not become a domain), but it has to cover the TLDs crypto
+// projects actually register on: stonkbrokers.cash and clutch.markets were
+// both invisible to the old list. Every match is still validated through
+// canonicalOfficialWebsite(), so a shared publication host named in the bio
+// (youtube.com, t.me) never qualifies either.
+const BIO_DOMAIN = /\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money|cash|markets|trade|exchange|capital|fund|vc|tech|info|me|pro|club|link|wtf|lol|world|digital|ventures|partners|group|global|studio|tools|crypto|dao|games|foundation|labs|protocol|systems|cloud|market|social|solutions))\b/gi;
+
 export function bioWebsiteDomain(bio: string): string | undefined {
-  return bio
-    .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, " ")
-    .match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const text = bio.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, " ");
+  for (const match of text.matchAll(BIO_DOMAIN)) {
+    const host = match[1];
+    if (canonicalOfficialWebsite(`https://${host}/`)) return host;
+  }
+  return undefined;
 }
 
 /**
@@ -1139,6 +1166,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       claimed_endorser_handle: t.claimed_endorser_handle,
       claimed_relationship: t.claimed_relationship,
       appears_at: "subject surfaces",
+      ...(t.evidence_url ? { evidence_url: t.evidence_url } : {}),
       evidence_origin: "model_lead" as const,
       artifact_verified: false,
     }));
@@ -1359,6 +1387,19 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     const h = t.handle ? norm(t.handle) : "";
     const n = norm(t.name);
     if (!h && !n) continue;
+    // Final roster boundary: search/model lanes can return a company or a
+    // sentence fragment as `name`. It is neither a person nor a research CTA.
+    // A handle the subject's own follow / amplification / post edge bound is
+    // identified by that handle, so its pseudonymous screen name stands.
+    if (!isPlausiblePersonRosterIdentity({
+      name: t.name,
+      handle: t.handle,
+      handleBoundBySubject: t.handleProvenance === "subject_first_party"
+        && t.identity_link_evidence_origin === "deterministic",
+    })) continue;
+    // A bare X profile is an identity locator. If it points at somebody other
+    // than the candidate, the search result is a failed join, not a weak lead.
+    if (!teamCandidateSourceMatchesIdentity(t)) continue;
     // Never list the audited subject handle as founder (or any role) of itself.
     if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
     const existing = (h && byHandle.get(h)) || (n && byName.get(n)) || null;
@@ -1376,6 +1417,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         existing.projects = t.projects;
         existing.projects_evidence_origin = t.projects_evidence_origin;
       }
+      if (!existing.biography && t.biography) existing.biography = t.biography;
       if (!existing.officialPortraitUrl && t.officialPortraitUrl) {
         existing.officialPortraitUrl = t.officialPortraitUrl;
         existing.officialPortraitSourceUrl = t.officialPortraitSourceUrl;
@@ -1423,6 +1465,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       name: t.name,
       handle: t.handle,
       role: t.role,
+      biography: t.biography,
       kind: "kind" in t && (t.kind === "org" || t.kind === "person") ? t.kind : "person" as const,
       linkedin: t.linkedin,
       evidence: t.evidence,
@@ -1499,6 +1542,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       ctx.evidence.associates.push({
         associate_handle: org.handle,
         relation: org.role,
+        kind: "org",
         notes: org.evidence,
         evidence_url: org.sourceUrl,
         provider: "twitterapi",
@@ -1762,6 +1806,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         claimed_endorser_handle: a.handle,
         claimed_relationship: "advisor",
         appears_at: "model search of project X content",
+        ...(a.sourceUrl ? { evidence_url: a.sourceUrl } : {}),
         evidence_origin: "model_lead",
         artifact_verified: false,
       });
@@ -1924,6 +1969,28 @@ async function maybeOrientSubject(ctx: CollectContext, siteExcerpt?: string): Pr
 }
 
 /**
+ * Whether the token collector must run again for the products the orientation
+ * pass says this company launched.
+ *
+ * The first token pass runs before intake so a slogan-only brand can inherit
+ * its registry homepage, but orientation (the only producer of
+ * `launchedProducts`) runs inside intake. Without a second pass the launched
+ * product ticker never reaches a registry search: a company whose token is not
+ * named after the company ("CLUTCH" → $STONKBROKER) records an assessed
+ * "no token under a matching name" and the report normalizes token conduct away
+ * as if the project were tokenless. The re-run only widens the SEARCH; every
+ * hit still has to list this exact official X account or official domain.
+ */
+export function launchedProductTokenBindPending(
+  evidence: Pick<CollectedEvidence, "projectToken" | "subjectOrientation">,
+  roles: readonly SubjectClass[],
+): boolean {
+  if (!roles.includes(SubjectClass.PROJECT)) return false;
+  if (evidence.projectToken?.verified === true) return false;
+  return launchedProductSearchQueries(evidence.subjectOrientation?.launchedProducts).length > 0;
+}
+
+/**
  * Select methodologies only from collector-owned evidence. A PROJECT label is
  * intentionally stricter than a generic bio keyword: the current X profile
  * must come from twitterapi and bind the account to a credible first-party
@@ -2080,9 +2147,9 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // investing (vocabulary was the only investor evidence), the fund
   // methodology is the wrong lens and would starve the scan into INCOMPLETE.
   if (roles.has(SubjectClass.INVESTOR)) {
-    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null) && !investorBeyondBio) {
+    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null || projectBound) && !investorBeyondBio) {
       roles.delete(SubjectClass.INVESTOR);
-    } else if (!evidence.projectToken?.verified) {
+    } else if (!evidence.projectToken?.verified && !projectBound) {
       roles.delete(SubjectClass.PROJECT);
     }
   }
@@ -2473,6 +2540,101 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
   }
 }
 
+/**
+ * The organization counterpart of projectVerifiedBasicFacts for a fund or
+ * agency brand account (INVESTOR / AGENCY routed, organization-shaped, not a
+ * PROJECT). The investor_org / organization question set asks the same
+ * identity and leadership questions a PROJECT is asked, and its answers pass
+ * the same independent fetch plus exact-excerpt verification. Only the PROJECT
+ * path turned those answers into checklist outcomes, so a fund whose brand and
+ * general partners were verified from fetched sources still published
+ * identity-resolution (never-waive, decision-critical for INVESTOR) and
+ * affiliations-associates as never recorded, and the report stayed
+ * "not ready" on a gate the frozen evidence had already closed.
+ *
+ * Same evidence standard as the PROJECT path: a strictly verified brand
+ * identity bound to the provider-resolved account's canonical official site, or
+ * founder / executive records verified from fetched, cited sources. Provider
+ * projections of the account's own self-description never qualify. Nothing
+ * here touches the legal-entity or entity-sanctions gates, which remain owned
+ * by the organization safety pass.
+ */
+export function organizationVerifiedBasicFacts(ctx: CollectContext): void {
+  const roles = providerBackedRoles(ctx.evidence);
+  if (!isInstitutionalOrganizationSubject({ ...ctx.evidence, roles })) return;
+  const facts = (ctx.evidence.basicFacts ?? []).filter(isRetainedSourceFact).filter(isStrictlyVerifiedFact);
+  if (!facts.length) return;
+  const audience = roles.includes(SubjectClass.INVESTOR) ? "fund" : "organization";
+
+  const brandIdentity = facts.find((fact) =>
+    fact.predicate === "official_identity"
+    && fact.sources.some((source) => source.sourceClass === "official_subject"));
+  const officialWebsite = canonicalOfficialWebsite(ctx.evidence.profile.website);
+  const officialWebsiteSources = officialWebsite
+    ? facts.flatMap((fact) => fact.sources).filter((source) => {
+      if (source.sourceClass !== "official_subject") return false;
+      try {
+        const host = new URL(source.url).hostname.replace(/^www\./, "").toLowerCase();
+        return host === officialWebsite.domain || host.endsWith(`.${officialWebsite.domain}`);
+      } catch {
+        return false;
+      }
+    })
+    : [];
+  const brandIdentityBound = Boolean(
+    brandIdentity
+    && officialWebsite
+    && ctx.evidence.profile.profile_collection_state === "resolved"
+    && ctx.evidence.profile.profile_provider === "twitterapi"
+    && (ctx.evidence.profile.site_substance_status === "live" || officialWebsiteSources.length > 0)
+    && ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation",
+  );
+  if (brandIdentityBound && brandIdentity && officialWebsite) {
+    ctx.evidence.profile.identity_confidence = "Confirmed";
+    ctx.recordCheck?.({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: `${audience} brand identity confirmed by the provider-resolved official X account and official site ${officialWebsite.domain}; the people who run it remain a separate team finding`,
+      provider: "twitterapi/basic-facts-web/site-fetch",
+      sourceCount: brandIdentity.sources.length + Math.max(1, officialWebsiteSources.length),
+    });
+  }
+
+  const people = facts.filter((fact) =>
+    (fact.predicate === "founder" || fact.predicate === "executive")
+    && !handlesMatch(fact.value, ctx.handle));
+  if (!people.length) return;
+  const peopleSourceCount = people.reduce((total, fact) => total + fact.sources.length, 0);
+  const publicRecordIdentity = people.some((fact) => {
+    const domains = new Set(fact.sources
+      .filter((src) => src.sourceClass !== "official_subject")
+      .map((src) => registrableDomain(src.url))
+      .filter((domain): domain is string => Boolean(domain)));
+    return domains.size >= 2;
+  });
+  if (ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation") {
+    if (publicRecordIdentity) {
+      ctx.evidence.profile.identity_confidence = "Confirmed";
+    } else if (ctx.evidence.profile.identity_confidence === "Unverified") {
+      ctx.evidence.profile.identity_confidence = "Probable";
+    }
+  }
+  ctx.recordCheck?.({
+    id: "identity-resolution",
+    status: "confirmed",
+    note: `${audience} identity resolved through ${people.length} founder or executive record${people.length === 1 ? "" : "s"} verified from fetched, cited public sources`,
+    provider: "basic-facts-web",
+    sourceCount: peopleSourceCount,
+  });
+  ctx.recordCheck?.({
+    id: "affiliations-associates",
+    status: "confirmed",
+    note: `${people.length} ${audience} leadership affiliation${people.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+    provider: "basic-facts-web",
+    sourceCount: peopleSourceCount,
+  });
+}
+
 type FounderDecisionCheckId =
   | "founder-identity-authority"
   | "founder-company-relationships"
@@ -2679,6 +2841,7 @@ const PROJECT_TRANSPARENCY_FACT_PREDICATES = new Set([
 export interface ProjectCoreEvidenceOutcomeOptions {
   /** A disclosure search completed and explicitly returned no candidate facts. */
   transparencySearchExplicitlyEmpty?: boolean;
+  basicFactsCompleted?: boolean;
 }
 
 /**
@@ -2751,8 +2914,8 @@ export function collectProjectCoreEvidenceOutcomes(
       || ctx.evidence.profile.site_substance_status === "live";
     ctx.recordCheck?.({
       id: "project-backing-partners",
-      status: assessable ? "finding" : "checked-empty",
-      note: assessable
+      status: options.basicFactsCompleted === false ? "unavailable" : assessable ? "finding" : "checked-empty",
+      note: options.basicFactsCompleted === false ? "The backing search did not complete; collected material does not establish absence." : assessable
         ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified funding, investor, advisor, counterparty, or operating-partner evidence appears. Project-only partnership claims and model-only leads were excluded. This is a null result on this axis, not adverse evidence."
         : "bounded scan of up to 32 frozen first-party team and account records found no verified funding, investor, advisor, counterparty, or operating-partner evidence; project-only partnership claims and model-only leads were excluded",
       provider: "project-core-evidence",
@@ -2787,11 +2950,11 @@ export function collectProjectCoreEvidenceOutcomes(
       note: "bounded disclosure search completed with an explicit no-match; no source-linked legal, governance, token-economic, repository, or security disclosure candidate was returned",
       provider: "basic-facts-web",
     });
-  } else if (
+  } else if (options.basicFactsCompleted !== false && (
     (ctx.evidence.basicFacts ?? []).length > 0
     || (ctx.evidence.webTeam ?? []).length > 0
     || ctx.evidence.profile.site_substance_status === "live"
-  ) {
+  )) {
     ctx.recordCheck?.({
       id: "project-transparency",
       status: "finding",
@@ -3085,7 +3248,7 @@ export async function adverseSignalsAndTooling(
     searchAdverseSignals(ctx.handle, subjectKind, {
       relationship_to_subject: "self",
       relationship_label: "audited subject",
-    }, ticker),
+    }, ticker, evidence.projectToken?.address),
     Promise.all(projectTargets.map((p) => searchAdverseSignals(p.handle!, "project", {
       relationship_to_subject: "venture",
       relationship_label: [p.role, p.name].filter(Boolean).join(" at ") || p.name,
@@ -3179,20 +3342,21 @@ export async function adverseSignalsAndTooling(
   const gap = unanswered
     ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.`
     : "";
-  if (totalSigs || toolingLeads) {
+  if (!subjectScreen.completed) {
+    record({
+      id: "adverse-screen",
+      status: "unavailable",
+      note: `The subject's own adverse search returned no readable answer. ${answered} of ${screens.length} target searches completed, but related targets cannot clear the unscreened subject. ${totalSigs + toolingLeads} candidate leads were retained for follow-up.${gap}`,
+      provider: "adverse-sweep",
+    });
+
+  } else if (totalSigs || toolingLeads) {
     record({
       id: "adverse-screen",
       status: "finding",
       note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: ${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}${toolingLeads ? ` and ${toolingLeads} manipulation-tooling lead${toolingLeads === 1 ? "" : "s"}` : ""} surfaced. Each is an unverified candidate source for follow-up, not a verified finding.${gap}`,
       provider: "adverse-sweep",
       sourceCount: totalSigs + toolingLeads,
-    });
-  } else if (!answered) {
-    record({
-      id: "adverse-screen",
-      status: "unavailable",
-      note: `the model search returned no readable answer for any of the ${screens.length} adverse-screen target${screens.length === 1 ? "" : "s"}, so no rug, scam, or drain search was completed`,
-      provider: "adverse-sweep",
     });
   } else {
     record({
@@ -3552,6 +3716,9 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
 interface RunAuditOptions {
   organizationId?: string;
   analystDeadlineAt?: number;
+  /** Server-derived reserves for authorized bounded follow-ups. */
+  collectionReserveMs?: number;
+  graphScreenReserveMs?: number;
   intent?: ResearchIntent;
   /** Server-derived from one frozen saved plan. Never accept these values directly from a browser. */
   authorizedResearchScope?: {
@@ -3673,14 +3840,15 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // than mid-run, so no in-flight adapter is abandoned while it mutates evidence.
   const analystDeadlineAt = options?.analystDeadlineAt
     ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000 - ANALYST_FINALIZATION_RESERVE_MS;
-  const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
+  const collectionDeadlineAt = analystDeadlineAt - (options?.collectionReserveMs ?? COLLECTION_ANALYST_RESERVE_MS);
   const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
   // The never-waive trust-graph screen runs AFTER general collection stops, in a
   // dedicated window carved from the reserve. General adapters halt at
   // collectionDeadlineAt; the bounded graph screen may still run until here, so a
   // high-connectivity subject's flagged-subject screen is recorded instead of
-  // skipped. Still leaves ANALYST_SCORING_TIMEOUT_MS before analystDeadlineAt.
-  const graphScreenDeadlineAt = collectionDeadlineAt + TRUST_GRAPH_SCREEN_RESERVE_MS;
+  // skipped. Full scans retain the full analyst window; bounded gap scans
+  // explicitly share their shorter budget with the deadline-aware scorer.
+  const graphScreenDeadlineAt = collectionDeadlineAt + (options?.graphScreenReserveMs ?? TRUST_GRAPH_SCREEN_RESERVE_MS);
   const graphScreenOverBudget = () => Date.now() >= graphScreenDeadlineAt;
   const startRuntimeStage = (stage: string) => {
     const stageStartedAt = Date.now();
@@ -3836,7 +4004,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   };
 
   const projectTokenPass = async () => {
-    const providers = ["coingecko", "dexscreener", "geckoterminal"] as const;
+    const providers = ["coingecko", "dexscreener", "geckoterminal", "site-fetch"] as const;
     const before = attemptTotals(providers);
     try {
       const result = await collectProjectTokenIdentity(ctx);
@@ -4047,13 +4215,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         {
           const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
           const auditsResult = await withWallClockBox(
-            collectSecurityAudits(
+            (fetcher) => collectSecurityAudits(
               projectName,
-              evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
+              evidence.projectToken!.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
               auditLinks.available ? auditLinks.value.auditLinks : [],
-              { canonicalContractAddress: evidence.projectToken.address },
+              { canonicalContractAddress: evidence.projectToken!.address, fetcher },
             ),
-            SECURITY_AUDITS_BUDGET_MS,
+            Math.min(SECURITY_AUDITS_BUDGET_MS, collectionDeadlineAt - Date.now()),
           );
           if (auditsResult?.available) {
             evidence.securityAudits = {
@@ -4089,11 +4257,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           if (companyLookup) {
             const sections = projectCompanyEnrichmentSections(evidence);
             const enrichment = await withWallClockBox(
-              collectProjectCompanyEnrichment(companyLookup, {
+              (fetcher) => collectProjectCompanyEnrichment(companyLookup, {
+                fetcher,
                 sections,
                 officialName: projectName,
               }),
-              MONID_ENRICHMENT_BUDGET_MS,
+              Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now()),
             );
             if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, companyLookup)) {
               evidence.companyEnrichment = { ...enrichment.value };
@@ -4325,6 +4494,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         handle: evidence.profile.handle,
         ticker: evidence.projectToken?.symbol ?? ctx.tokenSymbol,
         projectName: evidence.projectToken?.name ?? evidence.profile.display_name,
+        contractAddress: evidence.projectToken?.address,
       }, {
         deadlineAt: Math.min(Date.now() + SOCIAL_ACTIVITY_BUDGET_MS, collectionDeadlineAt),
       });
@@ -4385,14 +4555,82 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     rolesAfterBasicFacts = providerBackedRoles(evidence);
     evidence.roles = rolesAfterBasicFacts;
   }
+  // Orientation is the only producer of launched-product tickers and it ran
+  // inside intake, after the first token pass. A PROJECT still unbound after
+  // that pass gets one more registry search with those tickers.
+  const launchedProductBindPending = launchedProductTokenBindPending(evidence, rolesAfterBasicFacts);
   if (
     capabilityIsAuthorized("token_and_market", "project_fundamentals")
-    && (fixture || (recoveredProjectSite && !evidence.projectToken?.verified))
+    && (fixture || ((recoveredProjectSite || launchedProductBindPending) && !evidence.projectToken?.verified))
   ) {
+    if (launchedProductBindPending && !recoveredProjectSite) {
+      emit({
+        phase: "Token",
+        label: "Searching registries for the launched product ticker",
+        detail: `${launchedProductSearchQueries(evidence.subjectOrientation?.launchedProducts).join(", ")}: the first token pass ran before orientation named these products. A hit still has to list ${ctx.handle} as its official X account or match the official domain.`,
+        source: "coingecko / dexscreener",
+        tone: "neutral",
+      });
+    }
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
   } else {
     evidence.roles = rolesAfterBasicFacts;
+  }
+  // Project and token history is a mandatory pre-scoring stage. A canonical
+  // contract is a point in a lineage, not permission to treat the asset as a
+  // clean launch. Historical aliases discovered here are then available to
+  // every later analyst/scoring packet and are frozen with the report.
+  if (evidence.roles.includes(SubjectClass.PROJECT)) {
+    const continuityStartedAt = startRuntimeStage("entity-continuity");
+    try {
+      evidence.entityContinuity = await collectEntityContinuity(ctx);
+      const continuity = evidence.entityContinuity;
+      const complete = continuity.coverage.state === "complete";
+      const completedWithoutHistory = complete
+        && continuity.historicalAliases.length === 0
+        && continuity.tokenLineage.length === 0
+        && continuity.events.length === 0;
+      checkTracker.record({
+        id: "entity-continuity",
+        status: completedWithoutHistory ? "checked-empty" : complete ? "confirmed" : continuity.coverage.state === "not_applicable" ? "not-applicable" : "unavailable",
+        note: continuity.coverage.reason,
+        provider: "serper+primary-source-verification",
+        sourceCount: continuity.coverage.primarySourceCount,
+        completedAt: continuity.coverage.searchedAt,
+      });
+      checkTracker.provider(
+        "entity-continuity",
+        "Project and token continuity",
+        complete ? "executed" : continuity.coverage.state === "partial" ? "partial" : "unavailable",
+        continuity.coverage.reason,
+      );
+      emit({
+        phase: "Continuity",
+        label: complete
+          ? completedWithoutHistory
+            ? "No earlier name or token migration found"
+            : `Lifecycle recovered${continuity.predecessorName ? ` · ${continuity.predecessorName} → ${continuity.subject}` : ""}`
+          : "Lifecycle coverage remains open",
+        detail: complete
+          ? completedWithoutHistory
+            ? continuity.coverage.reason
+            : `${continuity.events.length} dated or sourced change records and ${continuity.tokenLineage.length} lineage nodes were frozen before scoring.`
+          : continuity.coverage.reason,
+        source: "serper + primary records",
+        tone: complete ? "good" : "warn",
+      });
+    } catch (error) {
+      checkTracker.record({
+        id: "entity-continuity",
+        status: "unavailable",
+        note: `the mandatory lifecycle stage failed before a verified result was frozen: ${String(error)}`,
+        provider: "serper+primary-source-verification",
+      });
+      checkTracker.provider("entity-continuity", "Project and token continuity", "failed", String(error));
+      emit({ phase: "Continuity", label: "Lifecycle search failed", detail: String(error), tone: "warn" });
+    }
+    finishRuntimeStage("entity-continuity", continuityStartedAt);
   }
   if (capabilityIsAuthorized("legal_and_adverse")) await organizationSafetyPass();
   if (
@@ -4434,11 +4672,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       const sections = projectCompanyEnrichmentSections(evidence);
       const enrichment = sections.length
         ? await withWallClockBox(
-            collectProjectCompanyEnrichment(recoveredCompanyLookup, {
+            (fetcher) => collectProjectCompanyEnrichment(recoveredCompanyLookup!, {
+              fetcher,
               sections,
               officialName: evidence.profile.resolved_name ?? evidence.profile.display_name,
             }),
-            MONID_ENRICHMENT_BUDGET_MS,
+            Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now()),
           )
         : null;
       if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, recoveredCompanyLookup)) {
@@ -4476,11 +4715,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       try {
         const enrichment = primaryVenture.domain
           ? await withWallClockBox(
-              collectProjectCompanyEnrichment(primaryVenture.domain, {
+              (fetcher) => collectProjectCompanyEnrichment(primaryVenture.domain!, {
+                fetcher,
                 sections: ["funding_detail", "firmographic"],
                 officialName: primaryVenture.project_name.trim(),
               }),
-              MONID_ENRICHMENT_BUDGET_MS,
+              Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now()),
             )
           : null;
         if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, primaryVenture.domain)) {
@@ -4575,6 +4815,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     });
   }
   projectVerifiedBasicFacts(ctx);
+  organizationVerifiedBasicFacts(ctx);
 
   // Post-discovery signal passes, all before the analyst so their findings feed
   // the scoring. Token lifecycle is keyless (DexScreener); cadence needs the
@@ -4684,6 +4925,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // allowed to complete transparency.
   try {
     const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx, {
+      basicFactsCompleted: adapterResults.get("basic-facts")?.collectionCompleted === true,
       transparencySearchExplicitlyEmpty: adapterResults
         .get("basic-facts")
         ?.explicitEmptyChecks
@@ -4923,6 +5165,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const profileForLlm: Record<string, unknown> = { ...evidence.profile };
   delete profileForLlm.identity_confidence;
   delete profileForLlm.identity_note;
+  const frozenCheckOutcomes = checkTracker.snapshot(evidence.roles, {
+    resolvedRealName: hasResolvedRealName(ctx),
+    organizationSubject: isOrganizationAccount(evidence),
+  });
+  evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
     ventures: evidence.ventures,
@@ -4941,7 +5188,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     associates: evidence.associates,
     // The named people behind the project (from the site + LinkedIn + X content),
     // so identity/founder scoring reflects the team we actually found.
-    team: (evidence.webTeam ?? []).map((p) => ({
+    team: (evidence.webTeam ?? []).filter((p) => p.kind !== "org").map((p) => ({
       name: p.name,
       handle: p.identity_link_evidence_origin === "model_lead" ? undefined : p.handle,
       role: p.role,
@@ -4956,20 +5203,21 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     })),
     ventureTeams: evidence.ventureTeams,
     findings: evidence.findings,
-    notableFollowers: evidence.notableFollowers.map((follower) => ({ ...follower, provider: "twitterapi" })),
+    // Notable-follower enumeration is intentionally retired: it is costly,
+    // incomplete for large accounts, and must not influence a diligence score.
+    notableFollowers: [],
     recentActivity: evidence.recentActivity.slice(0, 12).map((text) => ({ text, provider: "twitterapi" })),
     sourceArtifacts: evidence.sourceArtifacts,
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
     projectToken: evidence.projectToken,
+    entityContinuity: evidence.entityContinuity ? [evidence.entityContinuity] : [],
+    tokenApplicability: evidence.tokenApplicability,
     // The scale of the venture a founder verifiably founded is scoreable
     // evidence about them (F2/F4). It was collected and then dropped before.
     ventureToken: evidence.ventureToken,
     basicFacts: evidence.basicFacts,
-    checkOutcomes: checkTracker.snapshot(evidence.roles, {
-      resolvedRealName: hasResolvedRealName(ctx),
-      organizationSubject: isOrganizationAccount(evidence),
-    }),
+    checkOutcomes: frozenCheckOutcomes,
     providerRuns: checkTracker.providers().runs,
     // Keep the exclusion explicit at the packet boundary. The raw fixed-block
     // receipts persist in the dossier but cannot affect v1 scoring or model
@@ -4984,7 +5232,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     // Decision models receive a structurally isolated packet. Related-entity and
     // model-discovered leads remain visible to investigators, but are absent from
     // both the subject scorer and contradiction analyzer context.
-    const requestedAxes = axisCatalog(evidence.roles);
+    const requestedAxes = axisCatalog(evidence.roles).filter(({ axis, role }) => !(
+      role === SubjectClass.PROJECT
+      && axis === "P3_token_conduct"
+      && (evidence.tokenApplicability?.axisTreatment === "not_applicable"
+        || evidence.tokenApplicability?.axisTreatment === "deferred")
+    ));
     const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
     const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson, requestedAxes);
     const projectStrengthBands = deriveProjectStrengthBands(evidenceJson, requestedAxes);
@@ -5027,7 +5280,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     const contradictionBefore = analystAttemptTotals(["record_contradictions"]);
     const scorerBefore = analystAttemptTotals(["record_verdict"]);
     // analystDeadlineAt is computed once at the top of the run (see above).
-    const [found, verdict] = await Promise.all([
+    const [found, rawVerdict] = await Promise.all([
       decisionPacketUsable
         ? scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt })
         : Promise.resolve(null),
@@ -5037,6 +5290,17 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           })
         : Promise.resolve(null),
     ]);
+    const lineageReconciliation = rawVerdict
+      ? reconcileAnalystVerdictLineage(rawVerdict, frozenAxisEvidence, scoringAxes)
+      : null;
+    const verdict = lineageReconciliation?.verdict ?? null;
+    if (lineageReconciliation?.removed.length) {
+      console.warn("[agent-lineage]", JSON.stringify({
+        state: verdict ? "reconciled" : "failed_closed",
+        removed: lineageReconciliation.removed,
+        ...(lineageReconciliation.reason ? { reason: lineageReconciliation.reason } : {}),
+      }));
+    }
     const contradictionAttempts = attemptDelta(
       contradictionBefore,
       analystAttemptTotals(["record_contradictions"]),
@@ -5208,6 +5472,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // axis set is still a useful report, but it must remain partial and cannot
   // poison later trust-graph reconciliation with an INCOMPLETE verdict.
   dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE"
+    || dossier.report.score_coverage?.provisional === true
+    || dossier.report.role_reports.some((role) => role.raw_total === null)
     ? "partial"
     : checkCompleteness;
   // "Since last scan": one bounded read of the prior persisted outcome so a

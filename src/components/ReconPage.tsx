@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { runRecon, type Recon } from "../collect/recon";
+import { profileOf, runRecon, type Recon } from "../collect/recon";
+import { AVAILABILITY_LABEL, KIND_LABEL, type SiteAccount, type SiteProfile } from "../collect/siteProfile";
 import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
 import { ScoreTicker } from "./ScoreTicker";
@@ -33,11 +34,10 @@ function reconContribution(r: Recon) {
     { type: "Company", key: host, subject: true, verdict: r.verdict?.verdict, was_rug: r.verdict?.verdict === "FAIL" },
   ];
   const edges: { src: string; dst: string; type: string; [k: string]: unknown }[] = [];
-  const x = r.socials.find((s) => /x\.com|twitter\.com/i.test(s.url));
-  if (x) {
-    const seg = x.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1];
-    if (seg && !/status|home|i|share/i.test(seg)) { const h = "@" + seg.toLowerCase(); nodes.push({ type: "Person", key: h }); edges.push({ src: host, dst: h, type: "RUNS_X" }); }
-  }
+  // Only an account the page claims as its own becomes a RUNS_X edge. A
+  // portfolio company's or partner's X link on the page is not this site's.
+  const x = profileOf(r).officialAccounts.find((a) => a.platform === "x" && a.handle);
+  if (x?.handle) { const h = "@" + x.handle.toLowerCase(); nodes.push({ type: "Person", key: h }); edges.push({ src: host, dst: h, type: "RUNS_X" }); }
   const f = r.pivot?.found;
   if (f) {
     for (const n of f.graph.nodes) nodes.push(n.subject ? { ...n, verdict: f.verdict } : n);
@@ -116,6 +116,114 @@ function supplementalPersonLabel(person: WebPerson): string {
   if (person.evidenceKind === "code_contribution") return "GitHub contribution";
   if (person.evidenceKind === "team_attribution") return "team attribution";
   return "web/X candidate";
+}
+
+const KIND_TONE: Record<SiteProfile["kind"], string> = {
+  fund: "var(--color-signal)", "token-project": "var(--color-signal)", product: "var(--color-signal)", studio: "var(--color-signal)",
+  parked: "var(--color-avoid)", blocked: "var(--color-unverifiable)", "coming-soon": "var(--color-caution)", unclassified: "var(--color-ink-faint)",
+};
+const AVAILABILITY_TONE: Record<SiteProfile["availability"], string> = {
+  live: "var(--color-pass)", "js-app": "var(--color-caution)", "crawler-read": "var(--color-pass)",
+  parked: "var(--color-avoid)", blocked: "var(--color-unverifiable)", "coming-soon": "var(--color-caution)", unavailable: "var(--color-unverifiable)",
+};
+
+function AccountChip({ account, muted }: { account: SiteAccount; muted?: boolean }) {
+  return (
+    <a
+      href={account.url}
+      target="_blank"
+      rel="noreferrer"
+      title={account.why}
+      className={`chip normal-case tracking-normal transition hover:text-ink ${muted ? "opacity-70" : ""}`}
+    >
+      {account.label}
+    </a>
+  );
+}
+
+/**
+ * The first-pass answer, in the order an analyst asks it: what is this, is it
+ * live, which accounts are its own, who is named, what is the one bound next
+ * step. Every line comes from the rendered page; nothing is inferred.
+ */
+function AtAGlance({ profile, canAct, onAudit }: { profile: SiteProfile; canAct: boolean; onAudit?: (ref: string) => void }) {
+  const step = profile.nextStep;
+  return (
+    <div className="mt-3 panel p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="eyebrow">At a glance</span>
+        <span className="chip tint-var" style={{ "--tint": KIND_TONE[profile.kind] } as React.CSSProperties}>{KIND_LABEL[profile.kind]}</span>
+        <span className="chip tint-var" style={{ "--tint": AVAILABILITY_TONE[profile.availability] } as React.CSSProperties}>{AVAILABILITY_LABEL[profile.availability]}</span>
+      </div>
+      <p className="mt-2 text-[13.5px] leading-relaxed text-ink">{profile.summary}</p>
+      <p className="mt-1 text-[12.5px] leading-snug text-ink-dim">{profile.availabilityNote}</p>
+      {profile.kindEvidence && profile.kind !== "unclassified" && (
+        <p className="mt-1 text-[11.5px] leading-snug text-ink-faint">Basis: {profile.kindEvidence}</p>
+      )}
+
+      <div className="mt-3 grid gap-3 border-t border-line/60 pt-3 sm:grid-cols-2">
+        <div>
+          <div className="eyebrow">Official accounts · {profile.officialAccounts.length}</div>
+          {profile.officialAccounts.length > 0 ? (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {profile.officialAccounts.map((a) => <AccountChip key={a.url} account={a} />)}
+            </div>
+          ) : (
+            <p className="mt-1.5 text-[12.5px] leading-snug text-ink-faint">
+              {profile.availability === "unavailable" || profile.kind === "blocked"
+                ? "Nothing was read, so no account can be attributed."
+                : "The page links no X, Telegram, Discord, GitHub, or LinkedIn account of its own."}
+            </p>
+          )}
+          {profile.linkedAccounts.length > 0 && (
+            <div className="mt-2">
+              <div className="text-[11px] text-ink-faint">Also linked, not claimed as its own · {profile.linkedAccounts.length}</div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {profile.linkedAccounts.map((a) => <AccountChip key={a.url} account={a} muted />)}
+              </div>
+            </div>
+          )}
+        </div>
+        <div>
+          <div className="eyebrow">Named with a role · {profile.people.length}</div>
+          {profile.people.length > 0 ? (
+            <div className="mt-1.5 space-y-1">
+              {profile.people.slice(0, 8).map((p) => (
+                <div key={p.name} className="flex flex-wrap items-baseline gap-x-2 text-[12.5px]">
+                  <span className="text-ink">{p.name}</span>
+                  {p.role && <span className="text-ink-dim">{p.role}</span>}
+                  {p.link && <a href={p.link} target="_blank" rel="noreferrer" className="link-ext text-[11px]">{/linkedin\.com/i.test(p.link) ? "LinkedIn" : "site"}</a>}
+                </div>
+              ))}
+              {profile.people.length > 8 && <div className="text-[11px] text-ink-faint">and {profile.people.length - 8} more</div>}
+            </div>
+          ) : (
+            <p className="mt-1.5 text-[12.5px] leading-snug text-ink-faint">
+              {profile.availability === "unavailable" || profile.kind === "blocked" || profile.kind === "parked"
+                ? "Nothing on this page names a person."
+                : "The rendered page names no one with a role. Pseudonymity is recorded, not penalized."}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 border-t border-line/60 pt-3">
+        <div className="eyebrow">Next step</div>
+        {step.kind !== "none" ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            {canAct && onAudit ? (
+              <button type="button" onClick={() => onAudit(step.ref)} className="btn-chip tint-signal">{step.label} →</button>
+            ) : (
+              <span className="chip normal-case tracking-normal">{step.label}</span>
+            )}
+            <span className="text-[12px] leading-snug text-ink-dim">{step.reason}</span>
+          </div>
+        ) : (
+          <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">{step.reason}</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function ReconPage({ initialUrl, initialRecon, initialVersionContext, initialPrivate, onAudit, onInvestigate, onOpenRecent, onOpenBrief, onStartFresh }: { initialUrl?: string; initialRecon?: Recon; initialVersionContext?: ReportVersionContext; initialPrivate?: boolean; onAudit?: (q: string, priv?: boolean) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void; onOpenBrief?: (ref: string) => void; onStartFresh?: () => void }) {
@@ -277,6 +385,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
           r.tokenSignals.length >= 2 ? "token-project" : "",
           r.pivot?.reconcile.tone === "bad" ? "token-claim-unverified" : "",
           r.pivot?.found ? "token-found-onchain" : "",
+          r.profile && r.profile.kind !== "unclassified" ? `site:${r.profile.kind}` : "",
         ].filter(Boolean),
       });
     }
@@ -315,6 +424,11 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
   // The recon'd host, for deleted-content archaeology.
   let reconHost = "";
   try { reconHost = recon ? new URL(recon.retrieval.url).hostname.replace(/^www\./, "") : ""; } catch { /* keep empty */ }
+  // What-is-this / is-it-live / official accounts / bound next step. Rebuilt
+  // from the stored retrieval for records saved before profiles existed.
+  const profile = recon ? profileOf(recon) : null;
+  const officialX = profile?.officialAccounts.find((a) => a.platform === "x" && a.handle)?.handle;
+  const roleOf = new Map((profile?.people ?? []).map((p) => [p.name, p]));
   // Only names measured on the rendered first-party page can rebut the page's
   // own missing-team signal. Supplemental rows are candidates, associations, or
   // contributors and never establish employment.
@@ -423,6 +537,9 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                       <span className="chip tint-var" style={{ "--tint": COVERAGE[recon.retrieval.status].color } as React.CSSProperties}>
                         {COVERAGE[recon.retrieval.status].label}
                       </span>
+                      {profile && profile.kind !== "unclassified" && (
+                        <span className="chip tint-var" style={{ "--tint": KIND_TONE[profile.kind] } as React.CSSProperties}>{KIND_LABEL[profile.kind]}</span>
+                      )}
                       {v.capApplied && <span className="chip tint-avoid">score limit · {v.capApplied.replace(/_/g, " ")}</span>}
                       {briefBound && resultPolicy.canMutate && onOpenBrief && reconHost && (
                         <button
@@ -451,7 +568,10 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                       </button>
                     </div>
                     {recon.title && <div className="mt-1 truncate text-[13.5px] text-ink-dim">{recon.title}</div>}
-                    <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">{teamKnown && TEAM_ABSENCE.test(recon.identityLine) ? "ARGUS found team members outside the website. See the Team section below." : plainLanguageSummary(recon.identityLine)}</p>
+                    {profile && <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink">{profile.summary}</p>}
+                    {recon.identityLine !== profile?.summary && (
+                      <p className={`${profile ? "mt-1" : "mt-1.5"} text-[13.5px] leading-relaxed text-ink-dim`}>{teamKnown && TEAM_ABSENCE.test(recon.identityLine) ? "ARGUS found team members outside the website. See the Team section below." : plainLanguageSummary(recon.identityLine)}</p>
+                    )}
                   </div>
                 </div>
                 <div className="mt-3 space-y-1.5 border-t border-line/60 pt-3">
@@ -465,6 +585,16 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
               </div>
             );
           })()}
+
+          {/* the first-pass answer: what / live / official accounts / named people /
+              the one next step the page itself binds */}
+          {profile && (
+            <AtAGlance
+              profile={profile}
+              canAct={Boolean(onAudit)}
+              onAudit={onAudit ? (ref) => onAudit(ref, resultPolicy.displayedPrivate) : undefined}
+            />
+          )}
 
           {/* token bridge — a site recon only reads the website; if the project has
               a real token, one click opens the full on-chain report where the depth is */}
@@ -490,11 +620,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
               <ProjectXAccount
                 name={recon.title || reconHost.replace(/\.[a-z]+$/, "")}
                 domain={reconHost}
-                seedHandle={(() => {
-                  const x = recon.socials.find((s) => /x\.com|twitter\.com/i.test(s.url));
-                  const seg = x?.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1] ?? (x?.label.startsWith("@") ? x.label.slice(1) : undefined);
-                  return seg && !/status|home|intent|share|i$/i.test(seg) ? seg : undefined;
-                })()}
+                seedHandle={officialX ?? undefined}
                 panelCostToken={resultPolicy.panelCostToken}
                 onAudit={onAudit ? (handle) => onAudit(handle, resultPolicy.displayedPrivate) : undefined}
               />
@@ -569,18 +695,9 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
             </div>
           )}
 
-          {/* extracted entities */}
-          {(recon.socials.length > 0 || recon.funding.length > 0 || (recon.tokenSignals.length > 0 && !recon.isFund)) && (
+          {/* extracted claims; accounts live in At a glance, split official / linked */}
+          {(recon.funding.length > 0 || (recon.tokenSignals.length > 0 && !recon.isFund)) && (
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {recon.socials.length > 0 && (
-                <Card title="Socials">
-                  <div className="flex flex-wrap gap-1.5">
-                    {recon.socials.map((s) => (
-                      <a key={s.url} href={s.url} target="_blank" rel="noreferrer" className="chip normal-case tracking-normal transition hover:text-ink">{s.label}</a>
-                    ))}
-                  </div>
-                </Card>
-              )}
               {recon.funding.length > 0 && (
                 <Card title="Funding claims to verify">
                   <div className="flex flex-wrap gap-1.5">
@@ -613,7 +730,14 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                   <div className="mt-2">
                     <p className="text-[11px] leading-snug text-ink-faint">First-party context from the rendered site, not independent identity verification.</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      {team.sitePeople.map((name) => <span key={name} className="chip normal-case tracking-normal">{name}</span>)}
+                      {team.sitePeople.map((name) => {
+                        const person = roleOf.get(name);
+                        return (
+                          <span key={name} className="chip normal-case tracking-normal" title={person?.role ?? undefined}>
+                            {name}{person?.role ? <span className="text-ink-faint"> · {person.role}</span> : null}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                 ) : (

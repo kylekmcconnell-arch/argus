@@ -6,6 +6,7 @@ import { structured } from "../agent";
 import { recordCall } from "../cost";
 import { fetchPublicTextWithRecovery, type PublicTextWithRecoveryResult } from "../publicWeb";
 import type { TeamMember } from "./x";
+import { isPlausiblePersonRosterName } from "../../src/lib/personName";
 
 const normalizedApex = (domain: string) =>
   domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./i, "").toLowerCase();
@@ -436,7 +437,7 @@ export function scanPageTextForCredits(
       if (!words.length) continue;
       const name = words.join(" ").replace(/[.,;:]+$/, "");
       const key = creditKey(name);
-      if (!key || NON_PERSON_CREDITS.has(name.toLowerCase()) || seen.has(key)) continue;
+      if (!key || !isPlausiblePersonRosterName(name) || NON_PERSON_CREDITS.has(name.toLowerCase()) || seen.has(key)) continue;
       // A project crediting itself ("Built by Clutch") names no person.
       if (projectKey && (key === projectKey || projectKey.startsWith(key))) continue;
       seen.add(key);
@@ -599,11 +600,22 @@ export function teamMemberIsDirectlySupported(text: string, name: string, handle
     .map((value) => value.trim().toLowerCase());
   const lower = corpus.toLowerCase();
   const rolePattern = roleEvidencePattern(role);
+  const sectionHeadingSupportsRole = (identityOffset: number): boolean => {
+    if (!/advisor|adviser/i.test(role)) return false;
+    const before = lower.slice(0, identityOffset);
+    const advisorHeading = Math.max(before.lastIndexOf("our advisors"), before.lastIndexOf("our advisers"));
+    if (advisorHeading < 0) return false;
+    // A later explicit team heading closes the advisor section. Ordinary role
+    // copy such as "technical advisor" does not become a section boundary.
+    const laterTeamHeading = before.lastIndexOf("our team");
+    return advisorHeading > laterTeamHeading;
+  };
   for (const identity of identities) {
     let offset = lower.indexOf(identity);
     while (offset >= 0) {
       const window = corpus.slice(Math.max(0, offset - 220), Math.min(corpus.length, offset + identity.length + 220));
-      if (rolePattern.test(window) && (!projectName || window.toLowerCase().includes(projectName.toLowerCase()))) return true;
+      const roleSupported = rolePattern.test(window) || sectionHeadingSupportsRole(offset);
+      if (roleSupported && (!projectName || window.toLowerCase().includes(projectName.toLowerCase()))) return true;
       offset = lower.indexOf(identity, offset + identity.length);
     }
   }
@@ -639,7 +651,9 @@ const pageScore = (page: TeamPage) =>
 const TEAM_EXTRACTION_SYSTEM =
   "You extract a crypto/tech project's team roster from fetched first-party project text. " +
   "List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. " +
-  "Use the exact role the page states. Capture any X/Twitter handle and LinkedIn URL shown next to a person. " +
+  "Use the person's role in THIS project (for example founder, team member, or advisor). " +
+  "When the page includes descriptive credentials or biography copy next to the person, preserve that entire phrase verbatim in biography; never split biography text into additional people. " +
+  "Capture any X/Twitter handle and LinkedIn URL shown next to a person. " +
   "For every person copy the exact PAGE URL that directly states that person's role. " +
   "Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
 
@@ -656,6 +670,7 @@ const TEAM_EXTRACTION_TOOL = {
           properties: {
             name: { type: "string" },
             role: { type: "string" },
+            biography: { type: "string", description: "Optional exact descriptive phrase shown for this person; preserve it verbatim" },
             twitter: { type: "string", description: "@handle if shown" },
             linkedin: { type: "string", description: "linkedin.com/in/... if shown" },
             source_url: { type: "string", description: "Exact PAGE URL from the supplied corpus that directly states this role" },
@@ -678,7 +693,7 @@ async function extractTeamFromPages(
     .sort((a, b) => pageScore(b) - pageScore(a) || b.text.length - a.text.length)
     .slice(0, 3);
   const corpus = selectedPages.map((page) => `PAGE ${page.url}:\n${page.text.slice(0, 5000)}`).join("\n\n");
-  const out = await structured<{ people: { name: string; role: string; twitter?: string; linkedin?: string; source_url: string }[] }>(
+  const out = await structured<{ people: { name: string; role: string; biography?: string; twitter?: string; linkedin?: string; source_url: string }[] }>(
     TEAM_EXTRACTION_SYSTEM,
     `Project${projectName ? ` ${projectName}` : ""} first-party team evidence:\n\n${corpus}`,
     TEAM_EXTRACTION_TOOL,
@@ -686,13 +701,16 @@ async function extractTeamFromPages(
   );
   if (!out?.people?.length) return [];
   return out.people
-    .filter((person) => person.name && person.name.trim())
+    .filter((person) => person.name && isPlausiblePersonRosterName(person.name))
     .flatMap((person) => {
       const rawName = person.name.trim();
       const displayName = /^[a-z][a-z'-]{1,30}$/.test(rawName)
         ? rawName[0].toUpperCase() + rawName.slice(1)
         : rawName;
       const role = (person.role || "team").toString();
+      const biography = typeof person.biography === "string" && person.biography.trim()
+        ? person.biography.trim()
+        : undefined;
       const kind: "team" | "advisor" = /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
       const handle = person.twitter && /^@?[A-Za-z0-9_]{2,30}$/.test(person.twitter.replace(/^@/, "")) ? "@" + person.twitter.replace(/^@/, "") : undefined;
       const modelLinkedin = person.linkedin && /linkedin\.com\/(in|company)\//i.test(person.linkedin) ? person.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : undefined;
@@ -721,6 +739,7 @@ async function extractTeamFromPages(
         name: displayName,
         handle: boundHandle,
         role,
+        biography,
         kind,
         linkedin,
         evidence: `direct role statement on ${sourcePage.url}`,

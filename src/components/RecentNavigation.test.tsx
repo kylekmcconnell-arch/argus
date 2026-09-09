@@ -30,6 +30,15 @@ vi.mock("../lib/avatars", () => ({ auditImage: () => null }));
 vi.mock("../lib/runner", () => ({ activeRuns: () => [], subscribeRuns: () => () => undefined }));
 vi.mock("../lib/activescans", () => ({ activeScans: () => [], subscribeScans: () => () => undefined }));
 vi.mock("../lib/scanrunner", () => ({ activeScanRuns: () => [], subscribeScanRuns: () => () => undefined }));
+vi.mock("../graph/store", () => ({ getContributions: () => [] }));
+vi.mock("../graph/network", () => ({
+  buildAliasResolver: () => (key: string) => {
+    const normalized = key.toLowerCase().replace(/^[@$]/, "");
+    return normalized === "anyone" || normalized === "anyonefdn" || normalized === "0xanyone"
+      ? "token:ethereum:0xanyone"
+      : normalized;
+  },
+}));
 vi.mock("../lib/recentScored", () => ({ recentScored: () => harness.entries }));
 vi.mock("../lib/auditlog", () => ({
   mergedLog: () => harness.entries,
@@ -191,5 +200,46 @@ describe("Recent report controls", () => {
     expect(investigationCanvas?.querySelector("span.sr-only")).toBeNull();
     expect(sidebar?.textContent).toContain("Recent cases");
     expect(sidebar?.textContent).toContain("Kyle McConnell");
+  });
+
+  it("presents a verified project and token binding as one case with two report scores", async () => {
+    harness.entries = [
+      {
+        ...entry("anyone-token", "$ANYONE", 84),
+        kind: "token",
+        ref: "0xanyone",
+        flags: ["case-family:0xanyone", "case-title:ANyONe Protocol"],
+      },
+      {
+        ...entry("anyone-project", "@anyonefdn", 69),
+        flags: ["role:PROJECT", "case-family:0xanyone", "case-title:ANyONe Protocol"],
+      },
+    ];
+    const onOpenRecent = vi.fn();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <Sidebar
+          onNav={() => undefined}
+          onAudit={() => undefined}
+          onOpenRecent={onOpenRecent}
+          view="audit"
+        />,
+      );
+    });
+
+    const rail = container.querySelector("aside");
+    expect(rail?.textContent).toContain("ANyONe Protocollinked project + token");
+    expect(rail?.textContent).toContain("Project@anyonefdn69");
+    expect(rail?.textContent).toContain("Token$ANYONE84");
+
+    const project = [...(rail?.querySelectorAll<HTMLAnchorElement>("a") ?? [])]
+      .find((link) => link.textContent?.includes("@anyonefdn"));
+    const token = [...(rail?.querySelectorAll<HTMLAnchorElement>("a") ?? [])]
+      .find((link) => link.textContent?.includes("$ANYONE"));
+    expect(project?.getAttribute("href")).toBe("?s=anyonefdn&kind=person");
+    expect(token?.getAttribute("href")).toBe("?s=0xanyone&kind=token");
   });
 });

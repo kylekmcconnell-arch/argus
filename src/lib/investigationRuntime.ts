@@ -70,3 +70,20 @@ export const SOCIAL_ACTIVITY_BUDGET_MS = 45_000;
 // working, so 90 seconds with no streamed bytes means the connection itself is
 // genuinely stalled while a healthy investigation can use the server budget.
 export const AUDIT_STREAM_INACTIVITY_TIMEOUT_MS = 90_000;
+
+/** Short authorized follow-ups share their remaining time with collection,
+ * graph screening, and scoring instead of inheriting a full-scan reserve. */
+export function gapInvestigationReserves(timeBudgetSeconds: number): {
+  collectionReserveMs: number;
+  graphScreenReserveMs: number;
+} {
+  if (!Number.isInteger(timeBudgetSeconds) || timeBudgetSeconds < 180 || timeBudgetSeconds > 540) {
+    throw new RangeError("Gap investigation budget must be between 180 and 540 seconds.");
+  }
+  const availableMs = timeBudgetSeconds * 1000 - 30_000;
+  const collectionReserveMs = Math.min(COLLECTION_ANALYST_RESERVE_MS, Math.floor(availableMs * 0.6));
+  return {
+    collectionReserveMs,
+    graphScreenReserveMs: Math.min(TRUST_GRAPH_SCREEN_RESERVE_MS, Math.floor(collectionReserveMs * 0.25)),
+  };
+}

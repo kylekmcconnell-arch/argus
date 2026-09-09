@@ -5,6 +5,7 @@ import {
   AUDIENCE_SAMPLE_MIN,
   clearLastTweetsMemo,
   describeAudienceSample,
+  followerAudience,
   newAudienceTally,
   notableFollowers,
   sealAudienceSample,
@@ -203,6 +204,50 @@ describe("X follower audience shape", () => {
     expect(describeAudienceSample(scan.audience)).toBe(
       "No follower profiles were read on this path, so audience shape is not measured.",
     );
+  });
+
+  it("declines to measure rather than project a truncated read of a large account", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    const fetchMock = vi.fn(async () => page(rows(200), { has_next_page: true, next_cursor: "c1" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Beyond the page budget, and with no follower count at all, there is no
+    // bounded read that stands for the audience: buy nothing and say nothing.
+    expect(await followerAudience("@subject", { followerCount: 4_000 })).toBeUndefined();
+    expect(await followerAudience("@subject")).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    vi.stubEnv("TWITTERAPI_KEY", "");
+    expect(await followerAudience("@subject", { followerCount: 60 })).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reads a small account's audience within the page budget and reports its own denominators", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    const fetchMock = vi.fn(async (input?: unknown) => {
+      void input;
+      return page(rows(60, (index) => (index < 45 ? { statusesCount: 0 } : {})));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const audience = await followerAudience("@subject", { followerCount: 60 });
+
+    expect(audience?.profilesExamined).toBe(60);
+    expect(audience?.sampleIsComplete).toBe(true);
+    expect(audience?.posts).toEqual({ measured: 60, zeroPosts: 45 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/twitter/user/followers?userName=subject");
+  });
+
+  it("marks an interrupted audience read as a floor instead of a complete sample", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    // The provider says more pages exist but hands back no cursor to reach them.
+    vi.stubGlobal("fetch", vi.fn(async () => page(rows(60), { has_next_page: true, next_cursor: "" })));
+
+    const audience = await followerAudience("@subject", { followerCount: 400 });
+
+    expect(audience?.sampleIsComplete).toBe(false);
+    expect(describeAudienceSample(audience)).toContain("a floor: pagination stopped");
   });
 
   it("emits the distribution as a neutral observation and labels no account", async () => {

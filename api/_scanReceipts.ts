@@ -50,9 +50,9 @@ function iso(value: string): string | null {
  * an idempotent credit reservation cannot reset a terminal receipt. Terminal
  * writes update an existing tenant/run row only and may attach the persisted report.
  */
-export async function recordScanReceipt(auth: AuthContext, input: ScanReceiptWrite): Promise<boolean> {
+async function writeScanReceipt(auth: AuthContext, input: ScanReceiptWrite): Promise<"written" | "duplicate" | "unavailable"> {
   const credentials = serviceCredentials();
-  if (!credentials || !RUN_KEY.test(input.runKey)) return false;
+  if (!credentials || !RUN_KEY.test(input.runKey)) return "unavailable";
   const canonicalRef = cleanText(input.canonicalRef, 500);
   const displayQuery = cleanText(input.displayQuery, 500);
   const route = cleanText(input.route, 160);
@@ -61,9 +61,9 @@ export async function recordScanReceipt(auth: AuthContext, input: ScanReceiptWri
   const durationMs = input.status === "running"
     ? null
     : Number.isFinite(input.durationMs) ? Math.max(0, Math.floor(input.durationMs ?? 0)) : null;
-  if (!canonicalRef || !displayQuery || !route || !startedAt) return false;
-  if (input.status !== "running" && (!finishedAt || durationMs == null)) return false;
-  if (input.reportVersionId && !UUID.test(input.reportVersionId)) return false;
+  if (!canonicalRef || !displayQuery || !route || !startedAt) return "unavailable";
+  if (input.status !== "running" && (!finishedAt || durationMs == null)) return "unavailable";
+  if (input.reportVersionId && !UUID.test(input.reportVersionId)) return "unavailable";
 
   const costBasis = input.costBasis ?? "unknown";
   const providerCostUsd = costBasis === "unknown"
@@ -71,7 +71,7 @@ export async function recordScanReceipt(auth: AuthContext, input: ScanReceiptWri
     : Number.isFinite(input.providerCostUsd)
       ? Math.max(0, Math.round((input.providerCostUsd ?? 0) * 100000000) / 100000000)
       : null;
-  if (costBasis !== "unknown" && providerCostUsd == null) return false;
+  if (costBasis !== "unknown" && providerCostUsd == null) return "unavailable";
 
   const starting = input.status === "running";
   const outcome = {
@@ -108,7 +108,7 @@ export async function recordScanReceipt(auth: AuthContext, input: ScanReceiptWri
   const endpoint = starting
     ? `${credentials.url}/rest/v1/scan_run_receipts?on_conflict=organization_id,run_key`
     : `${credentials.url}/rest/v1/scan_run_receipts?organization_id=eq.${encodeURIComponent(auth.organizationId)}&run_key=eq.${encodeURIComponent(input.runKey)}`;
-  const prefer = starting ? "resolution=ignore-duplicates,return=minimal" : "return=representation";
+  const prefer = starting ? "resolution=ignore-duplicates,return=representation" : "return=representation";
   try {
     const response = await fetch(endpoint, {
       method: starting ? "POST" : "PATCH",
@@ -117,13 +117,23 @@ export async function recordScanReceipt(auth: AuthContext, input: ScanReceiptWri
       signal: AbortSignal.timeout(8_000),
     });
     if (response.ok) {
-      if (starting) return true;
       const updated = await response.json() as unknown;
-      return Array.isArray(updated) && updated.length === 1;
+      if (!Array.isArray(updated)) return "unavailable";
+      return updated.length === 1 ? "written" : starting && updated.length === 0 ? "duplicate" : "unavailable";
     }
     console.error("[scan-receipt] write rejected", response.status);
   } catch (error) {
     console.error("[scan-receipt] write failed", error instanceof Error ? error.message : "transport");
   }
-  return false;
+  return "unavailable";
+}
+
+/** Claim once using the existing tenant/run unique constraint, before providers start. */
+export async function claimScanReceipt(auth: AuthContext, input: ScanReceiptWrite) {
+  if (input.status !== "running") return "unavailable" as const;
+  return writeScanReceipt(auth, input);
+}
+
+export async function recordScanReceipt(auth: AuthContext, input: ScanReceiptWrite): Promise<boolean> {
+  return (await writeScanReceipt(auth, input)) !== "unavailable";
 }

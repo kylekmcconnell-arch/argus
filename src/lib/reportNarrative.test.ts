@@ -59,7 +59,7 @@ describe("reportOpeningNarrative", () => {
       projectToken: token,
     });
 
-    expect(summary).toContain("lets users earn real yield on tokenized stocks");
+    expect(summary).toContain("lets users earn yield on tokenized stocks");
     expect(summary).not.toContain(contract);
   });
 
@@ -106,5 +106,17 @@ describe("reportOpeningNarrative", () => {
     expect(summary).not.toContain("official product surface");
     expect(summary).not.toContain(contract);
     expect(summary).not.toContain("⚫");
+  });
+
+  it("removes calls to action and pitch adjectives from the opening product explanation", () => {
+    const summary = reportOpeningNarrative({
+      name: "Relay",
+      handle: "@relay",
+      bio: "Privacy infrastructure",
+      subjectOrientation: orientation("Relay is a revolutionary privacy-first application powered by a decentralized relay network. Join the revolution."),
+    });
+
+    expect(summary).toContain("privacy-focused application uses a decentralized relay network");
+    expect(summary).not.toMatch(/revolutionary|powered by|join the revolution/i);
   });
 });

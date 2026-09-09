@@ -27,6 +27,11 @@ import {
   type MaterialReportDelta,
   type PriorReportSnapshot,
 } from "../src/lib/reportDelta.js";
+import {
+  tokenFromBio,
+  tokenFromPromotions,
+  tokenFromVerifiedProjectToken,
+} from "../src/lib/projectTokenLeg.js";
 
 export const config = { maxDuration: 20 };
 
@@ -660,20 +665,39 @@ async function attachServerVersion(
   };
 }
 
+/**
+ * The one token the server-collected evidence itself attributes to this
+ * subject, in the same trust order the collector uses when it announces the
+ * token leg mid-stream (`server/orchestrate.ts`): the canonical verified
+ * project token, then a contract in the subject's own bio, then a claimed
+ * promotion. Derived only from the immutable stored payload, never from the
+ * browser's submission, so the client cannot bind an arbitrary token here.
+ * Anything the server did not announce (the browser-only CoinGecko name match)
+ * has no server-side attribution and is rejected.
+ */
+function serverAttributedTokenAddress(storedPayload: JsonRecord): string {
+  const projectToken = asRecord(storedPayload.projectToken);
+  const promotions = asRecord(storedPayload.evidence).promotions;
+  const candidate = tokenFromVerifiedProjectToken(
+    projectToken as Parameters<typeof tokenFromVerifiedProjectToken>[0],
+  )
+    ?? tokenFromBio(typeof storedPayload.bio === "string" ? storedPayload.bio : "")
+    ?? tokenFromPromotions(Array.isArray(promotions)
+      ? promotions as Parameters<typeof tokenFromPromotions>[0]
+      : undefined);
+  return candidate ? normRef(candidate.address) : "";
+}
+
 function personTokenEnrichment(
   storedPayload: JsonRecord,
   submittedPayload: JsonRecord,
 ): JsonRecord | null {
   if (submittedPayload.threat == null) return null;
 
-  const projectToken = asRecord(storedPayload.projectToken);
   const threat = asRecord(submittedPayload.threat);
   const tokenDossier = asRecord(threat.dossier);
   const threatCall = asRecord(threat.call);
-  const canonicalAddress = typeof projectToken.address === "string"
-    && projectToken.verified === true
-    ? normRef(projectToken.address)
-    : "";
+  const canonicalAddress = serverAttributedTokenAddress(storedPayload);
   const threatAddress = typeof threat.address === "string" ? normRef(threat.address) : "";
   const dossierAddress = typeof tokenDossier.address === "string" ? normRef(tokenDossier.address) : "";
 
@@ -1066,12 +1090,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           serverVersion.payload.checkRuns,
         );
         await activateReportVersion(credentials, auth.organizationId, serverVersion.reportVersionId);
+        // The browser's save contract (`syncReport`) requires the same
+        // capability receipt every other successful save returns. Without it
+        // a correctly persisted, token-less project report was reported to the
+        // analyst as a failed save: no case receipt, no share, no audit row.
+        const panelCostToken = issuePanelCostToken(auth.organizationId, serverVersion.reportVersionId);
         res.status(200).json({
           ok: true,
           reportVersionId: serverVersion.reportVersionId,
           caseId: serverVersion.caseId,
           version: serverVersion.version,
           linked: true,
+          attestationState: "server_collected",
+          ...(panelCostToken ? { panelCostToken } : {}),
         });
         return;
       }

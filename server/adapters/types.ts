@@ -20,6 +20,7 @@ export type PersonCheckId =
   | "profile-photo-authenticity"
   | "code-footprint-github"
   | "identity-continuity"
+  | "entity-continuity"
   | "affiliations-associates"
   | "promoted-token-performance"
   | "project-token-identity"
@@ -84,6 +85,8 @@ export interface AdapterRunResult {
    * response. This is distinct from a provider failure or an omitted result.
    */
   explicitEmptyChecks?: readonly PersonCheckId[];
+  /** Discovery and source reads completed, independently of verified fact yield. */
+  collectionCompleted?: boolean;
 }
 
 // An adapter declares which provider key(s) it needs and a run() that mutates

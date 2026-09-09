@@ -1,9 +1,10 @@
 import type { ProjectTokenSnapshot, SubjectOrientation } from "../data/evidence";
+import { neutralizeProductCopy } from "./productLanguage";
 
 const EVM_CONTRACT = /\b0x[a-f0-9]{40}\b/gi;
 const SOLANA_CONTRACT = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
 const URL_PATTERN = /https?:\/\/\S+/gi;
-const PRODUCT_VERBS = /\b(?:builds?|provides?|offers?|lets?|enables?|routes?|connects?|turns?|powers?|issues?|operates?|manages?|delivers?|gives?|trades?|swaps?|lends?|borrows?|stakes?|earns?|allocates?|automates?|supplies?|pools?|vaults?)\b/i;
+const PRODUCT_VERBS = /\b(?:builds?|provides?|offers?|lets?|enables?|uses?|routes?|connects?|turns?|powers?|issues?|operates?|manages?|delivers?|gives?|trades?|swaps?|lends?|borrows?|stakes?|earns?|allocates?|automates?|supplies?|pools?|vaults?)\b/i;
 const GENERIC_IDENTITY_COPY = /\b(?:official product surface|project behind|official (?:site|website)|linked to (?:the )?(?:site|website|domain))\b/i;
 
 function hasProductMechanism(value: string): boolean {
@@ -51,14 +52,14 @@ interface NarrativeProductFact {
 function narrativeProductFact(facts: NarrativeProductFact[] | undefined, bio: string): string {
   return (facts ?? [])
     .filter((fact) => fact.predicate === "product")
-    .map((fact) => typeof fact.value === "string" ? tidySentence(fact.value) : "")
+    .map((fact) => typeof fact.value === "string" ? tidySentence(neutralizeProductCopy(fact.value)) : "")
     .filter((value) => value.length >= 24 && hasProductMechanism(value) && !GENERIC_IDENTITY_COPY.test(value) && !substantiallyRepeats(value, bio))
     .sort((left, right) => right.length - left.length)[0] ?? "";
 }
 
 function boundGrokOverview(orientation: SubjectOrientation | undefined, bio: string): string {
   if (!orientation || orientation.kind === "UNKNOWN") return "";
-  const overview = tidySentence(orientation.what);
+  const overview = tidySentence(neutralizeProductCopy(orientation.what));
   if (overview.length < 24 || !hasProductMechanism(overview) || GENERIC_IDENTITY_COPY.test(overview) || substantiallyRepeats(overview, bio)) return "";
   return overview;
 }

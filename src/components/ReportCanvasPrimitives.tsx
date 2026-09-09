@@ -228,6 +228,9 @@ export interface ReportCanvasNarrativeItem {
   /** Compact top-right annotation (e.g. "Moderate · 4 src"). Use `provenance` when the caveat is content that must read inline. */
   meta?: string;
   href?: `#${string}`;
+  /** Explicit scoring lineage. Never infer score impact from prose keywords. */
+  impactAxis?: string;
+  impact?: string;
 }
 
 export function ReportCanvasNarrativeSection({

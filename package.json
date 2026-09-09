@@ -26,7 +26,7 @@
     "quality": "npm run truth:check && npm run canary:offline && npm run calibrate && npm test && npm run typecheck",
     "seed:local-report": "tsx scripts/seed-local-report.ts",
     "check-env": "tsx scripts/check-env.ts",
-    "test:db": "supabase test db supabase/tests/scan_run_receipts.sql supabase/tests/report_activation_quality_guard.sql supabase/tests/database/persist_report_version_bundle.test.sql supabase/tests/gap_investigation_proposals.sql supabase/tests/approved_signin_security.sql supabase/tests/early_access_growth.sql supabase/tests/growth_waitlist_credits.sql supabase/tests/database_advisor_contract.sql",
+    "test:db": "supabase test db supabase/tests/scan_run_receipts.sql supabase/tests/report_activation_quality_guard.sql supabase/tests/database/persist_report_version_bundle.test.sql supabase/tests/gap_investigation_proposals.sql supabase/tests/approved_signin_security.sql supabase/tests/early_access_growth.sql supabase/tests/growth_waitlist_credits.sql supabase/tests/database_advisor_contract.sql supabase/tests/supplemental_budget.sql && node scripts/test-threat-address-case.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -35,7 +35,7 @@
     "@supabase/supabase-js": "2.110.2",
     "@tailwindcss/vite": "^4.3.1",
     "@vercel/functions": "3.7.5",
-    "@vercel/og": "^0.11.1",
+    "@vercel/og": "1.0.1",
     "framer-motion": "^12.40.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -63,7 +63,7 @@
   "overrides": {
     "@vercel/node": {
       "path-to-regexp": "6.3.0",
-      "undici": "6.27.0"
+      "undici": "6.28.1"
     },
     "@vercel/python-analysis": {
       "js-yaml": "4.3.0",
@@ -72,6 +72,7 @@
     },
     "@vercel/static-config": {
       "ajv": "8.20.0"
-    }
+    },
+    "fflate": "0.7.5"
   }
 }

@@ -528,6 +528,30 @@ function SitePanel({ s }: { s: NonNullable<ThreatScan["deep"]["site"]> }) {
     </div>
   );
 }
+function TechnicalPosturePanel({ p }: { p: NonNullable<ThreatScan["deep"]["posture"]> }) {
+  const c = p.stance === "bullish" ? "var(--color-pass)" : p.stance === "bearish" ? "var(--color-caution)" : "var(--color-ink-dim)";
+  return (
+    <div className="mt-4 panel p-4">
+      <h2 className="display-sm text-[18px] leading-tight text-ink">Chart posture</h2>
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">Technical read from major-venue market data, matched by ticker. Chart structure only - not identity verification, and not investment advice.</p>
+      <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+        <span className="mono rounded border px-2 py-0.5" style={{ borderColor: c, color: c }}>{p.stance.toUpperCase()}</span>
+        {p.readings.map((r) => (
+          <span key={r.timeframe} className="mono rounded border border-line px-2 py-0.5 text-ink-dim">{r.timeframe.toUpperCase()} · {r.stance}</span>
+        ))}
+      </div>
+      {p.readings.map((r) => (
+        <div key={r.timeframe} className="mt-2 border-t border-line/50 pt-2">
+          <div className="mono text-[11px] text-ink-faint">{r.timeframe.toUpperCase()} chart</div>
+          {r.observations.map((o, i) => (
+            <div key={i} className="mt-0.5 text-[12.5px] text-ink-dim">{o}</div>
+          ))}
+        </div>
+      ))}
+      {p.note && <p className="mt-2 text-[11.5px] text-ink-faint">{p.note}</p>}
+    </div>
+  );
+}
 function SellStructurePanel({ s, chain }: { s: NonNullable<ThreatScan["deep"]["sellers"]>; chain: string }) {
   const flagged = s.topSellers.filter((x) => x.flags.length > 0);
   const rows = (flagged.length ? flagged : s.topSellers).slice(0, 8);
@@ -610,6 +634,138 @@ function Tokenomics({ tk, lpOverride }: { tk: ThreatScan["tokenomics"]; lpOverri
         {tk.rewardPools.length > 0 && row("Reward / emission pools", <span>{tk.rewardPools.map((p) => `${p.label} ${p.pct.toFixed(1)}%`).join(", ")} <span className="text-ink-faint/70">· cadence tracking is a next phase</span></span>)}
         {row("Top non-pool holder", <span>{tk.realHolderTopPct.toFixed(1)}%</span>)}
       </div>
+    </div>
+  );
+}
+
+function OwnershipSnapshot({ scan }: { scan: ThreatScan }) {
+  const { dossier: d, deployer } = scan;
+  const holdersMeasured = d.holdersAssessed !== false && d.topHolders.length > 0;
+  const topHolders = holdersMeasured
+    ? d.topHolders.filter((holder) => !holder.tag?.toLowerCase().includes("pool")).slice(0, 6)
+    : [];
+  return (
+    <div className="panel overflow-hidden">
+      <div className="grid border-b border-line/70 sm:grid-cols-4">
+        <div className="px-4 py-3">
+          <span className="mono text-[10px] uppercase tracking-widest text-ink-faint">Largest non-pool holder</span>
+          <strong className="mt-1 block text-[20px] text-ink">{holdersMeasured ? `${scan.tokenomics.realHolderTopPct.toFixed(1)}%` : "Not measured"}</strong>
+        </div>
+        <div className="border-line/70 px-4 py-3 sm:border-l">
+          <span className="mono text-[10px] uppercase tracking-widest text-ink-faint">Known insider share</span>
+          <strong className="mt-1 block text-[20px] text-ink">{holdersMeasured ? `${d.insiderPct.toFixed(1)}%` : "Not measured"}</strong>
+        </div>
+        <div className="border-line/70 px-4 py-3 sm:border-l">
+          <span className="mono text-[10px] uppercase tracking-widest text-ink-faint">Holder bundles</span>
+          <strong className="mt-1 block text-[20px] text-ink">{holdersMeasured ? d.bundleCount : "Not measured"}</strong>
+        </div>
+        <div className="border-line/70 px-4 py-3 sm:border-l">
+          <span className="mono text-[10px] uppercase tracking-widest text-ink-faint">Deployer history</span>
+          <strong className="mt-1 block text-[16px] text-ink">{deployer.serialHoneypoter ? "Prior honeypots found" : deployer.priorRugs > 0 ? `${deployer.priorRugs} prior flags` : deployer.address ? "No adverse history" : "Unresolved"}</strong>
+        </div>
+      </div>
+      {topHolders.length > 0 && (
+        <div className="px-4 py-3">
+          <div className="mono text-[10px] uppercase tracking-widest text-ink-faint">Largest measured holders</div>
+          <div className="mt-2 grid gap-x-5 sm:grid-cols-2">
+            {topHolders.map((holder) => (
+              <div key={holder.address} className="flex items-center justify-between gap-3 border-t border-line/60 py-2">
+                <span className="mono min-w-0 truncate text-[11px] text-ink-dim">{shortAddr(holder.address)}{holder.tag ? ` · ${holder.tag}` : ""}</span>
+                <strong className="mono shrink-0 text-[11px] text-ink">{holder.percent.toFixed(2)}%</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MarketRiskSummary({ scan }: { scan: ThreatScan }) {
+  const items = [
+    ...scan.call.flags.map((text) => ({ text, tone: "var(--color-avoid)", label: "Flag" })),
+    ...scan.call.warnings.map((text) => ({ text, tone: "var(--color-caution)", label: "Watch" })),
+    ...scan.call.positives.map((text) => ({ text, tone: "var(--color-pass)", label: "Support" })),
+  ].slice(0, 5);
+  return (
+    <div className="panel flex gap-5 p-5 max-sm:flex-col">
+      <RiskRing risk={scan.call.risk} verdict={scan.call.verdict} size={92} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mono text-[11px] font-semibold uppercase tracking-wider" style={{ color: VERDICT_META[scan.call.verdict].color }}>{scan.call.verdict}</span>
+          <span className="text-[13px] font-medium text-ink">{scan.call.action}</span>
+        </div>
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
+          This is the concise market-and-mechanics interpretation of the saved token evidence. It does not treat price decline alone as a safety failure.
+        </p>
+        {items.length > 0 && (
+          <ul className="mt-3 grid gap-2 lg:grid-cols-2">
+            {items.map((item, index) => (
+              <li key={`${item.label}:${index}`} className="flex gap-2 text-[12px] leading-relaxed text-ink-dim">
+                <span className="mono shrink-0 text-[9px] uppercase tracking-wider" style={{ color: item.tone }}>{item.label}</span>
+                <span>{item.text}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The project report's canonical token chapter. The light market overview is
+ * rendered by ProjectTokenCard; this component places every saved deep token
+ * read directly beneath it instead of burying a second threat report near the
+ * methodology appendix.
+ */
+export function ProjectMarketIntelligence({ scan }: { scan: ThreatScan }) {
+  const launchLpOverride = scan.deep.launch && !scan.deep.launch.onCurve
+    && (scan.deep.launch.lpDisposition === "burned" || scan.deep.launch.lpDisposition === "protocol-owned" || scan.deep.launch.lpDisposition === "locked")
+    && (scan.tokenomics.lp.status === "unconfirmed" || scan.tokenomics.lp.status === "unlocked")
+    ? `${scan.deep.launch.venue}: ${scan.deep.launch.lpNote}`
+    : null;
+  return (
+    <div className="space-y-8 border-t border-line/70 px-3 pb-5 pt-7 sm:px-4">
+      <section aria-labelledby="market-ownership-title">
+        <div className="mb-3">
+          <div className="eyebrow">02 · Ownership and concentration</div>
+          <h3 id="market-ownership-title" className="mt-1 text-[22px] font-semibold tracking-tight text-ink">Who controls the supply.</h3>
+          <p className="mt-1 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">Largest holders, known insider exposure, deployer history, and related-wallet clustering.</p>
+        </div>
+        <OwnershipSnapshot scan={scan} />
+        <InsiderClusters scan={scan} />
+      </section>
+
+      <section aria-labelledby="market-trading-title">
+        <div className="mb-3">
+          <div className="eyebrow">03 · Trading behavior</div>
+          <h3 id="market-trading-title" className="mt-1 text-[22px] font-semibold tracking-tight text-ink">Who is buying, selling, and moving supply.</h3>
+          <p className="mt-1 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">Realized selling, buyer cohorts, common holdings, and the origin of tokens reaching the market.</p>
+        </div>
+        {scan.deep.sellers && (scan.deep.sellers.sellerCount > 0 || scan.deep.sellers.devSold || scan.deep.sellers.recentTape) && <SellStructurePanel s={scan.deep.sellers} chain={scan.chain} />}
+        <BuyerCohort scan={scan} />
+        <BehindLedger scan={scan} />
+      </section>
+
+      <section aria-labelledby="market-mechanics-title">
+        <div className="mb-3">
+          <div className="eyebrow">04 · Market mechanics</div>
+          <h3 id="market-mechanics-title" className="mt-1 text-[22px] font-semibold tracking-tight text-ink">How the token and its liquidity work.</h3>
+          <p className="mt-1 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">Liquidity custody, launch structure, trading taxes, burns, and pools set aside.</p>
+        </div>
+        {scan.deep.launch && scan.deep.launch.kind !== "unknown" && <LaunchPanel launch={scan.deep.launch} />}
+        <Tokenomics tk={scan.tokenomics} lpOverride={launchLpOverride} />
+      </section>
+
+      <section aria-labelledby="market-risks-title">
+        <div className="mb-3">
+          <div className="eyebrow">05 · Market risks</div>
+          <h3 id="market-risks-title" className="mt-1 text-[22px] font-semibold tracking-tight text-ink">What these facts mean.</h3>
+          <p className="mt-1 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">A decision-oriented read of the token evidence, separated from the project score.</p>
+        </div>
+        <MarketRiskSummary scan={scan} />
+      </section>
     </div>
   );
 }
@@ -739,6 +895,9 @@ function Report({ scan }: { scan: ThreatScan }) {
           && (scan.tokenomics.lp.status === "unconfirmed" || scan.tokenomics.lp.status === "unlocked")
           ? `${scan.deep.launch.venue}: ${scan.deep.launch.lpNote}` : null}
       />
+
+      {/* chart posture: generic technical read for majors that trade on large venues */}
+      {scan.deep.posture && <TechnicalPosturePanel p={scan.deep.posture} />}
 
       {/* market structure: chart, trading ranges, volume concentration, fib zones */}
       <MarketStructurePanel address={scan.address} chain={scan.chain} pairAddress={scan.dossier.pairAddress} />

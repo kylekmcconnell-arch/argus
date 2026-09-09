@@ -56,24 +56,29 @@ describe("project abstention fix: assessed-null P3/P4 bands", () => {
     expect(bands.P4_backing_and_partners?.tier).toBe("none");
   });
 
-  it("FIX: assessed token-identity and backing outcomes band assessed_null and clear those axes", () => {
+  it("FIX: confirmed tokenless projects omit P3 while assessed backing still clears P4", () => {
     const sections = youngProjectSections();
+    sections.tokenApplicability = {
+      state: "confirmed_tokenless",
+      axisTreatment: "not_applicable",
+      reason: "completed identity-bound search found no project token",
+    };
     (sections.checkOutcomes as unknown[]).push(
       { checkId: "project-token-identity", status: "finding", note: "assessed token identity: registry candidates were inspected and none bound to the official X account or website domain. A null result on this axis, not adverse conduct evidence.", provider: "coingecko" },
       { checkId: "project-backing-partners", status: "finding", note: "assessed backing and partners across the collected first-party record: no verified financial backer, investor, or advisor appears. A null result on this axis, not adverse evidence.", provider: "project-core-evidence" },
     );
-    const { pf, bands } = preflightWith(sections);
+    const applicableAxes = projectAxes.filter(({ axis }) => axis !== "P3_token_conduct");
+    const packet = buildScoringEvidencePacket(sections, applicableAxes);
+    const pf = inspectAnalystScoringPreflight(applicableAxes, packet);
+    const bands = deriveProjectStrengthBands(packet, applicableAxes);
     expect(pf.missingSubstantiveAxes).not.toContain("P3_token_conduct");
     expect(pf.missingSubstantiveAxes).not.toContain("P4_backing_and_partners");
     const p3 = bands.P3_token_conduct;
     const p4 = bands.P4_backing_and_partners;
-    expect(p3?.tier).toBe("assessed_null");
+    expect(p3).toBeUndefined();
     expect(p4?.tier).toBe("assessed_null");
     // Low band only, anchored by the assessment artifact, never widened.
-    expect(p3?.minScore).toBe(0);
-    expect(p3?.maxScore).toBeGreaterThan(0);
     expect(p4?.floorTier).toBeUndefined();
-    expect(p3?.anchorArtifactIds.length).toBeGreaterThan(0);
   });
 
   it("keeps verified adverse evidence governing: limiting evidence still bands adverse, not assessed_null", () => {

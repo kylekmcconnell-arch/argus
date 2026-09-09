@@ -90,6 +90,79 @@ describe("DossierReport", () => {
     expect(container.querySelector("#dossier-sources")).toBeNull();
   });
 
+  it("turns a source-backed product narrative into distinct, neutral product capabilities", () => {
+    const payload = livePayload();
+    payload.display_name = "Fedi";
+    payload.handle = "@fedibtc";
+    payload.website = "https://fedi.xyz";
+    payload.basicFacts = [{
+      predicate: "product",
+      value: "Bitcoin wallet",
+      status: "verified",
+      sources: [{
+        url: "https://fedi.xyz/product",
+        excerpt: "Fedi is a privacy-first Bitcoin wallet.",
+        relation: "supports",
+        artifactVerified: true,
+        sourceClass: "first_party",
+      }],
+    }];
+
+    act(() => {
+      root.render(
+        <DossierReport
+          payload={payload}
+          includeBeats={["product"]}
+          includeSources={false}
+          subjectSummary="Fedi is the privacy-first Bitcoin application built on Fedimint that provides multispend group accounts, community custody, integrated chat spaces, and a mini-app catalog so communities can coordinate payments and local tools."
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("What the product is and how it works.");
+    expect(container.textContent).toContain("Multispend accounts");
+    expect(container.textContent).toContain("Community custody");
+    expect(container.textContent).toContain("Integrated chat");
+    expect(container.textContent).toContain("Mini-app catalog");
+    expect(container.textContent).not.toContain("4 products are on file");
+    expect(container.textContent).toContain("A shared-account feature that lets multiple participants coordinate approvals and payments.");
+    expect(container.textContent).toContain("A community custody model built on Fedimint");
+    expect(container.querySelectorAll(".product-portfolio-card")).toHaveLength(4);
+  });
+
+  it("does not repeat promotional product language as an ARGUS conclusion", () => {
+    const payload = livePayload();
+    payload.basicFacts = [{
+      predicate: "product",
+      value: "Privacy for any app. Powered by DePIN. Built for freedom. Join the revolution.",
+      status: "verified",
+      sources: [{
+        url: "https://clutch.markets/product",
+        excerpt: "Privacy for any app. Powered by DePIN. Built for freedom.",
+        relation: "supports",
+        artifactVerified: true,
+        sourceClass: "first_party",
+      }],
+    }];
+
+    act(() => {
+      root.render(
+        <DossierReport
+          payload={payload}
+          includeBeats={["product"]}
+          includeSources={false}
+          subjectSummary="The project provides a privacy application."
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("What the product is and how it works.");
+    const portfolio = container.querySelector(".product-portfolio");
+    expect(portfolio?.textContent).toContain("Privacy application layer");
+    expect(portfolio?.textContent).toContain("A privacy layer for applications");
+    expect(portfolio?.textContent).not.toMatch(/built for freedom|join the revolution|powered by/i);
+  });
+
   it("renders buildDossier of the live payload, never the dynex fixture", () => {
     render(livePayload());
     expect(container.textContent).toContain("@clutchmarkets");

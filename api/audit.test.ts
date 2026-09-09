@@ -1,3 +1,4 @@
+vi.mock("./_scanReceipts.js", () => ({ claimScanReceipt: vi.fn(async () => "written"), recordScanReceipt: vi.fn(async () => true) }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
@@ -46,6 +47,7 @@ vi.mock("./_graph.js", () => ({ activateReportVersionWithAuthoritativeGraph }));
 import { consumeInvestigationQuota, requireArgusAuth, serviceCredentials } from "./_auth.js";
 import { activateReportVersion } from "./_provenance.js";
 import { resolveInput, runAudit } from "./_collector.js";
+import { claimScanReceipt } from "./_scanReceipts.js";
 import handler, { config } from "./audit";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
@@ -97,6 +99,29 @@ describe("person audit input guard", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["argus", "different"])("rejects a replay for %s before a second collector starts", async (secondHandle) => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 0, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://db.example", key: "test" });
+    const actual = await vi.importActual<typeof import("./_scanReceipts.js")>("./_scanReceipts.js");
+    vi.mocked(claimScanReceipt).mockImplementationOnce(actual.claimScanReceipt).mockImplementationOnce(actual.claimScanReceipt);
+    const claimed = new Set<string>();
+    vi.stubGlobal("fetch", vi.fn(async (_url, init) => {
+      const row = JSON.parse(String(init.body));
+      const key = `${row.organization_id}:${row.run_key}`;
+      const exists = claimed.has(key);
+      claimed.add(key);
+      return new Response(JSON.stringify(exists ? [] : [row]), { status: 201 });
+    }));
+    vi.mocked(runAudit).mockResolvedValue(null);
+    const first = response();
+    await handler(request("argus", { creditKey: "replay-key-123" }), first.res);
+    const second = response();
+    await handler(request(secondHandle, { creditKey: "replay-key-123" }), second.res);
+    expect(first.captured.statusCode).toBe(200);
+    expect(second.captured.statusCode).toBe(409);
+    expect(runAudit).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -383,6 +408,39 @@ describe("person audit input guard", () => {
     expect(persistenceEvent).toEqual({
       state: "failed",
       reason: "invalid axis evidence lineage: F1_identity_verifiability cites absence evidence without a gap",
+    });
+  });
+
+  it("reports a failed save when report storage returns no immutable version instead of claiming one", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    // Report storage is not configured, so persistServerDossier returns null
+    // without throwing. The finished report still has a real verdict and score.
+    vi.mocked(serviceCredentials).mockReturnValue(undefined as never);
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@argus",
+      report: { audit_id: "audit-run-unconfigured-storage", composite_verdict: "PASS", governing_score: 81 },
+      cost: { schemaVersion: 1, calls: [] },
+    } as never);
+    const { res, captured } = response();
+
+    await handler(request("argus"), res);
+
+    expect(persistReportVersionBundle).not.toHaveBeenCalled();
+    expect(issuePanelCostToken).not.toHaveBeenCalled();
+    const stream = captured.chunks.join("");
+    const done = JSON.parse(stream.match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    // The score survives; only the save receipt is reported as failed.
+    expect(done.report.governing_score).toBe(81);
+    expect(done.persistence).toEqual({
+      state: "failed",
+      reportVersionId: null,
+      reason: "Report storage did not return an immutable version for this scan.",
+    });
+    const persistenceEvent = JSON.parse(stream.match(/event: persistence\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    expect(persistenceEvent).toEqual({
+      state: "failed",
+      reason: "Report storage did not return an immutable version for this scan.",
     });
   });
 

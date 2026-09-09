@@ -28,6 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!r.ok) { res.status(200).json({ available: false, error: `rugcheck ${r.status}` }); return; }
     const d = (await r.json()) as any;
 
+    if (!Array.isArray(d.topHolders)) { res.status(200).json({ available: false, note: "Holder records unavailable from RugCheck." }); return; }
     const supply = Number(d.token?.supply ?? 0);
     const ka: Record<string, { name?: string; type?: string }> = d.knownAccounts ?? {};
     const labelOf = (h: any) => ka[h.address] || ka[h.owner] || null;

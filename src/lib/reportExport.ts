@@ -1,3 +1,4 @@
+import { presentPublicReport } from "./reportPresentation";
 // Export a rendered audit to a portable document. Two dependency-free targets:
 //   • PDF      - render a print-styled standalone page and hand it to the browser's
 //                native "Save as PDF" (window.print). Highest fidelity, no libs.
@@ -37,6 +38,19 @@ const roleLabel = (r: string) => ROLE_META[r as SubjectClass]?.label ?? r;
 // A short host string from a URL for compact source lines.
 const host = (u: string) => String(u ?? "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
 
+const safeHref = (value?: string): string | null => {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value.trim());
+    if ((parsed.protocol === "https:" || parsed.protocol === "http:") && parsed.hostname && !parsed.username && !parsed.password) {
+      return esc(parsed.href);
+    }
+  } catch {
+    // Invalid or non-web URLs remain unavailable in the portable export.
+  }
+  return null;
+};
+
 /* ── section builders ─────────────────────────────────────────────── */
 
 function subjectBlock(d: Dossier): string {
@@ -67,16 +81,17 @@ function subjectBlock(d: Dossier): string {
 
 function verdictBanner(d: Dossier): string {
   const r = d.report;
-  const color = verdictHex(r.composite_verdict);
+  const presentation = presentPublicReport({ verdict: r.composite_verdict, score: r.governing_score, completeness: d.completeness_state ?? "partial", scoreCoverage: r.score_coverage, checks: d.checkRuns });
+  const color = presentation.color;
   const gov = r.governing_role ? ` &nbsp;·&nbsp; governed by ${esc(roleLabel(r.governing_role))}` : "";
   const cap = r.cap_applied ? `<div class="cap">▲ Hard cap · ${esc(capLabel(r.cap_applied))}</div>` : "";
   return `
     <div class="banner" style="border-color:${color}">
-      <div class="banner-score" style="color:${color}">${r.governing_score == null ? "-" : r.governing_score}<span>/100</span></div>
+      <div class="banner-score" style="color:${color}">${presentation.primaryScore || "-"}<span>/100</span></div>
       <div class="banner-body">
-        <div class="banner-kicker">Composite verdict</div>
-        <div class="banner-verdict" style="color:${color}">${esc(verdictLabel(r.composite_verdict))}${gov}</div>
-        ${d.headline ? `<p class="headline">${esc(d.headline)}</p>` : ""}
+        <div class="banner-kicker">${esc(presentation.scoreLabel ?? presentation.resultLabel)}</div>
+        <div class="banner-verdict" style="color:${color}">${esc(presentation.displayVerdict)}${gov}</div>
+        <p class="headline">${esc(presentation.final ? d.headline : presentation.note)}</p>
         ${cap}
       </div>
     </div>`;
@@ -146,7 +161,7 @@ function roleBreakdown(d: Dossier): string {
         <div class="role-card">
           <div class="role-head">
             <span class="role-name">${esc(roleLabel(rr.role))}${rr.role === gov ? ' <span class="pill">governs</span>' : ""}</span>
-            <span class="role-verdict" style="color:${color}">${esc(verdictLabel(rr.verdict))} · ${rr.score_total == null ? "-" : rr.score_total}/100</span>
+            <span class="role-verdict" style="color:${color}">${esc(rr.score_coverage?.provisional && rr.score_total != null && rr.verdict !== "AVOID" && rr.verdict !== "UNVERIFIABLE_IDENTITY" ? "PROVISIONAL" : verdictLabel(rr.verdict))} · ${rr.score_total == null ? "-" : rr.score_total}/100</span>
           </div>
           ${rr.cap_applied ? `<p class="cap-line">cap · ${esc(capLabel(rr.cap_applied))}</p>` : ""}
           ${axes}
@@ -207,19 +222,30 @@ function walletsBlock(d: Dossier): string {
 function testimonialsBlock(d: Dossier): string {
   const t = d.evidence.testimonials ?? [];
   if (!t.length) return "";
+  const publicSignal = (x: (typeof t)[number]): string => {
+    const ack = x.public_acknowledgment?.toLowerCase();
+    if (ack === "endorsement") return "Public endorsement found";
+    if (ack === "thanks") return "Public acknowledgment found";
+    if (ack === "mention") return "Public mention found; relationship unconfirmed";
+    if (ack === "none" || x.follows_subject === false) return "No public confirmation found";
+    if (x.follows_subject === true) return "Follows the project; acknowledgment not checked";
+    return "Independent confirmation was not completed";
+  };
   const rows = t
-    .map(
-      (x) => `
+    .map((x) => {
+      const claimHref = safeHref(x.evidence_url);
+      const acknowledgmentHref = safeHref(x.acknowledgment_source_url);
+      return `
       <tr>
-        <td>${esc(x.claimed_endorser_handle ?? x.claimed_endorser_name ?? "-")}${x.claimed_relationship ? `<br><span class="dim">claims: ${esc(x.claimed_relationship)}</span>` : ""}</td>
-        <td>${x.follows_subject ? "follows" : "no follow"} · ${esc(x.public_acknowledgment && x.public_acknowledgment !== "none" ? x.public_acknowledgment : "no ack")}</td>
+        <td>${esc(x.claimed_endorser_handle ?? x.claimed_endorser_name ?? "-")}${x.claimed_relationship ? `<br><span class="dim">Claimed role: ${esc(x.claimed_relationship)}</span>` : ""}${claimHref ? `<br><a href="${claimHref}">Claim source</a>` : `<br><span class="dim">Exact claim link unavailable</span>`}</td>
+        <td>${esc(publicSignal(x))}${acknowledgmentHref ? `<br><a href="${acknowledgmentHref}">Public acknowledgment</a>` : ""}</td>
         <td>${esc(x.corroboration_verdict ?? "Unconfirmed")}</td>
-      </tr>`,
-    )
+      </tr>`;
+    })
     .join("");
   return section(
-    "Testimonial corroboration",
-    `<table><thead><tr><th>Claimed endorser</th><th>Public signal</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table>`,
+    "Claimed relationships",
+    `<p class="note">People or organizations the subject publicly described as advisors, investors, partners, or backers. These claims remain separate from independent confirmation.</p><table><thead><tr><th>Named party and claimed role</th><th>Independent verification</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table>`,
   );
 }
 

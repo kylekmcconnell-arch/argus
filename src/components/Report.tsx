@@ -26,12 +26,13 @@ import { usdCompact } from "../lib/format";
 import { claimedTicker, deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { buildPublicClaimConflictDiscovery, buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
-import { DecisionLensSelector, NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
+import { NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
 import type { DecisionLensId } from "../intelligence/types";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
 import type { Dossier } from "../data/dossier";
 import type { SourceArtifact } from "../data/evidence";
+import type { TokenDossier } from "../token/audit";
 import { getProfile, SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
@@ -69,6 +70,7 @@ import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
 import { ProjectIntel } from "./ProjectIntel";
 import { ProjectTokenCard } from "./ProjectTokenCard";
+import { EntityContinuityTimeline } from "./EntityContinuityTimeline";
 import { changeReportLifecycle } from "../lib/reports";
 import { LegalScreen } from "./LegalScreen";
 import { SanctionsNameScreen } from "./SanctionsNameScreen";
@@ -78,7 +80,7 @@ import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvide
 import { DecisionBasis } from "./DecisionBasis";
 import { isStrictFundScaleArtifact } from "../lib/fundScaleEvidence";
 import { portfolioRelationshipBinding, type PortfolioBindingSubject } from "../lib/portfolioRelationshipBinding";
-import { buildDecisionBasis } from "../lib/decisionBasis";
+import { buildDecisionBasis, verifiedDecisionPressureArtifact } from "../lib/decisionBasis";
 import {
   ReportCanvasNarrativeSection,
   ReportCanvasRailCard,
@@ -104,14 +106,16 @@ import {
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 import { isExactOfficialXProfile, projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 import { ExpandableText } from "./ExpandableText";
-import { formatRoleLabel, plainLanguageSummary, plainReportStatusLabel, publicCheckLabel, publicCheckNote, publicConcernTitle } from "../lib/plainLanguage";
+import { formatRoleLabel, plainLanguageSummary, plainReportStatusLabel, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
+import { teamCandidateSourceMatchesIdentity } from "../lib/teamCandidateIdentity";
 import { publicFindingTitle, publicIntelligenceText, publicStrengthLabel } from "../lib/intelligencePresentation";
 import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
 import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
-import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
+import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion, isProductDescriptionQuestion } from "../lib/intelligenceBrief";
+import { hasBoundProjectDescription, hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
 import { SocialActivityPanel } from "./SocialActivityPanel";
 import { reportOpeningNarrative } from "../lib/reportNarrative";
 import { useReportLane } from "../reports/shared/ReportLaneContext";
@@ -453,10 +457,6 @@ function evidenceStrength({
   return "Limited support";
 }
 
-function questionMeta(count: number): string {
-  return count > 0 ? ` · ${count} ${count === 1 ? "question" : "questions"} to verify` : "";
-}
-
 // Copy a full wallet address (the row shows a truncated form).
 function CopyAddr({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -562,7 +562,12 @@ function RoleCard({ rr, governing, scoreState }: { rr: RoleReport; governing: bo
             {governing && <span className="chip">score used</span>}
           </div>
           <div className="mt-1 flex items-center gap-2">
-            <VerdictPill verdict={rr.verdict} />
+            <VerdictPill verdict={rr.score_coverage?.provisional && rr.verdict !== "AVOID" && rr.verdict !== "UNVERIFIABLE_IDENTITY" && rr.score_total !== null ? "PROVISIONAL" : rr.verdict} />
+            {rr.score_coverage?.provisional && (
+              <span className="mono text-[11px] text-ink-dim">
+                {rr.score_coverage.assessedAxes} of {rr.score_coverage.totalAxes} areas assessed
+              </span>
+            )}
             {!coverageReady && rr.verdict === "PASS" && (
               <span className="mono text-[11px] font-medium uppercase tracking-wide text-caution">
                 {provisional ? "checks still open" : "score not ready"}
@@ -637,48 +642,102 @@ const TV_TONE: Record<string, string> = {
 };
 const TV_SHORT: Record<string, string> = {
   Corroborated: "Confirmed",
-  PartiallyCorroborated: "Mixed",
-  Unconfirmed: "Not confirmed",
-  Contradicted: "Sources disagree",
+  PartiallyCorroborated: "Partial evidence",
+  Unconfirmed: "Not independently confirmed",
+  Contradicted: "Conflicting evidence",
 };
+
+function relationshipSignalLabel(follows?: boolean | null, acknowledgment?: string | null): string {
+  const ack = acknowledgment?.toLowerCase();
+  if (ack === "endorsement") return "Public endorsement found";
+  if (ack === "thanks") return "Public acknowledgment found";
+  if (ack === "mention") return "Public mention found; relationship unconfirmed";
+  if (ack === "none" && follows === true) return "Follows the project; no relationship confirmation found";
+  if (ack === "none" || follows === false) return "No public confirmation found";
+  if (follows === true) return "Follows the project; acknowledgment not checked";
+  return "Independent confirmation was not completed";
+}
+
+function xProfileLink(handle: string): { href: string; label: string } | null {
+  const match = handle.trim().match(/^@([A-Za-z0-9_]{1,30})$/);
+  return match ? { href: `https://x.com/${match[1]}`, label: "Open X profile" } : null;
+}
+
+function xClaimSearchLink(subjectHandle: string, namedParty: string): string | null {
+  const subject = subjectHandle.trim().replace(/^@/, "");
+  const party = namedParty.trim().match(/^@[A-Za-z0-9_]{1,30}$/)?.[0];
+  if (!subject || !party) return null;
+  return `https://x.com/search?q=${encodeURIComponent(`from:${subject} ${party}`)}&src=typed_query&f=live`;
+}
 
 function CorroborationTable({
   rows,
+  subjectHandle,
 }: {
-  rows: { who: string; rel?: string; follows?: boolean | null; ack?: string | null; verdict?: string; note?: string }[];
+  rows: {
+    who: string;
+    rel?: string;
+    follows?: boolean | null;
+    ack?: string | null;
+    verdict?: string;
+    note?: string;
+    evidenceUrl?: string;
+    acknowledgmentUrl?: string;
+  }[];
+  subjectHandle: string;
 }) {
   return (
     <Card className="overflow-hidden">
-      <div className="grid grid-cols-[1.4fr_1fr_auto] gap-2 border-b border-line px-4 py-2 eyebrow">
-        <span>Claimed endorser</span>
-        <span>Public signal</span>
+      <div className="border-b border-line px-4 py-3 text-[12.5px] leading-relaxed text-ink-dim">
+        These are people or organizations the subject publicly described as advisors, investors, partners, or backers. A claim is not treated as confirmed until the named party acknowledges it or another source corroborates it.
+      </div>
+      <div className="hidden grid-cols-[1.25fr_1.15fr_auto] gap-3 border-b border-line px-4 py-2 eyebrow sm:grid">
+        <span>Named party and claimed role</span>
+        <span>Independent verification</span>
         <span className="text-right">Result</span>
       </div>
       <div className="divide-y divide-line/60">
-        {rows.map((r, i) => (
-          <div key={i} className="grid grid-cols-[1.4fr_1fr_auto] items-center gap-2 px-4 py-2.5">
-            <div className="min-w-0">
-              <div className="mono truncate text-[12.5px] text-ink">{r.who}</div>
-              {r.rel && <div className="text-[11px] text-ink-faint">claims: {r.rel}</div>}
+        {rows.map((r, i) => {
+          const profile = xProfileLink(r.who);
+          const claimSource = safeSourceLink(r.evidenceUrl);
+          const acknowledgmentSource = safeSourceLink(r.acknowledgmentUrl);
+          const claimSearch = claimSource ? null : xClaimSearchLink(subjectHandle, r.who);
+          return (
+            <div key={i} className="grid grid-cols-1 items-start gap-3 px-4 py-3 sm:grid-cols-[1.25fr_1.15fr_auto]">
+              <div className="min-w-0">
+                {profile ? (
+                  <a href={profile.href} target="_blank" rel="noopener noreferrer" className="mono block truncate text-[12.5px] text-ink underline-offset-2 hover:text-signal-lift hover:underline">{r.who}</a>
+                ) : (
+                  <div className="mono truncate text-[12.5px] text-ink">{r.who}</div>
+                )}
+                <div className="mt-0.5 text-[11.5px] text-ink-dim">Claimed role: {r.rel || "relationship not specified"}</div>
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                  {claimSource ? (
+                    <a href={claimSource.href} target="_blank" rel="noopener noreferrer" className="link-ext">Open claim source</a>
+                  ) : claimSearch ? (
+                    <>
+                      <span className="text-ink-faint">Exact claim link not preserved in this saved scan.</span>
+                      <a href={claimSearch} target="_blank" rel="noopener noreferrer" className="link-ext">Search the subject's posts</a>
+                    </>
+                  ) : (
+                    <span className="text-ink-faint">Claim source link unavailable</span>
+                  )}
+                </div>
+              </div>
+              <div className="min-w-0 text-[12.5px] leading-relaxed text-ink-dim">
+                <div>{relationshipSignalLabel(r.follows, r.ack)}</div>
+                {acknowledgmentSource && (
+                  <a href={acknowledgmentSource.href} target="_blank" rel="noopener noreferrer" className="link-ext mt-1.5 inline-flex">Open acknowledgment</a>
+                )}
+              </div>
+              <div className="max-w-[14rem] sm:max-w-[11rem] sm:text-right">
+                <span className="mono text-[11px] font-medium" style={{ color: TV_TONE[r.verdict ?? "Unconfirmed"] }}>
+                  {TV_SHORT[r.verdict ?? "Unconfirmed"]}
+                </span>
+              </div>
             </div>
-            {/* null/undefined means the check never ran: render "unchecked",
-                not an affirmative negative about a named person */}
-            <div className="text-[12.5px] text-ink-dim">
-              <span className={r.follows ? "text-ink-dim" : "text-ink-faint line-through/0"}>
-                {r.follows ? "follows" : r.follows === false ? "no follow" : "follow unchecked"}
-              </span>
-              <span className="text-ink-faint"> · {!r.ack ? "ack unchecked" : r.ack !== "none" ? r.ack : "no ack"}</span>
-            </div>
-            <div className="text-right">
-              <span
-                className="mono text-[11px] font-medium"
-                style={{ color: TV_TONE[r.verdict ?? "Unconfirmed"] }}
-              >
-                {TV_SHORT[r.verdict ?? "Unconfirmed"]}
-              </span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Card>
   );
@@ -1426,6 +1485,7 @@ function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
   const seen = new Set<string>();
   return [...(dossier.webTeamLeads ?? []), ...inferred].filter((member) => {
     if (!meaningfulTeamMember(member)) return false;
+    if (!teamCandidateSourceMatchesIdentity(member)) return false;
     // Orientation also discovers support accounts, integrations, grantors,
     // speakers, customers, and community examples. Those remain available in
     // the evidence appendix, but they are not team candidates.
@@ -1605,9 +1665,9 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
   );
 }
 
-export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
+export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSavedResearch, onOpenTokenReport, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onResearchAudit?: (q: string, privateSearch?: boolean) => void; onOpenSavedResearch?: (q: string, kind: "person" | "token") => void; onOpenTokenReport?: (token: TokenDossier) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
   const reportLane = useReportLane();
-  const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
+  const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("general_diligence");
   const reportStyle = reportLane.definition.presentationStyle;
   const { role } = useArgusAuth();
   const f = dossier;
@@ -1839,7 +1899,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const governingRoleReport = report.role_reports.find((rr) => rr.role === report.governing_role)
     ?? report.role_reports[0];
   const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
-  const compositionRows = governingAxes.map(([axis, a]) => ({
+  const tokenAxisApplicability = governingRoleReport?.axis_applicability?.P3_token_conduct;
+  const tokenAxisExcluded = tokenAxisApplicability?.axisTreatment === "not_applicable"
+    || tokenAxisApplicability?.axisTreatment === "deferred";
+  const compositionRows = [
+    ...governingAxes.map(([axis, a]) => ({
     axis,
     label: diligenceAreaLabel(axis),
     score: a.score,
@@ -1849,8 +1913,29 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     counterCount: a.counterEvidenceRefs?.length,
     questionCount: a.gaps?.length,
     evidenceHref: f.projectStrengthBands ? `#dimension-${axis}` as const : undefined,
-  }));
+    })),
+    ...(tokenAxisExcluded ? [{
+      axis: "P3_token_conduct",
+      label: "Token design and conduct",
+      score: 0,
+      weight: 0,
+      rationale: tokenAxisApplicability.reason,
+      evidenceHref: null,
+      applicability: tokenAxisApplicability.axisTreatment as "not_applicable" | "deferred",
+      sublabel: tokenAxisApplicability.axisTreatment === "deferred" ? "deferred until launch" : "not applicable",
+      countsLine: `Project score normalized over ${governingRoleReport?.applicable_weight ?? 80} applicable points.`,
+    }] : []),
+  ];
   const linkedTokenDossier = f.threat?.dossier;
+  const tokenPairCreatedAt = linkedTokenDossier?.pairCreatedAt ?? f.projectToken?.pairCreatedAt ?? null;
+  const reportReferenceTime = Date.parse(report.finalized_at ?? f.projectToken?.capturedAt ?? "");
+  const tokenLaunchAgeDays = linkedTokenDossier?.ageDays ?? (
+    typeof tokenPairCreatedAt === "number"
+    && Number.isFinite(tokenPairCreatedAt)
+    && Number.isFinite(reportReferenceTime)
+      ? Math.max(0, (reportReferenceTime - tokenPairCreatedAt) / 86_400_000)
+      : null
+  );
   const linkedTokenCompositionRows = linkedTokenDossier
     ? orderByPlainAxis(linkedTokenDossier.axes.map((tokenAxis) => ({
       axis: tokenAxis.key,
@@ -1861,7 +1946,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       evidenceHref: "#project-token-threat" as const,
     })))
     : [];
-  const linkedTokenScore = linkedTokenDossier || f.projectToken
+  const tokenSafetyAxisTreatment = f.tokenApplicability?.axisTreatment ?? tokenAxisApplicability?.axisTreatment;
+  const tokenSafetyScoreSuppressed = tokenSafetyAxisTreatment === "not_applicable"
+    || tokenSafetyAxisTreatment === "deferred"
+    || tokenSafetyAxisTreatment === "provisional";
+  const linkedTokenScore = !tokenSafetyScoreSuppressed && (linkedTokenDossier || f.projectToken?.verified)
     ? {
       label: "Token safety score",
       score: linkedTokenDossier?.score ?? null,
@@ -1969,6 +2058,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const presentation = presentPublicReport({
     verdict: report.composite_verdict,
     score: report.governing_score,
+    scoreCoverage: report.score_coverage,
     completeness: presentationCompleteness,
     readiness: {
       status: readiness.status,
@@ -2223,6 +2313,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       ack: t.public_acknowledgment,
       verdict: t.corroboration_verdict,
       note: t.notes,
+      evidenceUrl: t.evidence_url,
+      acknowledgmentUrl: t.acknowledgment_source_url,
     })),
   ];
 
@@ -2247,7 +2339,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     const diagnostic = [check.label, check.note, check.provider].filter(Boolean).join(" ").toLowerCase();
     const optionalSource = /\b(?:crunchbase|reddit|people data labs|pdl|grok|twitterapi(?:\.io)?|x provider)\b/.test(diagnostic);
     const availabilityOnly = /\b(?:collection|provider|api|failed|failure|partial|unavailable|rate limit)\b/.test(diagnostic);
-    return !(optionalSource && availabilityOnly);
+    return isReaderDecisionCheck(check) && !(optionalSource && availabilityOnly);
   });
   const providerGaps = (f.providerSnapshot?.runs ?? []).filter((run) =>
     run.state === "partial" || run.state === "failed" || run.state === "unavailable",
@@ -2257,6 +2349,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const intelligenceBrief = f.intelligence
     ? deriveIntelligenceBrief(f.intelligence, decisionLensId)
     : { supports: [], pressures: [], context: [], questions: [] };
+  const boundProjectIdentity = hasBoundProjectIdentity(f);
+  const boundProjectDescription = hasBoundProjectDescription(f);
 
   const axisSupportNarrative: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
     .filter((axis) => Boolean(axis.rationale) && axis.support.length > 0)
@@ -2311,6 +2405,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   // a single aggregate row so a favorable report can never render an
   // all-clear while questions remain open.
   const confidenceLimitsBase: ReportCanvasNarrativeItem[] = [
+    ...(tokenLaunchAgeDays !== null && tokenLaunchAgeDays < 30 ? [{
+      id: "recent-token-launch",
+      title: "The token launched recently.",
+      detail: tokenLaunchAgeDays < 1
+        ? "The market has less than one day of trading history. That is too little history to judge how liquidity, holder behavior, and price hold up over time."
+        : `The market has about ${Math.max(1, Math.round(tokenLaunchAgeDays))} days of trading history. That is still a short record for judging how liquidity, holder behavior, and price hold up over time.`,
+      provenance: "Saved market history",
+      href: "#project-token" as `#${string}`,
+    }] : []),
     ...(report.cap_applied ? [{
       id: "hard-cap",
       title: `The score is limited because of: ${capLabel(report.cap_applied)}.`,
@@ -2336,51 +2439,27 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       provenance: item.provenance,
       href: "#decision-intelligence" as `#${string}`,
     })),
-    ...decisionBasisSummary.rows
-      .filter((axis) => axis.counter.length > 0)
-      .map((axis) => ({
-        id: `counter-${axis.axis}`,
-        title: `The evidence on ${diligenceAreaLabel(axis.axis).toLowerCase()} is mixed.`,
-        detail: `${axis.counter.length} ${axis.counter.length === 1 ? "source disagrees" : "sources disagree"}.`,
-        provenance: "Review competing sources",
+    ...decisionBasisSummary.rows.flatMap((axis) => {
+      const artifact = verifiedDecisionPressureArtifact(axis);
+      if (!artifact) return [];
+      return [{
+        id: `verified-pressure-${axis.axis}-${artifact.artifactId}`,
+        title: publicFindingTitle(artifact.title),
+        detail: publicIntelligenceText(artifact.excerpt || axis.rationale),
+        provenance: "Verified score-limiting evidence",
         href: axisHref(axis.axis),
-      })),
+      }];
+    }),
   ];
   const favorableVerdict = presentedVerdict === "PASS"
     || (presentedVerdict === "PROVISIONAL" && report.composite_verdict === "PASS");
-  // Risk cards lead with a FINDING about the subject, never with our process
-  // status: an assessed-null axis gets its deterministic conclusion, any other
-  // weak axis gets the analyst's own first gap statement (already specific,
-  // already dash-stripped server-side), and only then a thin-evidence fallback.
-  // A solid or exceptional strength band is not a risk driver even when its
-  // integer floor dips just under the 70 percent line.
+  // Confidence and score are deliberately separate. An emerging band, an
+  // assessed-null axis, a first-party-only source, or an unanswered question
+  // may limit the score without establishing an adverse fact. Those states
+  // remain visible in score composition and Verify next; only the direct,
+  // verified, counter-eligible records assembled above can become cautions.
   const bandTierFor = (axis: string): string | undefined => f.projectStrengthBands?.[axis]?.tier;
-  const ASSESSED_NULL_RISK_TITLES: Record<string, string> = {
-    P3_token_conduct: "No token could be tied to the project's official identity.",
-    P4_backing_and_partners: "No outside backers or partners are verified.",
-  };
   const sentence = (value: string): string => /[.!?]$/.test(value) ? value : `${value}.`;
-  const lowAxisDrivers: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
-    .filter((axis) => axis.weight > 0 && axis.score / axis.weight < 0.7)
-    .filter((axis) => !["solid", "exceptional"].includes(bandTierFor(axis.axis) ?? ""))
-    .sort((left, right) => (left.weight ? left.score / left.weight : 1) - (right.weight ? right.score / right.weight : 1))
-    .map((axis) => {
-      const questions = Math.max(axis.gaps.length, axis.gapArtifacts.length);
-      const title = bandTierFor(axis.axis) === "assessed_null"
-        ? (ASSESSED_NULL_RISK_TITLES[axis.axis] ?? `${diligenceAreaLabel(axis.axis)} was assessed with no positive record.`)
-        : publicConcernTitle({
-          axis: axis.axis,
-          axisLabel: diligenceAreaLabel(axis.axis),
-          gap: axis.gaps[0],
-        });
-      return {
-        id: `low-axis-${axis.axis}`,
-        title,
-        detail: plainLanguageSummary(axis.rationale),
-        provenance: `Limited source support${questionMeta(questions)}`,
-        href: axisHref(axis.axis),
-      };
-    });
 
   const notApplicableCheckIds = new Set(diligenceChecks
     .filter((check) => check.status === "not-applicable")
@@ -2398,6 +2477,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         detail: publicIntelligenceText(artifact.excerpt || `Source coverage is incomplete for ${diligenceAreaLabel(axis.axis).toLowerCase()}.`),
         provenance: "Source unavailable",
         href: axisHref(axis.axis),
+        impactAxis: axis.axis,
       })));
   const axisGapQuestions: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows.flatMap((axis) =>
     axis.gaps.map((gap, index) => ({
@@ -2406,6 +2486,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       detail: "Worth confirming before you invest.",
       provenance: "Not yet confirmed",
       href: axisHref(axis.axis),
+      impactAxis: axis.axis,
     })));
   const decisionBasicFactQuestions = reportBasicFactQuestionsFor(
     basicFactsAudience,
@@ -2488,7 +2569,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     }] : []),
     ...conflictedBasicFactQuestions,
     ...intelligenceBrief.questions
-      .filter((item) => !(f.projectToken?.verified && isOfficialTokenQuestion(item)))
+      .filter((item) => !(
+        (f.projectToken?.verified && isOfficialTokenQuestion(item))
+        || (boundProjectIdentity && isOfficialIdentityQuestion(item))
+        || (boundProjectDescription && isProductDescriptionQuestion(item))
+      ))
       .map((item) => ({
       id: item.id,
       title: plainLanguageSummary(item.title),
@@ -2586,7 +2671,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     remainingPointsItems[0] ? `Top open item: ${remainingPointsItems[0].title}.` : "",
   ].filter(Boolean).join("\n");
   const confidenceLimits: ReportCanvasNarrativeItem[] = confidenceLimitsBase.slice(0, 6);
-  const adverseVerdictNarrative = [...confidenceLimits, ...lowAxisDrivers]
+  const adverseVerdictNarrative = [...confidenceLimits]
     .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
     .slice(0, 6);
   // An unverified lead is not a finding: it never enters the findings ledger and
@@ -2624,18 +2709,22 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       ...intelligenceBrief.supports.map((item) => item.title),
       ...axisSupportNarrative.map((item) => item.title),
     ],
-    concerns: [
-      ...confidenceLimitsBase,
-      ...lowAxisDrivers,
-    ].map((item) => item.title),
+    concerns: confidenceLimitsBase.map((item) => item.title),
     capReason: report.cap_applied
       ? `The score is limited because of: ${capLabel(report.cap_applied)}`
       : null,
     nextChecks: verificationNext.map((item) => item.title),
   });
   const toDecisionCanvasItems = (items: readonly ReportCanvasNarrativeItem[]): DecisionCanvasItem[] =>
-    items.map((item) => ({ label: item.title, ...(item.detail ? { detail: item.detail } : {}) }));
-  const unresolvedRequiredNextSteps: ReportCanvasNarrativeItem[] = unresolvedChecks.map((check, index) => ({
+    items.map((item) => ({
+      label: item.title,
+      ...(item.detail ? { detail: item.detail } : {}),
+      ...(item.impactAxis ? { impactAxis: item.impactAxis } : {}),
+      ...(item.impact ? { impact: item.impact } : {}),
+    }));
+  const unresolvedRequiredNextSteps: ReportCanvasNarrativeItem[] = unresolvedChecks
+    .filter(isReaderDecisionCheck)
+    .map((check, index) => ({
     id: `required-check-${check.checkId || index}`,
     title: publicCheckLabel(check.label),
     detail: publicCheckNote(check.note || (
@@ -2646,11 +2735,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           : "This required check did not finish. A rescan may complete it."
     )),
     href: "#scan-methodology" as `#${string}`,
-  }));
+    }));
   const decisionCanvasSupports = toDecisionCanvasItems(supportNarrative);
   const decisionCanvasConcerns = toDecisionCanvasItems(
-    [...confidenceLimits, ...lowAxisDrivers, ...subjectLeadNarrative]
-      .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
+    [...confidenceLimits, ...subjectLeadNarrative]
+      .filter((item, index, items) => {
+        const key = item.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ");
+        return items.findIndex((candidate) =>
+          candidate.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ") === key,
+        ) === index;
+      })
       .slice(0, 8),
   );
   const decisionCanvasContext = toDecisionCanvasItems(intelligenceContextNarrative);
@@ -2912,15 +3006,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     { href: "#report-summary", label: "Decision", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
     ...(presentation.primaryScore && governingAxes.length > 0 ? [{ href: "#composition" as const, label: "Score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" /> }] : []),
     ...(roles.includes(SubjectClass.PROJECT)
-      ? [{ href: "#dossier-product" as const, label: "Product", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]
+      ? [{ href: "#dossier-product" as const, label: "What the product is", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]
       : [{ href: "#dossier" as const, label: "Summary", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]),
+    ...(f.entityContinuity?.events.length ? [{ href: "#key-developments" as const, label: "Key developments", icon: <ArrowsClockwise aria-hidden="true" size={15} weight="bold" /> }] : []),
     { href: "#identity-evidence", label: "People", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
     ...(f.projectToken ? [{ href: "#project-token" as const, label: "Market", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
     ...(f.socialActivity && roles.includes(SubjectClass.PROJECT) ? [{ href: "#social-activity" as const, label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> }] : []),
     { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
-    ...(f.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> }] : []),
     { href: "#evidence-ledger", label: "Evidence & method", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount },
-    ...(!shareView ? [{ href: "#ask-report" as const, label: "Challenge", icon: <MagnifyingGlassPlus aria-hidden="true" size={15} weight="bold" /> }] : []),
   ];
 
   return (
@@ -3405,7 +3498,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           score={presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null}
           scoreLabel={roles.includes(SubjectClass.PROJECT) ? "Project diligence score" : "Person diligence score"}
           scoreContext={roles.includes(SubjectClass.PROJECT)
-            ? "Team, product, token conduct, backers, traction and transparency."
+            ? tokenAxisExcluded
+              ? `Token conduct is ${tokenAxisApplicability.axisTreatment === "deferred" ? "deferred until launch" : "not applicable"}; the score is normalized across team, product, backers, traction and transparency.`
+              : "Team, product, token conduct, backers, traction and transparency."
             : "Identity, operating record, relationships and attributable risk."}
           scoreIsProvisional={!presentation.final}
           favorable={favorableVerdict}
@@ -3460,52 +3555,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         >
         {reportStyle === 2 && (
           <>
-            <section id="decision-brief" className="canonical-decision-brief story-chapter report-section scroll-mt-28">
-              <header className="report-section-heading">
-                <div>
-                  <p className="eyebrow text-signal-lift">02 · Decision brief</p>
-                  <h2 className="story-chapter-title mt-2 text-ink">The case, without the repetition.</h2>
-                  <p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">
-                    The strongest evidence, the main concerns, and the questions most likely to change the result.
-                  </p>
-                </div>
-              </header>
-              <div className="canonical-decision-grid panel overflow-hidden">
-                <ReportCanvasNarrativeSection
-                  id="canonical-verdict-rationale"
-                  title={favorableVerdict ? "What supports this result" : "Main concerns"}
-                  description="The three decision-changing points that most strongly govern the result."
-                  tone={decisionNarrativeTone}
-                  items={verdictNarrative.slice(0, 3)}
-                  emptyCopy="No decision-changing concern was recorded. Review the evidence before relying on the result."
-                  singleColumn
-                />
-                <ReportCanvasNarrativeSection
-                  id="canonical-confidence-limits"
-                  title={favorableVerdict ? "Main concerns" : "What looks credible"}
-                  description="The strongest counterweight to the governing result."
-                  tone={favorableVerdict ? "caution" : "pass"}
-                  items={countervailingNarrative.slice(0, 3)}
-                  emptyCopy="No countervailing finding was recorded in this saved report."
-                  singleColumn
-                />
-                <ReportCanvasNarrativeSection
-                  id="canonical-verification-next"
-                  title="What to check next"
-                  description="The three unanswered questions most likely to change the result."
-                  tone="signal"
-                  items={verificationNext.slice(0, 3)}
-                  emptyCopy="No unresolved decision question was recorded."
-                  singleColumn
-                />
-              </div>
-            </section>
-
             <DossierReport
               payload={f as unknown as Record<string, unknown>}
               includeBeats={roles.includes(SubjectClass.PROJECT) ? ["product"] : undefined}
               includeSources={false}
+              subjectSummary={openingSubjectSummary}
             />
+
+            {f.entityContinuity && <EntityContinuityTimeline snapshot={f.entityContinuity} />}
 
             <section id="identity-evidence" className="canonical-people-section story-chapter report-section scroll-mt-28" aria-labelledby="report-team-heading">
               <header className="report-section-heading">
@@ -3560,6 +3617,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                           <span className="team-person-role">
                             <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(person.role)}</span>
                           </span>
+                          {person.biography && <span className="team-person-evidence text-[13px] leading-relaxed text-ink-dim">{person.biography}</span>}
                           {roleProof && <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Open role source</a>}
                           {continuityLabel && (
                             <span className={`chip ${continuity?.state === "current" ? "tint-pass" : continuity?.state === "departed" ? "tint-caution" : ""}`}>
@@ -3632,9 +3690,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <ProjectTokenCard
                   token={f.projectToken}
                   chains={f.projectToken.deployedChains}
+                  threat={f.threat ?? undefined}
+                  threatNote={f.threatNote}
                   showCurrentIntelligence={showCurrentIntelligence}
                   refreshCurrentMarket={currentIntelligenceEnabled}
-                  onAudit={onAudit}
+                  onOpenReport={linkedTokenDossier && onOpenTokenReport
+                    ? () => onOpenTokenReport(linkedTokenDossier)
+                    : undefined}
                   onLoadCurrentIntelligence={versionContext
                     ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
                     : undefined}
@@ -3647,10 +3709,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 snapshot={f.socialActivity}
                 className="canonical-social-section mt-3"
                 panelCostToken={panelCostToken}
-                afterActivity={subjectLeads.length > 0 ? (
+                afterActivity={subjectAdverseLeads.length > 0 || (f.socialActivity.adverseMentions?.length ?? 0) > 0 ? (
                   <div id="subject-leads" className="scroll-mt-28">
                     <SubjectAccusationStage
-                      leads={subjectLeads}
+                      leads={subjectAdverseLeads}
+                      socialLeads={f.socialActivity?.adverseMentions}
                       subject={report.handle}
                       summary={subjectLeadSummary}
                       panelCostToken={panelCostToken}
@@ -3662,7 +3725,67 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </>
         )}
 
-        {reportStyle !== 2 && <DossierReport payload={f as unknown as Record<string, unknown>} />}
+        {reportStyle !== 2 && (
+          <>
+            <DossierReport
+              payload={f as unknown as Record<string, unknown>}
+              subjectSummary={openingSubjectSummary}
+            />
+            {f.entityContinuity && <EntityContinuityTimeline snapshot={f.entityContinuity} />}
+          </>
+        )}
+
+        <div id="relationships" className="scroll-mt-28" />
+        {reportLane.renderers.connectionWorkspace?.({
+          dossier: f,
+          nodes: visibleGraphNodes,
+          edges: visibleGraphEdges,
+          connections: showTrustGraphSupplemental ? connections : [],
+          onAudit: onResearchAudit ?? onAudit,
+          onOpenSavedReport: onOpenSavedResearch,
+          onOpenProject: onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined,
+          shareView,
+        })}
+        {/* connections — the compounding web: other audited subjects tied to this one */}
+        {!reportLane.renderers.connectionWorkspace && showTrustGraphSupplemental && connections.length > 0 && (
+          <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
+            <Card className="divide-y divide-line/60">
+              {connections.map((c) => {
+                const vm = c.otherVerdict ? verdictMeta(c.otherVerdict) : null;
+                return (
+                  <div key={c.other} className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <Avatar src={/^@[A-Za-z0-9_]{2,30}$/.test(c.other) ? xAvatar(c.other) : null} letter={(c.other.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
+                      <div className="min-w-0">
+                      <span className="mono text-[12.5px] text-ink">{c.other}</span>
+                      {vm && <span className={`verdict-pill ml-2 ${c.otherVerdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={c.otherVerdict === "FAIL" ? undefined : ({ "--tint": vm.color } as React.CSSProperties)}>{vm.label}</span>}
+                      <div className="mt-0.5 text-[12.5px] leading-snug text-ink-dim">
+                        {c.direct && <span>directly linked{c.ties.length > 0 ? " · " : ""}</span>}
+                        {c.ties.length > 0 && (
+                          <span>via {c.ties.map((t, ti) => (
+                            <span key={t.key}>
+                              {ti > 0 && ", "}
+                              {onOpenProject && t.type === "Company" ? (
+                                <button onClick={() => onOpenProject(t.label, undefined, panelCostToken)} className="text-ink underline-offset-2 transition hover:text-signal-lift hover:underline">{t.label}</button>
+                              ) : (
+                                <span className="text-ink">{t.label}</span>
+                              )}
+                            </span>
+                          ))}</span>
+                        )}
+                      </div>
+                      </div>
+                    </div>
+                    {onAudit && (
+                      <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">open →</button>
+                    )}
+                  </div>
+                );
+              })}
+            </Card>
+          </Section>
+        )}
+
         {f.projectStrengthBands && (
           reportStyle === 2 ? (
             <details className="canonical-evidence-disclosure panel mt-7 scroll-mt-28">
@@ -3821,10 +3944,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             snapshot={f.socialActivity}
             className="mt-3"
             panelCostToken={panelCostToken}
-            afterActivity={subjectLeads.length > 0 ? (
+            afterActivity={subjectAdverseLeads.length > 0 || (f.socialActivity.adverseMentions?.length ?? 0) > 0 ? (
               <div id="subject-leads" className="scroll-mt-28">
                 <SubjectAccusationStage
-                  leads={subjectLeads}
+                  leads={subjectAdverseLeads}
+                  socialLeads={f.socialActivity?.adverseMentions}
                   subject={report.handle}
                   summary={subjectLeadSummary}
                   panelCostToken={panelCostToken}
@@ -3839,9 +3963,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <ProjectTokenCard
               token={f.projectToken}
               chains={f.projectToken.deployedChains}
+              threat={f.threat ?? undefined}
+              threatNote={f.threatNote}
               showCurrentIntelligence={showCurrentIntelligence}
               refreshCurrentMarket={currentIntelligenceEnabled}
-              onAudit={onAudit}
+              onOpenReport={linkedTokenDossier && onOpenTokenReport
+                ? () => onOpenTokenReport(linkedTokenDossier)
+                : undefined}
               onLoadCurrentIntelligence={versionContext
                 ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
                 : undefined}
@@ -3913,9 +4041,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           )}
           <div className="panel px-5">
             <div className="border-b border-line/70 py-4" aria-label="Case synthesis">
-              {f.intelligence && (
-                <DecisionLensSelector value={decisionLensId} onChange={setDecisionLensId} />
-              )}
               <VerdictArgumentBlock argument={caseArgument} />
             </div>
             <ReportCanvasNarrativeSection
@@ -3936,7 +4061,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   : "No usable sources were saved. Review which sources were available and try the investigation again."
                 : favorableVerdict
                   ? "This saved report does not explain the score. Review the sources before relying on it."
-                  : "No warning in the saved sources explains this result. Review why it scored this way before relying on it."}
+                  : "No verified adverse finding was recorded. Lower-scoring areas reflect limited demonstrated evidence or maturity; review the score breakdown and Verify next."}
             />
             <ReportCanvasNarrativeSection
               id="confidence-limits"
@@ -4117,6 +4242,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       <span className="team-person-role">
                         <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(p.role)}</span>
                       </span>
+                      {p.biography && <span className="team-person-evidence text-[13px] leading-relaxed text-ink-dim">{p.biography}</span>}
                       {p.linkedin && (
                         <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                       )}
@@ -4288,47 +4414,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               </Card>
             </Section>
           </div>
-        )}
-
-        <div id="relationships" className="scroll-mt-28" />
-        {/* connections — the compounding web: other audited subjects tied to this one */}
-        {showTrustGraphSupplemental && connections.length > 0 && (
-          <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
-            <Card className="divide-y divide-line/60">
-              {connections.map((c) => {
-                const vm = c.otherVerdict ? verdictMeta(c.otherVerdict) : null;
-                return (
-                  <div key={c.other} className="flex items-start justify-between gap-3 px-4 py-2.5">
-                    <div className="flex min-w-0 items-start gap-2">
-                      <Avatar src={/^@[A-Za-z0-9_]{2,30}$/.test(c.other) ? xAvatar(c.other) : null} letter={(c.other.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
-                      <div className="min-w-0">
-                      <span className="mono text-[12.5px] text-ink">{c.other}</span>
-                      {vm && <span className={`verdict-pill ml-2 ${c.otherVerdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={c.otherVerdict === "FAIL" ? undefined : ({ "--tint": vm.color } as React.CSSProperties)}>{vm.label}</span>}
-                      <div className="mt-0.5 text-[12.5px] leading-snug text-ink-dim">
-                        {c.direct && <span>directly linked{c.ties.length > 0 ? " · " : ""}</span>}
-                        {c.ties.length > 0 && (
-                          <span>via {c.ties.map((t, ti) => (
-                            <span key={t.key}>
-                              {ti > 0 && ", "}
-                              {onOpenProject && t.type === "Company" ? (
-                                <button onClick={() => onOpenProject(t.label, undefined, panelCostToken)} className="text-ink underline-offset-2 transition hover:text-signal-lift hover:underline">{t.label}</button>
-                              ) : (
-                                <span className="text-ink">{t.label}</span>
-                              )}
-                            </span>
-                          ))}</span>
-                        )}
-                      </div>
-                      </div>
-                    </div>
-                    {onAudit && (
-                      <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">open →</button>
-                    )}
-                  </div>
-                );
-              })}
-            </Card>
-          </Section>
         )}
 
         <details id="evidence-ledger" className="canonical-evidence-disclosure panel mt-5 scroll-mt-28">
@@ -4713,9 +4798,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           {corroborationRows.length > 0 && (
             <div className="mb-3 min-w-0 break-inside-avoid">
-              <Section title="Testimonial corroboration" kicker="claimed vs. acknowledged">
-                <Clamp itemCount={corroborationRows.length} label="endorsements">
-                <CorroborationTable rows={corroborationRows} />
+              <Section title="Claimed relationships" kicker="project claims checked against public evidence">
+                <Clamp itemCount={corroborationRows.length} label="relationships">
+                <CorroborationTable rows={corroborationRows} subjectHandle={report.handle} />
                 </Clamp>
               </Section>
             </div>
@@ -4811,7 +4896,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               scanned by the complete threat pipeline in the same run. Absent
               field = older report from before the fold-in; a note without a
               scan = the leg was skipped or failed, and says why. */}
-          {(f.threat || f.threatNote) && (
+          {!f.projectToken && (f.threat || f.threatNote) && (
             <div id="project-token-threat" className="min-w-0 scroll-mt-28 lg:col-span-2">
               <Section title="Project token · threat scan" kicker={f.threatNote ?? "the token threat leg of this audit"}>
                 {f.threat ? (
@@ -4913,7 +4998,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
-          {(visibleGraphEdges.length > 0 || (showTrustGraphSupplemental && connections.length > 0)) && (
+          {!reportLane.renderers.connectionWorkspace && (visibleGraphEdges.length > 0 || (showTrustGraphSupplemental && connections.length > 0)) && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="Connection web" kicker="select a node to inspect it · subject → projects → the people behind them">
                 <Card className="p-2">
@@ -4964,11 +5049,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {/* Leads that name the subject themselves are never filed behind a
             disclosure the reader has to open: a reader who sees only the
             collapsed related-entity list would read this page as clean. */}
-        {subjectLeads.length > 0 && !(f.socialActivity && roles.includes(SubjectClass.PROJECT)) && (
+        {subjectAdverseLeads.length > 0 && !(f.socialActivity && roles.includes(SubjectClass.PROJECT)) && (
           <div id="subject-leads" className="scroll-mt-28">
             <Section title="Adverse conversation" kicker="direct-subject leads · never counted in this score">
               <SubjectAccusationStage
-                leads={subjectLeads}
+                leads={subjectAdverseLeads}
+                socialLeads={f.socialActivity?.adverseMentions}
                 subject={report.handle}
                 summary={subjectLeadSummary}
                 panelCostToken={panelCostToken}

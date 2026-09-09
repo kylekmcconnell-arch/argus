@@ -1,4 +1,7 @@
 import type { ReactNode } from "react";
+import type { Dossier } from "../../data/dossier";
+import type { PanoptesEdge, PanoptesNode } from "../../engine";
+import type { SubjectConnection } from "../../graph/network";
 import type { GithubAssessment } from "../../data/evidence";
 import type { SocialActivitySnapshot } from "../../data/socialActivity";
 import type { DecisionLensId } from "../../intelligence/types";
@@ -10,6 +13,8 @@ export type DecisionCanvasTone = "pass" | "caution" | "signal" | "avoid" | "neut
 export interface DecisionCanvasItem {
   label: string;
   detail?: string | undefined;
+  impactAxis?: string | undefined;
+  impact?: string | undefined;
 }
 
 export interface DecisionCanvasCompositionRow {
@@ -25,6 +30,7 @@ export interface DecisionCanvasCompositionRow {
   tone?: "pass" | "caution" | "fail";
   sublabel?: string;
   countsLine?: string;
+  applicability?: "not_applicable" | "deferred";
 }
 
 export interface DecisionCanvasScore {
@@ -77,12 +83,25 @@ export interface InvestigationDecisionCanvasProps {
   showDecisionDetails?: boolean;
 }
 
+export interface ConnectionWorkspaceProps {
+  dossier: Dossier;
+  nodes: PanoptesNode[];
+  edges: PanoptesEdge[];
+  connections: SubjectConnection[];
+  onAudit?: ((query: string, privateSearch?: boolean) => void) | undefined;
+  onOpenSavedReport?: ((query: string, kind: "person" | "token") => void) | undefined;
+  onOpenProject?: ((name: string) => void) | undefined;
+  shareView?: boolean | undefined;
+  previewBalance?: number | undefined;
+}
+
 /**
  * Presentation-only slots over a frozen saved report. Renderers cannot alter
  * evidence collection, saved scores, or report identity.
  */
 export interface ReportLaneRenderers {
   decisionCanvas?: (props: InvestigationDecisionCanvasProps) => ReactNode;
+  connectionWorkspace?: (props: ConnectionWorkspaceProps) => ReactNode;
   socialSynthesis?: (snapshot: SocialActivitySnapshot) => ReactNode;
   githubSynthesis?: (assessment: GithubAssessment) => ReactNode;
 }

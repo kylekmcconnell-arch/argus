@@ -115,6 +115,15 @@ describe("public Decision Intelligence presentation", () => {
     expect(drawdown).not.toContain("39.7410894525038");
   });
 
+  it("turns failed saved source references into a reader-facing evidence state", () => {
+    const copy = publicIntelligenceText(
+      "The saved evidence records an answer, but one or more saved answer or source references failed the Intelligence Spine source-link check. Surviving fragments cannot upgrade this question's prior evidence state.",
+    );
+
+    expect(copy).toBe("The saved answer is not tied to a reliable direct source in this report, so it remains unconfirmed.");
+    expect(copy).not.toMatch(/Intelligence Spine|failed|surviving fragments/i);
+  });
+
   it("does not treat a provider name as the public explanation", () => {
     expect(publicProviderExplanation("GoPlus")).toBeUndefined();
     expect(publicProviderExplanation("twitterapi.io")).toBeUndefined();
@@ -134,6 +143,22 @@ describe("public Decision Intelligence presentation", () => {
     expect(copy.finding).toContain("Team and leadership: strong evidence (12–13 points)");
     expect(copy.finding).toContain("Backers and partnerships: checked, but no reliable supporting evidence was confirmed (0 points)");
     expect(JSON.stringify(copy)).not.toMatch(/scorer|assessed_null|P\d_|deterministic|frozen/i);
+  });
+
+  it("explains no-code authority observations without exposing RPC jargon or block hashes", () => {
+    const copy = publicSignalCopy(signal({
+      id: "evm_no_code_control_address",
+      ruleId: "evm-no-code-control-address",
+      headline: "A standard control address has no runtime bytecode",
+      finding: "1 standard-interface authority address has no runtime bytecode at block 25,848,828 (0xbfb8a191874f847b7255f4f7e931c80bcc88104c939fc80d28a8e8d5d930a4e2): 0x1234567890abcdef1234567890abcdef12345678 (admin, owner). This does not prove EOA status, one key, or one human.",
+      whyItMatters: "Custody and authorization mechanics must be established.",
+    }));
+
+    expect(copy.headline).toBe("One detected control role points to an address with no deployed contract code");
+    expect(copy.finding).toContain("0x123456…5678");
+    expect(copy.finding).toContain("This can be normal for a signer wallet and is not a warning by itself.");
+    expect(copy.whyItMatters).toContain("multiple signers, MPC, or a single key");
+    expect(JSON.stringify(copy)).not.toMatch(/runtime bytecode|standard-interface|block 25,848,828|bfb8a191|EOA status/i);
   });
 
   it("turns legacy launch timestamps into a readable, neutral explanation", () => {

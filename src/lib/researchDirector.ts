@@ -1,5 +1,7 @@
 import type { CollectedEvidence } from "../data/evidence";
 import { SubjectClass } from "../engine/taxonomy";
+import { canonicalOfficialWebsite } from "./fundScaleEvidence";
+import { isOrganizationAccount } from "./investorSubject";
 import type { ScanCheck } from "./scanChecklist";
 
 export type ResearchIntent =
@@ -239,7 +241,31 @@ const RELATIONSHIP_CAPABILITIES = new Set<ResearchCapability>([
 const priorityWeight: Record<ResearchTask["priority"], number> = { critical: 300, high: 200, medium: 100 };
 const costPenalty: Record<ResearchTask["costClass"], number> = { free: 0, low: 4, medium: 12, high: 24 };
 
+/**
+ * An organization subject whose profile came back from the provider with a
+ * credible official website is already identity-bound for portfolio and
+ * fund-scale discovery. The gate below exists to stop namesake results from
+ * binding to the wrong PERSON; for an organization both collectors carry
+ * their own domain bind (portfolioRelationshipBinding requires the investor
+ * entity domain to equal the profile's official domain, and
+ * isStrictFundScaleArtifact requires the exact fund name plus that domain),
+ * so a wrong-entity lead cannot pass either of them. Blocking discovery on an
+ * unanswered official_identity passage only removed evidence the verifier
+ * would have bound on the domain anyway (owner decision on #327).
+ */
+function organizationBoundByOfficialSite(evidence: CollectedEvidence): boolean {
+  const profile = evidence.profile;
+  return profile.profile_collection_state === "resolved"
+    && profile.profile_provider === "twitterapi"
+    && canonicalOfficialWebsite(profile.website) !== null
+    && isOrganizationAccount(evidence);
+}
+
 function unresolvedIdentityQuestions(evidence: CollectedEvidence, capability: ResearchCapability): string[] {
+  if (
+    (capability === "portfolio_and_outcomes" || capability === "fund_scale")
+    && organizationBoundByOfficialSite(evidence)
+  ) return [];
   const blockingPredicates = capability === "fund_scale"
     ? ["official_identity", "legal_entity", "current_role"]
     : ["official_identity", "current_role"];

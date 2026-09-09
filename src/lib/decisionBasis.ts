@@ -26,6 +26,31 @@ export interface DecisionBasisModel {
   gaps: number;
 }
 
+/**
+ * Return the exact frozen record that is allowed to appear as decision
+ * pressure for an axis.
+ *
+ * A low score, an emerging evidence-strength band, a first-party-only source,
+ * or an unanswered question can all limit confidence without proving anything
+ * adverse about the subject. Those states belong in score composition and
+ * "Verify next". A public caution requires a direct-subject, verified record
+ * that the frozen scorer packet explicitly admitted as score-limiting.
+ *
+ * Some adverse bands cite the harmful record as primary support rather than
+ * duplicating it in counterEvidenceRefs, so inspect both resolved lists while
+ * preserving the same strict counter-eligibility gate.
+ */
+export function verifiedDecisionPressureArtifact(
+  row: Pick<DecisionBasisRow, "axis" | "support" | "counter">,
+): AxisEvidenceRecord | null {
+  const candidates = [...row.counter, ...row.support];
+  return candidates.find((record) =>
+    record.scope === "direct_subject"
+    && record.verification === "verified"
+    && record.counterEligibleAxes?.includes(row.axis) === true,
+  ) ?? null;
+}
+
 const EMPTY_MODEL: DecisionBasisModel = {
   available: false,
   role: null,

@@ -27,6 +27,7 @@ export const PROVIDERS: ProviderInfo[] = [
   { id: "bitquery", label: "Bitquery (not yet in core collector)", env: ["BITQUERY_API_KEY"], free: false, feeds: "reserved credential only; does not run or attest core audits" },
   { id: "analyst", label: "Grok analyst agent", env: ["XAI_API_KEY"], free: false, feeds: "messy-to-structured axis scoring + rationale + headline" },
   { id: "openrouter", label: "OpenRouter (optional extract fallback)", env: ["OPENROUTER_API_KEY"], free: false, feeds: "cheap extraction fallback when ARGUS_PROVIDER_FALLBACKS is on" },
+  { id: "chart-signals", label: "Chart signals (self-hosted technical posture)", env: ["CHART_SIGNALS_URL", "CHART_SIGNALS_TOKEN"], free: true, feeds: "generic chart-posture panel on token scans (majors only)" },
 ];
 
 export function hasEnv(keys: string[]): boolean {

@@ -547,7 +547,7 @@ describe("X provider attempt accounting", () => {
       if (url.includes("/user/last_tweets")) {
         return json({ data: { tweets: [
           { text: "@friend thanks", createdAt: "2026-07-16T00:00:00.000Z", isReply: true },
-          { text: "we are launching", createdAt: "2026-07-10T00:00:00.000Z" },
+          { id: "123456", text: "we are launching", createdAt: "2026-07-10T00:00:00.000Z" },
         ] } });
       }
       return json({ tweets: [] }); // the corpus keyword-search layers
@@ -561,6 +561,7 @@ describe("X provider attempt accounting", () => {
     const lastTweetsCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/user/last_tweets"));
     expect(lastTweetsCalls).toHaveLength(1);
     expect(corpus.count.originals).toBe(1);
+    expect(corpus.posts[0]).toContain("[Source: https://x.com/argus/status/123456]");
     // The RAW payload is shared: the reply the corpus drops still counts for dormancy.
     expect(lastPostAt).toBe("2026-07-16T00:00:00.000Z");
     expect(meta).toHaveLength(2);

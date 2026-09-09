@@ -256,6 +256,9 @@ describe("frozen trust-graph collector", () => {
 
     expect(result).toMatchObject({ state: "partial" });
     expect(ctx.evidence.trustGraphScreen).toMatchObject({ status: "incomplete" });
+    expect(ctx.evidence.trustGraphScreen?.line).toContain("not been treated as evidence about this subject");
+    expect(ctx.evidence.trustGraphScreen?.line).toContain("does not affect the score or verdict");
+    expect(ctx.evidence.trustGraphScreen?.line).not.toMatch(/immutable report|active case projection|incompletely attested/i);
     expect(ctx.evidence.trustGraphScreen?.connections[0]).toMatchObject({ qualified: false });
     expect(ctx.evidence.trustGraphScreen?.connections[0]).not.toHaveProperty("otherVerdict");
     expect(ctx.evidence.findings).toEqual([]);

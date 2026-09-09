@@ -53,7 +53,7 @@ async function evmClassify(chainid: number, wallet: string, key: string): Promis
     const r = await fetch(`https://api.etherscan.io/v2/api?${q}`, { signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const d = rec(await r.json());
-    if (d.status === "0" && /rate limit/i.test(String(d.message ?? d.result ?? ""))) return null;
+    if (!(d.status === "1" && Array.isArray(d.result)) && !(d.status === "0" && /no transactions found/i.test(String(d.message) + " " + String(d.result)))) return null;
     // rec() of a missing element would be a truthy {}, so the absent case is
     // kept as an explicit null exactly as it was.
     const rawFirst = Array.isArray(d.result) ? (d.result[0] as unknown) : null;
@@ -97,11 +97,12 @@ async function solClassify(key: string, wallet: string): Promise<{ ageDays: numb
   } catch { return null; }
 }
 
-async function solHolders(mint: string): Promise<{ addr: string; pct: number }[]> {
+async function solHolders(mint: string): Promise<{ addr: string; pct: number }[] | null> {
   try {
     const r = await fetch(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15000) });
-    if (!r.ok) return [];
+    if (!r.ok) return null;
     const rc = rec(await r.json());
+    if (!Array.isArray(rc.topHolders)) return null;
     const ka = rec(rc.knownAccounts);
     return arr(rc.topHolders)
       .map((entry) => rec(entry))
@@ -110,14 +111,15 @@ async function solHolders(mint: string): Promise<{ addr: string; pct: number }[]
       .filter((h) => { const l = rec(ka[String(h.address)] || ka[String(h.owner)]); return !(l.type && /market|amm|pool|liquid|lp/i.test(String(l.type))) && !h.insider; })
       .map((h) => ({ addr: String(h.owner || h.address || ""), pct: Number(h.pct ?? 0) }))
       .filter((h) => SOLADDR.test(h.addr)).slice(0, MAX);
-  } catch { return []; }
+  } catch { return null; }
 }
-async function evmHolders(chainid: number, token: string): Promise<{ addr: string; pct: number }[]> {
+async function evmHolders(chainid: number, token: string): Promise<{ addr: string; pct: number }[] | null> {
   try {
     const r = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainid}?contract_addresses=${token}`, { signal: AbortSignal.timeout(12000) });
-    if (!r.ok) return [];
+    if (!r.ok) return null;
     const d = rec(await r.json());
     const info = rec(rec(d.result)[token.toLowerCase()]);
+    if (!Array.isArray(info.holders)) return null;
     return arr(info.holders)
       .map((entry) => rec(entry))
       .filter((h) => h.is_contract !== 1)
@@ -125,7 +127,7 @@ async function evmHolders(chainid: number, token: string): Promise<{ addr: strin
       // absent percent yields NaN, NaN <= 1 is false, so the multiplier stays 1.
       .map((h) => ({ addr: String(h.address ?? "").toLowerCase(), pct: Number(h.percent ?? 0) * (Number(h.percent) <= 1 ? 100 : 1) }))
       .filter((h) => EVM.test(h.addr)).slice(0, MAX);
-  } catch { return []; }
+  } catch { return null; }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -142,11 +144,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!sol && (!chainid || !esKey)) { res.status(200).json({ available: false, note: `Wallet taxonomy needs an Etherscan-covered chain (${chain} not supported).` }); return; }
 
   const holders = sol ? await solHolders(address) : await evmHolders(Number(GOPLUS_CHAIN[chain] ?? 0), address.toLowerCase());
+  if (!holders) { res.status(200).json({ available: false, note: "Holder source unavailable." }); return; }
   if (!holders.length) { res.status(200).json({ available: true, analyzed: 0, cohorts: {}, note: "No non-pool top holders resolved." }); return; }
 
   const rows = await inChunks(holders, sol ? 8 : 4, async (h) => {
     const c = sol ? await solClassify(key!, h.addr) : await evmClassify(chainid, h.addr, esKey!);
-    return { ...h, ...(c ?? { ageDays: null, lastDays: null, cexFunded: false }) };
+    return { ...h, assessed: c !== null, ...(c ?? { ageDays: null, lastDays: null, cexFunded: false }) };
   });
 
   const bucket = { fresh: { n: 0, pct: 0 }, recent: { n: 0, pct: 0 }, dormant: { n: 0, pct: 0 }, cexFunded: { n: 0, pct: 0 }, aged: { n: 0, pct: 0 }, unknown: { n: 0, pct: 0 } };
@@ -161,7 +164,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const round = (o: { n: number; pct: number }) => ({ n: o.n, pct: Math.round(o.pct * 10) / 10 });
 
   res.status(200).json({
-    available: true, chain, analyzed: rows.length,
+    available: rows.every((row) => row.assessed), chain, analyzed: rows.filter((row) => row.assessed).length,
+    coverage: { attempted: rows.length, assessed: rows.filter((row) => row.assessed).length },
     cohorts: { fresh: round(bucket.fresh), recent: round(bucket.recent), aged: round(bucket.aged), dormant: round(bucket.dormant), cexFunded: round(bucket.cexFunded), unknown: round(bucket.unknown) },
     note: `${rows.length} top holders classified by wallet age and funding.${sol ? " CEX-funding tags are EVM-only for now." : ""}`,
   });

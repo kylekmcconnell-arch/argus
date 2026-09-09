@@ -1,4 +1,5 @@
-import type { LaunchedProductLead, ProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
+import { officialXProfileHandle } from "../../src/lib/officialXProfile";
+import type { LaunchedProductLead, ProjectTokenSnapshot, UnresolvedProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
 import { canonicalOfficialWebsite, type OfficialWebsiteScope } from "../../src/lib/fundScaleEvidence";
 import { readCandle, summarizeCandles, type Candle } from "../../src/lib/priceHistory";
 import { declaredTokenFromBio, type TokenCandidate } from "../../src/lib/projectTokenLeg";
@@ -6,7 +7,7 @@ import { env } from "../config";
 import { captureTimestamp } from "../captureTime";
 import { recordCall } from "../cost";
 import { fetchPublicTextWithRecovery, type PublicTextWithRecoveryResult } from "../publicWeb";
-import type { Adapter, AdapterRunResult, CollectContext } from "./types";
+import type { Adapter, AdapterRunResult, CollectContext, CollectedEvidence } from "./types";
 
 const COINGECKO_PUBLIC = "https://api.coingecko.com/api/v3";
 const COINGECKO_PRO = "https://pro-api.coingecko.com/api/v3";
@@ -14,6 +15,14 @@ const DEXSCREENER = "https://api.dexscreener.com/latest/dex/tokens";
 const DEXSCREENER_SEARCH = "https://api.dexscreener.com/latest/dex/search";
 const GECKOTERMINAL = "https://api.geckoterminal.com/api/v2";
 const MAX_CANDIDATES = 3;
+/** CoinGecko `/coins/{id}` reads per adapter invocation, across every registry query. */
+const MAX_DETAIL_FETCHES = 6;
+/**
+ * Keyless CoinGecko answers HTTP 429 "Throttled" after a few quick queries.
+ * One bounded back-off before recording the query as failed turns most of
+ * those into completed searches. Mutable so tests can zero the wait.
+ */
+export const coingeckoThrottle = { backoffMs: 1_500 };
 const MAX_HISTORY_POINTS = 90;
 const PRICE_TOLERANCE = 0.25;
 const MIN_POOL_LIQUIDITY_USD = 25_000;
@@ -82,6 +91,7 @@ interface DexPair {
   priceUsd: number;
   liquidityUsd: number;
   sourceUrl: string;
+  pairCreatedAt?: number;
 }
 
 interface DexProjectCandidate {
@@ -99,6 +109,7 @@ interface DexProjectCandidate {
   fdvUsd?: number;
   volume24hUsd?: number;
   liquidityUsd?: number;
+  pairCreatedAt?: number;
   relevance: number;
 }
 
@@ -125,7 +136,71 @@ const cleanText = (value: unknown): string => typeof value === "string" ? value.
 const normalized = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 
 const projectName = (value: string): string =>
-  value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*/)[0]?.trim() || value.trim();
+  value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*|\s+-\s+/)[0]?.trim() || value.trim();
+
+// A `$TICKER` in a provider-frozen display name or bio. Registry search by
+// symbol is exact, so a cashtag is the most reliable query a project hands us.
+const CASHTAG = /\$([A-Za-z][A-Za-z0-9]{1,11})(?![A-Za-z0-9])/g;
+// Bracketed asides only count as a ticker when written the way tickers are:
+// "(ALTT)" and "(L3)" qualify, "(Beta)" and "(Official)" do not.
+const BRACKETED_TICKER_SHAPE = /^\$?[A-Z][A-Z0-9]{1,11}$/;
+const MAX_TICKER_QUERIES = 3;
+/**
+ * A bio that lists more cashtags than this is a watchlist or a promoter's
+ * portfolio, not a project naming its own token. Every ticker would still have
+ * to pass the official-X identity gate, but searching them all spends registry
+ * calls on assets that cannot bind.
+ */
+const MAX_BIO_CASHTAGS_FOR_SELF_DECLARATION = 3;
+
+export function cashtagTickers(text: string): string[] {
+  const out: string[] = [];
+  for (const match of (text ?? "").matchAll(CASHTAG)) {
+    const ticker = match[1].toUpperCase();
+    if (!out.includes(ticker)) out.push(ticker);
+  }
+  return out;
+}
+
+/**
+ * Ticker queries the official bio declares. Returns nothing for a bio that
+ * reads like a watchlist (see MAX_BIO_CASHTAGS_FOR_SELF_DECLARATION).
+ */
+export function bioTickerQueries(bio: string): string[] {
+  const tickers = cashtagTickers(bio);
+  if (!tickers.length || tickers.length > MAX_BIO_CASHTAGS_FOR_SELF_DECLARATION) return [];
+  return tickers.slice(0, 2);
+}
+
+/**
+ * The display name with everything a registry search chokes on removed:
+ * cashtags, emoji and symbol decoration, and bracketed asides. CoinGecko's
+ * search returns nothing for "Altcoinist 🚀" or "Altcoinist ($ALTT)" while
+ * "Altcoinist" and "ALTT" both find the listed token, so a decorated brand
+ * name silently produced an assessed "no token under a matching name" result
+ * and the report normalized token conduct away as if the project were tokenless.
+ */
+export function cleanRegistryName(raw: string): string {
+  return raw
+    .replace(CASHTAG, " ")
+    .replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, " ")
+    .replace(/[^\p{L}\p{N}\s.&'-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s.&'-]+|[\s.&'-]+$/g, "")
+    .trim();
+}
+
+/** Short bracketed asides that are really a ticker: "Layer3 (L3)". */
+const bracketedTickers = (raw: string): string[] => {
+  const out: string[] = [];
+  for (const match of raw.matchAll(/\(([^)]{2,12})\)|\[([^\]]{2,12})\]/g)) {
+    const inner = (match[1] ?? match[2] ?? "").trim();
+    if (!BRACKETED_TICKER_SHAPE.test(inner)) continue;
+    const ticker = inner.replace(/^\$/, "").toUpperCase();
+    if (!out.includes(ticker)) out.push(ticker);
+  }
+  return out;
+};
 
 // Registry searches are literal enough that a display name carrying a generic
 // corporate suffix misses the token named without it: DexScreener's search for
@@ -141,7 +216,6 @@ const projectName = (value: string): string =>
 // through unique-id surfaces (investigation CA, official X, owned domain).
 const GENERIC_NAME_SUFFIX = /^(?:finance|protocol|labs?|network|official|app|exchange|capital|fund|foundation|dao|token|coin|money|cash|club|world|games?|inu)$/i;
 export function tokenSearchQueries(raw: string): string[] {
-  const primary = projectName(raw);
   const queries: string[] = [];
   const push = (candidate: string) => {
     const trimmed = candidate.trim();
@@ -149,12 +223,22 @@ export function tokenSearchQueries(raw: string): string[] {
       queries.push(trimmed);
     }
   };
+  // The name segment before any slogan separator, then stripped of the
+  // decoration that makes a registry return nothing. The raw decorated string
+  // is never sent: it cannot match, and it costs a rate-limited call.
+  const primary = cleanRegistryName(projectName(raw)) || cleanRegistryName(raw);
   push(primary);
   const words = primary.split(/\s+/);
   while (words.length > 1 && GENERIC_NAME_SUFFIX.test(words[words.length - 1])) {
     words.pop();
     push(words.join(" "));
   }
+  // Ticker queries last: name matches rank first, and a ticker still has to
+  // pass the same official-X / official-domain identity gate as every other hit.
+  const tickers = [...cashtagTickers(raw), ...bracketedTickers(raw)]
+    .filter((ticker, index, all) => all.indexOf(ticker) === index)
+    .slice(0, MAX_TICKER_QUERIES);
+  for (const ticker of tickers) push(ticker);
   return queries;
 }
 
@@ -204,15 +288,32 @@ const coingeckoConfig = () => {
   };
 };
 
+/**
+ * One CoinGecko read with a single back-off on 429. Returns null on transport
+ * failure; the caller still inspects the final status of the response.
+ */
+async function coingeckoFetch(url: string, headers: Record<string, string>, label: string, tier: string): Promise<Response | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+    } catch {
+      return null;
+    }
+    if (response.status === 429 && attempt === 0) {
+      recordCall("coingecko", label, 0, `${tier} · http_429 · backing_off_once`, "partial");
+      await new Promise((resolve) => setTimeout(resolve, coingeckoThrottle.backoffMs));
+      continue;
+    }
+    return response;
+  }
+  return null;
+}
+
 async function coinSearch(query: string): Promise<CoinSearchRow[] | null> {
   const { base, headers, tier } = coingeckoConfig();
-  let response: Response;
-  try {
-    response = await fetch(`${base}/search?query=${encodeURIComponent(query)}`, {
-      headers,
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch {
+  const response = await coingeckoFetch(`${base}/search?query=${encodeURIComponent(query)}`, headers, "project-search", tier);
+  if (!response) {
     recordCall("coingecko", "project-search", 0, `${tier} · transport_error`, "failed");
     return null;
   }
@@ -283,10 +384,8 @@ function rankedCandidates(query: string, rows: CoinSearchRow[]): CoinSearchRow[]
 async function coinDetails(id: string): Promise<JsonRecord | null> {
   const { base, headers, tier } = coingeckoConfig();
   const url = `${base}/coins/${encodeURIComponent(id)}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
-  let response: Response;
-  try {
-    response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
-  } catch {
+  const response = await coingeckoFetch(url, headers, "project-details", tier);
+  if (!response) {
     recordCall("coingecko", "project-details", 0, `${tier} · transport_error`, "failed");
     return null;
   }
@@ -400,36 +499,65 @@ const officialHomepages = (details: JsonRecord): string[] => {
 const domainsMatch = (left: string, right: string): boolean =>
   left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
 
+/**
+ * Credible official domains declared on the provider-frozen X profile record:
+ * the profile website plus every other twitterapi website/entity URL on that
+ * same record. Nothing else qualifies here. A search lead, a registry
+ * homepage or a third-party citation must never enter this set, because these
+ * scopes are one half of the CoinGecko official-domain gate and of the
+ * DexScreener dual gate.
+ *
+ * Reading only `profile.website` left the gate unsatisfiable whenever the
+ * first profile URL was a shared host (t.me, youtube.com): the real domain sat
+ * in `official_websites` on the same frozen record and the token never bound.
+ */
+function profileOfficialScopes(ctx: CollectContext): OfficialWebsiteScope[] {
+  const profile = ctx.evidence.profile;
+  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
+  if (
+    profile.profile_collection_state !== "resolved"
+    || profile.profile_provider !== "twitterapi"
+    || !Number.isFinite(capturedAt)
+  ) return [];
+  const seen = new Set<string>();
+  const scopes: OfficialWebsiteScope[] = [];
+  for (const value of [profile.website, ...(profile.official_websites ?? [])]) {
+    const scope = canonicalOfficialWebsite(value);
+    if (!scope || seen.has(scope.domain)) continue;
+    seen.add(scope.domain);
+    scopes.push(scope);
+  }
+  return scopes;
+}
+
+const homepageOnProfileDomain = (
+  scopes: readonly OfficialWebsiteScope[],
+  homepages: readonly string[],
+): string | undefined => scopes.length
+  ? homepages.find((candidate) => {
+      const tokenScope = canonicalOfficialWebsite(candidate);
+      return tokenScope !== null && scopes.some((scope) => domainsMatch(scope.domain, tokenScope.domain));
+    })
+  : undefined;
+
 function verifyIdentity(
   ctx: CollectContext,
   details: JsonRecord,
 ): { verification: ProjectTokenSnapshot["verification"]; homepage?: string; officialX?: string } | null {
   const links = isRecord(details.links) ? details.links : {};
   const officialHandle = cleanText(links.twitter_screen_name);
-  const exactX = officialHandle && normalizeHandle(officialHandle) === normalizeHandle(ctx.handle);
+  const matchedX = matchedOfficialX(ctx, details);
   const homepages = officialHomepages(details);
-  if (exactX) {
+  if (matchedX) {
     return {
       verification: "official_x",
       ...(homepages[0] ? { homepage: homepages[0] } : {}),
-      officialX: `@${officialHandle.replace(/^@/, "")}`,
+      officialX: `@${matchedX}`,
     };
   }
 
-  const profile = ctx.evidence.profile;
-  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
-  const profileScope = profile.profile_collection_state === "resolved"
-    && profile.profile_provider === "twitterapi"
-    && Number.isFinite(capturedAt)
-    ? canonicalOfficialWebsite(profile.website)
-    : null;
-  const homepage = profileScope
-    ? homepages.find((candidate) => {
-        const tokenScope = canonicalOfficialWebsite(candidate);
-        return tokenScope !== null && domainsMatch(profileScope.domain, tokenScope.domain);
-      })
-    : undefined;
-  if (!profileScope || !homepage) return null;
+  const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), homepages);
+  if (!homepage) return null;
   return {
     verification: "official_domain",
     homepage,
@@ -437,19 +565,48 @@ function verifyIdentity(
   };
 }
 
+const xHandleFromUrlRaw = officialXProfileHandle;
+
 const xHandleFromUrl = (value: unknown): string | null => {
-  const raw = cleanText(value);
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    if (host !== "x.com" && host !== "twitter.com") return null;
-    const handle = url.pathname.split("/").filter(Boolean)[0] ?? "";
-    return handle ? normalizeHandle(handle) : null;
-  } catch {
-    return null;
-  }
+  const handle = xHandleFromUrlRaw(value);
+  return handle ? normalizeHandle(handle) : null;
 };
+
+/**
+ * CoinGecko often keeps a renamed or stale `twitter_screen_name` while the
+ * current official X URL is sitting in `links.homepage` (or another link
+ * array). ARGUS must treat those curated X URLs as official-X evidence —
+ * otherwise a live token whose registry row still says @project_com never
+ * binds to the audited @project account, and token conduct stays unmeasured.
+ */
+const COINGECKO_LINK_ARRAYS = [
+  "homepage",
+  "official_forum_url",
+  "announcement_url",
+  "blockchain_site",
+  "chat_url",
+] as const;
+
+function firstMatchingOfficialX(details: JsonRecord, auditedHandle: string): string | null {
+  const audited = normalizeHandle(auditedHandle);
+  if (!audited) return null;
+  const links = isRecord(details.links) ? details.links : {};
+  const officialHandle = cleanText(links.twitter_screen_name).replace(/^@/, "");
+  if (officialHandle && normalizeHandle(officialHandle) === audited) return officialHandle;
+  for (const key of COINGECKO_LINK_ARRAYS) {
+    const value = links[key];
+    const rows = Array.isArray(value) ? value : value ? [value] : [];
+    for (const row of rows) {
+      const handle = xHandleFromUrlRaw(row);
+      if (handle && normalizeHandle(handle) === audited) return handle;
+    }
+  }
+  return null;
+}
+
+function matchedOfficialX(ctx: CollectContext, details: JsonRecord): string | null {
+  return firstMatchingOfficialX(details, ctx.handle);
+}
 
 function dexIdentity(
   ctx: CollectContext,
@@ -470,25 +627,13 @@ function dexIdentity(
         return handle ? [handle] : [];
       })
     : [];
-  const profile = ctx.evidence.profile;
-  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
-  const profileScope = profile.profile_collection_state === "resolved"
-    && profile.profile_provider === "twitterapi"
-    && Number.isFinite(capturedAt)
-    ? canonicalOfficialWebsite(profile.website)
-    : null;
-  const homepage = profileScope
-    ? websites.find((candidate) => {
-        const tokenScope = canonicalOfficialWebsite(candidate);
-        return tokenScope !== null && domainsMatch(profileScope.domain, tokenScope.domain);
-      })
-    : undefined;
+  const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), websites);
   const exactHandle = handles.find((handle) => handle === normalizeHandle(ctx.handle));
   // DexScreener metadata is permissionless enough that one self-supplied link
   // is not a canonical-token identity proof. Require the token row to bridge
   // BOTH provider-frozen identity surfaces: the exact audited X account and
-  // the exact official profile domain.
-  if (!profileScope || !homepage || !exactHandle) return null;
+  // one of the official domains declared on that same profile record.
+  if (!homepage || !exactHandle) return null;
   return {
     verification: "official_x",
     homepage,
@@ -510,18 +655,42 @@ function dexIdentity(
  * Addresses are extracted verbatim; which one is actually a token is settled
  * on-chain afterwards, never by guessing from page position.
  */
+const SITE_EVM_ADDRESS = /0x[a-fA-F0-9]{40}/g;
+// Base58 mint as a standalone word only (no base58 character on either side),
+// the same rule the bio parser uses, so prose and URLs never false-positive.
+const SITE_SOLANA_ADDRESS = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/g;
+// Address key for de-duplication and grouping: EVM addresses are case-
+// insensitive hex, base58 mints are case-sensitive.
+const addressKey = (address: string): string => address.startsWith("0x") ? address.toLowerCase() : address;
+
 export function siteContractCandidates(html: string, limit = 10): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const match of html.matchAll(/0x[a-fA-F0-9]{40}/g)) {
+  const take = (address: string): boolean => {
+    const key = addressKey(address);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(address);
+    }
+    return out.length >= limit;
+  };
+  for (const match of html.matchAll(SITE_EVM_ADDRESS)) {
     const address = match[0];
-    const key = address.toLowerCase();
     // The zero address and obvious burn sinks are never a project's token.
     if (/^0x0{40}$/i.test(address) || /^0x0{38}dead$/i.test(address)) continue;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(address);
-    if (out.length >= limit) break;
+    if (take(address)) return out;
+  }
+  // Base58 mints fill only the slots the EVM candidates left, so a page that
+  // prints many hashed asset names can never evict a real EVM contract. The
+  // EVM matches are blanked first: the hex tail of a zero-free 0x address is
+  // itself a 41-character base58 word.
+  const rest = html.replace(SITE_EVM_ADDRESS, " ");
+  for (const match of rest.matchAll(SITE_SOLANA_ADDRESS)) {
+    const address = match[1];
+    // The system program and other all-ones sentinels are never a token, and
+    // a pure hex word (an asset hash, a content id) is never a base58 mint.
+    if (/^1+$/.test(address) || /^[0-9a-f]+$/i.test(address)) continue;
+    if (take(address)) break;
   }
   return out;
 }
@@ -599,6 +768,7 @@ function dexProjectCandidates(
     if (!identity) return [];
     const liquidity = isRecord(row.liquidity) ? finiteNumber(row.liquidity.usd) : undefined;
     const volume = isRecord(row.volume) ? finiteNumber(row.volume.h24) : undefined;
+    const pairCreatedAt = finiteNumber(row.pairCreatedAt);
     return [{
       name,
       symbol,
@@ -613,6 +783,7 @@ function dexProjectCandidates(
       ...(finiteNumber(row.fdv) !== undefined ? { fdvUsd: finiteNumber(row.fdv) } : {}),
       ...(volume !== undefined ? { volume24hUsd: volume } : {}),
       ...(liquidity !== undefined ? { liquidityUsd: liquidity } : {}),
+      ...(pairCreatedAt !== undefined ? { pairCreatedAt } : {}),
     }];
   });
   return candidates.sort((left, right) =>
@@ -698,6 +869,7 @@ async function collectDexProjectToken(
       ...(candidate.volume24hUsd !== undefined ? { volume24hUsd: candidate.volume24hUsd } : {}),
       ...(candidate.liquidityUsd !== undefined ? { liquidityUsd: candidate.liquidityUsd } : {}),
       pairAddress: candidate.pairAddress,
+      ...(candidate.pairCreatedAt !== undefined ? { pairCreatedAt: candidate.pairCreatedAt } : {}),
       ...(history ? { history } : {}),
     },
   };
@@ -708,9 +880,7 @@ async function collectDexProjectToken(
  * handle. Unique-id via the handle — not a search lead.
  */
 function cgHandleBoundHomepages(ctx: CollectContext, details: JsonRecord): string[] {
-  const links = isRecord(details.links) ? details.links : {};
-  const officialHandle = cleanText(links.twitter_screen_name);
-  if (!officialHandle || normalizeHandle(officialHandle) !== normalizeHandle(ctx.handle)) return [];
+  if (!matchedOfficialX(ctx, details)) return [];
   return officialHomepages(details);
 }
 
@@ -776,12 +946,16 @@ function officialWebsiteScopes(
   return scopes;
 }
 
+type SiteDeclarationResult =
+  | { state: "declared"; snapshot: ProjectTokenSnapshot; sourceUrl: string }
+  | { state: "empty" | "failed" };
+
 async function resolveSiteDeclaredOnPage(
   ctx: CollectContext,
   scope: OfficialWebsiteScope,
   fetchImpl: typeof fetch,
   recoverOfficialText: (url: string) => Promise<PublicTextWithRecoveryResult>,
-): Promise<{ snapshot: ProjectTokenSnapshot; sourceUrl: string } | null> {
+): Promise<SiteDeclarationResult> {
   let html: string;
   let identityCapturedAt: string;
   try {
@@ -799,11 +973,11 @@ async function resolveSiteDeclaredOnPage(
           recordCall("site-fetch", "token-declaration", 0, `reader_recovery_after_http_${response.status}`, "succeeded");
         } else {
           recordCall("site-fetch", "token-declaration", 0, `http_${response.status} · ${recovered.reason}`, "failed");
-          return null;
+          return { state: "failed" };
         }
       } else {
         recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
-        return null;
+        return { state: "failed" };
       }
     } else {
       html = (await response.text()).slice(0, 400_000);
@@ -813,7 +987,7 @@ async function resolveSiteDeclaredOnPage(
     const recovered = await recoverOfficialText(scope.canonicalUrl);
     if (recovered.status !== "ok") {
       recordCall("site-fetch", "token-declaration", 0, `transport_error · ${recovered.reason}`, "failed");
-      return null;
+      return { state: "failed" };
     }
     html = recovered.text.slice(0, 400_000);
     identityCapturedAt = captureTimestamp();
@@ -822,16 +996,47 @@ async function resolveSiteDeclaredOnPage(
   const candidates = siteContractCandidates(html);
   if (!candidates.length) {
     recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
-    return null;
+    return { state: "empty" };
   }
-  const resolved: Array<{ address: string; pairs: JsonRecord[]; capturedAt: string }> = [];
-  for (const address of candidates.slice(0, 6)) {
-    const pairs = await dexPairs(address);
-    if (pairs && pairs.length) resolved.push({ address, pairs, capturedAt: captureTimestamp() });
+  // One batched DexScreener read settles which of the page's strings is a
+  // token (the endpoint accepts up to 30 addresses). Hashed asset names and
+  // wallet addresses come back with no pairs and drop out here.
+  const batch = await dexTokenPairs(candidates);
+  if (!batch) {
+    recordCall("site-fetch", "token-declaration", 0, "candidate_resolution_failed", "failed");
+    return { state: "failed" };
   }
+  const pairsByAddress = new Map<string, JsonRecord[]>();
+  const candidateKeys = new Set(candidates.map(addressKey));
+  for (const pair of batch.pairs) {
+    const base = isRecord(pair.baseToken) ? pair.baseToken : {};
+    const key = addressKey(cleanText(base.address));
+    if (!candidateKeys.has(key)) continue;
+    pairsByAddress.set(key, [...(pairsByAddress.get(key) ?? []), pair]);
+  }
+  // The batch answer is capped at 30 pairs in total. When a deep token fills
+  // the whole answer, a second tradeable address on the same page would be
+  // invisible and the "exactly one token" rule would bind on false grounds.
+  // Only in that capped case are the unseen candidates read individually.
+  if (batch.capped) {
+    for (const address of candidates) {
+      if (pairsByAddress.has(addressKey(address))) continue;
+      const pairs = await dexPairs(address);
+      if (!pairs) {
+        recordCall("site-fetch", "token-declaration", 0, "candidate_followup_failed", "failed");
+        return { state: "failed" };
+      }
+      if (pairs.length) pairsByAddress.set(addressKey(address), pairs);
+    }
+  }
+  const capturedAt = captureTimestamp();
+  const resolved = candidates.flatMap((address) => {
+    const pairs = pairsByAddress.get(addressKey(address));
+    return pairs && pairs.length ? [{ address, pairs, capturedAt }] : [];
+  });
   if (resolved.length !== 1) {
-    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", "succeeded");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", resolved.length ? "partial" : "succeeded");
+    return { state: resolved.length ? "failed" : "empty" };
   }
   const [only] = resolved;
   // Deepest pool represents the token; a dust pair must not name the chain.
@@ -845,7 +1050,11 @@ async function resolveSiteDeclaredOnPage(
   const symbol = cleanText(base.symbol);
   const chain = cleanText(best.chainId);
   const pairAddress = cleanText(best.pairAddress);
-  if (!symbol || !chain) return null;
+  const pairCreatedAt = finiteNumber(best.pairCreatedAt);
+  if (!symbol || !chain) {
+    recordCall("site-fetch", "token-declaration", 0, "candidate_metadata_incomplete", "failed");
+    return { state: "failed" };
+  }
   const info = isRecord(best.info) ? best.info as JsonRecord : {};
   const priceUsd = finiteNumber(best.priceUsd);
   const liquidityUsd = isRecord(best.liquidity) ? finiteNumber(best.liquidity.usd) : undefined;
@@ -863,6 +1072,7 @@ async function resolveSiteDeclaredOnPage(
   // than depending on a live refresh, exactly as the other binding paths do.
   const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: undefined, attempts: 0 };
   return {
+    state: "declared",
     sourceUrl: scope.canonicalUrl,
     snapshot: {
       verified: true,
@@ -902,6 +1112,7 @@ async function resolveSiteDeclaredOnPage(
       ...(historyResult.history ? { history: historyResult.history } : {}),
       ...(cleanText(info.imageUrl) ? { imageUrl: cleanText(info.imageUrl) } : {}),
       ...(pairAddress ? { pairAddress } : {}),
+      ...(pairCreatedAt !== undefined ? { pairCreatedAt } : {}),
     } as ProjectTokenSnapshot,
   };
 }
@@ -910,7 +1121,8 @@ async function resolveSiteDeclaredOnPage(
  * Bind the token a project publishes on its OWN verified domains.
  *
  * Walks every first-party official website already bound to this subject,
- * not just profile.website. A page with 0 or >1 tradeable tokens is skipped.
+ * not just profile.website. Empty pages are skipped; unread or ambiguous
+ * pages leave the declaration unresolved.
  * The first page that yields exactly one tradeable token wins unless a later
  * official page declares a different tradeable token (same ambiguity rule
  * as a single page with two tokens).
@@ -920,29 +1132,48 @@ async function collectSiteDeclaredToken(
   fetchImpl: typeof fetch = fetch,
   extraOfficialUrls: readonly string[] = [],
   recoverOfficialText: (url: string) => Promise<PublicTextWithRecoveryResult> = fetchPublicTextWithRecovery,
-): Promise<{ snapshot: ProjectTokenSnapshot; sourceUrl: string } | null> {
+): Promise<SiteDeclarationResult> {
   const scopes = officialWebsiteScopes(ctx, extraOfficialUrls);
-  if (!scopes.length) return null;
+  if (!scopes.length) return { state: "empty" };
 
-  const declared: Array<{ snapshot: ProjectTokenSnapshot; sourceUrl: string }> = [];
+  const declared: Array<Extract<SiteDeclarationResult, { state: "declared" }>> = [];
+  let failed = false;
   for (const scope of scopes) {
     const found = await resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialText);
-    if (found) declared.push(found);
+    if (found.state === "declared") declared.push(found);
+    if (found.state === "failed") failed = true;
   }
-  if (!declared.length) return null;
+  // An unread scope could declare a different token, so uniqueness is unresolved.
+  if (failed) return { state: "failed" };
+  if (!declared.length) return { state: "empty" };
   const addresses = new Set(declared.map((row) => row.snapshot.address.toLowerCase()));
   if (addresses.size !== 1) {
-    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "succeeded");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "partial");
+    return { state: "failed" };
   }
   // First official page that declared this unique tradeable token wins.
   return declared[0];
 }
 
+/** DexScreener returns at most this many pairs for one token-list read. */
+const DEX_BATCH_PAIR_CAP = 30;
+
 async function dexPairs(address: string): Promise<JsonRecord[] | null> {
+  const result = await dexTokenPairs([address]);
+  return result ? result.pairs : null;
+}
+
+/**
+ * Pairs for one or more token addresses in a single read. `capped` is true
+ * when the answer hit DexScreener's per-read pair limit, meaning a listed
+ * address with no pair in the answer may still have a market.
+ */
+async function dexTokenPairs(
+  addresses: readonly string[],
+): Promise<{ pairs: JsonRecord[]; capped: boolean } | null> {
   let response: Response;
   try {
-    response = await fetch(`${DEXSCREENER}/${encodeURIComponent(address)}`, {
+    response = await fetch(`${DEXSCREENER}/${addresses.map((address) => encodeURIComponent(address)).join(",")}`, {
       signal: AbortSignal.timeout(8_000),
     });
   } catch {
@@ -960,19 +1191,25 @@ async function dexPairs(address: string): Promise<JsonRecord[] | null> {
     recordCall("dexscreener", "project-token-pairs", 0, "keyless · response_json_error", "failed");
     return null;
   }
-  if (!isRecord(payload) || !Array.isArray(payload.pairs)) {
+  // DexScreener answers an address with no market as `{"pairs": null}`, not an
+  // empty array. That is a completed empty read: an official bio declaring a
+  // contract with no pool must be recorded as "no market", never as "provider
+  // could not be read", and a registry-bound token without a DEX pool is still
+  // a fully executed bind.
+  if (!isRecord(payload) || (payload.pairs !== null && !Array.isArray(payload.pairs))) {
     recordCall("dexscreener", "project-token-pairs", 0, "keyless · result_shape_error", "partial");
     return null;
   }
-  const pairs = payload.pairs.filter(isRecord);
+  const rawPairs = Array.isArray(payload.pairs) ? payload.pairs : [];
+  const pairs = rawPairs.filter(isRecord);
   recordCall(
     "dexscreener",
     "project-token-pairs",
     0,
-    `keyless · ${pairs.length ? `${pairs.length} pairs` : "no_pairs"}`,
-    pairs.length === payload.pairs.length ? "succeeded" : "partial",
+    `keyless · ${pairs.length ? `${pairs.length} pairs` : "no_pairs"}${addresses.length > 1 ? ` · ${addresses.length} addresses` : ""}`,
+    pairs.length === rawPairs.length ? "succeeded" : "partial",
   );
-  return pairs;
+  return { pairs, capped: rawPairs.length >= DEX_BATCH_PAIR_CAP };
 }
 
 const quotePriority = (symbol: string): number => {
@@ -1012,6 +1249,9 @@ function selectPriceCorroboratedPair(
       priceUsd,
       liquidityUsd: liquidity,
       sourceUrl: cleanText(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`,
+      ...(finiteNumber(row.pairCreatedAt) !== undefined
+        ? { pairCreatedAt: finiteNumber(row.pairCreatedAt) }
+        : {}),
     }];
   });
   return candidates.sort((left, right) =>
@@ -1150,6 +1390,7 @@ async function collectProfileDeclaredToken(
   const symbol = cleanText(base.symbol).toUpperCase();
   const chain = cleanText(best.chainId).toLowerCase();
   const pairAddress = cleanText(best.pairAddress);
+  const pairCreatedAt = finiteNumber(best.pairCreatedAt);
   if (!name || !symbol || !chain || !pairAddress) {
     return {
       state: "failed",
@@ -1211,31 +1452,135 @@ async function collectProfileDeclaredToken(
       ...(volume24hUsd !== undefined ? { volume24hUsd } : {}),
       ...(liquidityUsd !== undefined ? { liquidityUsd } : {}),
       pairAddress,
+      ...(pairCreatedAt !== undefined ? { pairCreatedAt } : {}),
       ...(history ? { history } : {}),
       ...(cleanText(info.imageUrl) ? { imageUrl: cleanText(info.imageUrl) } : {}),
     },
   };
 }
 
+type DeclaredOutcome = { candidate: TokenCandidate; result: DexFallbackResult };
+
+/**
+ * Registry queries that already completed with NO candidate at all earlier in
+ * the same run, per provider. The adapter runs more than once per scan (after
+ * orientation names launched products, after an official site is recovered),
+ * and each re-run used to repeat every display-name query that had already
+ * come back empty, which is what pushes keyless CoinGecko into throttling.
+ * Only truly empty queries are remembered: a query whose candidates merely
+ * failed the identity gate must run again, because a recovered official
+ * domain can bind exactly those candidates.
+ */
+const completedEmptyQueries = new WeakMap<CollectedEvidence, { coingecko: Set<string>; dexscreener: Set<string> }>();
+
+function emptyQueryLedger(evidence: CollectedEvidence): { coingecko: Set<string>; dexscreener: Set<string> } {
+  let ledger = completedEmptyQueries.get(evidence);
+  if (!ledger) {
+    ledger = { coingecko: new Set(), dexscreener: new Set() };
+    completedEmptyQueries.set(evidence, ledger);
+  }
+  return ledger;
+}
+
+/**
+ * The registry platform whose listed address equals the bio-declared contract.
+ * CoinGecko lists every chain a token is deployed on under `platforms`, so a
+ * declared contract that is the token's Base deployment still matches when the
+ * record's canonical (first-ordered) platform is Ethereum.
+ */
+function registryContractMatchingDeclared(details: JsonRecord, candidate: TokenCandidate): ContractIdentity | null {
+  const platforms = isRecord(details.platforms) ? details.platforms : {};
+  for (const [platform, value] of Object.entries(platforms)) {
+    const address = cleanText(value);
+    if (!address || !sameAddress(address, candidate.address)) continue;
+    return { address: candidate.address, chain: PLATFORM_CHAIN[platform] ?? platform };
+  }
+  return null;
+}
+
+/**
+ * An identity-bound registry record whose contract differs from the contract
+ * the official bio declares. Neither side is chosen: a stale or migrated CA is
+ * exactly the entity-continuity signal an investigator needs to see, and a
+ * silent pick either way would attach the wrong token. Both contracts are
+ * disclosed and the row stays unresolved.
+ */
+function recordDeclaredConflict(
+  ctx: CollectContext,
+  declared: DeclaredOutcome,
+  registry: NonNullable<UnresolvedProjectTokenSnapshot["registry"]>,
+  attempts: number,
+): AdapterRunResult {
+  const handle = `@${normalizeHandle(ctx.handle)}`;
+  ctx.evidence.unresolvedProjectToken = {
+    address: declared.candidate.address,
+    via: declared.candidate.via,
+    source: "official_bio",
+    state: "registry_conflict",
+    registry,
+    capturedAt: captureTimestamp(),
+  };
+  const note = `the official X bio of ${handle} declares contract ${declared.candidate.address} (no exact-address DEX market), while the ${registry.provider === "official_site" ? "official site" : registry.provider} record bound to this account lists ${registry.name} ($${registry.symbol}) at ${registry.address} on ${registry.chain}. The two contracts differ, so no token was bound; a stale or migrated contract must be reconciled before token conduct is assessed.`;
+  ctx.recordCheck?.({
+    id: "project-token-identity",
+    status: "finding",
+    note,
+    provider: `twitterapi/${registry.provider}`,
+    sourceCount: 2,
+  });
+  ctx.emit({
+    phase: "P0 · Routing",
+    label: "Official bio contract and registry contract disagree",
+    detail: note,
+    source: `twitterapi / ${registry.provider}`,
+    tone: "warn",
+  });
+  return { state: "executed", detail: "official bio contract and identity-bound registry contract differ", attempts };
+}
+
 export async function collectProjectTokenIdentity(
   ctx: CollectContext,
   dependencies: { recoverOfficialText?: (url: string) => Promise<PublicTextWithRecoveryResult> } = {},
 ): Promise<AdapterRunResult> {
-  const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
+  const handleQuery = ctx.handle.replace(/^@/, "");
+  const query = projectName(ctx.evidence.profile.display_name || handleQuery);
   const registryQueries = projectRegistrySearchQueries(
-    ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""),
+    ctx.evidence.profile.display_name || handleQuery,
     ctx.evidence.subjectOrientation?.launchedProducts,
   );
-  const seeded = parseSeededContract(ctx);
-  const profileDeclaredToken = ctx.evidence.profile.profile_collection_state === "resolved"
+  const displayKey = normalized(ctx.evidence.profile.display_name || handleQuery);
+  const handleKey = normalized(handleQuery);
+  const handleAlreadyCovered = !handleKey
+    || handleKey.length < 2
+    || displayKey === handleKey
+    || displayKey.includes(handleKey)
+    || handleKey.includes(displayKey)
+    || registryQueries.some((existing) => existing.toLowerCase() === handleQuery.toLowerCase());
+  if (!handleAlreadyCovered) {
+    registryQueries.push(handleQuery);
+  }
+  const profileFrozen = ctx.evidence.profile.profile_collection_state === "resolved"
     && ctx.evidence.profile.profile_provider === "twitterapi"
-    && Number.isFinite(Date.parse(ctx.evidence.profile.profile_captured_at ?? ""))
+    && Number.isFinite(Date.parse(ctx.evidence.profile.profile_captured_at ?? ""));
+  // A project whose display name is a slogan usually still names its ticker in
+  // the bio ("The home of $ALTT on Base"). That symbol is a search lead only:
+  // the registry record it finds must still list this exact official X account.
+  if (profileFrozen) {
+    for (const ticker of bioTickerQueries(ctx.evidence.profile.bio)) {
+      if (!registryQueries.some((existing) => existing.toLowerCase() === ticker.toLowerCase())) {
+        registryQueries.push(ticker);
+      }
+    }
+  }
+  const seeded = parseSeededContract(ctx);
+  const profileDeclaredToken = profileFrozen
     ? declaredTokenFromBio(ctx.evidence.profile.bio)
     : null;
   if (!registryQueries.length && !seeded && !profileDeclaredToken) {
     return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
   }
 
+  let declaredOutcome: DeclaredOutcome | null = null;
   if (profileDeclaredToken) {
     const declared = await collectProfileDeclaredToken(ctx, profileDeclaredToken);
     if (declared.state === "matched" && declared.snapshot) {
@@ -1279,26 +1624,21 @@ export async function collectProjectTokenIdentity(
       });
       return { state: "executed", detail: declared.detail, attempts: declared.attempts };
     }
-    const providerUnavailable = declared.state === "failed";
-    ctx.recordCheck?.({
-      id: "project-token-identity",
-      status: providerUnavailable ? "unavailable" : "finding",
-      note: declared.detail,
-      provider: "twitterapi/dexscreener",
-      sourceCount: 1,
-    });
+    // A declared contract with no DEX market does not end the identity
+    // search. The bio may name a stale or migrated contract while CoinGecko
+    // lists the current token under this exact official X account, or the
+    // contract may be right but CEX-only. The registry and official-site
+    // tiers still run; the declared contract is then either confirmed by an
+    // identity-bound record, contradicted by one (disclosed, never chosen
+    // between), or left unresolved after every tier completed.
+    declaredOutcome = { candidate: profileDeclaredToken, result: declared };
     ctx.emit({
       phase: "P0 · Routing",
-      label: providerUnavailable ? "Official bio contract could not be checked" : "Official bio contract has no resolved market",
-      detail: declared.detail,
+      label: declared.state === "failed" ? "Official bio contract could not be checked" : "Official bio contract has no resolved market",
+      detail: `${declared.detail} Continuing into the CoinGecko, DexScreener and official-site tiers before recording an outcome.`,
       source: "twitterapi / dexscreener",
       tone: "warn",
     });
-    return {
-      state: providerUnavailable ? "partial" : "executed",
-      detail: declared.detail,
-      attempts: declared.attempts,
-    };
   }
 
   const registryHomepages: string[] = [];
@@ -1341,23 +1681,45 @@ export async function collectProjectTokenIdentity(
     }
   }
 
+  // Every registry query is part of one identity search. A query the registry
+  // never answered (throttled, transport error) leaves that search incomplete
+  // even when another query completed empty; the DexScreener leg already
+  // tracks this, and CoinGecko must not report "no token under a matching
+  // name" for a name it was never allowed to look up.
+  let searchFailures = 0;
+  const emptyLedger = emptyQueryLedger(ctx.evidence);
   if (!selected && registryQueries.length) {
     const seenIds = new Set<string>();
     let anySearchCompleted = false;
     for (const registryQuery of registryQueries) {
+      const queryKey = registryQuery.toLowerCase();
+      if (emptyLedger.coingecko.has(queryKey)) {
+        // Completed empty earlier in this run; the answer cannot change.
+        anySearchCompleted = true;
+        search ??= [];
+        continue;
+      }
       const rows = await coinSearch(registryQuery);
-      if (rows === null) continue;
+      if (rows === null) {
+        searchFailures += 1;
+        continue;
+      }
       anySearchCompleted = true;
       search = rows;
-      for (const row of rankedCandidates(registryQuery, rows)) {
+      const ranked = rankedCandidates(registryQuery, rows);
+      if (!ranked.length) emptyLedger.coingecko.add(queryKey);
+      for (const row of ranked) {
         if (seenIds.has(row.id)) continue;
         seenIds.add(row.id);
         candidates.push(row);
       }
     }
     if (!anySearchCompleted) search = null;
-    detailAttempts += candidates.length;
-    inspected = await Promise.all(candidates.map(async (candidate) => {
+    // A hard cap on detail reads per invocation: six queries times three
+    // candidates each is what tipped keyless CoinGecko into throttling.
+    const inspectedCandidates = candidates.slice(0, MAX_DETAIL_FETCHES);
+    detailAttempts += inspectedCandidates.length;
+    inspected = await Promise.all(inspectedCandidates.map(async (candidate) => {
       const details = await coinDetails(candidate.id);
       if (!details) return { details: null, selected: null };
       registryHomepages.push(...cgHandleBoundHomepages(ctx, details));
@@ -1391,16 +1753,26 @@ export async function collectProjectTokenIdentity(
     let dexSearchEverFailed = false;
     const dexNameMatches = new Set<string>();
     let dexNameMatchCount = 0;
+    let dexQueriesSkipped = 0;
     for (const fallbackQuery of dexQueries) {
       if (dexFallback.state === "matched") break;
+      const queryKey = fallbackQuery.toLowerCase();
+      if (emptyLedger.dexscreener.has(queryKey)) {
+        dexQueriesSkipped += 1;
+        continue;
+      }
       const retry = await collectDexProjectToken(ctx, fallbackQuery);
       dexAttempts += retry.attempts;
       if (retry.state === "failed") dexSearchEverFailed = true;
       if (retry.state === "empty") {
+        if (!(retry.nameMatchCount ?? 0) && !(retry.nameMatches?.length)) emptyLedger.dexscreener.add(queryKey);
         for (const match of retry.nameMatches ?? []) dexNameMatches.add(match);
         dexNameMatchCount = Math.max(dexNameMatchCount, retry.nameMatchCount ?? 0);
       }
       if (retry.state === "matched") dexFallback = retry;
+    }
+    if (dexFallback.state === "empty" && dexQueriesSkipped && dexQueriesSkipped === dexQueries.length) {
+      dexFallback = { ...dexFallback, detail: "DexScreener project search already completed empty earlier in this run" };
     }
     if (dexFallback.state !== "matched" && dexNameMatches.size) {
       dexFallback = {
@@ -1410,9 +1782,20 @@ export async function collectProjectTokenIdentity(
         nameMatchCount: Math.max(dexNameMatchCount, dexNameMatches.size),
       };
     }
-    const attempts = (query.length >= 2 ? 1 : 0) + detailAttempts + seedPairAttempts + dexAttempts;
+    const attempts = (query.length >= 2 ? 1 : 0) + detailAttempts + seedPairAttempts + dexAttempts
+      + (declaredOutcome?.result.attempts ?? 0);
     if (dexFallback.state === "matched" && dexFallback.snapshot) {
       const snapshot = dexFallback.snapshot;
+      if (declaredOutcome && !sameAddress(snapshot.address, declaredOutcome.candidate.address)) {
+        return recordDeclaredConflict(ctx, declaredOutcome, {
+          provider: "dexscreener",
+          address: snapshot.address,
+          chain: snapshot.chain,
+          name: snapshot.name,
+          symbol: snapshot.symbol,
+          sourceUrl: snapshot.sourceUrl,
+        }, attempts);
+      }
       ctx.evidence.projectToken = snapshot;
       if (!canonicalOfficialWebsite(ctx.evidence.profile.website) && snapshot.homepage) {
         ctx.evidence.profile.website = snapshot.homepage;
@@ -1452,7 +1835,17 @@ export async function collectProjectTokenIdentity(
       registryHomepages,
       dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery,
     );
-    if (declared) {
+    if (declared.state === "declared" && declaredOutcome && !sameAddress(declared.snapshot.address, declaredOutcome.candidate.address)) {
+      return recordDeclaredConflict(ctx, declaredOutcome, {
+        provider: "official_site",
+        address: declared.snapshot.address,
+        chain: declared.snapshot.chain,
+        name: declared.snapshot.name,
+        symbol: declared.snapshot.symbol,
+        sourceUrl: declared.sourceUrl,
+      }, attempts + 1);
+    }
+    if (declared.state === "declared") {
       ctx.evidence.projectToken = declared.snapshot;
       ctx.recordCheck?.({
         id: "project-token-identity",
@@ -1472,13 +1865,49 @@ export async function collectProjectTokenIdentity(
     }
 
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
-    if ((registryQueries.length > 0 && !search) || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
-      const gaps = [
-        contractLookupFailed ? "CoinGecko contract lookup failed" : null,
-        registryQueries.length > 0 && !search ? "CoinGecko search failed" : null,
-        coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
-        dexSearchEverFailed ? "DexScreener project search failed" : null,
-      ].filter((part): part is string => Boolean(part));
+    const coinSearchIncomplete = registryQueries.length > 0 && (!search || searchFailures > 0);
+    const gaps = [
+      declared.state === "failed" ? "official site token declarations could not be fully resolved" : null,
+      contractLookupFailed ? "CoinGecko contract lookup failed" : null,
+      coinSearchIncomplete
+        ? !search
+          ? "CoinGecko search failed"
+          : `CoinGecko search failed for ${searchFailures} of ${registryQueries.length} queries`
+        : null,
+      coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
+      dexSearchEverFailed ? "DexScreener project search failed" : null,
+      declaredOutcome?.result.state === "failed" ? "DexScreener could not read the contract declared in the official bio" : null,
+    ].filter((part): part is string => Boolean(part));
+
+    if (declaredOutcome) {
+      // Every tier ran and none bound a token to this account, so the
+      // declared contract is the whole story: unresolved, with the reason.
+      const providerGap = gaps.length > 0;
+      ctx.evidence.unresolvedProjectToken = {
+        address: declaredOutcome.candidate.address,
+        via: declaredOutcome.candidate.via,
+        source: "official_bio",
+        state: providerGap ? "provider_unavailable" : "no_market",
+        capturedAt: captureTimestamp(),
+      };
+      const note = providerGap
+        ? `${declaredOutcome.result.detail} The registry tiers could not be fully read either (${gaps.join("; ")}); this is a provider gap, not an assessed result, and a rescan can close it.`
+        : `${declaredOutcome.result.detail} The CoinGecko, DexScreener and official-site tiers also completed without binding a token to this account, so the declared contract stays unresolved.`;
+      ctx.recordCheck?.({
+        id: "project-token-identity",
+        status: providerGap ? "unavailable" : "finding",
+        note,
+        provider: "twitterapi/dexscreener/coingecko",
+        sourceCount: 1,
+      });
+      return {
+        state: providerGap ? "partial" : "executed",
+        detail: declaredOutcome.result.detail,
+        attempts,
+      };
+    }
+
+    if (gaps.length) {
       // A provider failure is not an assessed null, but it must still be
       // RECORDED: leaving this decision-critical row unwritten made the report
       // fall back to its placeholder note ("no official token identity was
@@ -1521,7 +1950,25 @@ export async function collectProjectTokenIdentity(
     };
   }
 
-  const { details, identity, contract } = selected;
+  const { details, identity } = selected;
+  let contract = selected.contract;
+  if (declaredOutcome) {
+    // The registry record is identity-bound to this account. It confirms the
+    // declared contract only when it lists that exact address on some chain;
+    // otherwise the two first-party statements disagree and neither wins.
+    const declaredMatch = registryContractMatchingDeclared(details, declaredOutcome.candidate);
+    if (!declaredMatch) {
+      return recordDeclaredConflict(ctx, declaredOutcome, {
+        provider: "coingecko",
+        address: contract.address,
+        chain: contract.chain,
+        name: cleanText(details.name),
+        symbol: cleanText(details.symbol).toUpperCase(),
+        sourceUrl: `https://www.coingecko.com/en/coins/${encodeURIComponent(cleanText(details.id))}`,
+      }, 1 + detailAttempts + declaredOutcome.result.attempts);
+    }
+    contract = declaredMatch;
+  }
   const market = isRecord(details.market_data) ? details.market_data : {};
   const currentPrice = isRecord(market.current_price) ? finiteNumber(market.current_price.usd) : undefined;
   const marketCap = isRecord(market.market_cap) ? finiteNumber(market.market_cap.usd) : undefined;
@@ -1614,7 +2061,11 @@ export async function collectProjectTokenIdentity(
     ...circulatingSupply !== undefined ? { circulatingSupply } : {},
     ...totalSupply !== undefined ? { totalSupply } : {},
     ...maxSupply !== undefined ? { maxSupply } : {},
-    ...pair ? { liquidityUsd: pair.liquidityUsd, pairAddress: pair.pairAddress } : {},
+    ...pair ? {
+      liquidityUsd: pair.liquidityUsd,
+      pairAddress: pair.pairAddress,
+      ...(pair.pairCreatedAt !== undefined ? { pairCreatedAt: pair.pairCreatedAt } : {}),
+    } : {},
     ...ath ? { ath } : {},
     ...history ? { history } : {},
   };
@@ -1625,9 +2076,9 @@ export async function collectProjectTokenIdentity(
   ctx.recordCheck?.({
     id: "project-token-identity",
     status: "confirmed",
-    note: `$${snapshot.symbol} matched this project through its ${snapshot.verification === "official_x" ? "official X account" : "official website domain"} and canonical ${snapshot.chain} contract`,
-    provider: "coingecko",
-    sourceCount: 1,
+    note: `$${snapshot.symbol} matched this project through its ${snapshot.verification === "official_x" ? "official X account" : "official website domain"} and canonical ${snapshot.chain} contract${declaredOutcome ? "; the registry lists the exact contract declared in the official X bio, which has no DEX market of its own" : ""}`,
+    provider: declaredOutcome ? "coingecko/twitterapi" : "coingecko",
+    sourceCount: declaredOutcome ? 2 : 1,
   });
   if (pair) {
     ctx.recordCheck?.({
@@ -1684,7 +2135,8 @@ export async function collectVentureTokenIdentity(venture: {
     if (!details) continue;
     const links = isRecord(details.links) ? details.links : {};
     const officialHandle = cleanText(links.twitter_screen_name);
-    const exactX = Boolean(ventureHandle && officialHandle && normalizeHandle(officialHandle) === ventureHandle);
+    const matchedVentureX = ventureHandle ? firstMatchingOfficialX(details, ventureHandle) : null;
+    const exactX = Boolean(matchedVentureX);
     const homepages = officialHomepages(details);
     const domainHomepage = ventureScope
       ? homepages.find((candidateHome) => {
@@ -1720,7 +2172,9 @@ export async function collectVentureTokenIdentity(venture: {
       address: contract.address,
       chain: contract.chain,
       ...(homepages[0] ? { homepage: homepages[0] } : {}),
-      ...(officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}),
+      ...(matchedVentureX
+        ? { officialX: `@${matchedVentureX}` }
+        : officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}),
       sourceUrl,
       capturedAt,
       producerSources: {

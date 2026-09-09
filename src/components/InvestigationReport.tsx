@@ -40,6 +40,7 @@ import { LpCustody } from "./LpCustody";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { marketSizeBand } from "../lib/marketPosition";
 import { UsageVisuals } from "./UsageVisuals";
+import { EntityContinuityTimeline } from "./EntityContinuityTimeline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { RingAlert } from "./RingAlert";
 import { TrustGraph } from "./TrustGraph";
@@ -93,7 +94,8 @@ import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, i
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
 import { buildPublicClaimConflictDiscovery, buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
-import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
+import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion, isProductDescriptionQuestion } from "../lib/intelligenceBrief";
+import { hasBoundProjectDescription, hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
 import { NoticedRail } from "./InvestigatorBrief";
 import { summarizeFundingEvidence, type FundingEvidenceRound } from "../lib/fundingEvidence";
 import { walletAgeFact } from "../lib/operatorTrace";
@@ -745,7 +747,7 @@ export function InvestigationReport({
   const reportLane = useReportLane();
   const arkhamEnabled = arkhamProviderEnabled();
   const [spent, setSpent] = useState(0);
-  const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
+  const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("general_diligence");
   const reportStyle = reportLane.definition.presentationStyle;
   const [watched, setWatched] = useState(() => isWatched(inv.token.address));
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
@@ -1348,11 +1350,13 @@ export function InvestigationReport({
     }] : []),
   ].slice(0, 6);
   const requiredNextStepItems = requiredGapChecks
+    .filter(isReaderDecisionCheck)
     .map((check) => ({
       label: `Required: ${publicCheckLabel(check.label)}`,
       ...(check.note ? { detail: publicCheckNote(check.note) } : {}),
     }));
   const enrichmentNextStepItems = enrichmentGapChecks
+    .filter(isReaderDecisionCheck)
     .map((check) => ({
       label: publicCheckLabel(check.label),
       ...(check.note ? { detail: publicCheckNote(check.note) } : {}),
@@ -1364,8 +1368,10 @@ export function InvestigationReport({
     ...requiredNextStepItems.slice(0, 2),
     ...intelligenceBrief.questions
       .filter((item) => !(
-        isOfficialTokenQuestion(item)
-        && (projectAccount?.projectToken?.verified || inv.projectAccountBinding?.status === "verified")
+        (isOfficialTokenQuestion(item)
+          && (projectAccount?.projectToken?.verified || inv.projectAccountBinding?.status === "verified"))
+        || (projectAccount != null && hasBoundProjectIdentity(projectAccount) && isOfficialIdentityQuestion(item))
+        || (projectAccount != null && hasBoundProjectDescription(projectAccount) && isProductDescriptionQuestion(item))
       ))
       .map((item) => ({
       label: item.title,
@@ -1419,6 +1425,7 @@ export function InvestigationReport({
     `${String(chapter).padStart(2, "0")} · ${label}`;
   const reportNavItems: ReportCanvasNavItem[] = [
     { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
+    ...(projectAccount?.entityContinuity?.events.length ? [{ href: "#key-developments" as const, label: "Key developments", icon: <ArrowClockwise size={16} weight="duotone" aria-hidden="true" /> }] : []),
     { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
     { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
     ...(socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
@@ -1965,6 +1972,8 @@ export function InvestigationReport({
           showGuideNavigation={reportLane.definition.navigation === "guide"}
         >
 
+        {projectAccount?.entityContinuity && <EntityContinuityTimeline snapshot={projectAccount.entityContinuity} />}
+
         {projectAccount?.intelligence && (
           <PointInTimeIntelligencePanel
             snapshot={projectAccount.intelligence}
@@ -2054,10 +2063,11 @@ export function InvestigationReport({
                 snapshot={socialActivity}
                 className="mt-3"
                 panelCostToken={panelCostToken}
-                afterActivity={accountLeads.subjectLeads.length > 0 ? (
+                afterActivity={accountLeads.subjectAdverseLeads.length > 0 || (socialActivity.adverseMentions?.length ?? 0) > 0 ? (
                   <div id="subject-leads" className="scroll-mt-28">
                     <SubjectAccusationStage
-                      leads={accountLeads.subjectLeads}
+                      leads={accountLeads.subjectAdverseLeads}
+                      socialLeads={socialActivity.adverseMentions}
                       subject={accountLeadSubject}
                       panelCostToken={panelCostToken}
                     />
@@ -2074,10 +2084,10 @@ export function InvestigationReport({
             title="Who is behind this project"
             description="Team identity is a core diligence question. Start with the people and roles supported by sources, then review the project account and token creator."
           />
-          {accountLeads.subjectLeads.length > 0 && !socialActivity && (
+          {accountLeads.subjectAdverseLeads.length > 0 && !socialActivity && (
             <div id="subject-leads" className="mb-4 scroll-mt-28">
               <SubjectAccusationStage
-                leads={accountLeads.subjectLeads}
+                leads={accountLeads.subjectAdverseLeads}
                 subject={accountLeadSubject}
                 panelCostToken={panelCostToken}
               />

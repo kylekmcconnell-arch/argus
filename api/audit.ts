@@ -20,7 +20,7 @@ import {
 } from "../src/lib/investigationRuntime.js";
 import { activateReportVersionWithAuthoritativeGraph } from "./_graph.js";
 import type { ResearchIntent } from "../src/lib/researchDirector.js";
-import { recordScanReceipt } from "./_scanReceipts.js";
+import { claimScanReceipt, recordScanReceipt } from "./_scanReceipts.js";
 
 export const config = { maxDuration: 600 };
 
@@ -275,7 +275,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const privateRun = req.query.private === "1";
   const embeddedProjectAccount = privateRun && typeof req.query.address === "string" && !!req.query.address.trim();
   const receiptRunKey = embeddedProjectAccount ? `${effectiveCreditKey}:embedded` : effectiveCreditKey;
-  await recordScanReceipt(auth, {
+  const claim = await claimScanReceipt(auth, {
     runKey: receiptRunKey,
     route: "/api/audit",
     kind: "person",
@@ -286,6 +286,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     creditsCharged: embeddedProjectAccount ? 0 : quota.used,
     startedAt: new Date(requestStartedAt).toISOString(),
   });
+  if (claim !== "written") {
+    res.status(claim === "duplicate" ? 409 : 503).json({
+      error: claim === "duplicate" ? "scan_run_already_claimed" : "scan_run_claim_unavailable",
+      message: "This scan could not be started. Open its saved result or use a new scan identifier.",
+    });
+    return;
+  }
+
 
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
@@ -370,6 +378,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }));
         try {
           reportVersionId = await persistServerDossier(handle, dossier, auth);
+          if (!reportVersionId) {
+            // persistServerDossier returns null without throwing when report
+            // storage is unconfigured or the subject carries no canonical ref.
+            // Reporting that as "persisted" handed the browser a save receipt
+            // with no immutable version behind it, which then failed the
+            // client's version binding and took the whole finished scan -
+            // score included - down with it. An absent version id is a failed
+            // save, and the report says so.
+            persistence = "failed";
+            persistenceFailureReason = "Report storage did not return an immutable version for this scan.";
+            send("persistence", { state: "failed", reason: persistenceFailureReason });
+          }
         } catch (persistenceError) {
           persistence = "failed";
           console.error("[api/audit] persistence failed", persistenceError);

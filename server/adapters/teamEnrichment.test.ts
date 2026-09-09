@@ -8,7 +8,7 @@ const fetchTrustedProfileImageMock = vi.fn();
 vi.mock("./x", () => ({ getProfile: (...args: unknown[]) => getProfileMock(...args) }));
 vi.mock("./profilePhoto", () => ({ fetchTrustedProfileImage: (...args: unknown[]) => fetchTrustedProfileImageMock(...args) }));
 
-const { enrichFirstPartyTeamAvatars } = await import("./teamEnrichment");
+const { enrichFirstPartyTeamAvatars, teamProfileEntityType } = await import("./teamEnrichment");
 
 function member(overrides: Partial<WebTeamMember>): WebTeamMember {
   return { name: "Test Person", role: "Founder", source: "post role-scan", ...overrides };
@@ -112,5 +112,42 @@ describe("first-party team avatar enrichment", () => {
     expect(firstParty.accountStatus).toBe("active");
     expect(firstParty.avatarUrl).toBeUndefined();
     expect(fetchTrustedProfileImageMock).not.toHaveBeenCalled();
+  });
+
+  it("reclassifies Women of Satoshi as an organization and keeps it out of team evidence", async () => {
+    getProfileMock.mockResolvedValueOnce({
+      handle: "@womenofsatoshi",
+      name: "Women of Satoshi",
+      bio: "An NFT project and community celebrating women building on Bitcoin.",
+      accountStatus: "active",
+      statusSourceUrl: "https://x.com/womenofsatoshi",
+      statusCapturedAt: "2026-08-27T00:00:00.000Z",
+      image: "https://pbs.twimg.com/profile_images/wos/avatar.jpg",
+    });
+    const falseFounder = member({
+      name: "@womenofsatoshi",
+      handle: "@womenofsatoshi",
+      role: "Founder",
+      evidence: 'the official account placed the role "founder" next to @womenofsatoshi',
+      sourceUrl: "https://x.com/fedibtc",
+      handleProvenance: "subject_first_party",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+    const ctx = context([falseFounder]);
+
+    await enrichFirstPartyTeamAvatars(ctx);
+
+    expect(teamProfileEntityType({ name: "Women of Satoshi", bio: "An NFT project and community." })).toBe("organization");
+    expect(falseFounder).toMatchObject({
+      kind: "org",
+      name: "Women of Satoshi",
+      role: "related organization",
+    });
+    expect(falseFounder.avatarUrl).toBeUndefined();
+    expect(ctx.evidence.associates).toContainEqual(expect.objectContaining({
+      associate_handle: "@womenofsatoshi",
+      relation: "official-post mention",
+    }));
   });
 });

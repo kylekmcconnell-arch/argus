@@ -352,7 +352,7 @@ async function structuredGrok<T>(
 export interface ExtractedClaims {
   roles: string[];
   ventures: { project_name: string; role?: string; period?: string; claimed_outcome?: string }[];
-  testimonials: { claimed_endorser_handle: string; claimed_relationship?: string }[];
+  testimonials: { claimed_endorser_handle: string; claimed_relationship?: string; evidence_url?: string }[];
   advised: { project_name: string; project_handle?: string; claimed_role?: string }[];
   promotions: { ticker: string; contract_address?: string; chain?: string }[];
 }
@@ -382,7 +382,7 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
     "can hold several roles, but do not tag KOL merely for hype words or for promoting the " +
     "project's own token, and do not tag INVESTOR merely for trading talk. " +
     "Ventures = companies/projects they say they founded or led. " +
-    "Testimonials = named people/accounts they cite as backers or endorsers. Advised " +
+    "Testimonials = named people/accounts they cite as backers or endorsers. When a post includes a [Source: URL] stamp, copy that exact URL into evidence_url for the testimonial extracted from that post. Advised " +
     "= projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller " +
     "capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, " +
     "listing each ticker once with its contract address and chain when a chart link or CA is present. Use the " +
@@ -407,7 +407,7 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
           type: "array",
           items: {
             type: "object",
-            properties: { claimed_endorser_handle: { type: "string" }, claimed_relationship: { type: "string" } },
+            properties: { claimed_endorser_handle: { type: "string" }, claimed_relationship: { type: "string" }, evidence_url: { type: "string" } },
             required: ["claimed_endorser_handle"],
           },
         },
@@ -575,9 +575,9 @@ export const PROJECT_SCORING_POLICY = [
   "If an axis has neither affirmative evidence nor verified adverse evidence, do not score it at zero. Mark it unscored and publish the investigation as INCOMPLETE. A zero is a severe assessment, not a synonym for missing data.",
   "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
   "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
-  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation. A completed token-identity assessment (the project-token-identity check) that binds no canonical token scores P3 at the low end for lack of demonstrated conduct history; it is a null result on this axis only, never adverse conduct evidence or counter-evidence against any other axis. EXCEPTION: when the official profile biography in the packet explicitly declares the project has no token and no canonical token is bound, there is no token-conduct risk surface to assess and the null search result CONFIRMS the declaration. Score P3 at the top of its allowed band as clean conduct, and write the rationale as: the project explicitly declares itself token-free, so token conduct criteria are waived until a token launches. Never describe a declared-token-free project as lacking demonstrated conduct history, and never score it low for not having a token.",
+  "P3 token conduct is governed by the frozen tokenApplicability state established before scoring. verified_live_token and historical_token_lineage are assessed; lineage means the analyst must consider predecessor names, contracts, migrations, and current status together. confirmed_tokenless removes P3 as not applicable and normalizes the project score over the remaining 80 weighted points. prelaunch_token_deferred also removes P3 without penalty until a token is live. unresolved_token_identity keeps P3 unresolved and the overall project verdict provisional. Never infer applicability from biography wording, never award clean-conduct points for lacking a token, and never penalize a tokenless business for having no token history.",
   "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
-  "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end as a null result on this axis only, never counter-evidence against any other axis.",
+  "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end because no positive backing signal was verified on that axis only, never as counter-evidence against any other axis.",
   "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
   "A severe canonical-token market drawdown is material counter-evidence for P5 and must be cited, but price performance alone only caps otherwise exceptional traction and liveness at the solid band. It cannot erase verified current protocol usage or imply token misconduct.",
   "P6 transparency and integrity: a named legal operator, terms, public docs or repositories, governance materials, and consistent current disclosures justify a solid score. Published independent audits, treasury reporting, and fuller financial disclosures may justify the exceptional band. An unavailable disclosure path is a confidence gap unless a direct verified search establishes a material nondisclosure.",
@@ -984,6 +984,88 @@ export function normalizeAnalystCitationEligibility(
     return changed ? { ...root, axes } : value;
   }
   return value;
+}
+
+export interface AnalystLineageReconciliation {
+  verdict: AnalystVerdict | null;
+  removed: Array<{
+    axis: string;
+    artifactId: string;
+    relation: "support" | "counter";
+    eligibleAxes: string[];
+  }>;
+  reason?: string;
+}
+
+/**
+ * Reconcile a validated analyst result against the exact evidence catalog that
+ * will be attached to the finished report. The scorer can run against a
+ * compacted or supported-axis packet while persistence validates the final
+ * report catalog. Any drift between those two immutable views must be resolved
+ * before the report reaches the database, not surfaced to the reader as a save
+ * failure.
+ *
+ * This never invents or substitutes evidence. Ineligible extra references are
+ * removed. If that would leave an axis without substantive support, the whole
+ * verdict fails closed so the report can publish honestly as incomplete.
+ */
+export function reconcileAnalystVerdictLineage(
+  verdict: AnalystVerdict,
+  evidenceCatalog: AxisEvidenceRecord[],
+  axisCatalog: AnalystAxis[],
+): AnalystLineageReconciliation {
+  const artifacts = new Map(evidenceCatalog.map((artifact) => [artifact.artifactId, artifact]));
+  const roleByAxis = new Map(axisCatalog.map((axis) => [axis.axis, axis.role]));
+  const removed: AnalystLineageReconciliation["removed"] = [];
+  const unique = (values: readonly string[]): string[] => [...new Set(values)];
+  const eligible = (
+    axis: string,
+    artifactId: string,
+    relation: "support" | "counter",
+  ): boolean => {
+    const artifact = artifacts.get(artifactId);
+    const allowed = Boolean(
+      artifact
+      && artifact.eligibleAxes.includes(axis)
+      && (relation === "support" || isSubstantiveArtifact(artifact))
+      && (
+        relation === "support"
+        || roleByAxis.get(axis) !== "PROJECT"
+        || artifact.counterEligibleAxes?.includes(axis)
+      ),
+    );
+    if (!allowed) {
+      removed.push({
+        axis,
+        artifactId,
+        relation,
+        eligibleAxes: artifact ? [...artifact.eligibleAxes] : [],
+      });
+    }
+    return allowed;
+  };
+
+  const axes = verdict.axes.map((row) => {
+    const support = unique(row.evidenceRefs).filter((artifactId) =>
+      eligible(row.axis, artifactId, "support"));
+    const supportSet = new Set(support);
+    const counter = unique(row.counterEvidenceRefs).filter((artifactId) =>
+      !supportSet.has(artifactId) && eligible(row.axis, artifactId, "counter"));
+    return { ...row, evidenceRefs: support, counterEvidenceRefs: counter };
+  });
+  const unsupported = axes.find((row) => !row.evidenceRefs.some((artifactId) =>
+    isSubstantiveArtifact(artifacts.get(artifactId))));
+  if (unsupported) {
+    return {
+      verdict: null,
+      removed,
+      reason: `${unsupported.axis} has no substantive eligible support in the final report catalog`,
+    };
+  }
+  return {
+    verdict: removed.length > 0 ? { ...verdict, axes } : verdict,
+    removed,
+  };
 }
 
 // A verified project-team artifact makes "the team is unresolved" wording
@@ -1706,18 +1788,6 @@ export type ProjectScoreBand = ProjectStrengthBandRecord;
  * "no token needed/required/gating" is usage copy, not an existence claim,
  * and "token launch soon" promises one rather than disclaiming one.
  */
-const NO_TOKEN_DECLARATION = new RegExp([
-  String.raw`\bno (?:official )?(?:token|coin)s?\b(?!\s*(?:needed|required|gate|gating|sale))`,
-  String.raw`\b(?:do(?:es)? not|don'?t|doesn'?t) have an? (?:official )?(?:token|coin)\b`,
-  String.raw`\bthere is no (?:official )?(?:token|coin)\b`,
-  String.raw`\btoken:?\s*none\b`,
-  String.raw`\btoken-?less\b`,
-  String.raw`\bno (?:token|coin) (?:has been |was )?(?:launched|issued|released|deployed)\b`,
-  String.raw`\bhave(?: not|n'?t) (?:launched|issued|released) an? (?:token|coin)\b`,
-  String.raw`\bnever launch(?:ed|ing)? an? (?:token|coin)\b`,
-  String.raw`\b(?:any|all|every) (?:token|coin)s? (?:claiming|impersonat\w+|using|named|bearing)\b[\s\S]{0,60}\b(?:scams?|fake|not ours|unofficial)\b`,
-].join("|"), "i");
-
 const PROJECT_EARLY_STAGE = /\b(?:alpha|beta|testnet|prototype|demo|pilot|coming soon|pre-?launch|waitlist)\b/i;
 const PROJECT_MATURE_STAGE = /\b(?:live|mainnet|production|in production|operational|operating)\b/i;
 const TOKEN_MARKET_ONLY_TRACTION = /\b(?:token|trading volume|volume|market cap|liquidity|price|fdv)\b/i;
@@ -1826,6 +1896,10 @@ export function deriveProjectStrengthBands(
   const token = packet.projectToken && typeof packet.projectToken === "object" && !Array.isArray(packet.projectToken)
     ? packet.projectToken as Record<string, unknown>
     : undefined;
+  const tokenApplicability = packet.tokenApplicability && typeof packet.tokenApplicability === "object" && !Array.isArray(packet.tokenApplicability)
+    ? packet.tokenApplicability as Record<string, unknown>
+    : undefined;
+  const historicalTokenLineage = tokenApplicability?.state === "historical_token_lineage";
   const verifiedToken = token?.verified === true
     && (token.verification === "official_x" || token.verification === "official_domain");
   // This is narrower than an `official_x` registry match. It means ARGUS read
@@ -2061,27 +2135,11 @@ export function deriveProjectStrengthBands(
   ], artifactIds(p2Anchors), p2FloorTier);
 
   const tokenDisclosures = [...tokenDisclosureFacts];
-  // A project with no canonical token record has no token conduct to measure,
-  // and the preflight treats a "none" band as missing evidence for the WHOLE
-  // axis set. Verified conduct disclosures therefore keep the axis scoreable
-  // for tokenless brand and company subjects; market-tier strength still
-  // requires the verified token, and a discovered token that failed official
-  // verification still fails closed to "none".
+  // Disclosures may strengthen an applicable live or historical token lineage.
+  // Tokenless and prelaunch projects never reach this axis: applicability
+  // removes P3 before the catalog is constructed.
   const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0]
     .filter(Boolean).length;
-  // A first-party "no token" declaration waives the token-conduct criteria:
-  // the axis measures token conduct RISK, and a project that explicitly
-  // declares it has no token (and binds none) has no such risk surface. The
-  // ceiling opens on the declaration alone (a self-description, H2
-  // ceiling-only); the enforced floor additionally needs ARGUS's own
-  // completed token-identity search confirming no token exists, which turns
-  // the self-claim into a corroborated fact. Any verified limiting evidence
-  // (a prior token that collapsed under this project) disables the waiver.
-  const p3NullSearch = assessmentArtifactFor("P3_token_conduct", "project-token-identity");
-  const declaredTokenless = !token
-    && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0
-    && typeof profile?.bio === "string"
-    && NO_TOKEN_DECLARATION.test(String(profile.bio));
   // Ceiling uses registry-matched audit discovery leads. Floor uses the strict
   // corroborated auditFact only, so an unverified lead widens the allowed range
   // without minting an enforced minimum (H2).
@@ -2090,7 +2148,8 @@ export function deriveProjectStrengthBands(
       && tokenDisclosures.length > 0
       && auditExceptionalCeiling ? "exceptional"
       : moderateMarket ? "solid" : "emerging")
-    : declaredTokenless ? "exceptional"
+    : historicalTokenLineage
+      ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
       : !token && tokenlessConductCategories > 0
         ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
         : "none";
@@ -2099,24 +2158,19 @@ export function deriveProjectStrengthBands(
       && tokenDisclosures.length > 0
       && auditFacts.length > 0 ? "exceptional"
       : moderateMarket ? "solid" : "emerging")
-    : declaredTokenless ? (p3NullSearch ? "solid" : "none")
+    : historicalTokenLineage
+      ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
       : !token && tokenlessConductCategories > 0
         ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
         : "none";
-  const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0
-    ? p3NullSearch
-    : null;
-  let p3FinalTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3CeilingTier;
-  let p3FinalFloorTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3FloorTier;
+  let p3FinalTier: ProjectStrengthTier = p3CeilingTier;
+  let p3FinalFloorTier: ProjectStrengthTier = p3FloorTier;
   if (severeUnrecoveredProtocolIncident && (p3FinalTier === "solid" || p3FinalTier === "exceptional")) p3FinalTier = "emerging";
   if (severeUnrecoveredProtocolIncident && (p3FinalFloorTier === "solid" || p3FinalFloorTier === "exceptional")) p3FinalFloorTier = "emerging";
   setBand("P3_token_conduct", p3FinalTier, [
     ...(verifiedToken ? ["canonical token verified"] : []),
-    ...(declaredTokenless
-      ? ["official profile explicitly declares the project has no token; token conduct criteria waived until a token launches"]
-      : []),
-    ...(!token && !declaredTokenless && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : []),
-    ...(p3Assessment ? ["completed token-identity assessment bound no canonical token"] : []),
+    ...(historicalTokenLineage ? ["predecessor or migration lineage requires continuous token-conduct assessment"] : []),
+    ...(!token && !historicalTokenLineage && p3FinalTier !== "none" ? ["token conduct scored from verified disclosures"] : []),
     ...(moderateMarket ? ["measured market activity"] : []),
     ...(governanceFacts.length ? ["verified token governance"] : []),
     ...(tokenDisclosures.length ? ["verified token economic disclosure"] : []),
@@ -2126,10 +2180,6 @@ export function deriveProjectStrengthBands(
     ...(severeUnrecoveredProtocolIncident ? ["material protocol security incident without a recorded full recovery caps token and control evidence at emerging"] : []),
   ], [
     ...artifactIds([...(token ? [token] : []), ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
-    ...(p3Assessment ? [p3Assessment.artifactId] : []),
-    // The waived band anchors on the completed search that corroborates the
-    // declaration; without it the anchor fallback in setBand still applies.
-    ...(declaredTokenless && p3NullSearch ? [p3NullSearch.artifactId] : []),
   ], p3FinalFloorTier);
 
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
@@ -2656,6 +2706,9 @@ const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   projectToken: [
     "P3_token_conduct", "P5_traction_and_liveness",
   ],
+  entityContinuity: [
+    "P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity",
+  ],
   // Findings are routed by exact finding_type below. A section-wide allowlist
   // made unrelated facts (for example, token collapse) eligible for identity.
   findings: [],
@@ -2738,6 +2791,7 @@ const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "profile-photo-authenticity": [],
   "code-footprint-github": ["F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
   "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
+  "entity-continuity": ["P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity"],
   "affiliations-associates": ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "AD3_relationship_corroboration", "ME2_role_authenticity"],
   "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
   "project-token-identity": ["P3_token_conduct"],
@@ -3504,7 +3558,7 @@ const makeAxisArtifact = (
 const SCORING_SINGLE_SECTIONS = ["profile", "profileAuthenticity", "trustGraphScreen", "projectToken", "ventureToken"] as const;
 const SCORING_ARRAY_SECTIONS = [
   "findings", "ventures", "testimonials", "advised", "promotions", "wallets", "team",
-  "basicFacts",
+  "basicFacts", "entityContinuity",
   "notableFollowers", "recentActivity", "sourceArtifacts", "checkOutcomes",
   "clientEngagements", "associates", "ventureTeams",
 ] as const;
@@ -3772,6 +3826,7 @@ function serializeAnalystEvidencePacket(
     promotions: 16,
     wallets: 12,
     team: 16,
+    entityContinuity: 1,
     basicFacts: 24,
     notableFollowers: 16,
     recentActivity: 12,
@@ -3842,6 +3897,9 @@ function serializeAnalystEvidencePacket(
     trustGraphScreen: compactTrustGraphScreen(input.trustGraphScreen),
     projectToken: input.projectToken && typeof input.projectToken === "object" && !Array.isArray(input.projectToken)
       ? compactProjectToken(input.projectToken)
+      : undefined,
+    tokenApplicability: input.tokenApplicability && typeof input.tokenApplicability === "object" && !Array.isArray(input.tokenApplicability)
+      ? compactObject(input.tokenApplicability, 2)
       : undefined,
     // Findings stay ahead of descriptive context in the budget. This prevents a
     // long social corpus from hiding the material facts that govern a verdict.
@@ -4296,6 +4354,12 @@ export async function analyzeSubject(
     `${citationEligibilityTable}\n\n` +
     `Score every listed axis, write the composite headline (one sentence on what ` +
     `governs the verdict), and an identity note.\n\n` +
+    `PUBLIC LANGUAGE RULE: write for a reader, not for the research pipeline. Never ` +
+    `use analyst shorthand such as "null backing", "null result", "governing limitation", ` +
+    `"project and token continuity", or internal collection-state language in the headline, ` +
+    `identity note, rationales, or gaps. Say exactly what was or was not verified in plain ` +
+    `English, for example "no financial backers were verified" or "the token launched ` +
+    `recently, so it has little trading history."\n\n` +
     `ACTIVITY RULE: weigh posting cadence. profile.days_since_post is how long the ` +
     `account has been silent. For a PROJECT/token, going quiet for weeks (roughly ` +
     `21+ days) is a real liveness flag (abandoned, winding down, or quiet after a ` +

@@ -56,6 +56,7 @@ describe("provider readiness", () => {
         { id: "reddit", ok: false, retired: true, detail: "retired: Reddit API access was not approved" },
         { id: "gmgn", ok: false, detail: "not configured in this deployment" },
         { id: "safebrowsing", ok: false, optional: true, detail: "optional fallback not configured" },
+        { id: "chart-signals", ok: false, optional: true, detail: "optional fallback not configured" },
         { id: "x-api-bearer", ok: false, optional: true, detail: "optional fallback not configured" },
       ],
       // Serper + a model are set but no OpenRouter key -> grounded search runs on
@@ -90,7 +91,7 @@ describe("provider readiness", () => {
         { id: "openrouter", ok: true },
         { id: "helius" }, { id: "etherscan" }, { id: "arkham" }, { id: "pdl" },
         { id: "github" }, { id: "coingecko" }, { id: "crunchbase" }, { id: "reddit" }, { id: "gmgn" },
-        { id: "safebrowsing" }, { id: "x-api-bearer" },
+        { id: "safebrowsing" }, { id: "chart-signals" }, { id: "x-api-bearer" },
       ],
       extraction: { extractProvider: "openrouter", groundedSearchActive: true },
       knowledgeBase: { reuse: true },

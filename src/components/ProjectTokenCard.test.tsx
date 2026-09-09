@@ -4,12 +4,19 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectTokenSnapshot } from "../data/evidence";
+import type { ThreatScan } from "../threat/types";
 
-const harness = vi.hoisted(() => ({ sparkline: vi.fn() }));
+const harness = vi.hoisted(() => ({ sparkline: vi.fn(), marketIntelligence: vi.fn() }));
 vi.mock("./TokenSparkline", () => ({
   TokenSparkline: (props: Record<string, unknown>) => {
     harness.sparkline(props);
     return <div data-testid="token-chart">chart</div>;
+  },
+}));
+vi.mock("./ThreatScanPage", () => ({
+  ProjectMarketIntelligence: (props: Record<string, unknown>) => {
+    harness.marketIntelligence(props);
+    return <div data-testid="deep-market-intelligence">deep market intelligence</div>;
   },
 }));
 
@@ -51,6 +58,7 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   harness.sparkline.mockReset();
+  harness.marketIntelligence.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -63,8 +71,8 @@ afterEach(() => {
 
 describe("ProjectTokenCard", () => {
   it("renders frozen fundamentals and chart even when the report verdict is incomplete", () => {
-    const onAudit = vi.fn();
-    act(() => root.render(<ProjectTokenCard token={token} showCurrentIntelligence={false} onAudit={onAudit} />));
+    const onOpenReport = vi.fn();
+    act(() => root.render(<ProjectTokenCard token={token} showCurrentIntelligence={false} onOpenReport={onOpenReport} />));
 
     expect(container.textContent).toContain("Token and market");
     expect(container.textContent).toContain("$JUP");
@@ -74,6 +82,7 @@ describe("ProjectTokenCard", () => {
     // close-based nor the range-based figure is a lifetime record.
     expect(container.textContent).toContain("From the highest close in the window");
     expect(container.textContent).toContain("Official site");
+    expect(container.textContent).toContain("Included in this scan · no credits");
     expect(harness.sparkline).toHaveBeenCalledWith(expect.objectContaining({
       address: token.address,
       chain: "solana",
@@ -85,9 +94,25 @@ describe("ProjectTokenCard", () => {
     }));
 
     const action = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("Open full token report"));
+      .find((button) => button.textContent?.includes("Open included token report"));
     act(() => action?.click());
-    expect(onAudit).toHaveBeenCalledWith(token.address);
+    expect(onOpenReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer a paid-looking token-report action without an included token dossier", () => {
+    act(() => root.render(<ProjectTokenCard token={token} showCurrentIntelligence={false} />));
+
+    expect(container.textContent).not.toContain("Open included token report");
+    expect(container.textContent).not.toContain("Open full token report");
+  });
+
+  it("places the saved deep token evidence inside the canonical market chapter", () => {
+    const threat = { address: token.address, symbol: token.symbol } as unknown as ThreatScan;
+    act(() => root.render(<ProjectTokenCard token={token} threat={threat} showCurrentIntelligence={false} />));
+
+    expect(container.textContent).toContain("01 · Market overview");
+    expect(container.querySelector('[data-testid="deep-market-intelligence"]')).not.toBeNull();
+    expect(harness.marketIntelligence).toHaveBeenCalledWith(expect.objectContaining({ scan: threat }));
   });
 
   it("does not fetch a live chart for a frozen snapshot without frozen history", () => {

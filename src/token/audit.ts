@@ -1,3 +1,4 @@
+import { officialXProfileHandle } from "../lib/officialXProfile";
 // Token audit: contract / DexScreener URL -> a forensic rug verdict, computed
 // live in the browser, keyless. Sources: DexScreener (market), GoPlus EVM +
 // honeypot.is simulation (EVM safety), GoPlus Solana (Solana safety). Also
@@ -259,6 +260,7 @@ export type CollectTokenSocialActivityFn = (identity: {
   handle: string;
   ticker: string;
   projectName: string;
+  contractAddress?: string;
 }) => Promise<SocialActivitySnapshot>;
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -396,9 +398,8 @@ function band(score: number): string {
 }
 
 function handleFromUrl(url?: string): string | null {
-  if (!url) return null;
-  const m = url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i);
-  return m ? "@" + m[1].toLowerCase() : null;
+  const handle = officialXProfileHandle(url);
+  return handle ? "@" + handle.toLowerCase() : null;
 }
 
 const isBurnAddr = (a?: string) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
@@ -1167,6 +1168,7 @@ async function runTokenAudit(
         handle: projectX,
         ticker: pair.baseToken.symbol,
         projectName: pair.baseToken.name,
+        contractAddress: pair.baseToken.address,
       }).catch(() => undefined)
     : undefined;
   const deployer = deployerAttribution?.address ?? null;

@@ -50,7 +50,7 @@ afterEach(async () => {
 
 describe("owner report selector", () => {
   it("does not render for a non-owner and strips a forged selection", async () => {
-    window.history.replaceState({}, "", "/?s=fedi&reportView=enigma");
+    window.history.replaceState({}, "", "/?s=fedi&reportView=developer");
     await renderSelector(false);
 
     expect(container.querySelector("[data-owner-control='report-view']")).toBeNull();
@@ -60,34 +60,40 @@ describe("owner report selector", () => {
 
   it("switches presentation without changing the report query", async () => {
     await renderSelector(true);
-    const enigma = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === "Enigma");
-    if (!enigma) throw new Error("Enigma selector was not rendered");
+    const developer = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "Developer");
+    if (!developer) throw new Error("Developer selector was not rendered");
 
-    await act(async () => enigma.click());
+    await act(async () => developer.click());
 
     expect(window.location.search).toContain("s=fedi");
-    expect(window.location.search).toContain("reportView=enigma");
-    expect(window.localStorage.getItem(REPORT_VIEW_STORAGE_KEY)).toBe("enigma");
-    expect(document.documentElement.dataset.reportLane).toBe("enigma");
-    expect(enigma.getAttribute("aria-pressed")).toBe("true");
+    expect(window.location.search).toContain("reportView=developer");
+    expect(window.localStorage.getItem(REPORT_VIEW_STORAGE_KEY)).toBe("developer");
+    expect(document.documentElement.dataset.reportLane).toBe("developer");
+    expect(developer.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("offers three interpretations plus the raw evidence record", async () => {
+  it("offers only Production and Developer", async () => {
     await renderSelector(true);
-    const labels = [...container.querySelectorAll<HTMLButtonElement>("button")].map((button) => button.textContent);
-    expect(labels).toEqual(["Production", "Kyle", "Enigma", "Raw"]);
+    expect([...container.querySelectorAll("button")].map((button) => button.textContent)).toEqual(["Production", "Developer"]);
+  });
 
-    const raw = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === "Raw");
-    if (!raw) throw new Error("Raw Evidence selector was not rendered");
+  it.each([["kyle", "production"], ["enigma", "production"], ["raw", "developer"]])("canonicalizes old %s links and preferences", async (old, current) => {
+    window.history.replaceState({}, "", `/?s=fedi&reportView=${old}#evidence`);
+    storage.set(REPORT_VIEW_STORAGE_KEY, old);
+    await renderSelector(true);
+    expect(document.documentElement.dataset.reportLane).toBe(current);
+    expect(storage.get(REPORT_VIEW_STORAGE_KEY)).toBe(current);
+    expect(window.location.search).toBe(current === "production" ? "?s=fedi" : "?s=fedi&reportView=developer");
+    expect(window.location.hash).toBe("#evidence");
+  });
 
-    await act(async () => raw.click());
-
-    expect(window.location.search).toContain("s=fedi");
-    expect(window.location.search).toContain("reportView=raw");
-    expect(window.localStorage.getItem(REPORT_VIEW_STORAGE_KEY)).toBe("raw");
-    expect(document.documentElement.dataset.reportLane).toBe("raw");
-    expect(raw.getAttribute("aria-pressed")).toBe("true");
+  it("removes Developer immediately when owner selection is revoked", async () => {
+    storage.set(REPORT_VIEW_STORAGE_KEY, "developer");
+    await renderSelector(true);
+    await act(async () => root.render(<ReportLaneProvider allowSelection={false} manageSelection><ReportLaneSelector /></ReportLaneProvider>));
+    expect(container.querySelector("button")).toBeNull();
+    expect(document.documentElement.dataset.reportLane).toBe("production");
+    expect(storage.has(REPORT_VIEW_STORAGE_KEY)).toBe(false);
   });
 });

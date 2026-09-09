@@ -234,6 +234,32 @@ export interface TraceStep {
  * never enough. CoinGecko is preferred when available; identity-bound DEX
  * records cover new or chain-native assets that have not reached CoinGecko yet.
  */
+/**
+ * A first-party contract declaration the identity search could not turn into
+ * a bound token. The official X bio names a contract, but no exact-address DEX
+ * market exists (`no_market`), the provider could not be read
+ * (`provider_unavailable`), or the registry record that IS identity-bound to
+ * this account lists a different contract (`registry_conflict`, the stale or
+ * migrated-CA signal). Structured so token applicability never depends on the
+ * wording of a check note. Never a bound token and never scored.
+ */
+export interface UnresolvedProjectTokenSnapshot {
+  address: string;
+  via: "evm" | "solana";
+  source: "official_bio";
+  state: "no_market" | "provider_unavailable" | "registry_conflict";
+  /** The identity-bound registry record whose contract differs (registry_conflict only). */
+  registry?: {
+    provider: "coingecko" | "dexscreener" | "official_site";
+    address: string;
+    chain: string;
+    name: string;
+    symbol: string;
+    sourceUrl: string;
+  };
+  capturedAt: string;
+}
+
 export interface ProjectTokenSnapshot {
   verified: true;
   verification: "official_x" | "official_domain";
@@ -281,6 +307,8 @@ export interface ProjectTokenSnapshot {
   maxSupply?: number;
   liquidityUsd?: number;
   pairAddress?: string;
+  /** Provider-reported creation time for the canonical DEX pair, in Unix milliseconds. */
+  pairCreatedAt?: number;
   /** CoinGecko lifetime high, captured with the canonical-token snapshot. */
   ath?: {
     priceUsd?: number;
@@ -844,6 +872,8 @@ export interface WebTeamMember {
   name: string;
   handle?: string;
   role: string;
+  /** First-party descriptive copy about this person, separate from their project role. */
+  biography?: string;
   /** Person vs linked fund/incubator/VC. Unique-id is still the handle. */
   kind?: "person" | "org";
   linkedin?: string;
@@ -924,6 +954,91 @@ export interface LaunchWindowSnapshot {
   summary: string;
 }
 
+export type EntityContinuitySourceClass = "first_party" | "exchange" | "explorer" | "regulator" | "secondary";
+
+export interface EntityContinuitySource {
+  url: string;
+  title: string;
+  sourceClass: EntityContinuitySourceClass;
+}
+
+export interface EntityLifecycleEvent {
+  date: string | null;
+  kind: "predecessor" | "rebrand" | "token_migration" | "contract_replacement" | "exchange_handling" | "architecture_change" | "current_status";
+  title: string;
+  detail: string;
+  sourceUrls: string[];
+}
+
+export interface TokenLineageNode {
+  name: string;
+  ticker: string | null;
+  contract: string | null;
+  chain: string | null;
+  status: "predecessor" | "migration" | "current";
+  validFrom: string | null;
+  validTo: string | null;
+  sourceUrls: string[];
+}
+
+/** Frozen project/token history collected before scoring. */
+export interface EntityContinuitySnapshot {
+  subject: string;
+  historicalAliases: string[];
+  predecessorName: string | null;
+  oldTicker: string | null;
+  oldContract: string | null;
+  migrationRatio: string | null;
+  migrationDate: string | null;
+  replacementContract: string | null;
+  migrationContract: string | null;
+  currentStatus: string | null;
+  architectureChanges: string[];
+  exchangeHandling: string[];
+  tokenLineage: TokenLineageNode[];
+  events: EntityLifecycleEvent[];
+  sources: EntityContinuitySource[];
+  aliasSearches: Array<{
+    alias: string;
+    categories: Array<"team" | "security" | "market" | "legal" | "audit" | "incident">;
+    sourceUrls: string[];
+  }>;
+  marketHistory: Array<{
+    ticker: string | null;
+    contract: string | null;
+    status: "predecessor" | "current";
+    sourceUrls: string[];
+  }>;
+  coverage: {
+    required: boolean;
+    state: "complete" | "partial" | "unavailable" | "not_applicable";
+    reason: string;
+    primarySourceCount: number;
+    searchedAt: string;
+  };
+}
+
+export type TokenApplicabilityState =
+  | "verified_live_token"
+  | "historical_token_lineage"
+  | "confirmed_tokenless"
+  | "prelaunch_token_deferred"
+  | "unresolved_token_identity";
+
+/**
+ * Frozen, pre-scoring decision about whether token conduct belongs in this
+ * subject's methodology. This is evidence applicability, not a token score.
+ * It must be established before the analyst sees an axis catalog so absence
+ * can never be translated into a low score by either the model or renderer.
+ */
+export interface TokenApplicabilitySnapshot {
+  state: TokenApplicabilityState;
+  axisTreatment: "assess" | "not_applicable" | "deferred" | "provisional";
+  reason: string;
+  evidence: string[];
+  determinedAt: string;
+}
+
 /** Grok first-pass read of the bound X profile + official site. Display name is never a bind key. */
 /** Product/token the COMPANY launched. Separate unique-id from the subject. */
 export interface LaunchedProductLead {
@@ -989,6 +1104,8 @@ export interface CollectedEvidence {
   trustGraphScreen?: TrustGraphScreen;
   /** Verified project-owned token identity and frozen market snapshot. */
   projectToken?: ProjectTokenSnapshot;
+  /** A bio-declared contract the identity search completed without binding. Mutually exclusive with projectToken. */
+  unresolvedProjectToken?: UnresolvedProjectTokenSnapshot;
   /**
    * Fixed-block direct RPC observations for the verified canonical EVM token.
    * This lane is point-in-time context only and has no v1 scoring impact.
@@ -1040,6 +1157,10 @@ export interface CollectedEvidence {
   /** Official-domain registration record, and the launch window it brackets with the account age. */
   domainRegistration?: DomainRegistrationSnapshot;
   launchWindow?: LaunchWindowSnapshot;
+  /** Project and token aliases, migrations and contract replacements discovered before scoring. */
+  entityContinuity?: EntityContinuitySnapshot;
+  /** Pre-scoring determination of whether P3 token conduct applies. */
+  tokenApplicability?: TokenApplicabilitySnapshot;
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to

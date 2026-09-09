@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  gapInvestigationReserves,
   ANALYST_FINALIZATION_RESERVE_MS,
   ANALYST_SCORING_TIMEOUT_MS,
   COLLECTION_ANALYST_RESERVE_MS,
@@ -40,5 +41,25 @@ describe("investigation runtime budget invariants", () => {
     expect(SOCIAL_ACTIVITY_BUDGET_MS).toBeGreaterThanOrEqual(15_000);
     expect(SOCIAL_ACTIVITY_BUDGET_MS).toBeLessThanOrEqual(45_000);
     expect(SOCIAL_ACTIVITY_BUDGET_MS).toBeLessThan(TRUST_GRAPH_SCREEN_RESERVE_MS);
+  });
+});
+
+describe("authorized gap investigation budgets", () => {
+  it("leaves positive collection, graph and scoring windows for every allowed budget", () => {
+    for (let budget = 180; budget <= 540; budget++) {
+      const { collectionReserveMs, graphScreenReserveMs } = gapInvestigationReserves(budget);
+      const collectionDeadline = budget * 1000 - 30_000 - collectionReserveMs;
+      expect(collectionDeadline).toBeGreaterThanOrEqual(60_000);
+      expect(graphScreenReserveMs).toBeGreaterThan(0);
+      expect(collectionReserveMs - graphScreenReserveMs).toBeGreaterThanOrEqual(60_000);
+      expect(collectionReserveMs).toBeLessThanOrEqual(COLLECTION_ANALYST_RESERVE_MS);
+    }
+  });
+  it("gives a 240-second scan 84 seconds to launch collection", () => {
+    const reserves = gapInvestigationReserves(240);
+    expect(240_000 - 30_000 - reserves.collectionReserveMs).toBe(84_000);
+  });
+  it.each([0, 179, 541, NaN, Infinity, 180.5])("rejects invalid budget %s", (budget) => {
+    expect(() => gapInvestigationReserves(budget)).toThrow(RangeError);
   });
 });

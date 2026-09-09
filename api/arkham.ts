@@ -146,10 +146,10 @@ const RISK_SCORE_FIELDS = [
   ["token_blacklist_score", "blacklisted token"],
 ] as const;
 
-async function lookup(addr: string, key: string, usage: CallCounter): Promise<ArkhamLabel | null> {
-  const ck = `arkham:${providerAddressKey(addr)}:v3`;
+async function lookup(addr: string, key: string, usage: CallCounter): Promise<{ label: ArkhamLabel | null; complete: boolean }> {
+  const ck = `arkham:${providerAddressKey(addr)}:v4`;
   const cached = await cacheGetJson<ArkhamLabel | { none: true }>(ck);
-  if (cached) return (cached as { none?: true }).none ? null : (cached as ArkhamLabel);
+  if (cached) return { label: (cached as { none?: true }).none ? null : (cached as ArkhamLabel), complete: true };
   try {
     // Enriched identity includes Arkham's behavior tags, cluster metadata, and
     // the full entity footprint. Risk is fetched beside it so an identity label
@@ -205,7 +205,8 @@ async function lookup(addr: string, key: string, usage: CallCounter): Promise<Ar
           topSources,
         }
       : undefined;
-    if (!name && !risk) { await cacheSetJson(ck, { none: true }); return null; }
+    if (!d || !rk) return { label: null, complete: false };
+    if (!name && !risk) { await cacheSetJson(ck, { none: true }); return { label: null, complete: true }; }
     const footprint = entityFootprint(e?.addresses);
     const entityType = cleanText(e?.type)?.toLowerCase();
     const labelName = cleanText(lbl?.name);
@@ -227,8 +228,8 @@ async function lookup(addr: string, key: string, usage: CallCounter): Promise<Ar
       risk,
     };
     await cacheSetJson(ck, out);
-    return out;
-  } catch { return null; }
+    return { label: out, complete: true };
+  } catch { return { label: null, complete: false }; }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -249,10 +250,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!addrs.length) { res.status(400).json({ error: "addresses required" }); return; }
   const usage: CallCounter = { calls: 0, succeeded: 0 };
   try {
-    const results = await Promise.all(addrs.map((a) => lookup(a, key, usage).then((l) => [providerAddressKey(a), l] as const)));
+    const results = await Promise.all(addrs.map(async (a) => {
+      const addressUsage: CallCounter = { calls: 0, succeeded: 0 };
+      const outcome = await lookup(a, key, addressUsage);
+      usage.calls += addressUsage.calls;
+      usage.succeeded += addressUsage.succeeded;
+      return { address: providerAddressKey(a), ...outcome };
+    }));
     const labels: Record<string, ArkhamLabel> = {};
-    for (const [a, l] of results) if (l && (l.name || l.risk)) labels[a] = l;
-    res.status(200).json({ available: true, labels });
+    for (const { address, label } of results) if (label && (label.name || label.risk)) labels[address] = label;
+    res.status(200).json({ available: results.every((result) => result.complete), labels, coverage: { attempted: usage.calls, succeeded: usage.succeeded, addresses: Object.fromEntries(results.map((result) => [result.address, result.complete ? "complete" : "unavailable"])) } });
   } catch (e) {
     res.status(200).json({ available: false, error: String(e), note: "Arkham lookup failed." });
   } finally {

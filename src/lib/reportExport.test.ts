@@ -13,6 +13,29 @@ const dossiers = SUBJECTS.map((s) => buildReport(s));
 const first = dossiers[0];
 
 describe("reportToHtml", () => {
+  it("exports a provisional score with its coverage and missing areas", () => {
+    const dossier: Dossier = {
+      ...first,
+      completeness_state: "partial",
+      headline: "Unqualified final clearance",
+      report: {
+        ...first.report,
+        composite_verdict: "PROVISIONAL",
+        governing_score: 70,
+        score_coverage: {
+          assessedAxes: 2, totalAxes: 6, assessedWeight: 40, totalWeight: 100,
+          missingAxes: ["P3_token_conduct"], provisional: true,
+        },
+      },
+    };
+    const html = reportToHtml(dossier);
+    expect(html).toContain("PROVISIONAL SCORE");
+    expect(html).toContain("70<span>/100</span>");
+    expect(html).toContain("2 of 6 scoring areas assessed (40% of the methodology weight)");
+    expect(html).toContain("Not assessed: token conduct");
+    expect(html).not.toContain("Unqualified final clearance");
+  });
+
   it("produces a self-contained HTML document with the subject and verdict", () => {
     const html = reportToHtml(first);
     expect(html.startsWith("<!doctype html>")).toBe(true);
@@ -111,6 +134,28 @@ describe("reportToHtml", () => {
     const skipped: Dossier = { ...first, threat: null, threatNote: "No project token could be attributed to this subject." };
     expect(reportToHtml(skipped)).toContain("No project token could be attributed");
     expect(reportToHtml(first)).not.toContain("Project token · threat scan");
+  });
+
+  it("exports claimed relationships with plain verification language and source links", () => {
+    const dossier: Dossier = {
+      ...first,
+      evidence: {
+        ...first.evidence,
+        testimonials: [{
+          claimed_endorser_handle: "@exampleadvisor",
+          claimed_relationship: "advisor",
+          evidence_url: "https://project.example/team",
+          acknowledgment_source_url: "https://x.com/exampleadvisor/status/123",
+          public_acknowledgment: "mention",
+        }],
+      },
+    };
+    const html = reportToHtml(dossier);
+    expect(html).toContain("Claimed relationships");
+    expect(html).toContain("Public mention found; relationship unconfirmed");
+    expect(html).toContain("https://project.example/team");
+    expect(html).toContain("https://x.com/exampleadvisor/status/123");
+    expect(html).not.toContain("ack unchecked");
   });
 
   it("keeps the case label stable across saved versions and prints unique report IDs", () => {

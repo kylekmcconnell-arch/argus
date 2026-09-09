@@ -361,6 +361,29 @@ describe("site-liveness evidence attribution", () => {
     expect(JSON.stringify(emit.mock.calls)).not.toContain("promoting a token");
   });
 
+  it("does not call a fund's blocked or live site a person profile and still records no product check", () => {
+    const { ctx, evidence, checks, emit } = context([SubjectClass.INVESTOR]);
+    evidence.profile.display_name = "Northstar Ventures";
+    evidence.profile.bio = "Early-stage venture capital. We back founders.";
+
+    applySiteSubstanceOutcome(ctx, "northstar.example", {
+      url: "https://northstar.example",
+      status: "access_blocked",
+      reason: "anti_bot",
+      detail: "HTTP 403 from an anti-bot gate",
+    });
+
+    // A fund's website is not a product surface: no product-substance row, no
+    // counter-evidence, and no 403 leaking into the checklist as a finding.
+    expect(checks).toEqual([]);
+    expect(evidence.findings).toEqual([]);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      label: "Profile website checked",
+      detail: expect.stringContaining("for this organization profile"),
+    }));
+    expect(JSON.stringify(emit.mock.calls)).not.toContain("person profile");
+  });
+
   it("does not repeat an ungrounded coming-soon label as fact for a person profile", () => {
     const { ctx, evidence, checks, emit } = context([SubjectClass.FOUNDER]);
 
@@ -408,5 +431,17 @@ describe("bio website domain extraction", () => {
 
   it("keeps extracting a bare domain from bio text", () => {
     expect(bioWebsiteDomain("building the future at myproject.xyz")).toBe("myproject.xyz");
+  });
+});
+
+describe("bio website domain extraction covers the TLDs crypto projects register on", () => {
+  it("finds a .cash or .markets domain that the old allow-list skipped", () => {
+    expect(bioWebsiteDomain("CA on stonkbrokers.cash")).toBe("stonkbrokers.cash");
+    expect(bioWebsiteDomain("Trade perps at clutch.markets | est. 2024")).toBe("clutch.markets");
+  });
+
+  it("never returns a shared publication host named in the bio", () => {
+    expect(bioWebsiteDomain("Watch us on youtube.com and chat on t.me")).toBeUndefined();
+    expect(bioWebsiteDomain("Watch us on youtube.com, then visit stonkbrokers.cash")).toBe("stonkbrokers.cash");
   });
 });

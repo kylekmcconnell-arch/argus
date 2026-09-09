@@ -1,3 +1,5 @@
+import { requireArgusAuth } from "./_auth.js";
+import { withLedgerOrganization } from "./_ledger.js";
 // Threat scanner receipts ledger — the shared, server-side track record and
 // deployer memory. GET reads it; POST records a scan.
 //
@@ -28,6 +30,10 @@ function statsOf(rows: LedgerReceipt[]) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  return withLedgerOrganization(auth.organizationId, async () => {
+
   if (!ledgerAvailable()) { res.status(200).json({ available: false }); return; }
 
   if (req.method === "POST") {
@@ -73,4 +79,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const rows = await ledgerRecent(120);
   res.status(200).json({ available: true, receipts: rows.filter((r) => BAD.has(r.verdict)).slice(0, 60), stats: statsOf(rows) });
+  }).catch(() => { res.status(503).json({ available: false, error: "threat_ledger_unavailable" }); });
 }

@@ -51,6 +51,50 @@ afterEach(async () => {
 });
 
 describe("Kyle intelligence report opening", () => {
+  it("describes unresolved public evidence without implying a research failure", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      favorable
+      concerns={[]}
+    />));
+
+    expect(container.textContent).toContain(
+      "Team and leadership is the strongest verified part of the case. The available public record still lacks independent security and governance evidence.",
+    );
+    expect(container.textContent).not.toContain("Independent evidence remains incomplete.");
+  });
+
+  it("uses verified support depth before score saturation when naming the strongest evidence", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      favorable
+      concerns={[]}
+      composition={[
+        { axis: "team", label: "Team & leadership", score: 9, weight: 16, rationale: "The roster is deeply sourced.", supportCount: 8 },
+        { axis: "product", label: "Product & execution", score: 20, weight: 24, rationale: "The product is live.", supportCount: 4 },
+      ]}
+    />));
+
+    expect(container.textContent).toContain("Team and leadership is the strongest verified part of the case.");
+    expect(container.textContent).not.toContain("Product and execution is the strongest verified part of the case.");
+  });
+
+  it("names the actual unresolved evidence area instead of hard-coding security and governance", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      favorable
+      concerns={[]}
+      nextSteps={[{ label: "Verify current customer adoption and recurring usage" }]}
+      composition={[
+        { axis: "team", label: "Team & leadership", score: 15, weight: 16, rationale: "Named leadership is source-backed.", supportCount: 4 },
+        { axis: "traction", label: "Traction & usage", score: 8, weight: 16, rationale: "Adoption remains partly measured.", supportCount: 1, questionCount: 1 },
+      ]}
+    />));
+
+    expect(container.textContent).toContain("The available public record still lacks independent usage and market evidence.");
+    expect(container.textContent).not.toContain("still lacks independent security and governance evidence");
+  });
+
   it("leads with the verdict and separates evidence gaps from adverse evidence", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} />));
 
@@ -68,13 +112,67 @@ describe("Kyle intelligence report opening", () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} />));
 
     expect(container.querySelector('[aria-label="Report depth"]')).toBeNull();
+    expect(container.textContent).not.toContain("Review this for");
+    expect(container.querySelector('[aria-label="Review angle"]')).toBeNull();
+    expect(container.textContent).toContain("What matters before you decide.");
+    expect(container.textContent).toContain("The strongest case for it, the reason to hesitate, and the evidence that could change the verdict.");
+    expect(container.textContent).not.toContain("research-engine language");
+    expect(container.textContent).toContain("The bottom line.");
+    expect(container.textContent).toContain("The clearest reading of what is established");
+    expect(container.textContent).not.toContain("What the evidence means.");
+    expect(container.textContent).not.toContain("FALSIFIABLE");
+    expect(container.textContent).not.toContain("private model reasoning");
+    const take = container.querySelector(".kyle-argus-take")?.textContent ?? "";
+    expect(take.match(/Leadership identity is source-backed/g)).toHaveLength(1);
     expect(container.querySelector('a[href="#composition"]')?.textContent).toContain("Continue through the full report");
     expect([...container.querySelectorAll('a[href="#evidence-ledger"]')]
       .some((link) => link.textContent?.includes("Enter evidence room"))).toBe(true);
   });
 
+  it("replaces the full watching chapter with a compact, impact-based Verify next strip", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      nextSteps={[
+        { label: "Establish a complete independent security history", impactAxis: "product" },
+        { label: "Verify current product adoption" },
+        { label: "Confirm a third lower-impact item" },
+      ]}
+    />));
+
+    const strip = container.querySelector(".kyle-verify-next");
+    expect(strip?.textContent).toContain("VERIFY NEXT");
+    expect(strip?.textContent).toContain("The evidence most likely to change the decision.");
+    expect(strip?.textContent).toContain("Decision impact:");
+    expect(strip?.textContent).toContain("tied to Product & execution");
+    expect(strip?.textContent).not.toContain("Team & leadership");
+    expect(strip?.querySelectorAll("li")).toHaveLength(2);
+    expect(container.textContent).not.toContain("What ARGUS is watching.");
+    expect(strip?.textContent).not.toContain("Confirm a third lower-impact item");
+  });
+
+  it("removes Verify next entirely when no material question remains", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} nextSteps={[]} />));
+
+    expect(container.querySelector(".kyle-verify-next")).toBeNull();
+    expect(container.textContent).not.toContain("VERIFY NEXT");
+  });
+
+  it("does not expose empty internal limitation language or analyst shorthand", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      concerns={[]}
+      reportSummary="Emerging service with null backing."
+    />));
+
+    expect(container.textContent).toContain("No material concern was identified in the evidence reviewed.");
+    expect(container.textContent).toContain("no verified financial backing");
+    expect(container.textContent).not.toContain("No governing limitation was recorded");
+    expect(container.textContent).not.toContain("null backing");
+  });
+
   it("keeps project diligence and linked-token safety as two separate scores", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      presentationStyle={2}
       {...props}
       secondaryScore={{
         label: "Token safety score",

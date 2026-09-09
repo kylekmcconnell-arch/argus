@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildSocialActivityQuery, collectSocialActivity } from "./socialActivity";
+import { selectSocialAdverseMentions } from "../src/data/socialActivity";
 
 const NOW = new Date("2026-08-22T22:00:00.000Z");
 
@@ -16,6 +17,72 @@ describe("social activity collector", () => {
       query: '(@clutch OR $CLUTCH OR "Clutch Markets") -is:retweet',
     });
     expect(buildSocialActivityQuery({ handle: "not a handle" })).toBeNull();
+  });
+
+  it("adds an exact verified contract to the subject-bound search", () => {
+    const contract = "HG3sZ52NRmNpm2BueL1MSBM3krr5M6YJtQohjNyhpump";
+    expect(buildSocialActivityQuery({
+      handle: "@bandoscash",
+      ticker: "BANDOS",
+      projectName: "Bandos",
+      contractAddress: contract,
+    })?.query).toBe(`(@bandoscash OR $BANDOS OR "${contract}") -is:retweet`);
+    expect(buildSocialActivityQuery({ handle: "@bandoscash", contractAddress: "not-a-contract" })?.query)
+      .toBe("(@bandoscash) -is:retweet");
+  });
+
+  it("preserves direct Bandos warnings and separates specific claims from unsupported warnings", () => {
+    const warnings = selectSocialAdverseMentions([
+      {
+        id: "2093131220574179642",
+        authorId: "hunter",
+        handle: "devs_hunter",
+        displayName: "Devs Hunter",
+        createdAt: "2026-08-27T20:10:00.000Z",
+        followers: 7_219,
+        text: "SCAM token, don't buy. 58.3% bundled in 38 fresh wallets from the same funding source and deployer; 26 wallets hold 24.6%.",
+        tweetUrl: "https://x.com/devs_hunter/status/2093131220574179642?s=20",
+      },
+      {
+        id: "2093127354214195480",
+        authorId: "disciple",
+        handle: "0xdisciplee",
+        createdAt: "2026-08-27T20:00:00.000Z",
+        followers: 584,
+        text: "The same dev previously rugged another token and launched $BANDOS.",
+      },
+      {
+        id: "2093130161227223433",
+        authorId: "peet",
+        handle: "Crypto_peet",
+        createdAt: "2026-08-27T20:05:00.000Z",
+        followers: 12_529,
+        text: "$bandos is a larp",
+      },
+      {
+        id: "safe",
+        authorId: "reader",
+        handle: "reader",
+        createdAt: "2026-08-27T20:04:00.000Z",
+        text: "Reading the Bandos product announcement.",
+      },
+      {
+        id: "self",
+        authorId: "self",
+        handle: "bandoscash",
+        createdAt: "2026-08-27T20:03:00.000Z",
+        text: "Beware of fake BANDOS contracts.",
+      },
+    ], "@bandoscash");
+
+    expect(warnings.map((warning) => warning.postId)).toEqual([
+      "2093131220574179642",
+      "2093127354214195480",
+      "2093130161227223433",
+    ]);
+    expect(warnings[0]).toMatchObject({ category: "wallet_cluster", specificity: "specific", followers: 7_219 });
+    expect(warnings[1]).toMatchObject({ category: "operator_history", specificity: "specific" });
+    expect(warnings[2]).toMatchObject({ category: "general_warning", specificity: "general" });
   });
 
   it("does not OR a quoted project name that is the ticker or a short generic word", () => {

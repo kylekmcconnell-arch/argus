@@ -34,6 +34,7 @@ const harness = vi.hoisted(() => ({
   startTokenScan: vi.fn(),
   syncReport: vi.fn(),
   logAudit: vi.fn(),
+  applyAuditCaseFamily: vi.fn(),
   reconcileAuditOutcome: vi.fn(),
   personContribution: vi.fn(),
   recordContribution: vi.fn(),
@@ -74,12 +75,13 @@ vi.mock("./components/LiveRun", () => ({
 }));
 
 vi.mock("./components/Report", () => ({
-  Report: (props: { dossier: Record<string, unknown>; onAudit?: (q: string) => void; onOpenProject?: (name: string) => void; onOpenBrief?: () => void }) => {
+  Report: (props: { dossier: Record<string, unknown>; onAudit?: (q: string) => void; onOpenTokenReport?: (token: Record<string, unknown>) => void; onOpenProject?: (name: string) => void; onOpenBrief?: () => void }) => {
     harness.personReports.push(props);
     return (
       <div data-testid="stored-person-report">
         Stored person report
         {props.onAudit && <button data-testid="person-pivot" onClick={() => props.onAudit?.("@person_pivot")}>Audit person pivot</button>}
+        {props.onOpenTokenReport && (props.dossier.threat as { dossier?: Record<string, unknown> } | undefined)?.dossier && <button data-testid="open-included-token" onClick={() => props.onOpenTokenReport?.((props.dossier.threat as { dossier: Record<string, unknown> }).dossier)}>Open included token</button>}
         {props.onOpenProject && <button data-testid="project-pivot" onClick={() => props.onOpenProject?.("Private Project")}>Open project pivot</button>}
         {props.onOpenBrief && <button data-testid="person-case-brief" onClick={props.onOpenBrief}>Case brief</button>}
       </div>
@@ -191,6 +193,7 @@ vi.mock("./components/CaseBriefPanel", () => ({
 }));
 
 vi.mock("./lib/auditlog", () => ({
+  applyAuditCaseFamily: harness.applyAuditCaseFamily,
   hydrateSharedLog: vi.fn(),
   logAudit: harness.logAudit,
   reconcileAuditOutcome: harness.reconcileAuditOutcome,
@@ -470,6 +473,61 @@ describe("App routing safety", () => {
     expect(harness.recordContribution).not.toHaveBeenCalled();
   });
 
+  it("keeps a scan whose save claimed no immutable version session-only instead of failing completion", async () => {
+    const view = await renderApp();
+
+    // The server reported a successful save with no version id behind it. The
+    // report itself is finished and carries a real verdict and score.
+    await act(async () => {
+      await harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: null }));
+    });
+
+    expect(harness.syncReport).not.toHaveBeenCalled();
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+
+    // Reopening it in this session still shows the completed report, and its
+    // persistence reads as failed so the page can explain the missing save.
+    harness.shellInput = "@persisted_person";
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-unreceipted-save",
+        kind: "person",
+        ref: "persisted_person",
+        query: "@persisted_person",
+        status: "open",
+      }],
+    });
+    harness.fetchReportState.mockResolvedValue({ status: "open", report: null });
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='shell-run']")?.click());
+    await settle();
+
+    expect(harness.startPersonAudit).not.toHaveBeenCalled();
+    expect(harness.personReports.at(-1)?.dossier).toMatchObject({
+      report: expect.objectContaining({ governing_score: 88, composite_verdict: "PASS" }),
+      persistence: expect.objectContaining({ state: "failed" }),
+    });
+  });
+
+  it("keeps a failed combined save out of audit and graph while the session keeps its token score", async () => {
+    await renderApp();
+    const initialVersionId = "00000000-0000-4000-8000-000000000311";
+    harness.syncReport.mockResolvedValue({ state: "failed", reason: "Report storage did not accept the save." });
+
+    await act(async () => {
+      await harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: initialVersionId }));
+    });
+
+    await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledTimes(1));
+    // The durable project version exists, but it does not carry the token leg
+    // this session is showing, so nothing may point shared surfaces at it.
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.personContribution).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+    expect(harness.applyAuditCaseFamily).not.toHaveBeenCalled();
+  });
+
   it("rebinds a completed project report to the final version containing its token score", async () => {
     await renderApp();
     const initialVersionId = "00000000-0000-4000-8000-000000000301";
@@ -553,6 +611,51 @@ describe("App routing safety", () => {
     expectNoRunnerStarted();
   });
 
+  it("offers a chooser instead of the unavailable notice when a stored label resolves to two refs", async () => {
+    harness.shellInput = "@clutch";
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-clutch",
+        kind: "person",
+        ref: "clutch",
+        query: "@clutch",
+        status: "open",
+      }],
+    });
+    harness.fetchReportState
+      .mockResolvedValueOnce({
+        status: "ambiguous",
+        report: null,
+        subjects: [
+          { caseId: "case-clutch", kind: "person", ref: "clutch", query: "@clutch", status: "open" },
+          { caseId: "case-clutchmarkets", kind: "person", ref: "clutchmarkets", query: "@CLUTCHMARKETS", status: "open" },
+        ],
+      })
+      .mockResolvedValue({ status: "archived", report: null });
+    harness.getRun.mockReturnValue({ handle: "clutch", status: "running" });
+
+    const view = await renderApp();
+    await submitShell();
+
+    expect(view.textContent).toContain("More than one stored case matches");
+    expect(view.textContent).not.toContain("Stored case status is unavailable");
+    const choices = container?.querySelectorAll<HTMLButtonElement>("[data-testid='case-choice']") ?? [];
+    expect(choices).toHaveLength(2);
+    expect(choices[1].textContent).toContain("clutchmarkets");
+
+    await act(async () => {
+      choices[1].click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(harness.fetchReportState).toHaveBeenLastCalledWith("clutchmarkets", "person");
+    expect(view.textContent).toContain("This case is archived");
+    expect(harness.getRun).not.toHaveBeenCalled();
+    expectNoRunnerStarted();
+  });
+
   it.each([
     ["X profile URL", "https://x.com/Alice/status/123", "Alice"],
     ["site URL", "HTTPS://Example.COM/Path/", "example.com"],
@@ -624,6 +727,38 @@ describe("App routing safety", () => {
     expect(harness.resolveStoredCases).not.toHaveBeenCalled();
     expect(harness.fetchReportState).not.toHaveBeenCalled();
     expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { force: true, intent: "investment_due_diligence" });
+    expect(harness.startTokenScan).not.toHaveBeenCalled();
+  });
+
+  it("upgrades a persistent contract search from a legacy token-only snapshot to a combined investigation", async () => {
+    const address = "0x1313131313131313131313131313131313131313";
+    const candidate = {
+      input: { kind: "token" as const, ref: address, via: "evm" as const },
+      canonicalRef: address,
+      chain: "ethereum",
+      symbol: "FULL",
+      name: "Full Project Token",
+      pairAddress: "pair-full",
+      liquidityUsd: 100,
+    };
+    harness.shellInput = address;
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "legacy-token-only",
+        kind: "token",
+        ref: address,
+        query: address,
+        status: "open",
+      }],
+    });
+    harness.resolveTokenSubject.mockResolvedValue({ state: "resolved", candidate });
+
+    await renderApp();
+    await submitShell();
+
+    expect(harness.fetchReportState).not.toHaveBeenCalled();
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { intent: "investment_due_diligence" });
     expect(harness.startTokenScan).not.toHaveBeenCalled();
   });
 
@@ -783,6 +918,28 @@ describe("App routing safety", () => {
       coverage: "ready",
       summary: "Stored founder has a verified track record.",
     });
+    expectNoRunnerStarted();
+  });
+
+  it("opens a project report's included token dossier without starting another scan", async () => {
+    const payload = personResult({ state: "persisted", reportVersionId: "version-person-token" });
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "person",
+        ref: "persisted_person",
+        payload,
+        versionContext: { caseId: "case-person-token", reportVersionId: "version-person-token" },
+      },
+    });
+
+    const view = await renderApp("/?s=persisted_person&kind=person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='open-included-token']")).not.toBeNull());
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='open-included-token']")?.click());
+    await settle();
+
+    expect(view.querySelector("[data-testid='stored-token-report']")).not.toBeNull();
+    expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({ score: 84, verdict: "PASS" }));
     expectNoRunnerStarted();
   });
 
@@ -1083,6 +1240,60 @@ describe("App routing safety", () => {
     }));
   });
 
+  it("does not publish a token whose immutable save fails", async () => {
+    const address = "0x8888888888888888888888888888888888888888";
+    harness.syncReport.mockResolvedValue({ state: "failed", reason: "storage unavailable" });
+    await renderApp();
+    await act(async () => {
+      harness.scanOnComplete?.({ id: "scan-save-failed", kind: "token", priv: false, result: tokenResult(address, "unsaved token"), creditKey: "credit-save-failed", startedAt: Date.now() });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+  });
+
+  it("logs a finished token scan to recents with the same completion contract its report applies", async () => {
+    const address = "0x7777777777777777777777777777777777777777";
+    // Every check the standalone token collector actually runs has an outcome.
+    // The org-side rows (docs, news, GitHub, trust graph) have no token-side
+    // producer and are supplemental under the report contract; the raw
+    // checklist still carries them as required, which used to log this same
+    // scan as "incomplete" while its report read complete.
+    const fullyCovered = {
+      ...tokenResult(address, "fully covered token"),
+      safety: {
+        available: true,
+        simChecked: true,
+        tradeabilityAssessed: true,
+        buyTax: 0,
+        sellTax: 0,
+        holderCount: 1200,
+        topHolderPct: 12,
+        ownerRenounced: true,
+        openSource: true,
+      },
+      topHolders: [{ address: "0xholder1", percent: 12 }, { address: "0xholder2", percent: 8 }],
+      holdersAssessed: true,
+      cg: { listed: true, cexCount: 2, rank: 400 },
+      sanctionsScreen: { available: true, checked: 3, sanctioned: [], completedAt: "2026-08-30T00:00:00.000Z" },
+    };
+    harness.syncReport.mockResolvedValue({ state: "persisted", caseId: "case-full", reportVersionId: "version-full", version: 1 });
+    await renderApp();
+
+    await act(async () => {
+      harness.scanOnComplete?.({ id: "scan-full-token", kind: "token", priv: false, result: fullyCovered, creditKey: "credit-full-token", startedAt: Date.now() });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(harness.logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "token",
+      ref: address,
+      verdict: "PASS",
+      coverage: "ready",
+    })));
+  });
+
   it("runs deep investigation team discovery only after persistence with the exact capability", async () => {
     const address = "0x6666666666666666666666666666666666666666";
     harness.syncReport.mockResolvedValue({
@@ -1204,9 +1415,85 @@ describe("App routing safety", () => {
       "PASS",
       80,
     );
+
+    // The whole point of the receipt: the saved report reopens as that exact
+    // immutable version, carrying the score the finished scan produced.
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='nav-home']")?.click());
+    await settle();
+
+    harness.shellInput = address;
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-earn-live",
+        kind: "investigation",
+        ref: address,
+        query: "$EARN",
+        status: "open",
+      }],
+    });
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "investigation",
+        ref: address,
+        payload: {
+          rootRef: address,
+          token: { address, symbol: "EARN", name: "EARN", verdict: "PASS", score: 80 },
+        },
+        versionContext: { caseId: "case-earn-live", reportVersionId: "rv-earn-v2", version: 2 },
+      },
+    });
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='shell-run']")?.click());
+    await settle();
+
+    expect(harness.startInvestigationScan).toHaveBeenCalledTimes(1); // no rescan
+    expect(harness.investigationReports.at(-1)).toEqual(expect.objectContaining({
+      token: expect.objectContaining({ symbol: "EARN", verdict: "PASS", score: 80 }),
+      versionContext: expect.objectContaining({ reportVersionId: "rv-earn-v2", version: 2 }),
+    }));
   });
 
-  it("retries a failed quick lookup as a quick token audit, not a full investigation", async () => {
+  // A saved report has to stay reachable by its own contract even when the live
+  // market lookup no longer resolves it: a delisted or unindexed pair used to
+  // dead-end on "Couldn't resolve that token" and hide the finished report.
+  it("reopens a saved token case with its score when live resolution finds no contract", async () => {
+    const address = "0x1414141414141414141414141414141414141414";
+    harness.shellInput = address;
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-delisted",
+        kind: "token",
+        ref: address,
+        query: "$GONE",
+        status: "open",
+      }],
+    });
+    harness.resolveTokenSubject.mockResolvedValue({ state: "not_found" });
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "token",
+        ref: address,
+        payload: { ...tokenResult(address, "Saved before delisting"), symbol: "GONE", score: 73 },
+        versionContext: { caseId: "case-delisted", reportVersionId: "rv-gone-v1", version: 1 },
+      },
+    });
+
+    const view = await renderApp();
+    await submitShell();
+
+    expect(view.querySelector("[data-testid='stored-token-report']")).not.toBeNull();
+    expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({
+      symbol: "GONE",
+      score: 73,
+      versionContext: expect.objectContaining({ reportVersionId: "rv-gone-v1" }),
+    }));
+    expectNoRunnerStarted();
+  });
+
+  it("retries a failed contract lookup as the same full investigation", async () => {
     harness.shellInput = "$QUICK";
     harness.resolveStoredCases.mockResolvedValueOnce({ status: "unavailable", subjects: [] });
     const view = await renderApp();
@@ -1236,8 +1523,8 @@ describe("App routing safety", () => {
     await act(async () => { retry?.click(); });
     await settle();
 
-    expect(harness.startTokenScan).toHaveBeenCalledTimes(1);
-    expect(harness.startInvestigationScan).not.toHaveBeenCalled();
+    expect(harness.startInvestigationScan).toHaveBeenCalledTimes(1);
+    expect(harness.startTokenScan).not.toHaveBeenCalled();
   });
 
   it("opens a stored site report with initialRecon and no fresh recon input", async () => {
@@ -1424,7 +1711,7 @@ describe("App routing safety", () => {
     expect(harness.startPersonAudit).toHaveBeenLastCalledWith("project_pivot", true, "investment_due_diligence");
   });
 
-  it("keeps token and investigation founder pivots private", async () => {
+  it("keeps canonical contract investigations and their founder pivots private", async () => {
     const tokenAddress = "0x4444444444444444444444444444444444444444";
     harness.shellInput = tokenAddress;
     harness.shellPrivate = true;
@@ -1443,21 +1730,16 @@ describe("App routing safety", () => {
     const view = await renderApp();
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='shell-run']")?.click());
     await settle();
-    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='finish-token-run']")?.click());
-    await settle();
-
-    expect(harness.tokenReports.at(-1)?.persistence).toEqual({ state: "private", scanId: "private-token-scan" });
-    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='token-pivot']")?.click());
-    await settle();
-    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("token_pivot", true, "investment_due_diligence");
-
-    // Start a separate private investigation and verify its founder callback.
-    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='nav-home']")?.click());
-    harness.landingInput = "0x5555555555555555555555555555555555555555";
-    harness.landingPrivate = true;
-    await submitLanding();
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: tokenAddress }),
+      true,
+      expect.objectContaining({ intent: "investment_due_diligence" }),
+    );
+    expect(harness.startTokenScan).not.toHaveBeenCalled();
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='finish-investigation-run']")?.click());
     await settle();
+
+    expect(harness.investigationReports.at(-1)?.persistence).toEqual({ state: "private", scanId: "private-investigation-scan" });
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='investigation-pivot']")?.click());
     await settle();
     expect(harness.startPersonAudit).toHaveBeenLastCalledWith("investigation_pivot", true, "investment_due_diligence");

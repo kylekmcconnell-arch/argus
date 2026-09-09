@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IntelligenceSpineSnapshot } from "../intelligence/types";
-import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "./intelligenceBrief";
+import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion, isProductDescriptionQuestion } from "./intelligenceBrief";
 
 function snapshot(): IntelligenceSpineSnapshot {
   return {
@@ -127,6 +127,28 @@ describe("deriveIntelligenceBrief", () => {
     })).toBe(false);
   });
 
+  it("identifies the exact stale official-identity question", () => {
+    expect(isOfficialIdentityQuestion({
+      id: "intelligence-question:project.official_identity",
+      title: "What exact project or company does this account represent?",
+    })).toBe(true);
+    expect(isOfficialIdentityQuestion({
+      id: "intelligence-question:security-audit",
+      title: "Which independent security audits are published?",
+    })).toBe(false);
+  });
+
+  it("identifies a stale product-description question", () => {
+    expect(isProductDescriptionQuestion({
+      id: "intelligence-question:project.product_surface",
+      title: "What live products or services does the project provide?",
+    })).toBe(true);
+    expect(isProductDescriptionQuestion({
+      id: "intelligence-question:security-audit",
+      title: "Which independent security audits are published?",
+    })).toBe(false);
+  });
+
   it("ties saved support, pressure, and open questions into the selected decision lens", () => {
     const brief = deriveIntelligenceBrief(snapshot());
 
@@ -178,6 +200,22 @@ describe("deriveIntelligenceBrief", () => {
     expect(text).toContain("ownership was not established");
     expect(text).not.toContain("no owner");
     expect(text).not.toContain("unowned");
+  });
+
+  it("does not repeat the score-strength summary as unrelated useful context", () => {
+    const value = snapshot();
+    value.signals.push({
+      ...value.signals[2]!,
+      id: "project_strength_band_summary",
+      ruleId: "project-strength-band-summary",
+      headline: "How strong the evidence is in each area",
+      finding: "Team and leadership: strong evidence (12 to 13).",
+    });
+
+    const brief = deriveIntelligenceBrief(value);
+
+    expect(brief.context.map((item) => item.title)).not.toContain("How strong the evidence is in each area.");
+    expect(brief.context.map((item) => item.title)).toContain("A leadership transition is recorded.");
   });
 
   it("keeps a high-severity risk at the head of pressures under every lens", () => {

@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { analyzeContent } from "./recon";
+import { scoreProject } from "./projectverdict";
 import { extractLinks, visibleText, type Retrieval } from "./retrieve";
 
 const ICON_FOOTER = `
@@ -102,5 +103,126 @@ describe("social links on a server-rendered page", () => {
 
     expect(recon.socials).toEqual([]);
     expect(recon.team.state).toBe("not-retrieved");
+  });
+});
+
+// 10xcapital.com saved recon V1: a fund page whose bios contain a Title-case
+// desk phrase next to "Advisor" and affiliation @mentions (MBA @UNC, CEO
+// @Kraken). The extractor treated those as a named individual and the
+// project's socials, then minted 89 PASS from that junk.
+const DESK_AND_MENTION_COPY = `
+10X Capital is a next-generation merchant bank. Core Team.
+Omar Al Yousuf
+Senior Advisor
+Emerging Markets Digital Assets Treasuries. Government Affairs & Defense @Siemens AG. Board Member @CoinW @Legend Technologies
+Alex Monje
+Partner, Chief Legal Officer
+DWAC, GAMCO. Morgan Stanley. MBA @UNC. JD @University of Miami
+Austin Alexander
+Partner
+Head of Bitcoin Strategy. Fmr. CEO @Kraken EMEA. Co-Founder @NY Bitcoin Center
+`;
+
+describe("site recon identity extract", () => {
+  it("keeps the desk phrase and bio @mentions out while reading the real roster the page names", () => {
+    const recon = analyzeContent({
+      url: "https://10xcapital.com/",
+      status: "recovered",
+      content: DESK_AND_MENTION_COPY,
+      title: "10X Capital",
+      stages: [],
+      coverageNote: "Direct retrieval failed; content recovered by rendering the JavaScript app.",
+    });
+    const verdict = scoreProject(recon);
+
+    // #341 junk stays out: the desk phrase is not a person, no glued newline name.
+    expect(recon.team.names).not.toContain("Emerging Markets Digital");
+    expect(recon.team.names.join(" | ")).not.toMatch(/Yousuf Senior|Emerging|Markets|Digital/);
+    expect(recon.identityLine).not.toMatch(/Emerging Markets Digital/);
+    // The page's actual card grid (name line, role line) is read as people WITH roles.
+    expect(recon.team.state).toBe("named");
+    expect(recon.team.people).toEqual([
+      expect.objectContaining({ name: "Omar Al Yousuf", role: "Senior Advisor", basis: "roster" }),
+      expect.objectContaining({ name: "Alex Monje", role: "Partner, Chief Legal Officer", basis: "roster" }),
+      expect.objectContaining({ name: "Austin Alexander", role: "Partner", basis: "roster" }),
+    ]);
+
+    const socialLabels = recon.socials.map((s) => s.label);
+    for (const junk of ["@UNC", "@NY", "@University", "@Siemens", "@Kraken", "@CoinW", "@Legend"]) {
+      expect(socialLabels).not.toContain(junk);
+    }
+    expect(recon.socials).toEqual([]);
+    expect(recon.profile?.officialAccounts).toEqual([]);
+    expect(recon.findings.some((f) => /official accounts linked/i.test(f.claim) && f.tone === "good")).toBe(false);
+
+    // The named-team credit is earned by real people, never by the desk phrase.
+    expect(verdict.reasons.some((r) => r.tone === "good" && /Emerging Markets Digital/i.test(r.text))).toBe(false);
+    expect(verdict.reasons.some((r) => r.tone === "good" && /Team identified on the site: Omar Al Yousuf \(Senior Advisor\)/.test(r.text))).toBe(true);
+  });
+
+  it("still extracts a real person next to a role", () => {
+    const recon = analyzeContent(fromHtml("", {
+      content: "Jane Smith, Managing Partner leads the fund. Hans Thomas Founder & CEO since 1999.",
+    }));
+
+    expect(recon.team.state).toBe("named");
+    expect(recon.team.names).toEqual(expect.arrayContaining(["Jane Smith", "Hans Thomas"]));
+    expect(recon.team.names).not.toContain("Emerging Markets Digital");
+  });
+
+  it("still extracts real social URLs and a first-party framed handle", () => {
+    const recon = analyzeContent({
+      url: "https://10xcapital.com/",
+      status: "rendered",
+      content: "Follow us @10xcapital or https://x.com/10xcapital and https://t.me/10xcapital plus https://www.linkedin.com/company/10xcapital",
+      links: undefined,
+      title: "10X Capital",
+      stages: [],
+      coverageNote: "Retrieved directly; full page content available.",
+    });
+
+    const urls = recon.socials.map((s) => s.url);
+    expect(urls).toContain("https://x.com/10xcapital");
+    expect(urls).toContain("https://t.me/10xcapital");
+    expect(urls).toContain("https://www.linkedin.com/company/10xcapital");
+  });
+
+  it("keeps a host-matching bare handle and drops an unframed mention", () => {
+    const recon = analyzeContent({
+      url: "https://10xcapital.com/",
+      status: "rendered",
+      content: "The desk. @10xcapital in the footer. Alumni @UNC and fmr CEO @Kraken.",
+      title: "10X Capital",
+      stages: [],
+      coverageNote: "Retrieved directly; full page content available.",
+    });
+
+    expect(recon.socials.map((s) => s.label)).toEqual(["@10xcapital"]);
+  });
+
+  it("does not let a junk named extract mint the team score bonus", () => {
+    const verdict = scoreProject({
+      retrieval: {
+        url: "https://10xcapital.com/",
+        status: "recovered",
+        content: DESK_AND_MENTION_COPY,
+        title: "10X Capital",
+        stages: [],
+        coverageNote: "Direct retrieval failed; content recovered by rendering the JavaScript app.",
+      },
+      title: "10X Capital",
+      team: { state: "named", names: ["Emerging Markets Digital"], note: "Names 1 individual with roles." },
+      socials: [
+        { label: "@UNC", url: "https://x.com/UNC" },
+        { label: "@NY", url: "https://x.com/NY" },
+      ],
+      funding: [],
+      tokenSignals: [],
+      findings: [],
+      identityLine: "Team identified: Emerging Markets Digital.",
+    });
+
+    expect(verdict.reasons.some((r) => /Team identified: Emerging Markets Digital/i.test(r.text))).toBe(false);
+    expect(verdict.score).toBeLessThan(89);
   });
 });

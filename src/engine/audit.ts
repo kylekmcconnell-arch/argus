@@ -17,6 +17,7 @@ import {
 } from "./taxonomy";
 import { getProfile, effectiveCaps, classForAxis, SHARED_CAPS } from "./profiles";
 import { classifyTestimonial, scoreAxis, type AxisSummary } from "./corroboration";
+import type { TokenApplicabilitySnapshot } from "../data/evidence";
 
 export const VERDICT_BANDS: [string, number, number][] = [
   ["PASS", 70, 100],
@@ -53,6 +54,15 @@ export interface AxisLineage {
   gaps?: string[];
 }
 
+export interface ScoreCoverage {
+  assessedAxes: number;
+  totalAxes: number;
+  assessedWeight: number;
+  totalWeight: number;
+  missingAxes: string[];
+  provisional: boolean;
+}
+
 export interface RoleReport {
   role: string;
   verdict: string;
@@ -61,6 +71,11 @@ export interface RoleReport {
   cap_applied: string | null;
   dox_bonus: number;
   axes: Record<string, AxisScore>;
+  /** Why a normal methodology axis was assessed, waived, deferred, or left provisional. */
+  axis_applicability?: Record<string, TokenApplicabilitySnapshot>;
+  /** Maximum applicable weighted points before normalization to 100. */
+  applicable_weight?: number;
+  score_coverage?: ScoreCoverage;
 }
 
 export type EvidenceOrigin = "deterministic" | "model_lead" | "human_verified";
@@ -189,7 +204,10 @@ export interface Testimonial extends EvidenceProvenance {
   sentiment?: string | null;
   fud_present?: boolean;
   corroboration_verdict?: TestimonialVerdict;
+  /** Exact first-party page or post where the subject made the relationship claim. */
   evidence_url?: string;
+  /** Exact public post where the named party acknowledged the subject, when one was found. */
+  acknowledgment_source_url?: string;
   notes?: string;
 }
 
@@ -282,6 +300,8 @@ export interface Promotion extends EvidenceProvenance {
 export interface AssociateInput extends EvidenceProvenance {
   associate_handle: string;
   relation: string;
+  /** Preserve whether a linked handle is a person or an organization. */
+  kind?: "person" | "org";
   in_cabal_kb?: boolean;
   evidence_url?: string;
   notes?: string;
@@ -290,12 +310,15 @@ export interface AssociateInput extends EvidenceProvenance {
 export interface Associate extends EvidenceProvenance {
   associate_key: string;
   relation: string;
+  /** Preserve whether a linked handle is a person or an organization. */
+  kind?: "person" | "org";
   in_cabal_kb?: boolean;
   evidence_url?: string;
   notes?: string;
 }
 
 export interface AuditReport {
+  score_coverage?: ScoreCoverage;
   audit_id: string;
   handle: string;
   roles: string[];
@@ -340,6 +363,7 @@ export class Audit {
   axisScores: Record<string, AxisScore> = {};
   identity: IdentityConfidence | null = null;
   display_name?: string;
+  tokenApplicability?: TokenApplicabilitySnapshot;
 
   private ventures: Venture[] = [];
   private testimonials: Testimonial[] = [];
@@ -366,6 +390,10 @@ export class Audit {
 
   setIdentity(confidence: IdentityConfidence) {
     this.identity = confidence;
+  }
+
+  setTokenApplicability(applicability: TokenApplicabilitySnapshot | undefined) {
+    this.tokenApplicability = applicability ? structuredClone(applicability) : undefined;
   }
 
   addVenture(v: Venture) {
@@ -691,22 +719,16 @@ export class Audit {
       for (const [ax, a] of Object.entries(this.axisScores)) {
         if (classForAxis(ax) === role) axes[ax] = a;
       }
-      const expectedAxes = Object.keys(getProfile(role).axes);
-      const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
-      if (!complete || Object.keys(axes).length !== expectedAxes.length) {
-        roleReports.push({
-          role,
-          verdict: "INCOMPLETE",
-          raw_total: null,
-          score_total: null,
-          cap_applied: null,
-          dox_bonus: doxBonus,
-          axes,
-        });
-        continue;
-      }
-      const raw = Math.round(Object.values(axes).reduce((a, x) => a + x.score, 0));
-      const base = raw + doxBonus;
+      const omitTokenConduct = role === SubjectClass.PROJECT
+        && (this.tokenApplicability?.axisTreatment === "not_applicable"
+          || this.tokenApplicability?.axisTreatment === "deferred");
+      const expectedAxes = Object.keys(getProfile(role).axes)
+        .filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct"));
+      const axisApplicability = role === SubjectClass.PROJECT && this.tokenApplicability
+        ? { P3_token_conduct: structuredClone(this.tokenApplicability) }
+        : undefined;
+      const applicableWeight = expectedAxes.reduce((sum, axis) =>
+        sum + (getProfile(role).axes[axis] ?? 0), 0);
       const caps = effectiveCaps(role);
       const triggered: [number, string][] = [
         ...this.roleCapsTriggered(role).map((k) => [caps[k], k] as [number, string]),
@@ -715,9 +737,41 @@ export class Audit {
 
       let ceiling: number | null = null;
       let applied: string | null = null;
-      let total: number;
       if (triggered.length) {
         [ceiling, applied] = triggered.reduce((m, c) => (c[0] < m[0] ? c : m));
+      }
+      const provisionalToken = role === SubjectClass.PROJECT
+        && this.tokenApplicability?.axisTreatment === "provisional";
+      if (provisionalToken) delete axes.P3_token_conduct;
+      const assessedAxes = expectedAxes.filter((axis) => axes[axis] && Number.isFinite(axes[axis].score));
+      const assessedWeight = assessedAxes.reduce((sum, axis) => sum + getProfile(role).axes[axis], 0);
+      const missingAxes = expectedAxes.filter((axis) => !assessedAxes.includes(axis));
+      const provisional = missingAxes.length > 0 || provisionalToken;
+      const scoreCoverage: ScoreCoverage = {
+        assessedAxes: assessedAxes.length, totalAxes: expectedAxes.length,
+        assessedWeight, totalWeight: applicableWeight, missingAxes, provisional,
+      };
+      if (assessedWeight === 0) {
+        roleReports.push({
+          role,
+          verdict: this.identityBlocks() ? "UNVERIFIABLE_IDENTITY"
+            : applied && ceiling! <= 10 ? "AVOID" : "INCOMPLETE",
+          raw_total: null, score_total: null, cap_applied: applied,
+          dox_bonus: 0, axes, score_coverage: scoreCoverage,
+          ...(axisApplicability ? { axis_applicability: axisApplicability } : {}),
+          applicable_weight: applicableWeight,
+        });
+        continue;
+      }
+      // Unknown axes are neither zeros nor positive evidence. Normalize only
+      // assessed weighted points and publish the denominator alongside the score.
+      const earnedPoints = assessedAxes.reduce((sum, axis) => sum + axes[axis].score, 0);
+      const raw = Math.round((earnedPoints / assessedWeight) * 100);
+      const appliedBonus = provisional ? 0 : doxBonus;
+      const base = raw + appliedBonus;
+
+      let total: number;
+      if (ceiling !== null) {
         total = Math.min(base, ceiling);
       } else {
         total = Math.min(100, base);
@@ -739,10 +793,13 @@ export class Audit {
         role,
         axes,
         raw_total: raw,
-        dox_bonus: doxBonus,
+        dox_bonus: appliedBonus,
+        score_coverage: scoreCoverage,
         cap_applied: applied,
         score_total: published,
         verdict,
+        ...(axisApplicability ? { axis_applicability: axisApplicability } : {}),
+        applicable_weight: applicableWeight,
       });
     }
 
@@ -751,8 +808,10 @@ export class Audit {
     let govRole: string | null = null;
     let govScore: number | null = null;
     let govCap: string | null = null;
-    if (scored.length === roleReports.length && roleReports.length > 0) {
-      const governing = scored.reduce((current, candidate) => {
+    const blocking = scored.filter((role) => role.verdict === "AVOID" || role.verdict === "UNVERIFIABLE_IDENTITY");
+    const candidates = blocking.length ? blocking : scored;
+    if (candidates.length > 0) {
+      const governing = candidates.reduce((current, candidate) => {
         const candidateSeverity = SEVERITY[candidate.verdict];
         const currentSeverity = SEVERITY[current.verdict];
         if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity ? candidate : current;
@@ -772,7 +831,18 @@ export class Audit {
       govCap = governing.cap_applied;
     }
 
+    const scoreCoverage: ScoreCoverage = {
+      assessedAxes: roleReports.reduce((sum, role) => sum + (role.score_coverage?.assessedAxes ?? 0), 0),
+      totalAxes: roleReports.reduce((sum, role) => sum + (role.score_coverage?.totalAxes ?? 0), 0),
+      assessedWeight: roleReports.reduce((sum, role) => sum + (role.score_coverage?.assessedWeight ?? 0), 0),
+      totalWeight: roleReports.reduce((sum, role) => sum + (role.score_coverage?.totalWeight ?? 0), 0),
+      missingAxes: roleReports.flatMap((role) => role.score_coverage?.missingAxes ?? []),
+      provisional: roleReports.some((role) => role.score_coverage?.provisional),
+    };
+    if (scoreCoverage.provisional && govScore !== null && !blocking.length) composite = "PROVISIONAL";
+
     const report: AuditReport = {
+      score_coverage: scoreCoverage,
       audit_id: this.audit_id,
       handle: this.handle,
       roles: this.roles,
@@ -844,7 +914,7 @@ export class Audit {
       ...(row.artifact_verified !== undefined ? { artifact_verified: row.artifact_verified } : {}),
     });
     for (const a of this.associates) {
-      nodes.push({ type: "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
+      nodes.push({ type: a.kind === "org" ? "Company" : "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
       edges.push({ src: this.handle, dst: a.associate_key, type: "ASSOCIATES_WITH", relation: a.relation, ...receipt(a, a.evidence_url) });
     }
     for (const v of this.ventures) {
@@ -876,6 +946,7 @@ export class Audit {
           type: "CLAIMED_ENDORSEMENT",
           verdict: t.corroboration_verdict,
           claimed_relation: t.claimed_relationship,
+          ...receipt(t, t.evidence_url),
         });
       }
     }

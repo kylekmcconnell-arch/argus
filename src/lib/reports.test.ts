@@ -297,6 +297,51 @@ describe("report save reliability", () => {
     });
   });
 
+  it("accepts the linked receipt for a token-less person report and keeps its server attestation", async () => {
+    // Mirrors the exact `linked: true` body api/report returns when the person
+    // POST re-links the server-collected version. This shape used to omit the
+    // panel capability and was rejected here as an incomplete receipt, so a
+    // durably saved project report read as a failed save.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      reportVersionId: "00000000-0000-4000-8000-000000000301",
+      caseId: "00000000-0000-4000-8000-000000000201",
+      version: 3,
+      linked: true,
+      attestationState: "server_collected",
+      panelCostToken: "signed-panel-token",
+    }), { status: 200 })));
+
+    const dossier = {
+      ...legacyDossier,
+      checkRuns: [{ checkId: "identity", label: "Identity", status: "confirmed" }],
+      persistence: { state: "persisted", reportVersionId: "00000000-0000-4000-8000-000000000301" },
+    } as unknown as Dossier;
+    const persisted = await syncReport("person", "@example", "@example", dossier, "PASS", 80);
+    expect(persisted).toMatchObject({
+      state: "persisted",
+      caseId: "00000000-0000-4000-8000-000000000201",
+      version: 3,
+      attestationState: "server_collected",
+    });
+    if (persisted.state !== "persisted") throw new Error("expected persisted");
+    expect(savedVersionContext("person", dossier, persisted).attestationState).toBe("server_collected");
+    expect(savedVersionContext("person", dossier, { caseId: "c", reportVersionId: "v", version: 1 }).attestationState)
+      .toBe("analyst_submitted");
+  });
+
+  it("names the unbound token leg when the server rejects only the combined save", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: "person_token_subject_mismatch" }),
+      { status: 409 },
+    )));
+
+    await expect(syncReport("person", "@example", "@example", legacyDossier, "PASS", 80)).resolves.toEqual({
+      state: "failed",
+      reason: expect.stringContaining("The project report is saved"),
+    });
+  });
+
   it("fails closed when the save receipt omits case identity", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       reportVersionId: "00000000-0000-4000-8000-000000000123",
@@ -361,6 +406,58 @@ describe("stored token and investigation checks", () => {
     expect(checks).toContainEqual(versionContext.checks[0]);
     expect(checks.filter((check) => check.decisionCritical === true)).toHaveLength(7);
   });
+
+  // The default search shell runs every pasted contract as an investigation.
+  // A token whose sources link no official X account has no embedded project
+  // collector, so it is exactly a standalone token scan: once its six safety
+  // checks record, it is complete. It used to sit at 6 of 7 forever because
+  // the investigation contract demanded a trust-graph screen nothing could run.
+  it("completes an investigation that never bound a project account once its token safety checks record", () => {
+    const token = {
+      address: "0x7777777777777777777777777777777777777777",
+      chain: "ethereum",
+      safety: { available: true, simChecked: true, tradeabilityAssessed: true, buyTax: 0, sellTax: 0, holderCount: 900, topHolderPct: 9, ownerRenounced: true, openSource: true },
+      topHolders: [{ address: "0xholder1", percent: 9 }],
+      holdersAssessed: true,
+      bundleCount: 0,
+      insiderPct: 0,
+      bundleRisk: "low",
+      cg: { listed: true, cexCount: 1, rank: 900 },
+      sanctionsScreen: { available: true, checked: 2, sanctioned: [], completedAt: "2026-08-30T00:00:00.000Z" },
+    } as unknown as TokenDossier;
+    const unbound = {
+      token,
+      projectX: null,
+      projectAccount: null,
+      projectAccountAudit: {
+        state: "unavailable",
+        note: "Embedded project-account audit was unavailable because no official project X account was resolved.",
+      },
+    } as unknown as Investigation;
+
+    const checks = reportChecks("investigation", unbound);
+    expect(checks.find((check) => check.checkId === "trust-graph-connections")).toMatchObject({
+      status: "unavailable",
+      decisionCritical: false,
+      retryable: false,
+      provider: "project-account-audit",
+    });
+    expect(reportCompleteness("investigation", unbound, checks)).toBe("complete");
+
+    // The same token whose real project account failed its embedded audit is
+    // still a retryable gap and stays partial.
+    const failed = {
+      ...unbound,
+      projectX: "@realproject",
+      projectAccountAudit: { state: "failed", note: "Embedded project-account audit failed for @realproject: timeout." },
+    } as unknown as Investigation;
+    const failedChecks = reportChecks("investigation", failed);
+    expect(failedChecks.find((check) => check.checkId === "trust-graph-connections")).toMatchObject({
+      status: "unavailable",
+      decisionCritical: true,
+    });
+    expect(reportCompleteness("investigation", failed, failedChecks)).toBe("partial");
+  });
 });
 
 describe("fetchReport", () => {
@@ -424,6 +521,41 @@ describe("fetchReport", () => {
       report: null,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces an ambiguous label as its candidate subjects without retrying the 409", async () => {
+    const subjects = [
+      { caseId: "case-1", kind: "person", ref: "clutch", query: "@clutch", status: "open" },
+      { caseId: "case-2", kind: "person", ref: "clutchmarkets", query: "@CLUTCHMARKETS", status: "archived", updatedAt: "2026-09-01T00:00:00.000Z" },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "case_subject_ambiguous", subjects }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReportState("clutch")).resolves.toEqual({
+      status: "ambiguous",
+      report: null,
+      subjects,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry another deterministic 409 and never invents subjects for it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "person_token_subject_mismatch" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReportState("@alice", "person")).resolves.toEqual({
+      status: "unavailable",
+      report: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("loads one immutable report version without resolving the active projection", async () => {

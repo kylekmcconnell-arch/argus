@@ -1,3 +1,4 @@
+import type { ScoreCoverage } from "../engine/audit.js";
 // NOTE: this module is loaded as native ESM by the api/ functions — every
 // runtime import here MUST carry an explicit .js extension.
 import {
@@ -205,36 +206,6 @@ function scoreMatchesVerdict(verdict: string, score: string): boolean {
   return false;
 }
 
-function strictNonNegativeInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
-}
-
-function cleanNeededEvidenceSummary(value: unknown): string {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 500) : "";
-}
-
-function qualifiesForProvisionalPass(
-  rawVerdict: string,
-  score: string,
-  readiness: PublicReportReadinessSummary | undefined,
-): readiness is PublicReportReadinessSummary {
-  if (!readiness || rawVerdict !== "PASS" || !scoreMatchesVerdict(rawVerdict, score)) return false;
-  const coveragePercent = strictNonNegativeInteger(readiness.coveragePercent);
-  const roleCount = strictNonNegativeInteger(readiness.roleCount);
-  const decisionAxisTotal = strictNonNegativeInteger(readiness.decisionAxisTotal);
-  const evidenceBackedAxes = strictNonNegativeInteger(readiness.evidenceBackedAxes);
-  return readiness.status === "provisional"
-    && coveragePercent !== null
-    && coveragePercent >= 70
-    && coveragePercent < 100
-    && roleCount !== null
-    && roleCount > 0
-    && decisionAxisTotal !== null
-    && decisionAxisTotal > 0
-    && evidenceBackedAxes === decisionAxisTotal
-    && Boolean(cleanNeededEvidenceSummary(readiness.neededEvidenceSummary));
-}
-
 /**
  * One fail-closed presentation contract for every public ARGUS surface.
  *
@@ -250,13 +221,16 @@ export function presentPublicReport(input: {
   attestation?: unknown;
   checks?: readonly unknown[];
   readiness?: PublicReportReadinessSummary;
+  scoreCoverage?: ScoreCoverage;
 }): PublicReportPresentation {
   const rawVerdict = normalizedVerdict(input.verdict);
-  const completeness = coverageQualifiedCompleteness({
+  const recordedCompleteness = coverageQualifiedCompleteness({
     completeness: input.completeness,
     attestation: input.attestation,
     ...(input.checks !== undefined ? { checks: input.checks } : {}),
   });
+  const completeness = recordedCompleteness === "complete" && (rawVerdict === "PROVISIONAL" || input.scoreCoverage?.provisional)
+    ? "partial" : recordedCompleteness;
   const score = publicScoreLabel(input.score);
   const adverse = ADVERSE_VERDICTS.has(rawVerdict);
   const coverageLabel = completeness === "complete"
@@ -270,24 +244,30 @@ export function presentPublicReport(input: {
       ? "INVESTIGATION FAILED"
       : "INVESTIGATION INCOMPLETE";
 
+  // A score from assessed evidence remains useful when coverage is limited.
+  // It is explicitly provisional and can never certify final clearance.
+  const hasUsableEvidence = !input.readiness || (input.readiness.roleCount > 0
+    && (input.readiness.evidenceBackedAxes ?? 0) > 0);
+  if (completeness !== "failed" && score && hasUsableEvidence && (rawVerdict === "PROVISIONAL"
+    || (rawVerdict === "PASS" && completeness === "partial" && scoreMatchesVerdict(rawVerdict, score)))) {
+    const coverage = input.scoreCoverage;
+    const assessed = coverage
+      ? `${coverage.assessedAxes} of ${coverage.totalAxes} scoring areas assessed (${Math.round(100 * coverage.assessedWeight / Math.max(1, coverage.totalWeight))}% of the methodology weight).`
+      : "Based on the evidence assessed so far.";
+    const missing = coverage?.missingAxes.length
+      ? ` Not assessed: ${coverage.missingAxes.map((axis) => axis.replace(/^[A-Z]\d+_/, "").replace(/_/g, " ")).join(", ")}.`
+      : "";
+    const gap = input.readiness?.neededEvidenceSummary || "Some evidence checks remain open; see the report's data gaps.";
+    return Object.freeze({
+      rawVerdict, displayVerdict: "PROVISIONAL", resultLabel: "DECISION READINESS",
+      readinessLabel: "ASSESSMENT PROVISIONAL", coverageLabel,
+      color: VERDICT_COLORS.PROVISIONAL, primaryScore: score,
+      scoreLabel: "PROVISIONAL SCORE", secondarySignal: rawVerdict === "PASS" ? "PASS SIGNAL" : null,
+      note: `${assessed}${missing} ${gap} The score may change as gaps are resolved.`, final: false,
+    });
+  }
+
   if (completeness !== "complete") {
-    if (completeness === "partial" && qualifiesForProvisionalPass(rawVerdict, score, input.readiness)) {
-      const axisTotal = input.readiness.decisionAxisTotal;
-      const neededEvidenceSummary = cleanNeededEvidenceSummary(input.readiness.neededEvidenceSummary);
-      return Object.freeze({
-        rawVerdict,
-        displayVerdict: "PROVISIONAL",
-        resultLabel: "DECISION READINESS",
-        readinessLabel: "ASSESSMENT PROVISIONAL",
-        coverageLabel,
-        color: VERDICT_COLORS.PROVISIONAL,
-        primaryScore: score,
-        scoreLabel: "PROVISIONAL SCORE",
-        secondarySignal: "PASS SIGNAL",
-        note: `All ${axisTotal} parts of the score have saved sources. ${neededEvidenceSummary} Do not rely on this result until the open checks finish.`,
-        final: false,
-      });
-    }
 
     if (adverse) {
       const consistentScore = scoreMatchesVerdict(rawVerdict, score) ? score : "";

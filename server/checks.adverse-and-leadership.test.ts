@@ -155,6 +155,7 @@ describe("project-leadership-currency check row", () => {
       "identity-resolution",
       "affiliations-associates",
       "project-token-identity",
+      "entity-continuity",
       "project-product-substance",
       "project-team-identity",
       "project-backing-partners",
@@ -178,7 +179,7 @@ describe("frozen checklist contracts", () => {
     const preOrganizationSafety = new Set<string>(PRE_ORGANIZATION_SAFETY_PERSON_CHECK_IDS);
 
     expect(preOrganizationSafety.size).toBe(fundScaleEra.size + 2);
-    expect(current.size).toBe(preOrganizationSafety.size + 2);
+    expect(current.size).toBe(preOrganizationSafety.size + 3);
     for (const id of fundScaleEra) expect(preOrganizationSafety.has(id)).toBe(true);
     for (const id of preOrganizationSafety) expect(current.has(id)).toBe(true);
     expect(fundScaleEra.has("adverse-screen")).toBe(false);

@@ -5,15 +5,21 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Dossier } from "../data/dossier";
 import { buildReport, SUBJECTS } from "../data/subjects";
+import { SubjectClass } from "../engine";
 import type { ThreatScan } from "../threat/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn(), trustGraph: vi.fn() }));
+const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn(), trustGraph: vi.fn(), marketIntelligence: vi.fn() }));
 
 vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
-vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
+// The promoted production lane renders the connection workspace, which needs
+// the real entity-key canonicalizer; only the connection lookup is stubbed.
+vi.mock("../graph/network", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../graph/network")>()),
+  subjectConnections: () => [],
+}));
 vi.mock("./RingAlert", () => ({ RingAlert: (props: Record<string, unknown>) => { harness.livePanel("ring-alert", props); return null; } }));
 vi.mock("./SanctionsNameScreen", () => ({ SanctionsNameScreen: () => { harness.livePanel("sanctions"); return null; } }));
 vi.mock("./LegalScreen", () => ({ LegalScreen: () => { harness.livePanel("legal"); return null; } }));
@@ -33,7 +39,13 @@ vi.mock("./Avatar", () => ({
   Avatar: ({ src }: { src: string | null }) => src ? <img src={src} alt="" /> : null,
 }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => null }));
-vi.mock("./ThreatScanPage", () => ({ ThreatReport: () => null }));
+vi.mock("./ThreatScanPage", () => ({
+  ThreatReport: () => <div data-testid="late-threat-report">late threat report</div>,
+  ProjectMarketIntelligence: (props: Record<string, unknown>) => {
+    harness.marketIntelligence(props);
+    return <div data-testid="market-intelligence">market intelligence</div>;
+  },
+}));
 
 import { Report } from "./Report";
 
@@ -44,6 +56,7 @@ beforeEach(() => {
   harness.livePanel.mockReset();
   harness.askReport.mockReset();
   harness.trustGraph.mockReset();
+  harness.marketIntelligence.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -59,6 +72,90 @@ function decisionBasisText(): string {
 }
 
 describe("private person report evidence boundary", () => {
+  it("keeps the canonical chapter order and never renders retired notable followers", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
+    const axisName = Object.keys(governing.axes)[0]!;
+    const dossier = {
+      ...base,
+      report: { ...base.report, roles: [SubjectClass.PROJECT] },
+      projectStrengthBands: {
+        [axisName]: {
+          tier: "strong",
+          minScore: 70,
+          maxScore: 100,
+          reasons: ["Source-backed evidence supports this dimension."],
+          anchorArtifactIds: [],
+        },
+      },
+      notableFollowers: [{ handle: "legacywhale", label: "Legacy Whale", size: "2.4M", count: 2_400_000 }],
+      subjectOrientation: {
+        kind: "PROJECT",
+        what: "The product routes application traffic through a distributed privacy network.",
+        audience: "internet applications",
+        boundHandle: base.handle,
+        boundDomain: "example.com",
+        sourceUrls: ["https://example.com"],
+      },
+      entityContinuity: {
+        subject: "Anyone Protocol",
+        historicalAliases: ["ATOR Protocol"],
+        predecessorName: "ATOR Protocol",
+        oldTicker: "ATOR",
+        oldContract: "0xold",
+        migrationRatio: "1:1",
+        migrationDate: "2024-07-01",
+        replacementContract: "0xnew",
+        migrationContract: null,
+        currentStatus: "active",
+        architectureChanges: [],
+        exchangeHandling: [],
+        tokenLineage: [],
+        events: [{
+          date: "2024-07-01",
+          kind: "rebrand",
+          title: "ATOR became Anyone Protocol",
+          detail: "The project changed its name and migrated its token.",
+          sourceUrls: ["https://example.com/rebrand"],
+        }],
+        sources: [],
+        aliasSearches: [],
+        marketHistory: [],
+        coverage: {
+          required: true,
+          state: "complete",
+          reason: "Lifecycle search completed.",
+          primarySourceCount: 1,
+          searchedAt: "2026-08-27T00:00:00.000Z",
+        },
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const nav = container.querySelector('nav[aria-label="Report table of contents"]');
+    const links = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])];
+    expect(links.slice(0, 4).map((link) => link.textContent?.trim())).toEqual([
+      "Decision",
+      "What the product is",
+      "Key developments",
+      "People",
+    ]);
+    expect(links.map((link) => link.textContent)).not.toContain("What changed");
+    expect(container.querySelector("#key-developments")?.textContent).toContain("The events that shaped this case");
+    expect(container.textContent).not.toContain("Notable followers");
+    expect(container.querySelector('a[href="https://x.com/legacywhale"]')).toBeNull();
+
+    const relationships = container.querySelector("#relationships");
+    const scoreEvidence = [...container.querySelectorAll("details")].find((detail) =>
+      detail.textContent?.includes("Evidence behind each score dimension"));
+    expect(relationships).not.toBeNull();
+    expect(scoreEvidence).not.toBeUndefined();
+    expect(relationships!.compareDocumentPosition(scoreEvidence!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("uses the linked token scan as Style 2's separate second score", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
@@ -91,6 +188,38 @@ describe("private person report evidence boundary", () => {
     expect(dual?.textContent).toContain("The liquidity");
     expect(dual?.textContent).toContain("Code & security");
     expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
+  });
+
+  it("moves saved deep token evidence into Market instead of repeating it in the late appendix", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const threat = {
+      address: "0x5555555555555555555555555555555555555555",
+      symbol: "FIX",
+      dossier: { score: 82, verdict: "PASS", axes: [] },
+    } as unknown as ThreatScan;
+    const dossier = {
+      ...base,
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Fixture",
+        symbol: "FIX",
+        address: threat.address,
+        chain: "ethereum",
+        sourceUrl: "https://dexscreener.com/ethereum/fixture",
+        capturedAt: "2026-08-27T00:00:00.000Z",
+      },
+      threat,
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.querySelector('[data-testid="market-intelligence"]')).not.toBeNull();
+    expect(harness.marketIntelligence).toHaveBeenCalledWith(expect.objectContaining({ scan: threat }));
+    expect(container.querySelector('[data-testid="late-threat-report"]')).toBeNull();
+    expect(container.textContent).not.toContain("Project token · threat scan");
   });
 
   it("puts the exact unfinished required check ahead of general research questions", () => {
@@ -412,11 +541,9 @@ describe("private person report evidence boundary", () => {
           },
         ],
         questions: [],
-        lenses: base.intelligence!.lenses.map((lens) => lens.id === "investment"
-          ? { ...lens, signalIds: ["entity-support-investment-record", "entity-pressure-related-party"], unresolvedQuestionIds: [] }
-          : lens.id === "alpha_research"
-            ? { ...lens, signalIds: ["entity-support-alpha-change", "entity-pressure-related-party"], unresolvedQuestionIds: [] }
-            : { ...lens, signalIds: [], unresolvedQuestionIds: [] }),
+        lenses: base.intelligence!.lenses.map((lens) => lens.id === "general_diligence"
+          ? { ...lens, signalIds: ["entity-support-investment-record", "entity-support-alpha-change", "entity-pressure-related-party"], unresolvedQuestionIds: [] }
+          : { ...lens, signalIds: [], unresolvedQuestionIds: [] }),
       },
     };
 
@@ -435,18 +562,81 @@ describe("private person report evidence boundary", () => {
     expect(dossier.report.governing_score).toBe(base.report.governing_score);
 
     const synthesis = container.querySelector('[aria-label="Case synthesis"]')!;
-    const alphaButton = [...synthesis.querySelectorAll("button")]
-      .find((button) => button.textContent?.trim() === "Alpha")!;
-    act(() => alphaButton.click());
-
     expect(synthesis.textContent).toContain("Strongest evidence");
-    expect(synthesis.textContent).toContain("A newly verified operating milestone changes the setup");
+    expect(synthesis.textContent).toContain("A verified operating record supports the base case");
     expect(synthesis.textContent).toContain("A related-party relationship needs review");
-    expect(alphaButton.getAttribute("aria-pressed")).toBe("true");
-    const alphaAtlasTab = [...container.querySelectorAll('button[role="tab"]')]
-      .find((button) => button.textContent?.trim() === "Alpha research");
-    expect(alphaAtlasTab?.getAttribute("aria-selected")).toBe("true");
+    expect(synthesis.textContent).not.toContain("Review this for");
+    expect(container.querySelector('[role="tablist"][aria-label="Decision lens"]')).toBeNull();
     expect(dossier.report.governing_score).toBe(base.report.governing_score);
+  });
+
+  it("does not ask readers to re-identify a bound project or promote graph version diagnostics", () => {
+    const base = buildReport(SUBJECTS[1]);
+    expect(base.intelligence).toBeDefined();
+    const dossier: Dossier = {
+      ...base,
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      subjectOrientation: {
+        kind: "PROJECT",
+        what: "A privacy network for internet applications.",
+        audience: "internet users",
+        boundHandle: base.handle,
+        boundDomain: "example.com",
+        sourceUrls: ["https://example.com"],
+      },
+      checkRuns: [{
+        checkId: "trust-graph-connections",
+        label: "Connection map connections",
+        status: "unavailable",
+        note: "1 graph connection could not be qualified because the linked immutable report is not the active case projection, or is stale, partial, or incompletely attested.",
+        decisionCritical: true,
+      }],
+      intelligence: {
+        ...base.intelligence!,
+        signals: [],
+        questions: [{
+          id: "project.official_identity",
+          domain: "identity",
+          prompt: "What exact project or company does this account represent?",
+          materiality: "critical",
+          state: "reported",
+          basis: "The saved evidence records an answer, but one or more saved answer or source references failed the Intelligence Spine source-link check. Surviving fragments cannot upgrade this question's prior evidence state.",
+          answerRefs: [],
+          sourceRefs: [],
+        }, {
+          id: "project.product_surface",
+          domain: "product",
+          prompt: "What live products or services does the project provide?",
+          materiality: "important",
+          state: "partial",
+          basis: "An older collection pass completed only partially.",
+          answerRefs: [],
+          sourceRefs: [],
+        }, {
+          id: "project.security_audit",
+          domain: "control",
+          prompt: "Which independent security audits are published?",
+          materiality: "important",
+          state: "unavailable",
+          basis: "No independent audit was confirmed.",
+          answerRefs: [],
+          sourceRefs: [],
+        }],
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const verifyNext = container.querySelector(".kyle-verify-next")?.textContent ?? "";
+    expect(verifyNext).not.toContain("What exact project or company does this account represent");
+    expect(verifyNext).not.toContain("What live products or services does the project provide");
+    expect(verifyNext).not.toContain("Connection map connections");
+    expect(verifyNext).not.toContain("Team and leadership");
+    expect(container.textContent).toContain("does not affect the score or verdict");
+    expect(container.textContent).not.toContain("linked immutable report is not the active case projection");
   });
 
   it("uses the unified decision canvas and collapses secondary mobile actions", () => {
@@ -661,6 +851,40 @@ describe("private person report evidence boundary", () => {
     expect(ledgers?.textContent).toContain("Lead Capital");
     expect(ledgers?.textContent).toContain("Protocol incident ledger");
     expect(ledgers?.textContent).toContain("Oracle manipulation");
+  });
+
+  it("does not render a token-score surface for a confirmed tokenless business", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      // Deliberately retain a stale token candidate to prove that the frozen
+      // applicability decision, not leftover discovery data, controls the UI.
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Stale token candidate",
+        symbol: "STALE",
+        address: "0x5555555555555555555555555555555555555555",
+        chain: "ethereum",
+        sourceUrl: "https://example.com/stale-token",
+        capturedAt: "2026-08-27T00:00:00.000Z",
+      },
+      tokenApplicability: {
+        state: "confirmed_tokenless",
+        axisTreatment: "not_applicable",
+        reason: "A completed identity-bound token search found no project token.",
+        evidence: ["No canonical token is bound to the official project identity."],
+        determinedAt: "2026-08-27T00:00:00.000Z",
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.querySelector('[data-report-score="dual"]')).toBeNull();
+    expect(container.querySelector('[data-report-score="prominent"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("Token safety score");
   });
 
   it("renders model-only team identities as leads and excludes them from grounded report chat", () => {
@@ -1284,7 +1508,7 @@ describe("private person report evidence boundary", () => {
     expect(container.textContent).not.toContain("2 public funding rounds");
   });
 
-  it("renders never-collected follow and acknowledgment checks as unchecked instead of affirmative negatives", () => {
+  it("explains claimed relationships in public language and links the preserved evidence", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
       ...base,
@@ -1293,11 +1517,13 @@ describe("private person report evidence boundary", () => {
         testimonials: [{
           claimed_endorser_handle: "@unchecked_endorser",
           claimed_relationship: "advisor",
+          evidence_url: "https://project.example/team",
         }, {
           claimed_endorser_handle: "@screened_endorser",
           claimed_relationship: "investor",
           follows_subject: false,
           public_acknowledgment: "none",
+          acknowledgment_source_url: "https://x.com/screened_endorser/status/123",
         }],
       },
     };
@@ -1307,18 +1533,22 @@ describe("private person report evidence boundary", () => {
     });
 
     const rowText = (handle: string) => [...container.querySelectorAll<HTMLElement>("div")]
-      .find((el) => el.className.includes("grid-cols-[1.4fr_1fr_auto]") && el.textContent?.includes(handle))
+      .find((el) => el.className.includes("sm:grid-cols-[1.25fr_1.15fr_auto]") && el.textContent?.includes(handle))
       ?.textContent ?? "";
 
     const unchecked = rowText("@unchecked_endorser");
-    expect(unchecked).toContain("follow unchecked");
-    expect(unchecked).toContain("ack unchecked");
-    expect(unchecked).not.toContain("no follow");
-    expect(unchecked).not.toContain("no ack");
+    expect(unchecked).toContain("Claimed role: advisor");
+    expect(unchecked).toContain("Independent confirmation was not completed");
+    expect(unchecked).not.toContain("ack unchecked");
 
     const screened = rowText("@screened_endorser");
-    expect(screened).toContain("no follow");
-    expect(screened).toContain("no ack");
+    expect(screened).toContain("No public confirmation found");
+    expect(screened).toContain("Not independently confirmed");
+
+    const hrefs = [...container.querySelectorAll<HTMLAnchorElement>("a")].map((link) => link.href);
+    expect(hrefs).toContain("https://project.example/team");
+    expect(hrefs).toContain("https://x.com/screened_endorser/status/123");
+    expect(container.textContent).toContain("These are people or organizations the subject publicly described");
   });
 
   it("does not mount subject-specific supplemental panels", () => {
@@ -1678,10 +1908,15 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Provider returned no identity match");
     expect([...container.querySelectorAll("span")].some((node) => node.textContent?.trim() === "decision-ready")).toBe(false);
     expect(container.textContent).not.toContain("<UNKNOWN>");
-    expect(harness.trustGraph).toHaveBeenCalledWith(expect.objectContaining({
-      nodes: expect.not.arrayContaining([expect.objectContaining({ key: "<unknown>" })]),
-      edges: expect.not.arrayContaining([expect.objectContaining({ dst: "<unknown>" })]),
-    }));
+    // The promoted connections workspace draws the graph itself; the
+    // collector placeholder must never become a node or a drawer entry.
+    expect(container.querySelector('[aria-label^="<UNKNOWN>"]')).toBeNull();
+    expect(container.querySelector('[aria-label^="<unknown>"]')).toBeNull();
+    for (const call of harness.trustGraph.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({
+        nodes: expect.not.arrayContaining([expect.objectContaining({ key: "<unknown>" })]),
+      }));
+    }
     expect(decisionBasisText()).toContain("could not confirm what kind of subject this is");
     expect(decisionBasisText()).not.toContain("predates strict evidence-to-axis citations");
   });
@@ -1784,7 +2019,7 @@ describe("decision-safe person report presentation", () => {
     expect(counterweight).toContain("What looks credible");
   });
 
-  it("titles assessed-null axes with their deterministic finding and keeps coverage out of the risk section", () => {
+  it("keeps an assessed-null axis in score composition without promoting it to a caution", () => {
     const base = buildReport(SUBJECTS[0]);
     const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
     const axisName = Object.keys(governing.axes)[0]!;
@@ -1830,8 +2065,119 @@ describe("decision-safe person report presentation", () => {
     });
 
     const verdictDrivers = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
-    expect(verdictDrivers).toMatch(/assessed with no positive record|No token could be tied|No outside backers/);
+    expect(verdictDrivers).not.toMatch(/assessed with no positive record|No token could be tied|No outside backers/);
+    expect(verdictDrivers).toContain("The score is limited because of");
     expect(verdictDrivers).not.toContain("needs more verification");
+  });
+
+  it("keeps low-scoring official team and disclosure evidence out of Why we're cautious", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const teamHash = "1".repeat(64);
+    const disclosureHash = "2".repeat(64);
+    const teamArtifactId = `art_v1_${teamHash}`;
+    const disclosureArtifactId = `art_v1_${disclosureHash}`;
+    const dossier = {
+      ...base,
+      intelligence: undefined,
+      checkRuns: [],
+      axisCitationVersion: 1 as const,
+      axisEvidenceCatalog: [{
+        artifactId: teamArtifactId,
+        kind: "axis_evidence" as const,
+        provider: "official-project-site",
+        operation: "project-team-identity",
+        section: "team",
+        title: "The official site names eleven team members and advisors",
+        excerpt: "The official team page lists multiple named leads and advisors with direct role statements.",
+        contentHash: teamHash,
+        eligibleAxes: ["P1_team_and_identity"],
+        verification: "verified" as const,
+        scope: "direct_subject" as const,
+      }, {
+        artifactId: disclosureArtifactId,
+        kind: "axis_evidence" as const,
+        provider: "official-project-site",
+        operation: "project-transparency",
+        section: "disclosures",
+        title: "The project publishes documentation and token migration records",
+        excerpt: "Public documentation and migration records establish basic disclosure.",
+        contentHash: disclosureHash,
+        eligibleAxes: ["P6_transparency_integrity"],
+        verification: "verified" as const,
+        scope: "direct_subject" as const,
+      }],
+      projectStrengthBands: {
+        P1_team_and_identity: {
+          tier: "emerging" as const,
+          minScore: 7,
+          maxScore: 11,
+          reasons: ["The official roster is source-backed."],
+          anchorArtifactIds: [teamArtifactId],
+        },
+        P6_transparency_integrity: {
+          tier: "emerging" as const,
+          minScore: 5,
+          maxScore: 8,
+          reasons: ["Official documentation establishes basic disclosure."],
+          anchorArtifactIds: [disclosureArtifactId],
+        },
+      },
+      report: {
+        ...base.report,
+        roles: ["PROJECT"],
+        governing_role: "PROJECT",
+        governing_score: 58,
+        composite_verdict: "CAUTION" as const,
+        role_reports: [{
+          role: "PROJECT",
+          verdict: "CAUTION",
+          raw_total: 58,
+          score_total: 58,
+          cap_applied: null,
+          dox_bonus: 0,
+          axes: {
+            P1_team_and_identity: {
+              axis: "P1_team_and_identity",
+              role: "PROJECT",
+              score: 9,
+              weight: 16,
+              rationale: "The official team page lists multiple named leads and advisors with direct role statements.",
+              evidenceRefs: [teamArtifactId],
+              counterEvidenceRefs: [],
+              gaps: ["Which roles have independent employment or authority confirmation?"],
+            },
+            P6_transparency_integrity: {
+              axis: "P6_transparency_integrity",
+              role: "PROJECT",
+              score: 7,
+              weight: 12,
+              rationale: "Public team, documentation, and migration records establish basic disclosure.",
+              evidenceRefs: [disclosureArtifactId],
+              counterEvidenceRefs: [],
+              gaps: ["Which governance and treasury disclosures are independently confirmed?"],
+            },
+          },
+        }],
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const decisionBrief = container.querySelector("#report-summary")?.textContent ?? "";
+    const cautionColumn = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
+    const supportColumn = container.querySelector('section[aria-labelledby="confidence-limits-title"]')?.textContent ?? "";
+    const scoreEvidence = container.querySelector("#decision-basis")?.textContent ?? "";
+
+    expect(cautionColumn).toContain("No verified adverse finding was recorded");
+    expect(cautionColumn).not.toContain("Verified evidence on");
+    expect(cautionColumn).not.toContain("is thin");
+    expect(supportColumn).toContain("Team and leadership");
+    expect(supportColumn).toContain("Transparency and integrity");
+    expect(scoreEvidence).toMatch(/independent employment|governance and treasury/i);
+    expect(decisionBrief).not.toContain("Verified evidence on team and leadership is thin");
+    expect(decisionBrief).not.toContain("Verified evidence on transparency and integrity is thin");
   });
 
   it("translates internal axis and provider language into an investor-readable summary", () => {
@@ -2017,7 +2363,7 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("6 of 6 areas have sources");
     expect(container.textContent).toContain("3 follow-up questions");
     expect(container.textContent).toContain("Follow up on: 3 important questions");
-    expect(container.textContent).toContain("Do not rely on this result");
+    expect(container.textContent).toContain("The score may change as gaps are resolved");
     expect(container.textContent).toContain("This score uses the facts collected so far");
     expect(container.textContent).toContain("Current score 71");
     expect(container.textContent).not.toContain("score withheld");

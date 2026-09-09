@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("./live", () => ({ streamAudit: mocks.streamAudit }));
 vi.mock("../threat/scan", () => ({ threatScan: mocks.threatScan }));
+// The runner must never import this: a CoinGecko name match is not evidence
+// that a token belongs to the subject (#321). The mock stays so a regression
+// that reintroduces the import is caught by the assertion below.
 vi.mock("./resolveProjectToken", () => ({ resolveProjectToken: mocks.resolveProjectToken }));
 
 import { getRun, setOnComplete, startPersonAudit } from "./runner";
@@ -77,5 +80,119 @@ describe("project report token-safety leg", () => {
     expect(getRun("@AnyoneFDN")?.dossier?.threat).toBe(tokenSafety);
     expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("canonical $ANYONE project token");
     expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("PASS · 18/100 risk");
+  });
+
+  it("never attaches a token by CoinGecko name match when nothing first-party names one", async () => {
+    const dossier = { ...anyoneDossier(), projectToken: undefined, bio: "Privacy network.", evidence: { promotions: [] } } as unknown as Dossier;
+    mocks.resolveProjectToken.mockResolvedValue({
+      name: "Anyone Protocol",
+      symbol: "ANYONE",
+      contract: "0x1234567890abcdef1234567890abcdef12345678",
+      chain: "ethereum",
+      homepage: "https://www.anyone.io/",
+    });
+    mocks.streamAudit.mockImplementation((
+      _handle: string,
+      _priv: boolean,
+      handlers: { onDone: (value: Dossier) => void },
+    ) => {
+      handlers.onDone(dossier);
+      return () => undefined;
+    });
+
+    startPersonAudit("@AnyoneFDN");
+    await vi.waitFor(() => expect(getRun("@AnyoneFDN")?.status).toBe("done"));
+
+    expect(mocks.resolveProjectToken).not.toHaveBeenCalled();
+    expect(mocks.threatScan).not.toHaveBeenCalled();
+    expect(getRun("@AnyoneFDN")?.dossier?.threat).toBeUndefined();
+    expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("does not attach tokens by name match");
+  });
+
+  it("does not mark the report done until the token-enriched version is durably saved", async () => {
+    const dossier = anyoneDossier();
+    const tokenSafety = {
+      symbol: "ANYONE",
+      call: { verdict: "PASS", risk: 18 },
+      dossier: { score: 82, verdict: "PASS", axes: [] },
+    } as unknown as ThreatScan;
+    let releaseSave: (() => void) | undefined;
+    const saveFinished = new Promise<void>((resolve) => { releaseSave = resolve; });
+    setOnComplete(() => saveFinished);
+    mocks.threatScan.mockResolvedValue(tokenSafety);
+    mocks.streamAudit.mockImplementation((
+      _handle: string,
+      _priv: boolean,
+      handlers: { onDone: (value: Dossier) => void },
+    ) => {
+      handlers.onDone(dossier);
+      return () => undefined;
+    });
+
+    startPersonAudit("@AnyoneFDN");
+    await vi.waitFor(() => expect(mocks.threatScan).toHaveBeenCalledOnce());
+    expect(getRun("@AnyoneFDN")?.status).toBe("running");
+    expect(getRun("@AnyoneFDN")?.pct).toBeLessThan(100);
+
+    releaseSave?.();
+    await vi.waitFor(() => expect(getRun("@AnyoneFDN")?.status).toBe("done"));
+    expect(getRun("@AnyoneFDN")?.dossier?.threat).toBe(tokenSafety);
+  });
+
+  it("retries a newly indexed verified token once without the cached empty result", async () => {
+    const dossier = anyoneDossier();
+    const tokenSafety = {
+      symbol: "ANYONE",
+      call: { verdict: "PASS", risk: 18 },
+      dossier: { score: 82, verdict: "PASS", axes: [] },
+    } as unknown as ThreatScan;
+    mocks.threatScan
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(tokenSafety);
+    mocks.streamAudit.mockImplementation((
+      _handle: string,
+      _priv: boolean,
+      handlers: { onDone: (value: Dossier) => void },
+    ) => {
+      handlers.onDone(dossier);
+      return () => undefined;
+    });
+
+    startPersonAudit("@AnyoneFDN");
+    await vi.waitFor(() => expect(getRun("@AnyoneFDN")?.status).toBe("done"));
+
+    expect(mocks.threatScan).toHaveBeenCalledTimes(2);
+    expect(mocks.threatScan).toHaveBeenNthCalledWith(2, {
+      kind: "token",
+      ref: "0x1234567890abcdef1234567890abcdef12345678",
+      via: "evm",
+    }, expect.any(Function), { force: true });
+    expect(getRun("@AnyoneFDN")?.dossier?.threat).toBe(tokenSafety);
+    expect(getRun("@AnyoneFDN")?.steps.some((step) => step.label === "Retrying the token safety check")).toBe(true);
+  });
+
+  it("surfaces a final persistence failure instead of publishing the project-only version", async () => {
+    const dossier = anyoneDossier();
+    mocks.threatScan.mockResolvedValue({
+      symbol: "ANYONE",
+      call: { verdict: "PASS", risk: 18 },
+      dossier: { score: 82, verdict: "PASS", axes: [] },
+    } as unknown as ThreatScan);
+    setOnComplete(async () => {
+      throw new Error("The combined project and token report could not be saved.");
+    });
+    mocks.streamAudit.mockImplementation((
+      _handle: string,
+      _priv: boolean,
+      handlers: { onDone: (value: Dossier) => void },
+    ) => {
+      handlers.onDone(dossier);
+      return () => undefined;
+    });
+
+    startPersonAudit("@AnyoneFDN");
+    await vi.waitFor(() => expect(getRun("@AnyoneFDN")?.status).toBe("error"));
+    expect(getRun("@AnyoneFDN")?.error).toContain("combined project and token report");
+    expect(getRun("@AnyoneFDN")?.dossier).toBeUndefined();
   });
 });

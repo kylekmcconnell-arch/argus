@@ -342,7 +342,7 @@ function tokenResult(input: {
     };
   }
   const presentation = partialPresentation(input.dossier.verdict, input.dossier.score);
-  const expectedPublicDisplay = input.verdict === "PASS" ? "INCOMPLETE" : input.verdict;
+  const expectedPublicDisplay = input.verdict === "PASS" ? "PROVISIONAL" : input.verdict;
   const pass = input.dossier.verdict === input.verdict
     && input.dossier.capApplied === input.cap
     && input.dossier.safetyChecked
@@ -350,7 +350,7 @@ function tokenResult(input: {
     && (input.verdict !== "PASS" || input.dossier.cg?.ath?.drawdownPct === -75)
     && !presentation.final
     && presentation.displayVerdict === expectedPublicDisplay
-    && (input.verdict !== "PASS" || presentation.secondarySignal?.includes("EARLY SCORE") === true)
+    && (input.verdict !== "PASS" || presentation.scoreLabel === "PROVISIONAL SCORE")
     && (input.verdict === "PASS" || presentation.resultLabel === "RISK SIGNAL");
   return {
     id: input.id,

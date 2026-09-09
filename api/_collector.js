@@ -15,7 +15,8 @@ var PROVIDERS = [
   { id: "arkham", label: "Arkham", env: ["ARKHAM_API_KEY"], free: false, feeds: "score-neutral identity and exposure context for evidence-bound wallets" },
   { id: "bitquery", label: "Bitquery (not yet in core collector)", env: ["BITQUERY_API_KEY"], free: false, feeds: "reserved credential only; does not run or attest core audits" },
   { id: "analyst", label: "Grok analyst agent", env: ["XAI_API_KEY"], free: false, feeds: "messy-to-structured axis scoring + rationale + headline" },
-  { id: "openrouter", label: "OpenRouter (optional extract fallback)", env: ["OPENROUTER_API_KEY"], free: false, feeds: "cheap extraction fallback when ARGUS_PROVIDER_FALLBACKS is on" }
+  { id: "openrouter", label: "OpenRouter (optional extract fallback)", env: ["OPENROUTER_API_KEY"], free: false, feeds: "cheap extraction fallback when ARGUS_PROVIDER_FALLBACKS is on" },
+  { id: "chart-signals", label: "Chart signals (self-hosted technical posture)", env: ["CHART_SIGNALS_URL", "CHART_SIGNALS_TOKEN"], free: true, feeds: "generic chart-posture panel on token scans (majors only)" }
 ];
 function hasEnv(keys) {
   if (keys.length === 0) return true;
@@ -40,6 +41,30 @@ var providerFallbacksEnabled = () => {
   return raw === "on" || raw === "1" || raw === "true";
 };
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
+
+// server/boundedProvider.ts
+async function withWallClockBox(work, budgetMs) {
+  if (budgetMs <= 0) return null;
+  const controller = new AbortController();
+  let timer;
+  const fetcher = (input, init) => {
+    controller.signal.throwIfAborted();
+    return fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([controller.signal, init.signal]) : controller.signal });
+  };
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(null);
+    }, budgetMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([work(fetcher), timeout]);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+}
 
 // src/engine/taxonomy.ts
 var SubjectClass = /* @__PURE__ */ ((SubjectClass2) => {
@@ -79,12 +104,12 @@ var POSITIVE_OUTCOMES = /* @__PURE__ */ new Set([
 var SEVERE_OUTCOMES = /* @__PURE__ */ new Set(["Rug" /* RUG */]);
 function classifyFounderPattern(outcomes) {
   const outs = outcomes.map((o) => o);
-  const completed = outs.filter((o) => !NON_TERMINAL.has(o));
+  const completed2 = outs.filter((o) => !NON_TERMINAL.has(o));
   if (outs.some((o) => SEVERE_OUTCOMES.has(o))) return "RugHistory" /* RUG_HISTORY */;
   if (outs.length === 0) return "FirstVenture" /* FIRST_VENTURE */;
-  if (completed.length === 0) return "Unproven" /* UNPROVEN */;
-  const successes = completed.filter((o) => POSITIVE_OUTCOMES.has(o)).length;
-  const failures = completed.filter(
+  if (completed2.length === 0) return "Unproven" /* UNPROVEN */;
+  const successes = completed2.filter((o) => POSITIVE_OUTCOMES.has(o)).length;
+  const failures = completed2.filter(
     (o) => o === "SilentShutdown" /* SILENT_SHUTDOWN */ || o === "Failure" /* FAILURE */
   ).length;
   if (successes >= 2 && failures === 0) return "SerialSuccess" /* SERIAL_SUCCESS */;
@@ -618,6 +643,7 @@ var Audit = class {
   axisScores = {};
   identity = null;
   display_name;
+  tokenApplicability;
   ventures = [];
   testimonials = [];
   advisedProjects = [];
@@ -638,6 +664,9 @@ var Audit = class {
   }
   setIdentity(confidence) {
     this.identity = confidence;
+  }
+  setTokenApplicability(applicability) {
+    this.tokenApplicability = applicability ? structuredClone(applicability) : void 0;
   }
   addVenture(v) {
     this.ventures.push(v);
@@ -859,22 +888,10 @@ var Audit = class {
       for (const [ax, a] of Object.entries(this.axisScores)) {
         if (classForAxis(ax) === role) axes[ax] = a;
       }
-      const expectedAxes = Object.keys(getProfile(role).axes);
-      const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
-      if (!complete || Object.keys(axes).length !== expectedAxes.length) {
-        roleReports.push({
-          role,
-          verdict: "INCOMPLETE",
-          raw_total: null,
-          score_total: null,
-          cap_applied: null,
-          dox_bonus: doxBonus,
-          axes
-        });
-        continue;
-      }
-      const raw = Math.round(Object.values(axes).reduce((a, x) => a + x.score, 0));
-      const base = raw + doxBonus;
+      const omitTokenConduct = role === "PROJECT" /* PROJECT */ && (this.tokenApplicability?.axisTreatment === "not_applicable" || this.tokenApplicability?.axisTreatment === "deferred");
+      const expectedAxes = Object.keys(getProfile(role).axes).filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct"));
+      const axisApplicability = role === "PROJECT" /* PROJECT */ && this.tokenApplicability ? { P3_token_conduct: structuredClone(this.tokenApplicability) } : void 0;
+      const applicableWeight = expectedAxes.reduce((sum, axis) => sum + (getProfile(role).axes[axis] ?? 0), 0);
       const caps = effectiveCaps(role);
       const triggered = [
         ...this.roleCapsTriggered(role).map((k) => [caps[k], k]),
@@ -882,9 +899,44 @@ var Audit = class {
       ];
       let ceiling = null;
       let applied = null;
-      let total;
       if (triggered.length) {
         [ceiling, applied] = triggered.reduce((m, c) => c[0] < m[0] ? c : m);
+      }
+      const provisionalToken = role === "PROJECT" /* PROJECT */ && this.tokenApplicability?.axisTreatment === "provisional";
+      if (provisionalToken) delete axes.P3_token_conduct;
+      const assessedAxes = expectedAxes.filter((axis) => axes[axis] && Number.isFinite(axes[axis].score));
+      const assessedWeight = assessedAxes.reduce((sum, axis) => sum + getProfile(role).axes[axis], 0);
+      const missingAxes = expectedAxes.filter((axis) => !assessedAxes.includes(axis));
+      const provisional = missingAxes.length > 0 || provisionalToken;
+      const scoreCoverage2 = {
+        assessedAxes: assessedAxes.length,
+        totalAxes: expectedAxes.length,
+        assessedWeight,
+        totalWeight: applicableWeight,
+        missingAxes,
+        provisional
+      };
+      if (assessedWeight === 0) {
+        roleReports.push({
+          role,
+          verdict: this.identityBlocks() ? "UNVERIFIABLE_IDENTITY" : applied && ceiling <= 10 ? "AVOID" : "INCOMPLETE",
+          raw_total: null,
+          score_total: null,
+          cap_applied: applied,
+          dox_bonus: 0,
+          axes,
+          score_coverage: scoreCoverage2,
+          ...axisApplicability ? { axis_applicability: axisApplicability } : {},
+          applicable_weight: applicableWeight
+        });
+        continue;
+      }
+      const earnedPoints = assessedAxes.reduce((sum, axis) => sum + axes[axis].score, 0);
+      const raw = Math.round(earnedPoints / assessedWeight * 100);
+      const appliedBonus = provisional ? 0 : doxBonus;
+      const base = raw + appliedBonus;
+      let total;
+      if (ceiling !== null) {
         total = Math.min(base, ceiling);
       } else {
         total = Math.min(100, base);
@@ -905,10 +957,13 @@ var Audit = class {
         role,
         axes,
         raw_total: raw,
-        dox_bonus: doxBonus,
+        dox_bonus: appliedBonus,
+        score_coverage: scoreCoverage2,
         cap_applied: applied,
         score_total: published,
-        verdict
+        verdict,
+        ...axisApplicability ? { axis_applicability: axisApplicability } : {},
+        applicable_weight: applicableWeight
       });
     }
     const scored = roleReports.filter((r) => r.verdict !== "INCOMPLETE");
@@ -916,8 +971,10 @@ var Audit = class {
     let govRole = null;
     let govScore = null;
     let govCap = null;
-    if (scored.length === roleReports.length && roleReports.length > 0) {
-      const governing = scored.reduce((current, candidate) => {
+    const blocking = scored.filter((role) => role.verdict === "AVOID" || role.verdict === "UNVERIFIABLE_IDENTITY");
+    const candidates = blocking.length ? blocking : scored;
+    if (candidates.length > 0) {
+      const governing = candidates.reduce((current, candidate) => {
         const candidateSeverity = SEVERITY[candidate.verdict];
         const currentSeverity = SEVERITY[current.verdict];
         if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity ? candidate : current;
@@ -933,7 +990,17 @@ var Audit = class {
       govScore = governing.score_total;
       govCap = governing.cap_applied;
     }
+    const scoreCoverage = {
+      assessedAxes: roleReports.reduce((sum, role) => sum + (role.score_coverage?.assessedAxes ?? 0), 0),
+      totalAxes: roleReports.reduce((sum, role) => sum + (role.score_coverage?.totalAxes ?? 0), 0),
+      assessedWeight: roleReports.reduce((sum, role) => sum + (role.score_coverage?.assessedWeight ?? 0), 0),
+      totalWeight: roleReports.reduce((sum, role) => sum + (role.score_coverage?.totalWeight ?? 0), 0),
+      missingAxes: roleReports.flatMap((role) => role.score_coverage?.missingAxes ?? []),
+      provisional: roleReports.some((role) => role.score_coverage?.provisional)
+    };
+    if (scoreCoverage.provisional && govScore !== null && !blocking.length) composite = "PROVISIONAL";
     const report = {
+      score_coverage: scoreCoverage,
       audit_id: this.audit_id,
       handle: this.handle,
       roles: this.roles,
@@ -986,7 +1053,7 @@ var Audit = class {
       ...row.artifact_verified !== void 0 ? { artifact_verified: row.artifact_verified } : {}
     });
     for (const a of this.associates) {
-      nodes.push({ type: "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
+      nodes.push({ type: a.kind === "org" ? "Company" : "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
       edges.push({ src: this.handle, dst: a.associate_key, type: "ASSOCIATES_WITH", relation: a.relation, ...receipt(a, a.evidence_url) });
     }
     for (const v of this.ventures) {
@@ -1009,7 +1076,8 @@ var Audit = class {
           dst: this.handle,
           type: "CLAIMED_ENDORSEMENT",
           verdict: t.corroboration_verdict,
-          claimed_relation: t.claimed_relationship
+          claimed_relation: t.claimed_relationship,
+          ...receipt(t, t.evidence_url)
         });
       }
     }
@@ -1053,10 +1121,167 @@ function canonicalEntityKey(opts) {
   return (opts.name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+// src/lib/personName.ts
+var ORGANIZATION_WORDS = /* @__PURE__ */ new Set([
+  "advisors",
+  "app",
+  "asset",
+  "assets",
+  "capital",
+  "college",
+  "company",
+  "corp",
+  "corporation",
+  "credit",
+  "dao",
+  "digital",
+  "equity",
+  "exchange",
+  "finance",
+  "foundation",
+  "fund",
+  "group",
+  "holdings",
+  "inc",
+  "incorporated",
+  "infrastructure",
+  "labs",
+  "limited",
+  "llc",
+  "ltd",
+  "management",
+  "markets",
+  "network",
+  "protocol",
+  "solutions",
+  "strategies",
+  "strategy",
+  "studio",
+  "studios",
+  "systems",
+  "technologies",
+  "treasuries",
+  "treasury",
+  "university",
+  "ventures",
+  "wallet"
+]);
+var ROLE_OR_FRAGMENT_WORDS = /* @__PURE__ */ new Set([
+  "advisor",
+  "adviser",
+  "and",
+  "backer",
+  "board",
+  "chief",
+  "community",
+  "cofounder",
+  "co-founder",
+  "consultant",
+  "cto",
+  "ceo",
+  "cfo",
+  "cmo",
+  "coo",
+  "developer",
+  "director",
+  "engineer",
+  "executive",
+  "founder",
+  "head",
+  "lead",
+  "leader",
+  "manager",
+  "marketing",
+  "member",
+  "mentor",
+  "officer",
+  "operations",
+  "operator",
+  "owner",
+  "partner",
+  "president",
+  "product",
+  "researcher",
+  "senior",
+  "staff",
+  "strategist",
+  "team",
+  "technical",
+  "the",
+  "vice",
+  "vp"
+]);
+var SENTENCE_WORDS = /* @__PURE__ */ new Set([
+  "are",
+  "at",
+  "builds",
+  "building",
+  "founded",
+  "from",
+  "has",
+  "have",
+  "is",
+  "joined",
+  "leads",
+  "of",
+  "runs",
+  "was",
+  "were",
+  "with"
+]);
+var HONORIFIC = /^(?:dr|mr|mrs|ms|prof)\.$/i;
+var INITIAL = /^[A-Z]\.$/;
+var HANDLE = /^@[A-Za-z0-9_]{2,30}$/;
+var NAME_PART = /^[\p{L}\p{M}][\p{L}\p{M}'’\-]*\.?$/u;
+function isPlausiblePersonRosterName(value) {
+  const name = value.trim().replace(/\s+/g, " ");
+  if (!name || name.length > 80) return false;
+  if (HANDLE.test(name)) return true;
+  if (/[:;!?()[\]{}|/\\]/.test(name)) return false;
+  const parts = name.split(" ");
+  if (parts.length > 6) return false;
+  if (parts.some((part) => !NAME_PART.test(part))) return false;
+  if (parts.some((part) => part.includes(".") && !HONORIFIC.test(part) && !INITIAL.test(part))) return false;
+  const words = parts.map((part) => part.toLowerCase().replace(/[.'’]/g, ""));
+  if (words.some((word) => ORGANIZATION_WORDS.has(word))) return false;
+  if (words.some((word) => SENTENCE_WORDS.has(word))) return false;
+  if (words.every((word) => ROLE_OR_FRAGMENT_WORDS.has(word))) return false;
+  return true;
+}
+var SCREEN_NAME = /^[A-Za-z0-9_]{2,30}$/;
+function isPlausiblePersonRosterIdentity(candidate) {
+  const name = (candidate.name ?? "").trim().replace(/\s+/g, " ");
+  const handle = (candidate.handle ?? "").trim().replace(/^@/, "");
+  const handleBound = candidate.handleBoundBySubject === true && HANDLE.test(`@${handle}`);
+  if (!handleBound) return isPlausiblePersonRosterName(name);
+  if (!name || isPlausiblePersonRosterName(name)) return true;
+  if (!SCREEN_NAME.test(name)) return false;
+  const word = name.toLowerCase();
+  return !ORGANIZATION_WORDS.has(word) && !ROLE_OR_FRAGMENT_WORDS.has(word);
+}
+
+// src/lib/teamCandidateIdentity.ts
+function teamCandidateSourceMatchesIdentity(candidate) {
+  const expected = (candidate.handle ?? "").trim().replace(/^@/, "").toLowerCase();
+  const sourceUrl2 = (candidate.sourceUrl ?? "").trim();
+  if (!expected || !sourceUrl2) return true;
+  try {
+    const url = new URL(sourceUrl2);
+    const host2 = url.hostname.replace(/^www\./, "").toLowerCase();
+    if (host2 !== "x.com" && host2 !== "twitter.com") return true;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (!parts.length || parts[1]?.toLowerCase() === "status") return true;
+    if (parts.length === 1) return parts[0].replace(/^@/, "").toLowerCase() === expected;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 // src/lib/fundScaleEvidence.ts
 var SHA256_HEX = /^[a-f0-9]{64}$/i;
 var CLAIM_ID = /^[A-Za-z0-9:_-]{8,180}$/;
-var HANDLE = /^[A-Za-z0-9_]{2,30}$/;
+var HANDLE2 = /^[A-Za-z0-9_]{2,30}$/;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var CLOCK_SKEW_MS = 5 * 60 * 1e3;
 var AUM_MAX_AGE_MS = 731 * DAY_MS;
@@ -1240,7 +1465,7 @@ var profileBioHasCurrentAffiliation = (profile, value) => {
 var profileBioHasCurrentHandleAffiliation = (profile, value) => {
   const bio = normalizedWords(profile.bio);
   const handle = canonicalHandle(value);
-  if (!bio || !HANDLE.test(handle)) return false;
+  if (!bio || !HANDLE2.test(handle)) return false;
   const role = `(?:${AFFILIATION_ROLE})`;
   const pattern = new RegExp(`@${regexEscape(handle)}(?=$|[^a-z0-9_])`, "gi");
   for (const match of bio.matchAll(pattern)) {
@@ -1263,23 +1488,23 @@ var profileBioHasCurrentHandleAffiliation = (profile, value) => {
   return false;
 };
 var cleanHost = (value) => value.replace(/^www\./i, "").toLowerCase();
-var isSharedPublicationHost = (host) => {
-  const clean4 = cleanHost(host);
+var isSharedPublicationHost = (host2) => {
+  const clean4 = cleanHost(host2);
   return [...SHARED_PUBLICATION_HOSTS].some((candidate) => clean4 === candidate || clean4.endsWith(`.${candidate}`));
 };
 var isPublicHostname = (value) => {
-  const host = cleanHost(value).replace(/^\[|\]$/g, "").replace(/\.$/, "");
-  if (!host || host.includes(":") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || host.endsWith(".test") || host.endsWith(".invalid")) return false;
-  const labels = host.split(".");
+  const host2 = cleanHost(value).replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (!host2 || host2.includes(":") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host2) || host2 === "localhost" || host2.endsWith(".localhost") || host2.endsWith(".local") || host2.endsWith(".internal") || host2.endsWith(".test") || host2.endsWith(".invalid")) return false;
+  const labels = host2.split(".");
   return labels.length >= 2 && labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label)) && /^(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})$/i.test(labels.at(-1) ?? "");
 };
 var isCredibleOfficialDomain = (value) => {
-  const host = cleanHost(value).replace(/\.$/, "");
-  if (!isPublicHostname(host) || PUBLIC_SUFFIX_ONLY.has(host) || isSharedPublicationHost(host) || INDEPENDENT_PRESS_HOSTS.some((candidate) => host === candidate || host.endsWith(`.${candidate}`)) || ["sec.gov", "fca.org.uk", "gov.uk", "companieshouse.gov.uk", "asic.gov.au", "sedarplus.ca"].some((candidate) => host === candidate || host.endsWith(`.${candidate}`))) return false;
-  const labels = host.split(".");
+  const host2 = cleanHost(value).replace(/\.$/, "");
+  if (!isPublicHostname(host2) || PUBLIC_SUFFIX_ONLY.has(host2) || isSharedPublicationHost(host2) || INDEPENDENT_PRESS_HOSTS.some((candidate) => host2 === candidate || host2.endsWith(`.${candidate}`)) || ["sec.gov", "fca.org.uk", "gov.uk", "companieshouse.gov.uk", "asic.gov.au", "sedarplus.ca"].some((candidate) => host2 === candidate || host2.endsWith(`.${candidate}`))) return false;
+  const labels = host2.split(".");
   return !(labels.length === 2 && labels[1].length === 2 && SECOND_LEVEL_PUBLIC_SUFFIX_LABELS.has(labels[0]));
 };
-var listedHost = (host, list) => list.some((candidate) => hostMatches(host, candidate));
+var listedHost = (host2, list) => list.some((candidate) => hostMatches(host2, candidate));
 var boundedWebUrl = (value) => {
   if (typeof value !== "string" || value.length > 2e3) return null;
   try {
@@ -1297,10 +1522,10 @@ var canonicalPublicProfileWebsite = (value) => {
   if (typeof value !== "string" || !value.trim() || value.length > 2e3) return null;
   try {
     const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
-    const host = cleanHost(url.hostname).replace(/\.$/, "");
-    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || url.port || !isPublicHostname(host) || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM.test(key))) return null;
+    const host2 = cleanHost(url.hostname).replace(/\.$/, "");
+    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || url.port || !isPublicHostname(host2) || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM.test(key))) return null;
     const pathname = url.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/";
-    return `https://${host}${pathname === "/" ? "/" : pathname}`;
+    return `https://${host2}${pathname === "/" ? "/" : pathname}`;
   } catch {
     return null;
   }
@@ -1337,13 +1562,13 @@ var validatedPacketProfile = (context, now, artifactCapturedAt) => {
   if (!profile || !expectedHandle || canonicalHandle(profile.handle) !== expectedHandle || profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi" || !profileCapturedAt || profileCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || profileCapturedAt.getTime() > artifactCapturedAt.getTime() + CLOCK_SKEW_MS || artifactCapturedAt.getTime() - profileCapturedAt.getTime() > 7 * DAY_MS) return null;
   return profile;
 };
-var hostMatches = (host, expected) => {
-  const left = cleanHost(host);
+var hostMatches = (host2, expected) => {
+  const left = cleanHost(host2);
   const right = cleanHost(expected);
   return left === right || left.endsWith(`.${right}`);
 };
-var registrableApprox = (host) => {
-  const parts = cleanHost(host).split(".").filter(Boolean);
+var registrableApprox = (host2) => {
+  const parts = cleanHost(host2).split(".").filter(Boolean);
   if (parts.length <= 2) return parts.join(".");
   const twoLevelSuffixes = /* @__PURE__ */ new Set(["co.uk", "org.uk", "com.au", "com.br", "co.nz", "co.jp"]);
   const tail = parts.slice(-2).join(".");
@@ -1356,15 +1581,15 @@ var validDate = (value) => {
 };
 var isAumMetric = (metric) => metric === "regulatory_aum" || metric === "reported_aum";
 var isRecordSpecificRegulatoryUrl = (url) => {
-  const host = cleanHost(url.hostname);
+  const host2 = cleanHost(url.hostname);
   const path = url.pathname;
-  if (host === "sec.gov" || host.endsWith(".sec.gov")) {
+  if (host2 === "sec.gov" || host2.endsWith(".sec.gov")) {
     return /^\/Archives\/edgar\/data\/\d{1,12}\/\d{18}\/[^/]+\.(?:html?|txt|xml|json)$/i.test(path) || /^\/firm\/summary\/\d+\/?$/i.test(path);
   }
-  if (host === "fca.org.uk" || host.endsWith(".fca.org.uk")) {
+  if (host2 === "fca.org.uk" || host2.endsWith(".fca.org.uk")) {
     return /\/(?:firm|individual)\/details\/\d+/i.test(path) || /\/services\/v1\/(?:firm|individual)\//i.test(path);
   }
-  if (host === "companieshouse.gov.uk" || host.endsWith(".companieshouse.gov.uk") || host === "find-and-update.company-information.service.gov.uk" || host === "api.company-information.service.gov.uk") {
+  if (host2 === "companieshouse.gov.uk" || host2.endsWith(".companieshouse.gov.uk") || host2 === "find-and-update.company-information.service.gov.uk" || host2 === "api.company-information.service.gov.uk") {
     return /\/company\/[A-Z0-9]{6,12}(?:\/|$)/i.test(path);
   }
   return false;
@@ -1375,12 +1600,12 @@ var hasCurrentAffiliationProof = (value, capturedAt, now, profile) => {
   const source2 = boundedWebUrl(value.attributionSourceUrl);
   const sourceHash = typeof value.attributionSourceContentHash === "string" ? value.attributionSourceContentHash : "";
   const affiliationCapturedAt = validDate(value.attributionCapturedAt);
-  if (!subjectName3 || !HANDLE.test(handle) || !source2 || !SHA256_HEX.test(sourceHash) || !affiliationCapturedAt) return false;
+  if (!subjectName3 || !HANDLE2.test(handle) || !source2 || !SHA256_HEX.test(sourceHash) || !affiliationCapturedAt) return false;
   if (affiliationCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || affiliationCapturedAt.getTime() > capturedAt.getTime() + CLOCK_SKEW_MS || capturedAt.getTime() - affiliationCapturedAt.getTime() > 7 * DAY_MS) return false;
-  const host = cleanHost(source2.hostname);
+  const host2 = cleanHost(source2.hostname);
   const path = source2.pathname.split("/").filter(Boolean);
   if (value.attributionSourceKind !== "provider_profile") return false;
-  const sourceBound = (host === "x.com" || host === "twitter.com") && path.length === 1 && path[0].toLowerCase() === handle.toLowerCase() && !source2.search && !source2.hash;
+  const sourceBound = (host2 === "x.com" || host2 === "twitter.com") && path.length === 1 && path[0].toLowerCase() === handle.toLowerCase() && !source2.search && !source2.hash;
   if (!sourceBound) return false;
   if (!profile) return true;
   const profileCapturedAt = validDate(profile.profile_captured_at);
@@ -1399,9 +1624,9 @@ var hasOfficialInvestorDomainProof = (value, capturedAt, now, profile) => {
   const profileWebsiteUrl = boundedWebUrl(profileWebsite);
   if (value.investorDomainSourceKind !== "provider_profile" || !isCredibleOfficialDomain(officialDomain) || !source2 || !SHA256_HEX.test(sourceHash) || !domainCapturedAt || !fundHandle || !profileName || !profileWebsite || !profileWebsiteUrl || profileWebsiteUrl.search || profileWebsiteUrl.hash || !providerEntityNamesMatch(profileName, value.investorEntityName) || profileWebsiteHost(profileWebsite) !== officialDomain || !sourceMatchesOfficialWebsiteScope(value.sourceUrl, profileWebsite) || !profile || !profileBioHasCurrentHandleAffiliation(profile, fundHandle)) return false;
   if (domainCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || domainCapturedAt.getTime() > capturedAt.getTime() + CLOCK_SKEW_MS || capturedAt.getTime() - domainCapturedAt.getTime() > 7 * DAY_MS) return false;
-  const host = cleanHost(source2.hostname);
+  const host2 = cleanHost(source2.hostname);
   const path = source2.pathname.split("/").filter(Boolean);
-  return (host === "x.com" || host === "twitter.com") && path.length === 1 && path[0].toLowerCase() === fundHandle && !source2.search && !source2.hash;
+  return (host2 === "x.com" || host2 === "twitter.com") && path.length === 1 && path[0].toLowerCase() === fundHandle && !source2.search && !source2.hash;
 };
 var structurallyStrictFundScaleArtifact = (value, now, context) => {
   if (value.kind !== "fund_scale" || value.provider !== "fund-scale-web" || value.match !== "fund_scale_confirmed") return false;
@@ -1411,13 +1636,13 @@ var structurallyStrictFundScaleArtifact = (value, now, context) => {
   const investorName = comparable(value.investorEntityName);
   const amount = value.fundSizeUsd;
   const attribution = value.attribution;
-  const sourceClass3 = value.sourceClass;
+  const sourceClass4 = value.sourceClass;
   const metric = value.fundScaleMetric;
   const qualifier = value.fundAmountQualifier;
   const basis = value.fundScaleBasis;
   const temporalState = value.fundScaleTemporalState;
   const claimId = typeof value.fundScaleClaimId === "string" ? value.fundScaleClaimId : "";
-  if (!SHA256_HEX.test(typeof value.contentHash === "string" ? value.contentHash : "") || !SHA256_HEX.test(typeof value.sourceContentHash === "string" ? value.sourceContentHash : "") || !sourceUrl2 || !capturedAt || capturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 1e5 || amount > 1e13 || !fundName || !investorName || !namesExactlyMatch(value.fundName, value.investorEntityName) || attribution !== "direct_subject" && attribution !== "affiliated_fund" || !["first_party_subject", "first_party_investor", "public_primary", "independent_press"].includes(String(sourceClass3)) || !["regulatory_aum", "reported_aum", "fund_vehicle", "first_close", "final_close"].includes(String(metric)) || !["exact", "at_least", "approximate"].includes(String(qualifier)) || !["regulatory", "manager_reported", "press_corroborated"].includes(String(basis)) || !CLAIM_ID.test(claimId)) return false;
+  if (!SHA256_HEX.test(typeof value.contentHash === "string" ? value.contentHash : "") || !SHA256_HEX.test(typeof value.sourceContentHash === "string" ? value.sourceContentHash : "") || !sourceUrl2 || !capturedAt || capturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 1e5 || amount > 1e13 || !fundName || !investorName || !namesExactlyMatch(value.fundName, value.investorEntityName) || attribution !== "direct_subject" && attribution !== "affiliated_fund" || !["first_party_subject", "first_party_investor", "public_primary", "independent_press"].includes(String(sourceClass4)) || !["regulatory_aum", "reported_aum", "fund_vehicle", "first_close", "final_close"].includes(String(metric)) || !["exact", "at_least", "approximate"].includes(String(qualifier)) || !["regulatory", "manager_reported", "press_corroborated"].includes(String(basis)) || !CLAIM_ID.test(claimId)) return false;
   const expectedSubjectHandle = context.subjectHandle;
   if (expectedSubjectHandle) {
     const observedHandle = canonicalHandle(value.subjectHandle);
@@ -1429,13 +1654,13 @@ var structurallyStrictFundScaleArtifact = (value, now, context) => {
     if (!namesExactlyMatch(value.subjectName, value.fundName)) return false;
     if (profile && ![profile.resolved_name, profile.display_name].some((name) => namesExactlyMatch(name, value.fundName))) return false;
   } else if (!hasCurrentAffiliationProof(value, capturedAt, now, profile)) return false;
-  if (sourceClass3 === "first_party_subject" || sourceClass3 === "first_party_investor") {
+  if (sourceClass4 === "first_party_subject" || sourceClass4 === "first_party_investor") {
     const officialDomain = typeof value.investorEntityDomain === "string" ? cleanHost(value.investorEntityDomain) : "";
-    if (!isCredibleOfficialDomain(officialDomain) || !hostMatches(sourceUrl2.hostname, officialDomain) || basis !== "manager_reported" || metric === "regulatory_aum" || sourceClass3 === "first_party_subject" !== (attribution === "direct_subject")) return false;
-    if (sourceClass3 === "first_party_investor") {
+    if (!isCredibleOfficialDomain(officialDomain) || !hostMatches(sourceUrl2.hostname, officialDomain) || basis !== "manager_reported" || metric === "regulatory_aum" || sourceClass4 === "first_party_subject" !== (attribution === "direct_subject")) return false;
+    if (sourceClass4 === "first_party_investor") {
       if (!hasOfficialInvestorDomainProof(value, capturedAt, now, profile)) return false;
     } else if (profile && (profileWebsiteHost(profile.website) !== officialDomain || !sourceMatchesOfficialWebsiteScope(sourceUrl2, profile.website))) return false;
-  } else if (sourceClass3 === "public_primary") {
+  } else if (sourceClass4 === "public_primary") {
     if (basis !== "regulatory" || metric !== "regulatory_aum" || !isRecordSpecificRegulatoryUrl(sourceUrl2)) return false;
   } else if (basis !== "press_corroborated" || metric === "regulatory_aum" || !listedHost(sourceUrl2.hostname, INDEPENDENT_PRESS_HOSTS) || typeof value.fundScaleSourceCount !== "number" || !Number.isInteger(value.fundScaleSourceCount) || value.fundScaleSourceCount < 2) return false;
   if (isAumMetric(metric)) {
@@ -1461,11 +1686,11 @@ var compatiblePressClaim = (left, right) => {
 };
 function isStrictFundScaleArtifact(value, peers = [], context = {}) {
   const now = context.now ?? /* @__PURE__ */ new Date();
-  const record4 = asRecord(value);
-  if (!record4 || !Number.isFinite(now.getTime()) || !structurallyStrictFundScaleArtifact(record4, now, context)) return false;
-  if (record4.sourceClass !== "independent_press") return true;
-  if (typeof record4.fundScaleSourceCount !== "number" || record4.fundScaleSourceCount < 2) return false;
-  const compatible = [record4, ...peers.map(asRecord).filter((peer) => Boolean(peer))].filter((peer, index, rows) => rows.indexOf(peer) === index).filter((peer) => peer.sourceClass === "independent_press" && structurallyStrictFundScaleArtifact(peer, now, context) && compatiblePressClaim(record4, peer));
+  const record5 = asRecord(value);
+  if (!record5 || !Number.isFinite(now.getTime()) || !structurallyStrictFundScaleArtifact(record5, now, context)) return false;
+  if (record5.sourceClass !== "independent_press") return true;
+  if (typeof record5.fundScaleSourceCount !== "number" || record5.fundScaleSourceCount < 2) return false;
+  const compatible = [record5, ...peers.map(asRecord).filter((peer) => Boolean(peer))].filter((peer, index, rows) => rows.indexOf(peer) === index).filter((peer) => peer.sourceClass === "independent_press" && structurallyStrictFundScaleArtifact(peer, now, context) && compatiblePressClaim(record5, peer));
   const domains = /* @__PURE__ */ new Set();
   const hashes = /* @__PURE__ */ new Set();
   const prose = /* @__PURE__ */ new Set();
@@ -2376,8 +2601,8 @@ function qualifiedAdverseTrustConnections(evidence) {
     return connection.qualified === true && connection.otherAttestation === "server_collected" && connection.otherCompleteness === "complete" && (adverseVerdict === "FAIL" || adverseVerdict === "AVOID") && UUID.test(connection.otherReportVersionId ?? "") && ties.length > 0 ? [{ connection, ties }] : [];
   });
 }
-function axisEvidenceIsVerifiedCounter(record4, axis) {
-  return record4.scope === "direct_subject" && record4.verification === "verified" && SHA256_HEX3.test(record4.contentHash) && (record4.counterEligibleAxes ?? []).includes(axis);
+function axisEvidenceIsVerifiedCounter(record5, axis) {
+  return record5.scope === "direct_subject" && record5.verification === "verified" && SHA256_HEX3.test(record5.contentHash) && (record5.counterEligibleAxes ?? []).includes(axis);
 }
 function projectAxisDomain(axis) {
   if (axis.startsWith("P1_")) return "team";
@@ -3041,10 +3266,10 @@ function buildMeasurements(evidence) {
   if (evidence.securityAudits) {
     const checkRef = "snapshot:security-audits";
     const normalizedAuditor = (value) => value.trim().toLowerCase();
-    const auditRows = sortedCorroboratedAudits(evidence).map((record4, index) => ({
-      ...record4,
+    const auditRows = sortedCorroboratedAudits(evidence).map((record5, index) => ({
+      ...record5,
       sourceRef: corroboratedAuditSourceId(index),
-      anchorValidation: validatedAuditIdentityAnchor(record4.audit, evidence)
+      anchorValidation: validatedAuditIdentityAnchor(record5.audit, evidence)
     }));
     const identityAnchoredRows = auditRows.filter(({ anchorValidation }) => anchorValidation.state === "matched");
     const identityGapRows = auditRows.filter(({ anchorValidation }) => anchorValidation.state !== "matched");
@@ -4382,14 +4607,14 @@ function buildSignals(evidence, measurements, questions) {
     });
   });
   const counterRecordsByAxis = /* @__PURE__ */ new Map();
-  for (const record4 of evidence.axisEvidenceCatalog ?? []) {
-    for (const axis of record4.counterEligibleAxes ?? []) {
-      if (!axis.startsWith("P") || !axisEvidenceIsVerifiedCounter(record4, axis)) continue;
-      counterRecordsByAxis.set(axis, [...counterRecordsByAxis.get(axis) ?? [], record4]);
+  for (const record5 of evidence.axisEvidenceCatalog ?? []) {
+    for (const axis of record5.counterEligibleAxes ?? []) {
+      if (!axis.startsWith("P") || !axisEvidenceIsVerifiedCounter(record5, axis)) continue;
+      counterRecordsByAxis.set(axis, [...counterRecordsByAxis.get(axis) ?? [], record5]);
     }
   }
   for (const [axis, records] of [...counterRecordsByAxis.entries()].sort(([left], [right]) => left.localeCompare(right))) {
-    const excerpts = records.map((record4) => boundedText(record4.excerpt ?? record4.title, 180)).filter((excerpt) => Boolean(excerpt));
+    const excerpts = records.map((record5) => boundedText(record5.excerpt ?? record5.title, 180)).filter((excerpt) => Boolean(excerpt));
     addSignal({
       id: `verified_axis_counter_evidence:${encodeURIComponent(axis)}`,
       ruleId: "verified-direct-axis-counter-evidence",
@@ -4404,15 +4629,15 @@ function buildSignals(evidence, measurements, questions) {
       changeCondition: "Re-evaluate when the exact underlying record changes, is superseded, or no longer satisfies direct-subject verification and counter-eligibility gates.",
       evidenceState: "verified",
       measurementRefs: [],
-      sourceRefs: records.map((record4) => axisEvidenceSourceId(record4.artifactId)),
+      sourceRefs: records.map((record5) => axisEvidenceSourceId(record5.artifactId)),
       lenses: ["investment", "alpha_research", "counterparty", "general_diligence"]
     });
   }
   const catalogById = new Map((evidence.axisEvidenceCatalog ?? []).map((artifact) => [artifact.artifactId, artifact]));
   for (const axis of evidence.axes.filter((row) => row.axis.startsWith("P"))) {
     const invalidCounterRefs = uniqueSorted2((axis.counterEvidenceRefs ?? []).filter((reference) => {
-      const record4 = catalogById.get(reference);
-      return !record4 || !axisEvidenceIsVerifiedCounter(record4, axis.axis);
+      const record5 = catalogById.get(reference);
+      return !record5 || !axisEvidenceIsVerifiedCounter(record5, axis.axis);
     }));
     if (invalidCounterRefs.length > 0) {
       addSignal({
@@ -5327,7 +5552,7 @@ function buildLenses(signals, questions, definitions = LENS_DEFINITIONS, domains
   });
 }
 function buildCaptureWindow(sources) {
-  const dated = sources.flatMap((source2) => source2.capturedAt ? [{ value: source2.capturedAt, time: Date.parse(source2.capturedAt) }] : []).filter((record4) => Number.isFinite(record4.time)).sort((left, right) => left.time - right.time || left.value.localeCompare(right.value));
+  const dated = sources.flatMap((source2) => source2.capturedAt ? [{ value: source2.capturedAt, time: Date.parse(source2.capturedAt) }] : []).filter((record5) => Number.isFinite(record5.time)).sort((left, right) => left.time - right.time || left.value.localeCompare(right.value));
   return {
     earliest: dated[0]?.value ?? null,
     latest: dated.at(-1)?.value ?? null
@@ -5740,11 +5965,11 @@ function predicateDomain(predicate, kind) {
       return "product";
   }
 }
-function factSourceClass2(sourceClass3) {
-  if (sourceClass3 === "official_subject") return "official_subject";
-  if (sourceClass3 === "official_counterparty") return "official_counterparty";
-  if (sourceClass3 === "regulatory_or_onchain") return "public_registry";
-  if (sourceClass3 === "independent_press") return "independent_publication";
+function factSourceClass2(sourceClass4) {
+  if (sourceClass4 === "official_subject") return "official_subject";
+  if (sourceClass4 === "official_counterparty") return "official_counterparty";
+  if (sourceClass4 === "regulatory_or_onchain") return "public_registry";
+  if (sourceClass4 === "independent_press") return "independent_publication";
   return "other_public";
 }
 function factIsConflicted(fact) {
@@ -6294,10 +6519,10 @@ function extraEvidence(definition, evidence, measurements) {
     const screens = evidence.sourceArtifacts.map((artifact, index) => ({ artifact, index })).filter(({ artifact }) => artifact.kind === "sanctions_screen" || artifact.kind === "legal_case");
     if (!screens.length) return null;
     const unavailable = screens.filter(({ artifact }) => artifact.coverageState === "unavailable");
-    const completed = screens.filter(({ artifact }) => artifact.coverageState !== "unavailable");
+    const completed2 = screens.filter(({ artifact }) => artifact.coverageState !== "unavailable");
     return {
       state: "partial",
-      basis: unavailable.length ? `${completed.length} saved screen artifact${completed.length === 1 ? " completed" : "s completed"}; ${unavailable.length} remained unavailable. A completed no-match is limited to the named dataset and exact identity searched, not legal clearance.` : `${completed.length} saved screen artifact${completed.length === 1 ? " records" : "s record"} bounded search coverage. The frozen evidence bag does not encode a complete required-regime set, so this broader question remains partial. A no-match is limited to the named dataset and exact identity searched, not legal clearance.`,
+      basis: unavailable.length ? `${completed2.length} saved screen artifact${completed2.length === 1 ? " completed" : "s completed"}; ${unavailable.length} remained unavailable. A completed no-match is limited to the named dataset and exact identity searched, not legal clearance.` : `${completed2.length} saved screen artifact${completed2.length === 1 ? " records" : "s record"} bounded search coverage. The frozen evidence bag does not encode a complete required-regime set, so this broader question remains partial. A no-match is limited to the named dataset and exact identity searched, not legal clearance.`,
       answerRefs: [],
       sourceRefs: screens.map(({ index }) => artifactSourceRef(index))
     };
@@ -6764,6 +6989,7 @@ function assembleDossier(ev, live) {
   const a = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
   const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
   a.setIdentity(ev.profile.identity_confidence);
+  a.setTokenApplicability(ev.tokenApplicability);
   graphAudit.setIdentity(ev.profile.identity_confidence);
   const governingEligible = (row) => row.evidence_origin !== "model_lead" && row.artifact_verified !== false;
   const meaningfulTeamValue = (value) => Boolean(value.trim()) && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(value.trim());
@@ -6774,7 +7000,12 @@ function assembleDossier(ev, live) {
     const compact3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
     return Boolean(row.handle) && compact3(name) === compact3((row.handle ?? "").replace(/^@/, ""));
   };
-  const identityGrounded = (row) => meaningfulTeamValue(row.name) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
+  const rosterIdentityIsPerson = (row) => isPlausiblePersonRosterIdentity({
+    name: row.name,
+    handle: row.handle,
+    handleBoundBySubject: row.handleProvenance === "subject_first_party" && row.identity_link_evidence_origin === "deterministic"
+  });
+  const identityGrounded = (row) => row.kind !== "org" && meaningfulTeamValue(row.name) && rosterIdentityIsPerson(row) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
   // often use @handle as the display name until enrichment fills it.
   (row.handleProvenance === "subject_first_party" && Boolean(row.handle) || !teamNameIsOwnHandle(row));
   const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
@@ -6782,8 +7013,11 @@ function assembleDossier(ev, live) {
     ...member.identity_link_evidence_origin === "model_lead" ? { handle: void 0, linkedin: void 0, github: void 0, developerProfiles: void 0 } : {},
     ...member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}
   }));
+  const organizationRelationships = (ev.webTeam ?? []).filter((member) => member.kind === "org" && meaningfulTeamValue(member.name) && meaningfulTeamValue(member.role) && member.evidence_origin !== "model_lead" && member.artifact_verified === true).map((member) => ({ ...member }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
-    if (!meaningfulTeamValue(member.name) || !meaningfulTeamValue(member.role)) return [];
+    if (member.kind === "org") return [];
+    if (!meaningfulTeamValue(member.name) || !rosterIdentityIsPerson(member) || !meaningfulTeamValue(member.role)) return [];
+    if (!teamCandidateSourceMatchesIdentity(member)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     if (member.identity_link_evidence_origin !== "model_lead") return [];
     return [{
@@ -6818,9 +7052,12 @@ function assembleDossier(ev, live) {
     a.addClientEngagement(c);
     if (governingEligible(c)) graphAudit.addClientEngagement(c);
   });
-  ev.associates.forEach((as) => {
-    a.addAssociate(as);
-    if (governingEligible(as)) graphAudit.addAssociate(as);
+  const organizationHandles = new Set(organizationRelationships.map((member) => (member.handle ?? "").replace(/^@/, "").toLowerCase()).filter(Boolean));
+  ev.associates.forEach((associate) => {
+    const normalizedHandle4 = associate.associate_handle.replace(/^@/, "").toLowerCase();
+    const typedAssociate = associate.kind ? associate : organizationHandles.has(normalizedHandle4) ? { ...associate, kind: "org" } : associate;
+    a.addAssociate(typedAssociate);
+    if (governingEligible(typedAssociate)) graphAudit.addAssociate(typedAssociate);
   });
   ev.findings.forEach((f) => {
     a.addFinding(f);
@@ -6975,6 +7212,7 @@ function assembleDossier(ev, live) {
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
     webTeam: groundedWebTeam,
+    ...organizationRelationships.length ? { organizationRelationships } : {},
     ...webTeamLeads.length ? { webTeamLeads } : {},
     ...ev.leaderDepartures?.length ? { leaderDepartures: ev.leaderDepartures.map((row) => ({ ...row })) } : {},
     ventureTeams: ev.ventureTeams ?? [],
@@ -7049,6 +7287,8 @@ function assembleDossier(ev, live) {
       }
     } : {},
     ...ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {},
+    ...ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {},
+    ...ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {},
     ...ev.evmControlReality ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) } : {},
     ...intelligence ? { intelligence } : {},
     ...ev.researchPlan ? {
@@ -7865,7 +8105,7 @@ Return exactly one ${tool.name} object. ${tool.description}` },
   return valid ? parsed : null;
 }
 async function extractClaims(handle, bio, posts) {
-  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization: a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official brand account), a GP/partner/principal at one, or an angel with NAMED, verifiable investments (led or joined specific rounds). Buying/trading tokens, 'investing in gems', or calling oneself an investor with no documented deals is NOT INVESTOR. A caller who trades is a KOL, nothing more. Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts shipping a product/token, not allocating capital); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token, and do not tag INVESTOR merely for trading talk. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, listing each ticker once with its contract address and chain when a chart link or CA is present. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
+  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization: a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official brand account), a GP/partner/principal at one, or an angel with NAMED, verifiable investments (led or joined specific rounds). Buying/trading tokens, 'investing in gems', or calling oneself an investor with no documented deals is NOT INVESTOR. A caller who trades is a KOL, nothing more. Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts shipping a product/token, not allocating capital); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token, and do not tag INVESTOR merely for trading talk. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. When a post includes a [Source: URL] stamp, copy that exact URL into evidence_url for the testimonial extracted from that post. Advised = projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, listing each ticker once with its contract address and chain when a chart link or CA is present. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
   const user = `Subject: ${handle}
 Bio: ${bio || "(none)"}
 
@@ -7890,7 +8130,7 @@ ${posts.slice(0, 70).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
           type: "array",
           items: {
             type: "object",
-            properties: { claimed_endorser_handle: { type: "string" }, claimed_relationship: { type: "string" } },
+            properties: { claimed_endorser_handle: { type: "string" }, claimed_relationship: { type: "string" }, evidence_url: { type: "string" } },
             required: ["claimed_endorser_handle"]
           }
         },
@@ -7999,9 +8239,9 @@ var PROJECT_SCORING_POLICY = [
   "If an axis has neither affirmative evidence nor verified adverse evidence, do not score it at zero. Mark it unscored and publish the investigation as INCOMPLETE. A zero is a severe assessment, not a synonym for missing data.",
   "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
   "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
-  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation. A completed token-identity assessment (the project-token-identity check) that binds no canonical token scores P3 at the low end for lack of demonstrated conduct history; it is a null result on this axis only, never adverse conduct evidence or counter-evidence against any other axis. EXCEPTION: when the official profile biography in the packet explicitly declares the project has no token and no canonical token is bound, there is no token-conduct risk surface to assess and the null search result CONFIRMS the declaration. Score P3 at the top of its allowed band as clean conduct, and write the rationale as: the project explicitly declares itself token-free, so token conduct criteria are waived until a token launches. Never describe a declared-token-free project as lacking demonstrated conduct history, and never score it low for not having a token.",
+  "P3 token conduct is governed by the frozen tokenApplicability state established before scoring. verified_live_token and historical_token_lineage are assessed; lineage means the analyst must consider predecessor names, contracts, migrations, and current status together. confirmed_tokenless removes P3 as not applicable and normalizes the project score over the remaining 80 weighted points. prelaunch_token_deferred also removes P3 without penalty until a token is live. unresolved_token_identity keeps P3 unresolved and the overall project verdict provisional. Never infer applicability from biography wording, never award clean-conduct points for lacking a token, and never penalize a tokenless business for having no token history.",
   "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
-  "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end as a null result on this axis only, never counter-evidence against any other axis.",
+  "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end because no positive backing signal was verified on that axis only, never as counter-evidence against any other axis.",
   "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
   "A severe canonical-token market drawdown is material counter-evidence for P5 and must be cited, but price performance alone only caps otherwise exceptional traction and liveness at the solid band. It cannot erase verified current protocol usage or imply token misconduct.",
   "P6 transparency and integrity: a named legal operator, terms, public docs or repositories, governance materials, and consistent current disclosures justify a solid score. Published independent audits, treasury reporting, and fuller financial disclosures may justify the exceptional band. An unavailable disclosure path is a confidence gap unless a direct verified search establishes a material nondisclosure.",
@@ -8309,6 +8549,45 @@ function normalizeAnalystCitationEligibility(value, evidenceCatalog, axisCatalog
     return changed ? { ...root, axes } : value;
   }
   return value;
+}
+function reconcileAnalystVerdictLineage(verdict, evidenceCatalog, axisCatalog2) {
+  const artifacts = new Map(evidenceCatalog.map((artifact) => [artifact.artifactId, artifact]));
+  const roleByAxis = new Map(axisCatalog2.map((axis) => [axis.axis, axis.role]));
+  const removed = [];
+  const unique2 = (values) => [...new Set(values)];
+  const eligible = (axis, artifactId, relation) => {
+    const artifact = artifacts.get(artifactId);
+    const allowed = Boolean(
+      artifact && artifact.eligibleAxes.includes(axis) && (relation === "support" || isSubstantiveArtifact(artifact)) && (relation === "support" || roleByAxis.get(axis) !== "PROJECT" || artifact.counterEligibleAxes?.includes(axis))
+    );
+    if (!allowed) {
+      removed.push({
+        axis,
+        artifactId,
+        relation,
+        eligibleAxes: artifact ? [...artifact.eligibleAxes] : []
+      });
+    }
+    return allowed;
+  };
+  const axes = verdict.axes.map((row) => {
+    const support = unique2(row.evidenceRefs).filter((artifactId) => eligible(row.axis, artifactId, "support"));
+    const supportSet = new Set(support);
+    const counter = unique2(row.counterEvidenceRefs).filter((artifactId) => !supportSet.has(artifactId) && eligible(row.axis, artifactId, "counter"));
+    return { ...row, evidenceRefs: support, counterEvidenceRefs: counter };
+  });
+  const unsupported = axes.find((row) => !row.evidenceRefs.some((artifactId) => isSubstantiveArtifact(artifacts.get(artifactId))));
+  if (unsupported) {
+    return {
+      verdict: null,
+      removed,
+      reason: `${unsupported.axis} has no substantive eligible support in the final report catalog`
+    };
+  }
+  return {
+    verdict: removed.length > 0 ? { ...verdict, axes } : verdict,
+    removed
+  };
 }
 function normalizeGroundedTeamNarrative(value, evidenceCatalog, axisCatalog2) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -8803,17 +9082,6 @@ var sourceArtifactPriority = (value) => {
   return 6;
 };
 var retainSourceArtifacts = (source2, limit) => source2.map((value, index) => ({ value, index, priority: sourceArtifactPriority(value) })).sort((left, right) => left.priority - right.priority || left.index - right.index).slice(0, limit).map(({ value }) => value);
-var NO_TOKEN_DECLARATION = new RegExp([
-  String.raw`\bno (?:official )?(?:token|coin)s?\b(?!\s*(?:needed|required|gate|gating|sale))`,
-  String.raw`\b(?:do(?:es)? not|don'?t|doesn'?t) have an? (?:official )?(?:token|coin)\b`,
-  String.raw`\bthere is no (?:official )?(?:token|coin)\b`,
-  String.raw`\btoken:?\s*none\b`,
-  String.raw`\btoken-?less\b`,
-  String.raw`\bno (?:token|coin) (?:has been |was )?(?:launched|issued|released|deployed)\b`,
-  String.raw`\bhave(?: not|n'?t) (?:launched|issued|released) an? (?:token|coin)\b`,
-  String.raw`\bnever launch(?:ed|ing)? an? (?:token|coin)\b`,
-  String.raw`\b(?:any|all|every) (?:token|coin)s? (?:claiming|impersonat\w+|using|named|bearing)\b[\s\S]{0,60}\b(?:scams?|fake|not ours|unofficial)\b`
-].join("|"), "i");
 var PROJECT_EARLY_STAGE = /\b(?:alpha|beta|testnet|prototype|demo|pilot|coming soon|pre-?launch|waitlist)\b/i;
 var PROJECT_MATURE_STAGE = /\b(?:live|mainnet|production|in production|operational|operating)\b/i;
 var TOKEN_MARKET_ONLY_TRACTION = /\b(?:token|trading volume|volume|market cap|liquidity|price|fdv)\b/i;
@@ -8867,6 +9135,8 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const recentActivity = records(packet.recentActivity);
   const productActivity = recentActivity.filter((row) => PROJECT_PRODUCT_ACTIVITY.test(String(row.text ?? row.value ?? row.claim ?? row.title ?? "")));
   const token = packet.projectToken && typeof packet.projectToken === "object" && !Array.isArray(packet.projectToken) ? packet.projectToken : void 0;
+  const tokenApplicability = packet.tokenApplicability && typeof packet.tokenApplicability === "object" && !Array.isArray(packet.tokenApplicability) ? packet.tokenApplicability : void 0;
+  const historicalTokenLineage = tokenApplicability?.state === "historical_token_lineage";
   const verifiedToken = token?.verified === true && (token.verification === "official_x" || token.verification === "official_domain");
   const explicitOfficialBioContract = verifiedToken && token?.verification === "official_x" && token.producerSources && typeof token.producerSources === "object" && !Array.isArray(token.producerSources) && token.producerSources.identity && typeof token.producerSources.identity === "object" && !Array.isArray(token.producerSources.identity) && token.producerSources.identity.provider === "twitterapi";
   const rank = typeof token?.rank === "number" ? token.rank : Number.POSITIVE_INFINITY;
@@ -8989,31 +9259,23 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   ], artifactIds(p2Anchors), p2FloorTier);
   const tokenDisclosures = [...tokenDisclosureFacts];
   const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0].filter(Boolean).length;
-  const p3NullSearch = assessmentArtifactFor("P3_token_conduct", "project-token-identity");
-  const declaredTokenless = !token && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 && typeof profile?.bio === "string" && NO_TOKEN_DECLARATION.test(String(profile.bio));
-  const p3CeilingTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditExceptionalCeiling ? "exceptional" : moderateMarket ? "solid" : "emerging" : declaredTokenless ? "exceptional" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
-  const p3FloorTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging" : declaredTokenless ? p3NullSearch ? "solid" : "none" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
-  const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 ? p3NullSearch : null;
-  let p3FinalTier = p3Assessment ? "assessed_null" : p3CeilingTier;
-  let p3FinalFloorTier = p3Assessment ? "assessed_null" : p3FloorTier;
+  const p3CeilingTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditExceptionalCeiling ? "exceptional" : moderateMarket ? "solid" : "emerging" : historicalTokenLineage ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
+  const p3FloorTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging" : historicalTokenLineage ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
+  let p3FinalTier = p3CeilingTier;
+  let p3FinalFloorTier = p3FloorTier;
   if (severeUnrecoveredProtocolIncident && (p3FinalTier === "solid" || p3FinalTier === "exceptional")) p3FinalTier = "emerging";
   if (severeUnrecoveredProtocolIncident && (p3FinalFloorTier === "solid" || p3FinalFloorTier === "exceptional")) p3FinalFloorTier = "emerging";
   setBand("P3_token_conduct", p3FinalTier, [
     ...verifiedToken ? ["canonical token verified"] : [],
-    ...declaredTokenless ? ["official profile explicitly declares the project has no token; token conduct criteria waived until a token launches"] : [],
-    ...!token && !declaredTokenless && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : [],
-    ...p3Assessment ? ["completed token-identity assessment bound no canonical token"] : [],
+    ...historicalTokenLineage ? ["predecessor or migration lineage requires continuous token-conduct assessment"] : [],
+    ...!token && !historicalTokenLineage && p3FinalTier !== "none" ? ["token conduct scored from verified disclosures"] : [],
     ...moderateMarket ? ["measured market activity"] : [],
     ...governanceFacts.length ? ["verified token governance"] : [],
     ...tokenDisclosures.length ? ["verified token economic disclosure"] : [],
     ...auditFacts.length ? ["verified security review"] : auditLeadCount >= 2 ? [`${auditLeadCount} registry-matched auditor leads from bounded audit discovery sources`] : [],
     ...severeUnrecoveredProtocolIncident ? ["material protocol security incident without a recorded full recovery caps token and control evidence at emerging"] : []
   ], [
-    ...artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
-    ...p3Assessment ? [p3Assessment.artifactId] : [],
-    // The waived band anchors on the completed search that corroborates the
-    // declaration; without it the anchor fallback in setBand still applies.
-    ...declaredTokenless && p3NullSearch ? [p3NullSearch.artifactId] : []
+    ...artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts])
   ], p3FinalFloorTier);
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
   let p4FloorTier = fundingFacts.length || investorFacts.length || partnershipFacts.length || advisorTeam.length ? "emerging" : "none";
@@ -9410,6 +9672,12 @@ var SECTION_AXIS_ELIGIBILITY = {
     "P3_token_conduct",
     "P5_traction_and_liveness"
   ],
+  entityContinuity: [
+    "P2_product_substance",
+    "P3_token_conduct",
+    "P5_traction_and_liveness",
+    "P6_transparency_integrity"
+  ],
   // Findings are routed by exact finding_type below. A section-wide allowlist
   // made unrelated facts (for example, token collapse) eligible for identity.
   findings: [],
@@ -9534,6 +9802,7 @@ var CHECK_AXIS_ELIGIBILITY = {
   "profile-photo-authenticity": [],
   "code-footprint-github": ["F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
   "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
+  "entity-continuity": ["P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity"],
   "affiliations-associates": ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "AD3_relationship_corroboration", "ME2_role_authenticity"],
   "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
   "project-token-identity": ["P3_token_conduct"],
@@ -9873,9 +10142,9 @@ var eligibleAxesFor = (section, value, axisCatalog2, sourceArtifactPeers = [], s
   const allowed = new Set(eligible);
   return [...new Set(axisCatalog2.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
 };
-var recordText = (record4, keys, max) => {
+var recordText = (record5, keys, max) => {
   for (const key of keys) {
-    const value = record4[key];
+    const value = record5[key];
     if (typeof value === "string" && value.trim()) return clip(value.trim(), max);
   }
   return void 0;
@@ -9933,26 +10202,26 @@ var sanitizeArtifactUrls = (value, depth = 0) => {
   }
   return sanitized;
 };
-var verificationFor = (section, record4, sourceArtifactPeers = [], subjectHandle, profile, subjectRoles = []) => {
+var verificationFor = (section, record5, sourceArtifactPeers = [], subjectHandle, profile, subjectRoles = []) => {
   if (section === "axisGaps") return "unavailable";
   if (section === "checkOutcomes") {
-    const status = recordText(record4, ["status"], 40)?.toLowerCase();
+    const status = recordText(record5, ["status"], 40)?.toLowerCase();
     if (status === "confirmed" || status === "finding") return "verified";
     if (status === "reported") return "reported";
     if (status === "checked-empty") return "checked_empty";
     if (status === "unavailable" || status === "unknown" || status === "stale" || status === "not-applicable") return "unavailable";
   }
   if (section === "findings") {
-    const status = recordText(record4, ["verification_status"], 40)?.toLowerCase();
-    if (status === "verified" && record4.artifact_verified === true) return "verified";
+    const status = recordText(record5, ["verification_status"], 40)?.toLowerCase();
+    if (status === "verified" && record5.artifact_verified === true) return "verified";
     if (status === "reported") return "reported";
   }
   if (section === "sourceArtifacts") {
-    const match = recordText(record4, ["match"], 40);
-    const kind = recordText(record4, ["kind"], 80);
+    const match = recordText(record5, ["match"], 40);
+    const kind = recordText(record5, ["kind"], 80);
     if (kind === "portfolio_relationship") {
       if (match === "relationship_confirmed" && subjectHandle && profile) {
-        const binding = portfolioRelationshipBinding(record4, {
+        const binding = portfolioRelationshipBinding(record5, {
           roles: subjectRoles,
           profile: {
             handle: subjectHandle,
@@ -9971,13 +10240,13 @@ var verificationFor = (section, record4, sourceArtifactPeers = [], subjectHandle
       return "unavailable";
     }
     if (kind === "fund_scale") {
-      return isStrictFundScaleArtifact(record4, sourceArtifactPeers, { subjectHandle, profile }) ? "verified" : "unavailable";
+      return isStrictFundScaleArtifact(record5, sourceArtifactPeers, { subjectHandle, profile }) ? "verified" : "unavailable";
     }
     if (kind === "trust_graph") {
-      if (record4.coverageState === "unavailable" || match === "observed") return "unavailable";
+      if (record5.coverageState === "unavailable" || match === "observed") return "unavailable";
       if (match === "screened_clear" || match === "no_match") return "checked_empty";
-      const contentHash = recordText(record4, ["contentHash"], 64);
-      const sourceContentHash = recordText(record4, ["sourceContentHash"], 64);
+      const contentHash = recordText(record5, ["contentHash"], 64);
+      const sourceContentHash = recordText(record5, ["sourceContentHash"], 64);
       if (match === "risk_signal" && /^[a-f0-9]{64}$/i.test(contentHash ?? "") && /^[a-f0-9]{64}$/i.test(sourceContentHash ?? "")) {
         return "verified";
       }
@@ -9987,32 +10256,32 @@ var verificationFor = (section, record4, sourceArtifactPeers = [], subjectHandle
     if (match === "candidate") return "reported";
   }
   if (section === "trustGraphScreen") {
-    if (record4.status === "incomplete") return "unavailable";
-    const connections = Array.isArray(record4.connections) ? record4.connections : [];
+    if (record5.status === "incomplete") return "unavailable";
+    const connections = Array.isArray(record5.connections) ? record5.connections : [];
     const qualifiedConnections = connections.filter((candidate) => {
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
       const connection = candidate;
       return connection.qualified === true && Array.isArray(connection.ties) && connection.ties.length > 0;
     });
-    if (record4.status === "clear" && qualifiedConnections.length === 0) return "checked_empty";
+    if (record5.status === "clear" && qualifiedConnections.length === 0) return "checked_empty";
     if (qualifiedConnections.length > 0) return "verified";
     return "unavailable";
   }
   if (section === "projectToken" || section === "ventureToken") {
-    return record4.verified === true && (record4.verification === "official_x" || record4.verification === "official_domain") ? "verified" : "unavailable";
+    return record5.verified === true && (record5.verification === "official_x" || record5.verification === "official_domain") ? "verified" : "unavailable";
   }
   if (section === "basicFacts") {
-    const status = recordText(record4, ["status"], 40)?.toLowerCase();
-    return record4.artifact_verified === true && (status === "verified" || status === "corroborated") ? "verified" : status === "lead" ? "reported" : "unavailable";
+    const status = recordText(record5, ["status"], 40)?.toLowerCase();
+    return record5.artifact_verified === true && (status === "verified" || status === "corroborated") ? "verified" : status === "lead" ? "reported" : "unavailable";
   }
   return "observed";
 };
-var counterEligibleAxesFor = (section, record4, verification, eligibleAxes) => {
+var counterEligibleAxesFor = (section, record5, verification, eligibleAxes) => {
   if (verification !== "verified") return [];
-  if (section === "findings" && typeof record4.polarity === "number" && record4.polarity < 0) return [...eligibleAxes];
-  if (section === "basicFacts" && recordText(record4, ["predicate"], 80)?.toLowerCase() === "security_incident") return [...eligibleAxes];
-  if (section === "sourceArtifacts" && record4.match === "risk_signal") return [...eligibleAxes];
-  if (section === "trustGraphScreen" && (record4.severity === "caution" || record4.severity === "avoid")) return [...eligibleAxes];
+  if (section === "findings" && typeof record5.polarity === "number" && record5.polarity < 0) return [...eligibleAxes];
+  if (section === "basicFacts" && recordText(record5, ["predicate"], 80)?.toLowerCase() === "security_incident") return [...eligibleAxes];
+  if (section === "sourceArtifacts" && record5.match === "risk_signal") return [...eligibleAxes];
+  if (section === "trustGraphScreen" && (record5.severity === "caution" || record5.severity === "avoid")) return [...eligibleAxes];
   return [];
 };
 var DIRECT_SECTIONS = /* @__PURE__ */ new Set(["profile", "profileAuthenticity", "projectToken", "findings", "wallets", "promotions", "recentActivity"]);
@@ -10103,6 +10372,7 @@ var SCORING_ARRAY_SECTIONS = [
   "wallets",
   "team",
   "basicFacts",
+  "entityContinuity",
   "notableFollowers",
   "recentActivity",
   "sourceArtifacts",
@@ -10177,7 +10447,7 @@ function extractScoringEvidenceCatalog(json, axisCatalog2) {
   if (!Array.isArray(packet.evidenceCatalog) || !packet.evidenceCatalog.every(isAxisEvidenceRecord)) return [];
   if (axisCatalog2 && axisCatalog2.length > 0 && packet.schema_version !== 5) return [];
   const catalog = packet.evidenceCatalog;
-  const byId = new Map(catalog.map((record4) => [record4.artifactId, record4]));
+  const byId = new Map(catalog.map((record5) => [record5.artifactId, record5]));
   if (byId.size !== catalog.length) return [];
   const strictCatalog = packet.schema_version === 5;
   const requestedAxes = axisCatalog2 && axisCatalog2.length > 0 && new Set(axisCatalog2.map(({ axis }) => axis)).size === axisCatalog2.length ? [...axisCatalog2] : void 0;
@@ -10222,10 +10492,10 @@ function extractScoringEvidenceCatalog(json, axisCatalog2) {
   for (const section of [...SCORING_ARRAY_SECTIONS, "axisGaps"]) {
     if (Array.isArray(packet[section])) packet[section].forEach((value) => inspect(section, value));
   }
-  return represented.size === catalog.length ? catalog.map((record4) => ({
-    ...record4,
-    eligibleAxes: [...record4.eligibleAxes],
-    ...record4.counterEligibleAxes ? { counterEligibleAxes: [...record4.counterEligibleAxes] } : {}
+  return represented.size === catalog.length ? catalog.map((record5) => ({
+    ...record5,
+    eligibleAxes: [...record5.eligibleAxes],
+    ...record5.counterEligibleAxes ? { counterEligibleAxes: [...record5.counterEligibleAxes] } : {}
   })) : [];
 }
 var pruneTrustGraphPacket = (packet) => {
@@ -10273,6 +10543,7 @@ function serializeAnalystEvidencePacket(input, options) {
     promotions: 16,
     wallets: 12,
     team: 16,
+    entityContinuity: 1,
     basicFacts: 24,
     notableFollowers: 16,
     recentActivity: 12,
@@ -10330,6 +10601,7 @@ function serializeAnalystEvidencePacket(input, options) {
     profileAuthenticity: compactProfileAuthenticity(input.profileAuthenticity),
     trustGraphScreen: compactTrustGraphScreen(input.trustGraphScreen),
     projectToken: input.projectToken && typeof input.projectToken === "object" && !Array.isArray(input.projectToken) ? compactProjectToken(input.projectToken) : void 0,
+    tokenApplicability: input.tokenApplicability && typeof input.tokenApplicability === "object" && !Array.isArray(input.tokenApplicability) ? compactObject(input.tokenApplicability, 2) : void 0,
     // Findings stay ahead of descriptive context in the budget. This prevents a
     // long social corpus from hiding the material facts that govern a verdict.
     findings
@@ -10351,8 +10623,8 @@ function serializeAnalystEvidencePacket(input, options) {
     }
     const source2 = options.includeInvestigativeLeads ? rawSource : rawSource.filter((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return true;
-      const record4 = item;
-      return record4.evidence_origin !== "model_lead" && record4.artifact_verified !== false;
+      const record5 = item;
+      return record5.evidence_origin !== "model_lead" && record5.artifact_verified !== false;
     });
     const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source2, options.axisCatalog ? source2.length : limit) : section === "checkOutcomes" ? retainCheckOutcomes(source2, limit) : source2.slice(0, limit);
     const included = selected.map((item) => section === "sourceArtifacts" ? compactSourceArtifact(item) : compactObject(item)).filter((item) => item !== void 0);
@@ -10601,6 +10873,8 @@ Axis citation guidance (the substantive aliases are authoritative, while each co
 ${citationEligibilityTable}
 
 Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.
+
+PUBLIC LANGUAGE RULE: write for a reader, not for the research pipeline. Never use analyst shorthand such as "null backing", "null result", "governing limitation", "project and token continuity", or internal collection-state language in the headline, identity note, rationales, or gaps. Say exactly what was or was not verified in plain English, for example "no financial backers were verified" or "the token launched recently, so it has little trading history."
 
 ACTIVITY RULE: weigh posting cadence. profile.days_since_post is how long the account has been silent. For a PROJECT/token, going quiet for weeks (roughly 21+ days) is a real liveness flag (abandoned, winding down, or quiet after a raise) and should temper traction/execution axes; for an individual it is a milder signal. Recent, steady posting is mildly positive, not a free pass.
 
@@ -10956,6 +11230,13 @@ var CHECKS = [
   { id: "code-footprint-github", label: "Code footprint (GitHub)", defaultNote: "no completed GitHub resolution was recorded" },
   { id: "identity-continuity", label: "Identity continuity", defaultNote: "no completed handle-history result was recorded" },
   {
+    id: "entity-continuity",
+    label: "Project and token continuity",
+    defaultNote: "no completed predecessor, rebrand, migration, or contract-continuity search was recorded",
+    role: "PROJECT",
+    criticalFor: ["PROJECT"]
+  },
+  {
     id: "affiliations-associates",
     label: "Affiliations & associates",
     defaultNote: "no corroborated affiliation collection outcome was recorded",
@@ -11224,6 +11505,12 @@ ${value.note}`;
     return true;
   });
 }
+var NULL_FINDING_SUPERSEDED_BY_CONFIRMED = /* @__PURE__ */ new Set(["project-token-identity"]);
+function supersededObservations(id, observations) {
+  if (!NULL_FINDING_SUPERSEDED_BY_CONFIRMED.has(id)) return [...observations];
+  if (!observations.some((item) => item.status === "confirmed")) return [...observations];
+  return observations.filter((item) => item.status !== "finding");
+}
 var PersonCheckTracker = class {
   observations = /* @__PURE__ */ new Map();
   providerRuns = /* @__PURE__ */ new Map();
@@ -11311,7 +11598,7 @@ var PersonCheckTracker = class {
           decisionCritical: false
         });
       }
-      const observations = this.observations.get(definition.id) ?? [];
+      const observations = supersededObservations(definition.id, this.observations.get(definition.id) ?? []);
       if (!observations.length) {
         return Object.freeze({
           checkId: definition.id,
@@ -11350,6 +11637,106 @@ var PersonCheckTracker = class {
     });
   }
 };
+
+// server/tokenApplicability.ts
+var PRELAUNCH_TOKEN = /\b(?:token|coin)\b[\s\S]{0,45}\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched|TGE)\b|\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched|TGE)\b[\s\S]{0,45}\b(?:token|coin)\b/i;
+var completed = (status) => status === "confirmed" || status === "reported" || status === "finding" || status === "checked-empty";
+var unresolvedCandidateLine = (evidence) => {
+  const candidate = evidence.unresolvedProjectToken;
+  if (!candidate) return null;
+  switch (candidate.state) {
+    case "registry_conflict":
+      return `The official X bio declares contract ${candidate.address}, but the identity-bound ${candidate.registry?.provider ?? "registry"} record lists ${candidate.registry?.address ?? "a different contract"}; the two were not reconciled.`;
+    case "provider_unavailable":
+      return `The official X bio declares contract ${candidate.address}, and the market and registry providers could not complete the read.`;
+    default:
+      return `The official X bio declares contract ${candidate.address}, and no exact-address market or identity-bound registry record confirms it.`;
+  }
+};
+var continuityHasTokenLineage = (evidence) => {
+  const continuity = evidence.entityContinuity;
+  if (!continuity) return false;
+  return Boolean(
+    continuity.predecessorName || continuity.oldTicker || continuity.oldContract || continuity.migrationContract || continuity.replacementContract || continuity.tokenLineage.length > 0 || continuity.events.some((event) => event.kind === "token_migration" || event.kind === "contract_replacement")
+  );
+};
+var prelaunchText = (evidence) => [
+  evidence.profile.bio,
+  evidence.profile.self_post_sample,
+  evidence.subjectOrientation?.what,
+  ...(evidence.basicFacts ?? []).flatMap((fact) => [
+    String(fact.value ?? ""),
+    ...(fact.sources ?? []).map((source2) => source2.excerpt)
+  ])
+].filter(Boolean).join("\n");
+function deriveTokenApplicability(evidence, checks, determinedAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  if (!evidence.roles.some((role) => String(role) === "PROJECT")) return void 0;
+  const tokenCheck = checks.find((check) => check.checkId === "project-token-identity");
+  const continuity = evidence.entityContinuity;
+  const evidenceLines = [];
+  if (evidence.projectToken?.verified) {
+    evidenceLines.push(`Canonical token ${evidence.projectToken.symbol} is bound to the official project identity.`);
+    if (continuityHasTokenLineage(evidence)) {
+      evidenceLines.push(continuity?.coverage.reason ?? "Historical token lineage was recovered before scoring.");
+      return {
+        state: "historical_token_lineage",
+        axisTreatment: "assess",
+        reason: "A current token and predecessor or migration evidence exist, so ARGUS assesses the complete token lineage.",
+        evidence: evidenceLines,
+        determinedAt
+      };
+    }
+    return {
+      state: "verified_live_token",
+      axisTreatment: "assess",
+      reason: "A live canonical token is verified against the project's official identity.",
+      evidence: evidenceLines,
+      determinedAt
+    };
+  }
+  if (continuityHasTokenLineage(evidence)) {
+    evidenceLines.push(continuity?.coverage.reason ?? "Historical token lineage was recovered before scoring.");
+    return {
+      state: "historical_token_lineage",
+      axisTreatment: "assess",
+      reason: "Historical, migrated, or abandoned token evidence exists, so token conduct remains applicable across the full lineage.",
+      evidence: evidenceLines,
+      determinedAt
+    };
+  }
+  const unresolvedLine = unresolvedCandidateLine(evidence);
+  if (!tokenCheck || !completed(tokenCheck.status) || unresolvedLine) {
+    if (unresolvedLine) evidenceLines.push(unresolvedLine);
+    if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
+    return {
+      state: "unresolved_token_identity",
+      axisTreatment: "provisional",
+      reason: "Token identity did not reach a completed, attributable result, so the project verdict remains provisional.",
+      evidence: evidenceLines.length ? evidenceLines : ["No completed project-token identity result was frozen."],
+      determinedAt
+    };
+  }
+  if (PRELAUNCH_TOKEN.test(prelaunchText(evidence))) {
+    evidenceLines.push("A bound first-party source describes a token as planned or not yet live.");
+    if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
+    return {
+      state: "prelaunch_token_deferred",
+      axisTreatment: "deferred",
+      reason: "The project describes a future token, but no live token conduct surface exists yet; P3 is deferred without penalty.",
+      evidence: evidenceLines,
+      determinedAt
+    };
+  }
+  if (tokenCheck.note) evidenceLines.push(tokenCheck.note);
+  evidenceLines.push("No canonical token is bound to the official project handle or domain.");
+  return {
+    state: "confirmed_tokenless",
+    axisTreatment: "not_applicable",
+    reason: "A completed identity-bound token search found no project token; token conduct is not applicable and the project score is normalized over the remaining axes.",
+    evidence: evidenceLines,
+    determinedAt
+  };
+}
 
 // server/cache.ts
 import { createHash as createHash2 } from "node:crypto";
@@ -11425,397 +11812,6 @@ function shouldAnnounceOfficialXAccountStatus(input) {
   return false;
 }
 
-// server/adapters/notableAccounts.ts
-var NOTABLE_ACCOUNTS = [
-  // ── Venture funds / firm accounts ─────────────────────────────────────────
-  { handle: "a16zcrypto", label: "VC \xB7 a16z crypto" },
-  { handle: "paradigm", label: "VC \xB7 Paradigm" },
-  { handle: "dragonfly_xyz", label: "VC \xB7 Dragonfly" },
-  { handle: "multicoincap", label: "VC \xB7 Multicoin" },
-  { handle: "VariantFund", label: "VC \xB7 Variant" },
-  { handle: "FrameworkVC", label: "VC \xB7 Framework" },
-  { handle: "hack_vc", label: "VC \xB7 Hack VC" },
-  { handle: "PlaceholderVC", label: "VC \xB7 Placeholder" },
-  { handle: "panteracapital", label: "VC \xB7 Pantera" },
-  { handle: "1kxnetwork", label: "VC \xB7 1kx" },
-  { handle: "electric_capital", label: "VC \xB7 Electric Capital" },
-  { handle: "robotventures", label: "VC \xB7 Robot Ventures" },
-  { handle: "polychaincap", label: "VC \xB7 Polychain" },
-  { handle: "coinbaseventures", label: "VC \xB7 Coinbase Ventures" },
-  { handle: "binancelabs", label: "VC \xB7 Binance Labs" },
-  { handle: "HashKey_Capital", label: "VC \xB7 HashKey" },
-  { handle: "sequoia", label: "VC \xB7 Sequoia" },
-  { handle: "USV", label: "VC \xB7 Union Square Ventures" },
-  { handle: "IOSG_VC", label: "VC \xB7 IOSG" },
-  { handle: "hypersphere_x", label: "VC \xB7 Hypersphere" },
-  { handle: "standardcrypto", label: "VC \xB7 Standard Crypto" },
-  { handle: "blockchaincap", label: "VC \xB7 Blockchain Capital" },
-  { handle: "galaxyhq", label: "VC \xB7 Galaxy" },
-  { handle: "DelphiVentures", label: "VC \xB7 Delphi Ventures" },
-  { handle: "DCGco", label: "VC \xB7 Digital Currency Group" },
-  { handle: "gumi_cryptos", label: "VC \xB7 gumi Cryptos" },
-  { handle: "SygnumOfficial", label: "VC \xB7 Sygnum" },
-  { handle: "L2IV", label: "VC \xB7 L2 Iterative" },
-  { handle: "maven11", label: "VC \xB7 Maven 11" },
-  { handle: "nascentxyz", label: "VC \xB7 Nascent" },
-  { handle: "bankless_vc", label: "VC \xB7 Bankless Ventures" },
-  { handle: "SpartanGroup", label: "VC \xB7 Spartan" },
-  { handle: "TheSpartanGroup", label: "VC \xB7 Spartan" },
-  { handle: "6thmancapital", label: "VC \xB7 6th Man Ventures" },
-  { handle: "archetypevc", label: "VC \xB7 Archetype" },
-  { handle: "slowfund", label: "VC \xB7 Slow Ventures" },
-  { handle: "portal_ventures", label: "VC \xB7 Portal Ventures" },
-  { handle: "figmentcapital", label: "VC \xB7 Figment Capital" },
-  { handle: "reforgevc", label: "VC \xB7 Reforge" },
-  { handle: "foundationcap", label: "VC \xB7 Foundation Capital" },
-  { handle: "castle_isl", label: "VC \xB7 Castle Island" },
-  { handle: "lightspeedvp", label: "VC \xB7 Lightspeed" },
-  { handle: "tribecap", label: "VC \xB7 Tribe Capital" },
-  { handle: "roundtripcrypto", label: "VC \xB7 Round13" },
-  { handle: "fabric_vc", label: "VC \xB7 Fabric Ventures" },
-  { handle: "gsr_io", label: "market maker \xB7 GSR" },
-  { handle: "wintermute_t", label: "market maker \xB7 Wintermute" },
-  { handle: "jump_", label: "market maker \xB7 Jump" },
-  { handle: "amberGroup_HQ", label: "market maker \xB7 Amber" },
-  { handle: "cumberland_io", label: "market maker \xB7 Cumberland" },
-  { handle: "flowtraders", label: "market maker \xB7 Flow Traders" },
-  { handle: "mechanismcap", label: "fund \xB7 Mechanism" },
-  { handle: "dcfgod", label: "fund \xB7 DCF God" },
-  { handle: "arca", label: "fund \xB7 Arca" },
-  { handle: "republiccrypto", label: "VC \xB7 Republic Crypto" },
-  { handle: "animocabrands", label: "VC \xB7 Animoca" },
-  { handle: "shima_capital", label: "VC \xB7 Shima" },
-  { handle: "big_brain_hodl", label: "VC \xB7 Big Brain" },
-  { handle: "collab_currency", label: "VC \xB7 Collab+Currency" },
-  { handle: "roninvc", label: "VC \xB7 Ronin" },
-  // ── VC partners / notable investors (individuals) ─────────────────────────
-  { handle: "cdixon", label: "investor \xB7 a16z" },
-  { handle: "balajis", label: "investor \xB7 Balaji" },
-  { handle: "cyounessi1", label: "investor \xB7 Standard Crypto" },
-  { handle: "hosseeb", label: "investor \xB7 Dragonfly" },
-  { handle: "danrobinson", label: "investor \xB7 Paradigm" },
-  { handle: "gakonst", label: "founder \xB7 Paradigm/Foundry" },
-  { handle: "cburniske", label: "investor \xB7 Placeholder" },
-  { handle: "twobitidiot", label: "founder \xB7 Messari (Ryan Selkis)" },
-  { handle: "avichal", label: "investor \xB7 Electric Capital" },
-  { handle: "Maria_Shen", label: "investor \xB7 Electric Capital" },
-  { handle: "TarunChitra", label: "founder \xB7 Gauntlet" },
-  { handle: "ljin18", label: "investor \xB7 Variant" },
-  { handle: "jessewldn", label: "investor \xB7 Haun" },
-  { handle: "kmoney_69", label: "investor \xB7 Placeholder" },
-  { handle: "spencernoon", label: "investor \xB7 Variant" },
-  { handle: "arjunblj", label: "investor \xB7 Reverie" },
-  { handle: "TusharJain_", label: "investor \xB7 Multicoin" },
-  { handle: "KyleSamani", label: "investor \xB7 Multicoin" },
-  { handle: "santiagoroel", label: "investor \xB7 Amber/Delphi" },
-  { handle: "Anup_Bagchi", label: "investor" },
-  { handle: "0xMaki", label: "investor \xB7 founder (Sushi)" },
-  { handle: "ChrisBurniske", label: "investor \xB7 Placeholder" },
-  { handle: "RobHadick", label: "investor \xB7 Dragonfly" },
-  { handle: "Rewkang", label: "investor \xB7 Mechanism" },
-  { handle: "adam_tehc", label: "investor" },
-  { handle: "dberenzon", label: "investor" },
-  { handle: "packyM", label: "investor \xB7 Not Boring" },
-  { handle: "nlw", label: "media \xB7 The Breakdown" },
-  { handle: "lawmaster", label: "investor \xB7 Framework (Vance Spencer)" },
-  { handle: "MikeDudas", label: "investor \xB7 6MV" },
-  { handle: "iamDCinvestor", label: "investor \xB7 ETH OG" },
-  { handle: "AriDavidPaul", label: "investor \xB7 BlockTower" },
-  { handle: "APompliano", label: "investor \xB7 Pomp" },
-  { handle: "RaoulGMI", label: "investor \xB7 Real Vision" },
-  { handle: "novogratz", label: "investor \xB7 Galaxy (Mike Novogratz)" },
-  { handle: "cathiedwood", label: "investor \xB7 ARK" },
-  { handle: "woonomic", label: "analyst \xB7 Willy Woo" },
-  // ── Founders / builders ───────────────────────────────────────────────────
-  { handle: "VitalikButerin", label: "founder \xB7 Ethereum" },
-  { handle: "aeyakovenko", label: "founder \xB7 Solana" },
-  { handle: "rajgokal", label: "founder \xB7 Solana" },
-  { handle: "jessepollak", label: "founder \xB7 Base" },
-  { handle: "haydenzadams", label: "founder \xB7 Uniswap" },
-  { handle: "StaniKulechov", label: "founder \xB7 Aave" },
-  { handle: "sreeramkannan", label: "founder \xB7 EigenLayer" },
-  { handle: "smokey_eth", label: "founder \xB7 Berachain" },
-  { handle: "0xngmi", label: "founder \xB7 DefiLlama" },
-  { handle: "gabrielhaines", label: "founder" },
-  { handle: "brendaneich", label: "founder \xB7 Brave" },
-  { handle: "sassal0x", label: "Ethereum advocate" },
-  { handle: "econoar", label: "founder \xB7 Eric Conner" },
-  { handle: "drakefjustin", label: "researcher \xB7 Ethereum Foundation" },
-  { handle: "dannyryan", label: "researcher \xB7 Ethereum Foundation" },
-  { handle: "TimBeiko", label: "Ethereum core" },
-  { handle: "epolynya", label: "researcher \xB7 rollups" },
-  { handle: "el33th4xor", label: "founder \xB7 Ava Labs (Emin G\xFCn Sirer)" },
-  { handle: "zhusu", label: "founder \xB7 3AC (Su Zhu)" },
-  { handle: "MacroCephalopod", label: "founder \xB7 Reserve" },
-  { handle: "robertleshner", label: "founder \xB7 Compound" },
-  { handle: "kaiynne", label: "founder \xB7 Synthetix" },
-  { handle: "AndreCronjeTech", label: "founder \xB7 Yearn/Fantom" },
-  { handle: "bantg", label: "founder \xB7 Yearn" },
-  { handle: "danielesesta", label: "founder \xB7 Wonderland/Abracadabra" },
-  { handle: "kaledora", label: "founder" },
-  { handle: "eric_wallach", label: "founder" },
-  { handle: "0xSisyphus", label: "trader/founder" },
-  { handle: "MustStopMurad", label: "founder \xB7 Memecoin thesis" },
-  { handle: "shawmakesmagic", label: "founder \xB7 ai16z/eliza" },
-  { handle: "everythingempt0", label: "trader/founder" },
-  { handle: "0xzerebro", label: "founder \xB7 AI agent" },
-  { handle: "luna_virtuals", label: "founder \xB7 Virtuals" },
-  { handle: "punk9059", label: "founder" },
-  { handle: "0xMert_", label: "founder \xB7 Helius" },
-  { handle: "rogercrypto", label: "founder" },
-  { handle: "toly", label: "founder \xB7 Solana" },
-  { handle: "kayceecrypto", label: "founder" },
-  { handle: "loomdart", label: "trader \xB7 OG" },
-  { handle: "cobie", label: "trader \xB7 UpOnly (Cobie)" },
-  { handle: "ledgerstatus", label: "trader \xB7 OG" },
-  { handle: "dcfgod", label: "trader" },
-  { handle: "cyrusof", label: "founder" },
-  { handle: "0xdesigner", label: "builder/designer" },
-  { handle: "transmissions11", label: "engineer \xB7 Paradigm" },
-  { handle: "boredGenius", label: "engineer \xB7 dYdX" },
-  { handle: "antonio_m_juliano", label: "founder \xB7 dYdX" },
-  { handle: "0age", label: "engineer \xB7 Uniswap" },
-  { handle: "haydenzadams", label: "founder \xB7 Uniswap" },
-  { handle: "monosarin", label: "founder \xB7 Polymarket (Shayne Coplan)" },
-  { handle: "shayne_coplan", label: "founder \xB7 Polymarket" },
-  { handle: "gavofyork", label: "founder \xB7 Polkadot/Parity" },
-  { handle: "rune_christensen", label: "founder \xB7 MakerDAO/Sky" },
-  { handle: "kaiynne", label: "founder \xB7 Synthetix" },
-  { handle: "coopahtroopa", label: "builder \xB7 music/NFTs" },
-  { handle: "cryptopunk7213", label: "founder \xB7 Compound (Robert Leshner alt)" },
-  // ── KOLs / callers / traders ──────────────────────────────────────────────
-  { handle: "blknoiz06", label: "caller \xB7 Ansem" },
-  { handle: "CryptoKaleo", label: "caller \xB7 Kaleo" },
-  { handle: "inversebrah", label: "KOL" },
-  { handle: "CryptoCred", label: "trader" },
-  { handle: "HsakaTrades", label: "trader \xB7 Hsaka" },
-  { handle: "notthreadguy", label: "KOL" },
-  { handle: "theunipcs", label: "caller \xB7 Bonk guy" },
-  { handle: "CryptoGodJohn", label: "caller" },
-  { handle: "frankdegods", label: "founder/KOL \xB7 DeGods" },
-  { handle: "GiganticRebirth", label: "trader \xB7 GCR" },
-  { handle: "Pentosh1", label: "trader" },
-  { handle: "TheCryptoDog", label: "trader" },
-  { handle: "Tetranode", label: "whale" },
-  { handle: "DeFiGod1", label: "trader" },
-  { handle: "gainzy222", label: "trader" },
-  { handle: "AltcoinPsycho", label: "trader" },
-  { handle: "smallcapscience", label: "KOL" },
-  { handle: "SmartestMoney_", label: "trader" },
-  { handle: "CredibleCrypto", label: "trader" },
-  { handle: "CryptoMessiah", label: "trader" },
-  { handle: "IamNomad", label: "trader" },
-  { handle: "AltcoinGordon", label: "KOL" },
-  { handle: "CryptoTony__", label: "trader" },
-  { handle: "rektcapital", label: "analyst" },
-  { handle: "CryptoDonAlt", label: "trader \xB7 DonAlt" },
-  { handle: "koroushak", label: "trader" },
-  { handle: "TheFlowHorse", label: "trader \xB7 Flood" },
-  { handle: "MacnBTC", label: "trader" },
-  { handle: "0xWangarian", label: "trader" },
-  { handle: "IncomeSharks", label: "trader" },
-  { handle: "PostyXBT", label: "trader" },
-  { handle: "0x_Kun", label: "trader" },
-  { handle: "cobie", label: "trader \xB7 Cobie" },
-  { handle: "0xSisyphus", label: "trader" },
-  { handle: "loomdart", label: "trader" },
-  { handle: "shahh", label: "trader" },
-  { handle: "CL207", label: "trader" },
-  { handle: "satsdart", label: "trader" },
-  { handle: "cozypront", label: "trader" },
-  { handle: "0xngmi", label: "founder/analyst" },
-  { handle: "eth_daddy", label: "trader" },
-  { handle: "ThinkingUSD", label: "trader \xB7 Flood" },
-  { handle: "poordart", label: "trader" },
-  { handle: "gainzy", label: "trader" },
-  { handle: "hentaavi", label: "trader" },
-  { handle: "iloveponzi", label: "trader" },
-  { handle: "mesawine1", label: "trader" },
-  { handle: "0xShual", label: "trader" },
-  { handle: "greg16676935420", label: "KOL \xB7 Greg" },
-  { handle: "notlarrylink", label: "KOL" },
-  { handle: "chooserich", label: "KOL" },
-  { handle: "traderpow", label: "trader" },
-  { handle: "MoonOverlord", label: "trader" },
-  { handle: "cryptoyieldinfo", label: "analyst" },
-  { handle: "TashaKKK", label: "KOL" },
-  { handle: "zoomerfren", label: "KOL" },
-  // ── Protocols / infra (official accounts) ─────────────────────────────────
-  { handle: "solana", label: "infra \xB7 Solana" },
-  { handle: "ethereum", label: "infra \xB7 Ethereum" },
-  { handle: "base", label: "infra \xB7 Base" },
-  { handle: "arbitrum", label: "infra \xB7 Arbitrum" },
-  { handle: "optimism", label: "infra \xB7 Optimism" },
-  { handle: "0xPolygon", label: "infra \xB7 Polygon" },
-  { handle: "avax", label: "infra \xB7 Avalanche" },
-  { handle: "Uniswap", label: "protocol \xB7 Uniswap" },
-  { handle: "aave", label: "protocol \xB7 Aave" },
-  { handle: "chainlink", label: "infra \xB7 Chainlink" },
-  { handle: "MakerDAO", label: "protocol \xB7 Maker/Sky" },
-  { handle: "LidoFinance", label: "protocol \xB7 Lido" },
-  { handle: "eigenlayer", label: "protocol \xB7 EigenLayer" },
-  { handle: "pumpdotfun", label: "infra \xB7 Pump.fun" },
-  { handle: "jito_sol", label: "infra \xB7 Jito" },
-  { handle: "heliuslabs", label: "infra \xB7 Helius" },
-  { handle: "JupiterExchange", label: "protocol \xB7 Jupiter" },
-  { handle: "RaydiumProtocol", label: "protocol \xB7 Raydium" },
-  { handle: "DriftProtocol", label: "protocol \xB7 Drift" },
-  { handle: "KaminoFinance", label: "protocol \xB7 Kamino" },
-  { handle: "MarginFi", label: "protocol \xB7 marginfi" },
-  { handle: "tensor_hq", label: "protocol \xB7 Tensor" },
-  { handle: "MagicEden", label: "protocol \xB7 Magic Eden" },
-  { handle: "phantom", label: "infra \xB7 Phantom" },
-  { handle: "MetaMask", label: "infra \xB7 MetaMask" },
-  { handle: "dYdX", label: "protocol \xB7 dYdX" },
-  { handle: "GMX_IO", label: "protocol \xB7 GMX" },
-  { handle: "PendleIntern", label: "protocol \xB7 Pendle" },
-  { handle: "ethena_labs", label: "protocol \xB7 Ethena" },
-  { handle: "MorphoLabs", label: "protocol \xB7 Morpho" },
-  { handle: "CurveFinance", label: "protocol \xB7 Curve" },
-  { handle: "convexfinance", label: "protocol \xB7 Convex" },
-  { handle: "friedtech", label: "infra" },
-  { handle: "monad_xyz", label: "infra \xB7 Monad" },
-  { handle: "berachain", label: "infra \xB7 Berachain" },
-  { handle: "SuiNetwork", label: "infra \xB7 Sui" },
-  { handle: "Aptos", label: "infra \xB7 Aptos" },
-  { handle: "celestia", label: "infra \xB7 Celestia" },
-  { handle: "hyperliquid_x", label: "protocol \xB7 Hyperliquid" },
-  { handle: "VirtualsProtocol", label: "protocol \xB7 Virtuals" },
-  // ── Exchanges ─────────────────────────────────────────────────────────────
-  { handle: "coinbase", label: "exchange \xB7 Coinbase" },
-  { handle: "binance", label: "exchange \xB7 Binance" },
-  { handle: "krakenfx", label: "exchange \xB7 Kraken" },
-  { handle: "okx", label: "exchange \xB7 OKX" },
-  { handle: "Bybit_Official", label: "exchange \xB7 Bybit" },
-  { handle: "coinbasewallet", label: "infra \xB7 Coinbase Wallet" },
-  { handle: "brian_armstrong", label: "founder \xB7 Coinbase" },
-  { handle: "cz_binance", label: "founder \xB7 Binance" },
-  { handle: "cryptohayes", label: "founder \xB7 BitMEX (Arthur Hayes)" },
-  { handle: "SBF_FTX", label: "founder \xB7 FTX (defunct)" },
-  { handle: "jespow", label: "founder \xB7 Kraken" },
-  { handle: "tyler", label: "founder \xB7 Gemini (Winklevoss)" },
-  { handle: "cameron", label: "founder \xB7 Gemini (Winklevoss)" },
-  // ── Researchers / analysts / media / security ─────────────────────────────
-  { handle: "MessariCrypto", label: "research \xB7 Messari" },
-  { handle: "DelphiDigital", label: "research \xB7 Delphi" },
-  { handle: "tokenterminal", label: "research \xB7 Token Terminal" },
-  { handle: "DefiLlama", label: "data \xB7 DefiLlama" },
-  { handle: "nansen_ai", label: "data \xB7 Nansen" },
-  { handle: "ArkhamIntel", label: "data \xB7 Arkham" },
-  { handle: "lookonchain", label: "on-chain analyst" },
-  { handle: "spotonchain", label: "on-chain analyst" },
-  { handle: "zachxbt", label: "investigator \xB7 ZachXBT" },
-  { handle: "tayvano_", label: "security \xB7 MyCrypto (Tay)" },
-  { handle: "officer_cia", label: "security researcher" },
-  { handle: "samczsun", label: "security \xB7 Paradigm" },
-  { handle: "bantg", label: "engineer \xB7 Yearn" },
-  { handle: "peckshield", label: "security \xB7 PeckShield" },
-  { handle: "CertiK", label: "security \xB7 CertiK" },
-  { handle: "RugDocIO", label: "security \xB7 RugDoc" },
-  { handle: "WatcherGuru", label: "media" },
-  { handle: "Cointelegraph", label: "media" },
-  { handle: "CoinDesk", label: "media" },
-  { handle: "TheBlock__", label: "media \xB7 The Block" },
-  { handle: "BanklessHQ", label: "media \xB7 Bankless" },
-  { handle: "laurashin", label: "media \xB7 Unchained" },
-  { handle: "wublockchain", label: "media \xB7 Wu Blockchain" },
-  { handle: "DegenerateNews", label: "media" },
-  { handle: "unusual_whales", label: "data/flow" },
-  // ── Expansion batch: more founders / L1-L2 leaders ────────────────────────
-  { handle: "zhuoxun_yin", label: "founder \xB7 Manta" },
-  { handle: "0xkyle__", label: "researcher" },
-  { handle: "dabit3", label: "developer advocate (Nader)" },
-  { handle: "austingriffith", label: "builder \xB7 Ethereum (scaffold-eth)" },
-  { handle: "PatrickAlphaC", label: "developer educator" },
-  { handle: "hudsonjameson", label: "Ethereum community" },
-  { handle: "vladtenev", label: "founder \xB7 Robinhood" },
-  { handle: "jack", label: "founder \xB7 Block/Twitter" },
-  { handle: "elonmusk", label: "founder \xB7 Tesla/X" },
-  { handle: "saylor", label: "founder \xB7 MicroStrategy (Michael Saylor)" },
-  { handle: "APompliano", label: "investor \xB7 Pomp" },
-  { handle: "TylerDurden", label: "media \xB7 ZeroHedge" },
-  { handle: "DavidGokhshtein", label: "KOL \xB7 Gokhshtein" },
-  { handle: "scottmelker", label: "KOL \xB7 Wolf of All Streets" },
-  { handle: "TheCryptoLark", label: "KOL \xB7 Lark Davis" },
-  { handle: "IvanOnTech", label: "KOL \xB7 Ivan" },
-  { handle: "AltCryptoGems", label: "KOL" },
-  { handle: "CryptoWendyO", label: "KOL" },
-  { handle: "girlgone_crypto", label: "KOL" },
-  { handle: "CryptoTubers", label: "KOL" },
-  { handle: "PeterLBrandt", label: "trader \xB7 legacy TA" },
-  { handle: "cryptomanran", label: "KOL" },
-  { handle: "EllioTrades", label: "KOL" },
-  { handle: "sassal0x", label: "Ethereum advocate" },
-  { handle: "milesdeutscher", label: "KOL \xB7 analyst" },
-  { handle: "CryptoBusy", label: "KOL" },
-  { handle: "Ashcryptoreal", label: "KOL" },
-  { handle: "cobie", label: "trader \xB7 Cobie" },
-  { handle: "0xLouisT", label: "founder/investor" },
-  { handle: "DeFianceCapital", label: "fund \xB7 DeFiance" },
-  { handle: "arthur_0x", label: "founder \xB7 DeFiance (Arthur Cheong)" },
-  { handle: "ThreeSigmaXYZ", label: "research \xB7 Three Sigma" },
-  { handle: "tokenbrice", label: "DeFi analyst" },
-  { handle: "DefiIgnas", label: "DeFi researcher" },
-  { handle: "thedefiedge", label: "DeFi researcher" },
-  { handle: "Dynamo_Patrick", label: "DeFi researcher" },
-  { handle: "korpi87", label: "DeFi researcher" },
-  { handle: "0xLoke", label: "DeFi researcher" },
-  { handle: "0x_Todd", label: "researcher" },
-  { handle: "route2fi", label: "DeFi researcher" },
-  { handle: "stacy_muur", label: "DeFi researcher" },
-  { handle: "TheDeFiSaint", label: "DeFi analyst" },
-  { handle: "0xMinion", label: "researcher" },
-  { handle: "MrBlocks_", label: "researcher" },
-  { handle: "Flowslikeosmo", label: "researcher" },
-  { handle: "CryptoKoryo", label: "data analyst" },
-  { handle: "0xfoobar", label: "engineer/researcher" },
-  { handle: "cygaar_dev", label: "engineer" },
-  { handle: "pcaversaccio", label: "security engineer" },
-  { handle: "brockelmore", label: "engineer \xB7 Paradigm" },
-  { handle: "andyfeng21", label: "founder \xB7 EigenLayer" },
-  { handle: "ryanberckmans", label: "researcher" },
-  { handle: "poopmandefi", label: "trader" },
-  { handle: "yashhsm", label: "trader" },
-  { handle: "0xdoge_", label: "trader" },
-  { handle: "0xraceralt", label: "trader" },
-  { handle: "0xSweep", label: "trader" },
-  { handle: "cryptorinweb3", label: "KOL" },
-  { handle: "moon_shiller", label: "KOL" },
-  { handle: "0xUnihax0r", label: "trader" },
-  { handle: "himgajria", label: "investor" },
-  { handle: "lightcrypto", label: "trader" },
-  { handle: "gainzy222", label: "trader" },
-  { handle: "0xTindorr", label: "trader" },
-  { handle: "0xngmi", label: "founder \xB7 DefiLlama" },
-  { handle: "adamscochran", label: "investor \xB7 Cinneamhain" },
-  { handle: "TheOneandOmsy", label: "trader" },
-  { handle: "ColeGarnerHODL", label: "analyst" },
-  { handle: "checkmatey_", label: "on-chain analyst \xB7 Glassnode" },
-  { handle: "_Checkmatey", label: "on-chain analyst" },
-  { handle: "glassnode", label: "data \xB7 Glassnode" },
-  { handle: "santimentfeed", label: "data \xB7 Santiment" },
-  { handle: "intotheblock", label: "data \xB7 IntoTheBlock" },
-  { handle: "coinmetrics", label: "data \xB7 Coin Metrics" },
-  { handle: "nic__carter", label: "investor \xB7 Castle Island" },
-  { handle: "lopp", label: "Bitcoin \xB7 Jameson Lopp" },
-  { handle: "adam3us", label: "founder \xB7 Blockstream (Adam Back)" },
-  { handle: "aantonop", label: "Bitcoin educator" },
-  { handle: "pete_rizzo_", label: "Bitcoin historian" },
-  { handle: "DocumentingBTC", label: "Bitcoin media" },
-  { handle: "matt_odell", label: "Bitcoin \xB7 Odell" },
-  { handle: "gladstein", label: "Bitcoin \xB7 HRF" },
-  { handle: "prestonpysh", label: "investor \xB7 Bitcoin" },
-  { handle: "dergigi", label: "Bitcoin author" },
-  { handle: "TuurDemeester", label: "investor \xB7 Bitcoin" },
-  { handle: "MartyBent", label: "Bitcoin \xB7 TFTC" },
-  { handle: "Excellion", label: "Bitcoin \xB7 Samson Mow" },
-  { handle: "ErikVoorhees", label: "founder \xB7 ShapeShift" },
-  { handle: "brian_armstrong", label: "founder \xB7 Coinbase" },
-  { handle: "haydenzadams", label: "founder \xB7 Uniswap" },
-  { handle: "danheld", label: "Bitcoin educator" },
-  { handle: "CryptoCobain", label: "trader \xB7 Cobie alt" }
-];
-
 // server/publicWeb.ts
 import { createHash as createHash3 } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns/promises";
@@ -11838,7 +11834,7 @@ function attachEvalNativeRequest(init, request) {
 
 // server/publicWeb.ts
 var MAX_TEXT_BYTES = 15e5;
-var MAX_REDIRECTS = 4;
+var MAX_REDIRECTS = 3;
 var JINA_READER_ORIGIN = "https://r.jina.ai/";
 var PUBLIC_WEB_USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
 var JINA_RECOVERABLE_FAILURES = /* @__PURE__ */ new Set([
@@ -12077,15 +12073,16 @@ async function readBoundedText(response) {
   }
   return Buffer.concat(chunks, total);
 }
-async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8") {
+async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8", asset = false) {
   const request = dependencies.request ?? defaultRequestForMode();
   const lookup2 = dependencies.lookup ?? defaultLookupForMode();
   let target = initialTarget;
+  const signal2 = dependencies.signal ?? AbortSignal.timeout(8e3);
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     let response;
     try {
       response = await request(target.url, {
-        signal: AbortSignal.timeout(8e3),
+        signal: signal2,
         headers: {
           accept,
           "accept-language": "en-US,en;q=0.8",
@@ -12108,7 +12105,7 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
     }
     if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
+    if (asset ? !/^image\/(?:x-icon|vnd.microsoft.icon|png|jpeg|gif|webp|svg\+xml)$/.test(contentType) : contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
       return { status: "failed", reason: "unsupported_content_type" };
     }
     let bytes;
@@ -12118,7 +12115,8 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
       return { status: "failed", reason: "response_stream_error" };
     }
     if (!bytes) return { status: "failed", reason: "response_too_large" };
-    const text2 = bytes.toString("utf8");
+    if (asset && bytes.length <= 120) return { status: "failed", reason: "insufficient_asset_content" };
+    const text2 = asset ? "asset" : bytes.toString("utf8");
     if (!text2.trim()) return { status: "failed", reason: "empty_response" };
     if (antiBotChallengeBody(contentType, text2)) {
       return { status: "failed", reason: "anti_bot_challenge" };
@@ -12140,6 +12138,12 @@ async function fetchPublicText(raw, dependencies = {}) {
   const target = await validatedPublicTarget(raw, void 0, lookup2);
   if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
   return fetchValidatedPublicText(target, dependencies);
+}
+async function fetchPublicAssetHash(raw, dependencies = {}) {
+  const target = await validatedPublicTarget(raw, void 0, dependencies.lookup ?? defaultLookupForMode());
+  if (!target) return null;
+  const result = await fetchValidatedPublicText(target, dependencies, "image/*", true);
+  return result.status === "ok" ? result.contentHash : null;
 }
 async function fetchPublicTextWithRecovery(raw, dependencies = {}) {
   const lookup2 = dependencies.lookup ?? defaultLookupForMode();
@@ -12301,9 +12305,9 @@ function fallbackQueriesFromUser(user) {
   const candidates = [];
   for (const m of user.matchAll(/"([^"]{2,80})"/g)) candidates.push(`"${m[1]}"`);
   for (const m of user.matchAll(/\b((?:[a-z0-9-]+\.)+[a-z]{2,24})\b/gi)) {
-    const host = m[1].replace(/^www\./i, "").toLowerCase();
-    if (/^(?:x\.com|twitter\.com|t\.co|github\.com|linkedin\.com|youtube\.com|youtu\.be|google\.com|facebook\.com|instagram\.com)$/i.test(host)) continue;
-    candidates.push(`site:${host}`);
+    const host2 = m[1].replace(/^www\./i, "").toLowerCase();
+    if (/^(?:x\.com|twitter\.com|t\.co|github\.com|linkedin\.com|youtube\.com|youtu\.be|google\.com|facebook\.com|instagram\.com)$/i.test(host2)) continue;
+    candidates.push(`site:${host2}`);
   }
   return sanitizeQueryList(candidates);
 }
@@ -12913,8 +12917,11 @@ function twitterapiOfficialUrls(p) {
   push(p?.link);
   return out;
 }
+function pickProfileWebsite(urls) {
+  return urls.find((url) => canonicalOfficialWebsite(url) !== null) ?? urls[0];
+}
 function pickWebsite(p) {
-  return twitterapiOfficialUrls(p)[0];
+  return pickProfileWebsite(twitterapiOfficialUrls(p));
 }
 async function getProfile2(handle) {
   const key = env("TWITTERAPI_KEY");
@@ -13088,6 +13095,7 @@ function parseTweet(t) {
   const isReply = !!(t.isReply ?? t.inReplyToId ?? t.in_reply_to_status_id ?? t.in_reply_to_user_id) || /^@\w/.test(text2);
   return {
     text: text2,
+    id: String(t.id ?? t.id_str ?? "").trim() || void 0,
     at: Number.isFinite(at) ? at : null,
     views: num(t.viewCount, t.view_count, t.views) ?? 0,
     likes: num(t.likeCount, t.favorite_count, t.favoriteCount, t.likes) ?? 0,
@@ -13115,11 +13123,12 @@ async function searchFrom(handle, terms, key, queryType = "Top") {
   const d = await res.json();
   return d.tweets ?? d.data?.tweets ?? [];
 }
-var stamp = (p) => {
+var stamp = (p, author) => {
   const when = p.at ? new Date(p.at).toLocaleString("en-US", { month: "short", year: "numeric" }) : "";
   const v = p.views >= 1e3 ? `${Math.round(p.views / 1e3)}k views` : p.views ? `${p.views} views` : "";
   const meta = [when, v].filter(Boolean).join(" \xB7 ");
-  return (meta ? `[${meta}] ` : "") + p.text;
+  const source2 = p.id ? ` [Source: https://x.com/${author}/status/${p.id}]` : "";
+  return (meta ? `[${meta}] ` : "") + p.text + source2;
 };
 async function collectCorpus(handle) {
   const key = env("TWITTERAPI_KEY");
@@ -13147,11 +13156,11 @@ async function collectCorpus(handle) {
   const searched = dedup(searchedRaw);
   const all = [...originals, ...searched];
   const now = Date.now();
-  const CASHTAG = /\$[A-Za-z][A-Za-z0-9]{1,9}\b/g;
+  const CASHTAG2 = /\$[A-Za-z][A-Za-z0-9]{1,9}\b/g;
   const CHARTLINK = /dexscreener\.com|pump\.fun|birdeye\.so|dextools\.io|geckoterminal\.com|photon-sol|\bCA[:\s]/i;
   const score = (p) => {
     const kw = (p.text.match(new RegExp(CLAIM_RE.source, "gi")) ?? []).length;
-    const cashtags = (p.text.match(CASHTAG) ?? []).length;
+    const cashtags = (p.text.match(CASHTAG2) ?? []).length;
     const call = (cashtags > 0 ? 2 : 0) + (CHARTLINK.test(p.text) ? 2 : 0);
     const reach = Math.log10(p.views + p.likes + 1);
     const recency = p.at ? Math.max(0, 1 - (now - p.at) / (365 * 864e5)) : 0;
@@ -13162,7 +13171,7 @@ async function collectCorpus(handle) {
   const rankedKeys = new Set(ranked.map((p) => p.text.slice(0, 80).toLowerCase()));
   for (const p of newest) if (!rankedKeys.has(p.text.slice(0, 80).toLowerCase())) ranked.push(p);
   return {
-    posts: ranked.map(stamp),
+    posts: ranked.map((post) => stamp(post, u)),
     newest: newest.map((p) => p.text),
     teamSignalPosts: [...new Set(sId.map((tweet) => String(tweet?.text ?? tweet?.full_text ?? "").trim()).filter(Boolean))].slice(0, 30),
     count: { originals: originals.length, searched: searched.length, ranked: ranked.length }
@@ -13228,8 +13237,8 @@ async function checkFollowUncached(source2, target) {
     const nested = asRecord2(d.data);
     const records = Object.keys(nested).length ? [nested, d] : [d];
     const pick = (...keys) => {
-      for (const record4 of records) {
-        for (const k of keys) if (typeof record4[k] === "boolean") return record4[k];
+      for (const record5 of records) {
+        for (const k of keys) if (typeof record5[k] === "boolean") return record5[k];
       }
       return null;
     };
@@ -13283,25 +13292,25 @@ var audienceMonth = (row) => {
 };
 function tallyAudienceRow(tally, row) {
   if (!row || typeof row !== "object" || Array.isArray(row)) return;
-  const record4 = row;
+  const record5 = row;
   tally.profilesExamined += 1;
-  const month = audienceMonth(record4);
+  const month = audienceMonth(record5);
   if (month) {
     tally.creationMeasured += 1;
     tally.creationMonths.set(month, (tally.creationMonths.get(month) ?? 0) + 1);
   }
-  const posts = audienceNumber(record4, "statusesCount", "statuses_count", "tweetCount", "tweet_count");
+  const posts = audienceNumber(record5, "statusesCount", "statuses_count", "tweetCount", "tweet_count");
   if (posts !== null) {
     tally.postsMeasured += 1;
     if (posts === 0) tally.zeroPosts += 1;
   }
-  const avatarUrl = typeof record4.profilePicture === "string" ? record4.profilePicture : typeof record4.profile_image_url_https === "string" ? record4.profile_image_url_https : typeof record4.profile_image_url === "string" ? record4.profile_image_url : null;
+  const avatarUrl = typeof record5.profilePicture === "string" ? record5.profilePicture : typeof record5.profile_image_url_https === "string" ? record5.profile_image_url_https : typeof record5.profile_image_url === "string" ? record5.profile_image_url : null;
   const defaultAvatar = avatarUrl === null ? null : DEFAULT_AVATAR_URL.test(avatarUrl);
   if (defaultAvatar !== null) {
     tally.avatarMeasured += 1;
     if (defaultAvatar) tally.defaultAvatar += 1;
   }
-  const bio = typeof record4.description === "string" ? record4.description : null;
+  const bio = typeof record5.description === "string" ? record5.description : null;
   const emptyBio = bio === null ? null : bio.trim() === "";
   if (emptyBio !== null) {
     tally.bioMeasured += 1;
@@ -13311,8 +13320,8 @@ function tallyAudienceRow(tally, row) {
     tally.starterMeasured += 1;
     if (defaultAvatar && emptyBio) tally.starterAccounts += 1;
   }
-  const followers = audienceNumber(record4, "followers", "followersCount", "followers_count");
-  const following = audienceNumber(record4, "following", "followingCount", "following_count", "friends_count");
+  const followers = audienceNumber(record5, "followers", "followersCount", "followers_count");
+  const following = audienceNumber(record5, "following", "followingCount", "following_count", "friends_count");
   if (followers !== null && following !== null) {
     tally.ratioMeasured += 1;
     if (followers === 0 && following === 0) tally.balanced += 1;
@@ -13370,125 +13379,61 @@ function describeAudienceSample(sample) {
   const gap = thin.length ? ` The provider returned ${thin.join(", ")} for too little of the sample, so ${thin.length === 1 ? "that dimension stays" : "those dimensions stay"} unmeasured.` : "";
   return `Audience shape across ${basis}: ${shape} This describes the profiles read, not the account's full follower count, and a shape like this is never proof that a follower was bought.${gap}`;
 }
-async function dynamicNotable(organizationId) {
-  const org = organizationId?.trim();
-  if (!org) return [];
-  const url = env("SUPABASE_URL");
-  const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
-  if (!url || !key) return [];
-  try {
-    const r = await fetch(`${url.replace(/\/$/, "")}/rest/v1/reports?select=ref,score&organization_id=eq.${encodeURIComponent(org)}&kind=eq.person&verdict=eq.PASS&order=score.desc&limit=600`, {
-      headers: { apikey: key, ...!key.startsWith("sb_secret_") ? { authorization: `Bearer ${key}` } : {} },
-      signal: AbortSignal.timeout(8e3)
-    });
-    if (!r.ok) return [];
-    const rows = await r.json();
-    const accts = rows.filter((x) => x && typeof x.ref === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(x.ref)).map((x) => ({ handle: x.ref.replace(/^@/, ""), label: "ARGUS-verified" }));
-    return accts;
-  } catch {
-    return [];
+async function scanFollowerPages(subject, key, opts) {
+  const audience = newAudienceTally();
+  const u = subject.replace(/^@/, "");
+  let cursor = "";
+  let observedFollowers = 0;
+  let observedPage = false;
+  let coverageComplete = false;
+  for (let page = 0; page < opts.maxPages; page++) {
+    if (Date.now() > opts.deadline) break;
+    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res = await twFetch(url, key);
+    if (!res || !res.ok) break;
+    let d;
+    try {
+      d = asRecord2(await res.json());
+    } catch {
+      break;
+    }
+    if (twitterProviderFailure(d)) break;
+    const nested = asRecord2(d.data);
+    const followerValue = Array.isArray(d.followers) ? d.followers : Array.isArray(nested.followers) ? nested.followers : null;
+    if (!followerValue) break;
+    const followers = followerValue;
+    observedPage = true;
+    observedFollowers += followers.length;
+    for (const follower of followers) {
+      tallyAudienceRow(audience, follower);
+      opts.onRow?.(follower);
+    }
+    const hasNextPage = typeof d.has_next_page === "boolean" ? d.has_next_page : typeof nested.has_next_page === "boolean" ? nested.has_next_page : void 0;
+    const nextCursorValue = d.next_cursor ?? nested.next_cursor;
+    const nextCursor = typeof nextCursorValue === "string" ? nextCursorValue : "";
+    if (hasNextPage === false || hasNextPage === void 0 && observedFollowers >= opts.followerCount) {
+      coverageComplete = true;
+      break;
+    }
+    if (!hasNextPage || !nextCursor) break;
+    cursor = nextCursor;
   }
+  return { observedPage, coverageComplete, audience };
 }
-async function notableFollowers(subject, opts) {
+var AUDIENCE_MAX_PAGES = 6;
+async function followerAudience(subject, opts) {
   const key = env("TWITTERAPI_KEY");
-  if (!key) return { list: [], checked: 0, coverage: "unavailable" };
-  const subj = subject.replace(/^@/, "").toLowerCase();
-  const seen = /* @__PURE__ */ new Set();
-  const candidates = [...NOTABLE_ACCOUNTS, ...await dynamicNotable(opts?.organizationId)].filter((n) => {
-    const lk = n.handle.toLowerCase();
-    if (lk === subj || seen.has(lk)) return false;
-    seen.add(lk);
-    return true;
+  if (!key) return void 0;
+  const followerCount = opts?.followerCount ?? Infinity;
+  if (!Number.isFinite(followerCount) || followerCount <= 0) return void 0;
+  const pages = Math.ceil(followerCount / 200);
+  if (pages > AUDIENCE_MAX_PAGES) return void 0;
+  const scan = await scanFollowerPages(subject, key, {
+    maxPages: pages + 1,
+    followerCount,
+    deadline: Date.now() + (opts?.budgetMs ?? 2e4)
   });
-  const total = candidates.length;
-  const deadline = Date.now() + (opts?.budgetMs ?? 45e3);
-  const fc = opts?.followerCount ?? Infinity;
-  const enumPages = Math.ceil(fc / 200);
-  if (Number.isFinite(fc) && enumPages <= Math.min(total, 150)) {
-    const set = new Map(candidates.map((n) => [n.handle.toLowerCase(), n]));
-    const hits2 = [];
-    const got = /* @__PURE__ */ new Set();
-    const audience = newAudienceTally();
-    const u = subject.replace(/^@/, "");
-    let cursor = "";
-    let observedFollowers = 0;
-    let observedPage = false;
-    let coverageComplete = false;
-    for (let page = 0; page < enumPages + 2; page++) {
-      if (Date.now() > deadline) break;
-      const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-      const res = await twFetch(url, key);
-      if (!res || !res.ok) break;
-      let d;
-      try {
-        d = asRecord2(await res.json());
-      } catch {
-        break;
-      }
-      if (twitterProviderFailure(d)) break;
-      const nested = asRecord2(d.data);
-      const followerValue = Array.isArray(d.followers) ? d.followers : Array.isArray(nested.followers) ? nested.followers : null;
-      if (!followerValue) break;
-      const followers = followerValue;
-      observedPage = true;
-      observedFollowers += followers.length;
-      for (const follower of followers) {
-        const f = asRecord2(follower);
-        tallyAudienceRow(audience, follower);
-        const h = String(f.userName ?? f.screen_name ?? "").toLowerCase();
-        const m = set.get(h);
-        if (m && !got.has(h)) {
-          got.add(h);
-          hits2.push({ handle: m.handle, label: m.label, size: "" });
-        }
-      }
-      const hasNextPage = typeof d.has_next_page === "boolean" ? d.has_next_page : typeof nested.has_next_page === "boolean" ? nested.has_next_page : void 0;
-      const nextCursorValue = d.next_cursor ?? nested.next_cursor;
-      const nextCursor = typeof nextCursorValue === "string" ? nextCursorValue : "";
-      if (hasNextPage === false || hasNextPage === void 0 && observedFollowers >= fc) {
-        coverageComplete = true;
-        break;
-      }
-      if (!hasNextPage || !nextCursor) break;
-      cursor = nextCursor;
-    }
-    return {
-      list: hits2,
-      checked: coverageComplete ? total : hits2.length,
-      coverage: coverageComplete ? "complete" : observedPage ? "partial" : "unavailable",
-      // The sample is complete only when pagination finished; an interrupted
-      // pass reports the rows it read as a floor, never as the audience.
-      audience: sealAudienceSample(audience, coverageComplete)
-    };
-  }
-  const REVERSE_CAP = 500;
-  const toCheck = candidates.slice(0, REVERSE_CAP);
-  const hits = [];
-  const CHUNK = 15;
-  let checked = 0;
-  for (let i = 0; i < toCheck.length; i += CHUNK) {
-    if (Date.now() > deadline) break;
-    const slice = toCheck.slice(i, i + CHUNK);
-    const res = await Promise.all(
-      slice.map(async (n) => {
-        const rel = await checkFollow(n.handle, subject);
-        return { notable: n, rel };
-      })
-    );
-    let observedInChunk = 0;
-    for (const { notable, rel } of res) {
-      if (!rel || rel.following === null) continue;
-      observedInChunk += 1;
-      checked += 1;
-      if (rel.following) hits.push({ handle: notable.handle, label: notable.label, size: "" });
-    }
-    if (observedInChunk === 0) break;
-  }
-  return {
-    list: hits,
-    checked,
-    coverage: toCheck.length === total && checked === toCheck.length && toCheck.length > 0 ? "complete" : checked > 0 ? "partial" : "unavailable"
-  };
+  return sealAudienceSample(scan.audience, scan.coverageComplete);
 }
 var ACK_POSITIVE = /\b(?:great|amazing|excited|proud|congrats|congratulations|grateful|honored|honoured|bullish|legend|brilliant|incredible|impressive|welcome)\b/i;
 var ACK_NEGATIVE = /\b(?:scam|rug|fraud|avoid|warning|beware|ponzi|stole|stolen|fake|do not trust|stay away)\b/i;
@@ -13799,7 +13744,7 @@ function roleClaimantSerperPlan(subjectHandle, subjectName3, domain) {
   const h = subjectHandle.replace(/^@/, "");
   const projectName2 = (subjectName3 ?? "").replace(/"/g, "").trim();
   const nameDistinct = projectName2 && projectName2.toLowerCase() !== h.toLowerCase() ? projectName2 : "";
-  const host = officialSearchHost(domain);
+  const host2 = officialSearchHost(domain);
   const quoted = [
     `"founder of @${h}"`,
     `"co-founder of @${h}"`,
@@ -13809,13 +13754,13 @@ function roleClaimantSerperPlan(subjectHandle, subjectName3, domain) {
     `"CEO at @${h}"`,
     `"Founder @${h}"`,
     ...nameDistinct ? [`"founder of ${nameDistinct}"`, `"${nameDistinct} founder"`, `"${nameDistinct} team"`] : [],
-    ...host ? [`"founder of ${host}"`] : []
+    ...host2 ? [`"founder of ${host2}"`] : []
   ];
   const googleOnly = [];
-  if (host) {
-    googleOnly.push(`site:${host} team`, `site:${host} founder`, `site:${host} about`);
+  if (host2) {
+    googleOnly.push(`site:${host2} team`, `site:${host2} founder`, `site:${host2} about`);
   }
-  if (host && projectName2) {
+  if (host2 && projectName2) {
     googleOnly.push(`site:linkedin.com "${projectName2}" founder`);
   }
   if (projectName2) {
@@ -14280,8 +14225,7 @@ function scanPostsForRoles(posts, projectName2, subjectHandle) {
       const role = match[1].toLowerCase().replace(/^our\s+/, "");
       const gap = match[0].slice(match[1].length, match[0].length - match[2].length - 1);
       if (!connectorAllowed(gap, AFTER_ROLE_CONNECTORS)) continue;
-      const founderOwned = /^(?:co-)?founders?$/i.test(role);
-      if (!founderOwned && !roleIsProjectOwned(p, match.index ?? 0, match[0].length, role)) continue;
+      if (!roleIsProjectOwned(p, match.index ?? 0, match[0].length, role)) continue;
       const kind = /advisor/i.test(role) ? "advisor" : "team";
       const handles = [match[2]];
       if (isPluralFounderRole(role)) {
@@ -14369,7 +14313,7 @@ function parseTeamJSON(text2, selfHandle, source2) {
     const parsed = JSON.parse(m[0]);
     const arr2 = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
     const self = (selfHandle ?? "").replace(/^@/, "").toLowerCase();
-    return arr2.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => {
+    return arr2.filter((t) => t && typeof t.name === "string" && isPlausiblePersonRosterName(t.name)).map((t) => {
       const role = (t.role || "team").toString();
       const kind = t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
       const linkedin = typeof t.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(t.linkedin) ? t.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
@@ -14378,6 +14322,7 @@ function parseTeamJSON(text2, selfHandle, source2) {
         name: t.name.trim(),
         handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : void 0,
         role,
+        biography: typeof t.biography === "string" && t.biography.trim() ? t.biography.trim() : void 0,
         kind,
         linkedin,
         evidence: typeof t.evidence === "string" ? t.evidence : void 0,
@@ -14390,12 +14335,12 @@ function parseTeamJSON(text2, selfHandle, source2) {
   }
 }
 var ADVERSE_NOT_ANSWERED = { completed: false, signals: [] };
-async function searchAdverseSignals(handle, kind, context, ticker) {
+async function searchAdverseSignals(handle, kind, context, ticker, contractAddress) {
   const h = handle.replace(/^@/, "");
   const targetEntityKey = `@${h.toLowerCase()}`;
-  const subject = kind === "project" ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}` : `the person behind X account @${h}`;
+  const subject = kind === "project" ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}${contractAddress ? ` (verified contract ${contractAddress})` : ""}` : `the person behind X account @${h}`;
   const system = `You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, stolen technology or intellectual property, insider dumping, unpaid obligations, misleading partnerships, or material community complaints/FUD. Search X, Reddit, Trustpilot and other review sites, scam-report sites, technical forums, and news. Run exact-handle, display-name, domain, and token-ticker variants with terms such as scam, rug, fraud, stolen, copied, exploit, drain, dump, complaint, lawsuit, warning, and beware. Search both quoted and unquoted variants. Prefer the original post, complaint, filing, or article over a social mirror or search-result page. Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. Reply with ONLY compact JSON: {"signals":[{"category":"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud","claim":"","source":"","source_url":""}]}. Never use em dashes.`;
-  const text2 = await generalWebSearch(system, `Subject: ${subject}. Surface direct source URLs that may contain complaints or accusations involving rug, slow rug, liquidity pull, wallet drains, exit scam, stolen technology, insider dumping, misleading claims, or other material misconduct. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}:v2` });
+  const text2 = await generalWebSearch(system, `Subject: ${subject}. Surface direct source URLs that may contain complaints or accusations involving rug, slow rug, liquidity pull, wallet drains, exit scam, stolen technology, insider dumping, misleading claims, or other material misconduct. Search the exact verified contract when supplied. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}:v3` });
   if (!text2) return ADVERSE_NOT_ANSWERED;
   const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return ADVERSE_NOT_ANSWERED;
@@ -14527,25 +14472,12 @@ var xAdapter = {
       const dormant = days >= 21;
       ctx.emit({ phase: "P0 \xB7 Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days. A project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
     }
-    if (!ctx.evidence.notableFollowers.length) {
-      ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Checking which top funds, founders, and KOLs follow the subject\u2026", source: "twitterapi.io", tone: "neutral" });
+    {
       const fcm = (ctx.evidence.profile.followers ?? "").match(/([\d.]+)\s*([KMB]?)/i);
       const followerCount = fcm ? Number(fcm[1]) * (/m/i.test(fcm[2]) ? 1e6 : /b/i.test(fcm[2]) ? 1e9 : /k/i.test(fcm[2]) ? 1e3 : 1) : void 0;
-      const scan = await notableFollowers(ctx.handle, { followerCount, organizationId: ctx.organizationId });
-      const nf = scan.list;
-      ctx.evidence.notableFollowers = nf;
-      if (nf.length) {
-        const coverageDetail = scan.coverage === "complete" ? `Followed by ${nf.length} of ${scan.checked} known accounts checked` : `Observed ${nf.length} notable follower${nf.length === 1 ? "" : "s"} before provider coverage became incomplete`;
-        ctx.emit({ phase: "P0 \xB7 Intake", label: scan.coverage === "complete" ? "Notable followers" : "Notable followers \xB7 partial coverage", detail: `${coverageDetail}: ${nf.slice(0, 8).map((n) => `@${n.handle}${n.label ? ` (${n.label})` : ""}`).join(", ")}${nf.length > 8 ? ", \u2026" : ""}.${scan.coverage === "complete" ? "" : " Unobserved relationships remain unknown."}`, source: "twitterapi.io", tone: scan.coverage === "complete" ? "good" : "warn" });
-      } else if (scan.coverage === "complete" && scan.checked > 0) {
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `None of the ${scan.checked} known funds/founders/KOLs checked follow this subject.`, source: "twitterapi.io", tone: "neutral" });
-      } else if (scan.coverage === "partial") {
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable follower check incomplete", detail: scan.checked > 0 ? `No notable follower was observed in ${scan.checked} returned relationship result${scan.checked === 1 ? "" : "s"}; unobserved accounts remain unknown, so ARGUS withheld the negative conclusion.` : "Some follower data returned, but full reference-set coverage was not established; ARGUS withheld the negative conclusion.", source: "twitterapi.io", tone: "warn" });
-      } else {
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable follower check unavailable", detail: "The relationship provider returned no observable results; ARGUS withheld the notable-follower conclusion.", source: "twitterapi.io", tone: "warn" });
-      }
-      if (scan.audience) {
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Audience shape", detail: describeAudienceSample(scan.audience), source: "twitterapi.io", tone: "neutral" });
+      const audience = await followerAudience(ctx.handle, { followerCount });
+      if (audience) {
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Audience shape", detail: describeAudienceSample(audience), source: "twitterapi.io", tone: "neutral" });
       }
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);
@@ -14566,6 +14498,7 @@ var xAdapter = {
         if (ack?.source_url) {
           const lead = `Model-search acknowledgment lead: ${ack.ack}, ${ack.sentiment} (${ack.source_url}); independent artifact verification required`;
           t.notes = [t.notes, lead].filter(Boolean).join(" \xB7 ");
+          t.acknowledgment_source_url = ack.source_url;
         }
         t.corroboration_verdict = classifyTestimonial(t);
         if (t.corroboration_verdict === "Contradicted" /* CONTRADICTED */) {
@@ -14634,8 +14567,8 @@ function teamDocumentUrlsFromIndex(domain, raw) {
   for (const value of matches) {
     try {
       const url = new URL(value.replace(/&amp;/g, "&").replace(/[.,;:]+$/, ""));
-      const host = url.hostname.toLowerCase();
-      if (host !== apex && !host.endsWith(`.${apex}`)) continue;
+      const host2 = url.hostname.toLowerCase();
+      if (host2 !== apex && !host2.endsWith(`.${apex}`)) continue;
       if (!TEAM_DOCUMENT_HINT.test(`${url.hostname}${url.pathname}`)) continue;
       url.hash = "";
       url.search = "";
@@ -14712,8 +14645,8 @@ function officialPortraitAnchors(html, pageUrl) {
     if (!raw || !PORTRAIT_IMAGE_HINT.test(hintCorpus) && !PORTRAIT_IMAGE_HINT.test(raw)) continue;
     try {
       const url = new URL(raw, pageUrl);
-      const host = url.hostname.toLowerCase();
-      if (url.protocol !== "https:" || url.username || url.password || url.port && url.port !== "443" || !host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || !PORTRAIT_FILE.test(url.pathname)) continue;
+      const host2 = url.hostname.toLowerCase();
+      if (url.protocol !== "https:" || url.username || url.password || url.port && url.port !== "443" || !host2 || host2 === "localhost" || host2.endsWith(".localhost") || host2.endsWith(".local") || host2.endsWith(".internal") || !PORTRAIT_FILE.test(url.pathname)) continue;
       url.hash = "";
       const normalized4 = url.toString();
       if (seen.has(normalized4)) continue;
@@ -14886,7 +14819,7 @@ function scanPageTextForCredits(text2, sourceUrl2, projectName2, anchors) {
       if (!words.length) continue;
       const name = words.join(" ").replace(/[.,;:]+$/, "");
       const key = creditKey(name);
-      if (!key || NON_PERSON_CREDITS.has(name.toLowerCase()) || seen.has(key)) continue;
+      if (!key || !isPlausiblePersonRosterName(name) || NON_PERSON_CREDITS.has(name.toLowerCase()) || seen.has(key)) continue;
       if (projectKey && (key === projectKey || projectKey.startsWith(key))) continue;
       seen.add(key);
       const handle = name.startsWith("@") ? name : anchors?.find((anchor) => anchor.kind === "x" && (creditKey(anchor.anchorText) === key || creditKey(anchor.value) === key))?.value;
@@ -15014,11 +14947,20 @@ function teamMemberIsDirectlySupported(text2, name, handle, role, projectName2) 
   const identities = [name, handle?.replace(/^@/, "")].filter((value) => Boolean(value?.trim())).map((value) => value.trim().toLowerCase());
   const lower = corpus.toLowerCase();
   const rolePattern = roleEvidencePattern(role);
+  const sectionHeadingSupportsRole = (identityOffset) => {
+    if (!/advisor|adviser/i.test(role)) return false;
+    const before = lower.slice(0, identityOffset);
+    const advisorHeading = Math.max(before.lastIndexOf("our advisors"), before.lastIndexOf("our advisers"));
+    if (advisorHeading < 0) return false;
+    const laterTeamHeading = before.lastIndexOf("our team");
+    return advisorHeading > laterTeamHeading;
+  };
   for (const identity of identities) {
     let offset = lower.indexOf(identity);
     while (offset >= 0) {
       const window = corpus.slice(Math.max(0, offset - 220), Math.min(corpus.length, offset + identity.length + 220));
-      if (rolePattern.test(window) && (!projectName2 || window.toLowerCase().includes(projectName2.toLowerCase()))) return true;
+      const roleSupported = rolePattern.test(window) || sectionHeadingSupportsRole(offset);
+      if (roleSupported && (!projectName2 || window.toLowerCase().includes(projectName2.toLowerCase()))) return true;
       offset = lower.indexOf(identity, offset + identity.length);
     }
   }
@@ -15035,7 +14977,7 @@ var canonicalSourceUrl = (value) => {
   }
 };
 var pageScore = (page) => (/\/(?:team|leadership|founders?|people)(?:[/.?#-]|$)/i.test(page.url) ? 100 : 0) + (/\b(?:co-?founders?|founders?)\b/i.test(page.text) ? 70 : 0) + (/\/(?:tokenomics|governance|transparency)(?:[/.?#-]|$)/i.test(page.url) ? 35 : 0) + Math.min(20, page.text.length / 1e3);
-var TEAM_EXTRACTION_SYSTEM = "You extract a crypto/tech project's team roster from fetched first-party project text. List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. Use the exact role the page states. Capture any X/Twitter handle and LinkedIn URL shown next to a person. For every person copy the exact PAGE URL that directly states that person's role. Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
+var TEAM_EXTRACTION_SYSTEM = "You extract a crypto/tech project's team roster from fetched first-party project text. List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. Use the person's role in THIS project (for example founder, team member, or advisor). When the page includes descriptive credentials or biography copy next to the person, preserve that entire phrase verbatim in biography; never split biography text into additional people. Capture any X/Twitter handle and LinkedIn URL shown next to a person. For every person copy the exact PAGE URL that directly states that person's role. Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
 var TEAM_EXTRACTION_TOOL = {
   name: "record_team",
   description: "Record named project people whose roles are directly stated in fetched first-party text.",
@@ -15049,6 +14991,7 @@ var TEAM_EXTRACTION_TOOL = {
           properties: {
             name: { type: "string" },
             role: { type: "string" },
+            biography: { type: "string", description: "Optional exact descriptive phrase shown for this person; preserve it verbatim" },
             twitter: { type: "string", description: "@handle if shown" },
             linkedin: { type: "string", description: "linkedin.com/in/... if shown" },
             source_url: { type: "string", description: "Exact PAGE URL from the supplied corpus that directly states this role" }
@@ -15074,10 +15017,11 @@ ${corpus}`,
     2048
   );
   if (!out?.people?.length) return [];
-  return out.people.filter((person) => person.name && person.name.trim()).flatMap((person) => {
+  return out.people.filter((person) => person.name && isPlausiblePersonRosterName(person.name)).flatMap((person) => {
     const rawName = person.name.trim();
     const displayName = /^[a-z][a-z'-]{1,30}$/.test(rawName) ? rawName[0].toUpperCase() + rawName.slice(1) : rawName;
     const role = (person.role || "team").toString();
+    const biography = typeof person.biography === "string" && person.biography.trim() ? person.biography.trim() : void 0;
     const kind = /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
     const handle = person.twitter && /^@?[A-Za-z0-9_]{2,30}$/.test(person.twitter.replace(/^@/, "")) ? "@" + person.twitter.replace(/^@/, "") : void 0;
     const modelLinkedin = person.linkedin && /linkedin\.com\/(in|company)\//i.test(person.linkedin) ? person.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
@@ -15097,6 +15041,7 @@ ${corpus}`,
       name: displayName,
       handle: boundHandle,
       role,
+      biography,
       kind,
       linkedin,
       evidence: `direct role statement on ${sourcePage.url}`,
@@ -15116,9 +15061,9 @@ async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
   const verifiedAuthors = new Set(verifiedTeam.flatMap((person) => [person.name, person.handle?.replace(/^@/, "")]).filter((value) => Boolean(value?.trim())).map((value) => value.trim().toLowerCase()));
   const searches = ["cofounder", "co-founder"];
   const hosts = [`discuss.${apex}`, `forum.${apex}`];
-  const results = await Promise.all(hosts.flatMap((host) => searches.map(async (query) => {
+  const results = await Promise.all(hosts.flatMap((host2) => searches.map(async (query) => {
     try {
-      const response = await fetch(`https://${host}/search.json?q=${encodeURIComponent(query)}`, {
+      const response = await fetch(`https://${host2}/search.json?q=${encodeURIComponent(query)}`, {
         headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "application/json" },
         redirect: "follow",
         signal: AbortSignal.timeout(8e3)
@@ -15130,7 +15075,7 @@ async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
         const authorNames = [post.username, post.name].filter((value) => Boolean(value?.trim())).map((value) => value.trim().toLowerCase());
         const slug = slugs.get(post.topic_id ?? -1);
         if (!authorNames.some((author) => verifiedAuthors.has(author)) || !slug || !Number.isInteger(post.post_number)) return [];
-        return [`https://${host}/t/${slug}/${post.topic_id}/${post.post_number}`];
+        return [`https://${host2}/t/${slug}/${post.topic_id}/${post.post_number}`];
       });
     } catch {
       return [];
@@ -15206,8 +15151,8 @@ function hostname(url) {
   }
 }
 function officialSiteAccessDeniedFinding(domain) {
-  const host = hostname(domain.includes("://") ? domain : `https://${domain}`);
-  return `The official site (${host}) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.`;
+  const host2 = hostname(domain.includes("://") ? domain : `https://${domain}`);
+  return `The official site (${host2}) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.`;
 }
 function isConfirmedOfficialSiteAccessDenial(site) {
   if (site.status !== "access_blocked") return false;
@@ -15593,8 +15538,8 @@ var escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var handleBacklinkPattern = (account) => new RegExp(`(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${escapeRe(account)}(?:[/?#"'\\s<]|$)`, "i");
 function isLinkHubUrl(value) {
   if (typeof value !== "string" || !value.trim()) return false;
-  const host = hostOf(value);
-  return Boolean(host && LINK_HUB_HOSTS.has(host));
+  const host2 = hostOf(value);
+  return Boolean(host2 && LINK_HUB_HOSTS.has(host2));
 }
 async function resolveLinkHubWebsite(rawHubUrl, handle, fetchDoc = fetchPublicText) {
   const account = handle.replace(/^@/, "");
@@ -15616,10 +15561,10 @@ async function resolveLinkHubWebsite(rawHubUrl, handle, fetchDoc = fetchPublicTe
     const external = /* @__PURE__ */ new Map();
     for (const raw of text2.match(/https?:\/\/[^\s"'<>()]+/gi) ?? []) {
       const cleaned = raw.replace(/[.,;:!?]+$/, "");
-      const host = hostOf(cleaned);
-      if (!host || LINK_HUB_HOSTS.has(host)) continue;
-      if (NON_WEBSITE_HOSTS.some((listed) => host === listed || host.endsWith(`.${listed}`))) continue;
-      const registrable = host.split(".").slice(-2).join(".");
+      const host2 = hostOf(cleaned);
+      if (!host2 || LINK_HUB_HOSTS.has(host2)) continue;
+      if (NON_WEBSITE_HOSTS.some((listed) => host2 === listed || host2.endsWith(`.${listed}`))) continue;
+      const registrable = host2.split(".").slice(-2).join(".");
       if (!external.has(registrable)) external.set(registrable, cleaned);
     }
     const handleKey = account.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -15998,6 +15943,383 @@ function deriveLaunchWindow(domainRegisteredAt, accountCreatedAt) {
   };
 }
 
+// server/adapters/entityContinuity.ts
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function strings(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string").map((item) => item.trim()).filter(Boolean) : [];
+}
+function nullableString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+function canonicalUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(?:utm_|ref$|source$)/i.test(key)) url.searchParams.delete(key);
+    }
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return value.trim().replace(/\/$/, "");
+  }
+}
+function host(value) {
+  try {
+    return new URL(value).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+function officialHosts(ctx) {
+  const values = [
+    ctx.evidence.profile.website,
+    ctx.evidence.projectToken?.homepage,
+    ...ctx.evidence.subjectOrientation?.sourceUrls ?? []
+  ].filter((value) => Boolean(value));
+  return new Set(values.map(host).filter(Boolean));
+}
+function sourceClass(url, official) {
+  const hostname2 = host(url);
+  if ([...official].some((candidate) => hostname2 === candidate || hostname2.endsWith(`.${candidate}`))) return "first_party";
+  if (/etherscan\.io$|solscan\.io$|basescan\.org$|arbiscan\.io$/.test(hostname2)) return "explorer";
+  if (/sec\.gov$|justice\.gov$|ftc\.gov$|europa\.eu$/.test(hostname2)) return "regulator";
+  if (/kucoin\.com$|mexc\.com$|binance\.com$|coinbase\.com$|kraken\.com$|bitget\.com$/.test(hostname2)) return "exchange";
+  return "secondary";
+}
+function buildEntityContinuityQueries(subject, ticker) {
+  const token = ticker?.trim() ? ` ${ticker.trim().replace(/^\$/, "")}` : "";
+  return [
+    `what happened to ${subject}`,
+    `${subject} formerly rebrand predecessor`,
+    `${subject}${token} token migration swap`,
+    `${subject}${token} old contract new contract`,
+    `${subject}${token} migration contract exchange support`
+  ];
+}
+function buildEntityContinuityRecoveryQueries(subject, aliases, ticker) {
+  const names = [...new Set([subject, ...aliases].map((value) => value.trim()).filter(Boolean))];
+  const currentTicker = ticker?.trim().replace(/^\$/, "") || null;
+  const predecessorTerms = names.filter((name) => name.toLowerCase() !== subject.toLowerCase()).slice(0, 2);
+  const pair = [...predecessorTerms, currentTicker].filter(Boolean).join(" ");
+  return [
+    `${pair || subject} 1:1 token swap old contract new contract`,
+    `${pair || subject} migration contract exchange support`,
+    `site:kucoin.com ${pair || subject} token swap`,
+    `site:mexc.com ${pair || subject} contract swap`,
+    `${pair || subject} official docs token migration contract`
+  ].filter((query, index, all) => query.trim() && all.indexOf(query) === index);
+}
+function parseJson(raw) {
+  const candidate = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  try {
+    return record(JSON.parse(candidate));
+  } catch {
+    return null;
+  }
+}
+function isCompletedContinuityExtraction(raw) {
+  return Boolean(raw && parseJson(raw));
+}
+function admittedUrls(value, organicUrls) {
+  return strings(value).map(canonicalUrl).filter((url) => organicUrls.has(url));
+}
+function validKind(value) {
+  const allowed = ["predecessor", "rebrand", "token_migration", "contract_replacement", "exchange_handling", "architecture_change", "current_status"];
+  return typeof value === "string" && allowed.includes(value) ? value : null;
+}
+function uniqueBy(values, key) {
+  const seen = /* @__PURE__ */ new Set();
+  return values.filter((value) => {
+    const candidate = key(value);
+    if (!candidate || seen.has(candidate)) return false;
+    seen.add(candidate);
+    return true;
+  });
+}
+function dateFromSourceUrl(value) {
+  const match = value.match(/(?:^|\D)(20\d{2})(0[1-9]|1[0-2])([0-2]\d|3[01])(?:\D|$)/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+}
+function ratioFromLifecycleText(value) {
+  const equation = value.match(/(\d+(?:\.\d+)?)\s+(?:old\s+)?([A-Z][A-Z0-9]{1,11})\s*=\s*(\d+(?:\.\d+)?)\s+(?:new\s+)?([A-Z][A-Z0-9]{1,11})/);
+  if (equation) return `${equation[1]} ${equation[2]} = ${equation[3]} ${equation[4]}`;
+  const ratio = value.match(/\b(?:ratio\s+of\s+)?(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\b/i);
+  return ratio ? `${ratio[1]}:${ratio[2]}` : null;
+}
+function recomputeContinuityCoverage(snapshot) {
+  snapshot.events = snapshot.events.map((event) => ({
+    ...event,
+    date: event.date ?? event.sourceUrls.map(dateFromSourceUrl).find((value) => Boolean(value)) ?? null
+  }));
+  snapshot.migrationRatio ??= snapshot.events.map((event) => ratioFromLifecycleText(`${event.title} ${event.detail}`)).find((value) => Boolean(value)) ?? null;
+  snapshot.migrationDate ??= snapshot.events.filter((event) => event.kind === "token_migration" || /swap|migration/i.test(`${event.title} ${event.detail}`)).map((event) => event.date).find((value) => Boolean(value)) ?? null;
+  if (!snapshot.events.some((event) => event.kind === "rebrand")) {
+    const rebrandReceipt = snapshot.events.find((event) => /\brebrand(?:ed|ing)?\b|\brenamed\b|\bbecame\b/i.test(`${event.title} ${event.detail}`));
+    if (rebrandReceipt) snapshot.events.push({
+      ...rebrandReceipt,
+      kind: "rebrand",
+      title: rebrandReceipt.title
+    });
+  }
+  const predecessor = snapshot.tokenLineage.find((node) => node.status === "predecessor");
+  const current = snapshot.tokenLineage.find((node) => node.status === "current");
+  const complete = Boolean(
+    (snapshot.oldContract || predecessor?.contract) && (snapshot.replacementContract || current?.contract) && snapshot.migrationRatio && snapshot.migrationDate && snapshot.events.some((event) => event.kind === "rebrand") && snapshot.events.some((event) => event.kind === "token_migration")
+  );
+  snapshot.predecessorName ??= predecessor?.name ?? null;
+  snapshot.oldTicker ??= predecessor?.ticker ?? null;
+  snapshot.oldContract ??= predecessor?.contract ?? null;
+  snapshot.replacementContract ??= current?.contract ?? null;
+  snapshot.marketHistory = snapshot.tokenLineage.filter((node) => node.status !== "migration").map((node) => ({ ticker: node.ticker, contract: node.contract, status: node.status, sourceUrls: node.sourceUrls }));
+  snapshot.coverage.state = complete ? "complete" : "partial";
+  snapshot.coverage.reason = complete ? "Historical aliases, the dated migration ratio and both sides of the token lineage were recovered from primary records." : "A lifecycle signal was found, but one or more predecessor, contract, migration-ratio or dated-event fields remain unresolved.";
+  snapshot.coverage.primarySourceCount = snapshot.sources.filter((source2) => source2.sourceClass !== "secondary").length;
+  return snapshot;
+}
+function mergeContinuitySnapshots(first, recovery) {
+  const merged = {
+    ...first,
+    historicalAliases: [.../* @__PURE__ */ new Set([...first.historicalAliases, ...recovery.historicalAliases])],
+    predecessorName: first.predecessorName ?? recovery.predecessorName,
+    oldTicker: first.oldTicker ?? recovery.oldTicker,
+    oldContract: first.oldContract ?? recovery.oldContract,
+    migrationRatio: first.migrationRatio ?? recovery.migrationRatio,
+    migrationDate: first.migrationDate ?? recovery.migrationDate,
+    replacementContract: first.replacementContract ?? recovery.replacementContract,
+    migrationContract: first.migrationContract ?? recovery.migrationContract,
+    currentStatus: first.currentStatus ?? recovery.currentStatus,
+    architectureChanges: [.../* @__PURE__ */ new Set([...first.architectureChanges, ...recovery.architectureChanges])],
+    exchangeHandling: [.../* @__PURE__ */ new Set([...first.exchangeHandling, ...recovery.exchangeHandling])],
+    tokenLineage: uniqueBy([...first.tokenLineage, ...recovery.tokenLineage], (node) => `${node.status}:${node.contract?.toLowerCase() || node.ticker?.toLowerCase() || node.name.toLowerCase()}`),
+    events: uniqueBy([...first.events, ...recovery.events], (event) => `${event.kind}:${event.date || ""}:${event.title.toLowerCase()}`),
+    sources: uniqueBy([...first.sources, ...recovery.sources], (source2) => source2.url),
+    aliasSearches: [],
+    marketHistory: [],
+    coverage: { ...first.coverage }
+  };
+  return recomputeContinuityCoverage(merged);
+}
+function normalizeEntityContinuity(raw, subject, organic, official, currentToken) {
+  const parsed = parseJson(raw);
+  if (!parsed) return null;
+  const organicByUrl = new Map(organic.map((item) => [canonicalUrl(item.url), item]));
+  const organicUrls = new Set(organicByUrl.keys());
+  const sources = [...organicByUrl.entries()].map(([url, result]) => ({
+    url,
+    title: result.title,
+    sourceClass: sourceClass(url, new Set(official))
+  }));
+  const primaryUrls = new Set(sources.filter((source2) => source2.sourceClass !== "secondary").map((source2) => source2.url));
+  const events = (Array.isArray(parsed.events) ? parsed.events : []).map(record).map((event) => {
+    const kind = validKind(event.kind);
+    const sourceUrls = admittedUrls(event.sourceUrls, organicUrls);
+    const title = nullableString(event.title);
+    const detail = nullableString(event.detail);
+    if (!kind || !title || !detail || !sourceUrls.some((url) => primaryUrls.has(url))) return null;
+    return { date: nullableString(event.date), kind, title, detail, sourceUrls };
+  }).filter((event) => Boolean(event));
+  const lineage = (Array.isArray(parsed.tokenLineage) ? parsed.tokenLineage : []).map(record).map((node) => {
+    const sourceUrls = admittedUrls(node.sourceUrls, organicUrls);
+    const name = nullableString(node.name);
+    const status = node.status === "predecessor" || node.status === "migration" || node.status === "current" ? node.status : null;
+    if (!name || !status || !sourceUrls.some((url) => primaryUrls.has(url))) return null;
+    return {
+      name,
+      ticker: nullableString(node.ticker),
+      contract: nullableString(node.contract),
+      chain: nullableString(node.chain),
+      status,
+      validFrom: nullableString(node.validFrom),
+      validTo: nullableString(node.validTo),
+      sourceUrls
+    };
+  }).filter((node) => Boolean(node));
+  if (currentToken?.contract && !lineage.some((node) => node.contract?.toLowerCase() === currentToken.contract.toLowerCase())) {
+    const currentSources = sources.filter((source2) => source2.sourceClass === "first_party").map((source2) => source2.url);
+    if (currentSources.length) lineage.push({
+      name: currentToken.name || subject,
+      ticker: currentToken.ticker ?? null,
+      contract: currentToken.contract,
+      chain: currentToken.chain ?? null,
+      status: "current",
+      validFrom: null,
+      validTo: null,
+      sourceUrls: currentSources.slice(0, 2)
+    });
+  }
+  const predecessor = lineage.find((node) => node.status === "predecessor");
+  const current = lineage.find((node) => node.status === "current");
+  const migration = lineage.find((node) => node.status === "migration");
+  const historicalAliases = [...new Set([
+    ...strings(parsed.historicalAliases),
+    predecessor?.name,
+    predecessor?.ticker
+  ].filter((value) => Boolean(value)).map((value) => value.trim()))];
+  const lifecycleFound = historicalAliases.length > 0 || events.some((event) => event.kind === "rebrand" || event.kind === "token_migration") || Boolean(predecessor);
+  const hasPrimary = primaryUrls.size > 0;
+  if (!lifecycleFound && !hasPrimary) return null;
+  const primarySourceCount = sources.filter((source2) => source2.sourceClass !== "secondary").length;
+  const complete = !lifecycleFound || Boolean(
+    predecessor?.contract && current?.contract && nullableString(parsed.migrationRatio) && events.some((event) => event.kind === "rebrand") && events.some((event) => event.kind === "token_migration")
+  );
+  return recomputeContinuityCoverage({
+    subject,
+    historicalAliases,
+    predecessorName: nullableString(parsed.predecessorName) ?? predecessor?.name ?? null,
+    oldTicker: nullableString(parsed.oldTicker) ?? predecessor?.ticker ?? null,
+    oldContract: nullableString(parsed.oldContract) ?? predecessor?.contract ?? null,
+    migrationRatio: nullableString(parsed.migrationRatio),
+    migrationDate: nullableString(parsed.migrationDate),
+    replacementContract: nullableString(parsed.replacementContract) ?? current?.contract ?? null,
+    migrationContract: nullableString(parsed.migrationContract) ?? migration?.contract ?? null,
+    currentStatus: nullableString(parsed.currentStatus),
+    architectureChanges: strings(parsed.architectureChanges),
+    exchangeHandling: strings(parsed.exchangeHandling),
+    tokenLineage: lineage,
+    events,
+    sources,
+    aliasSearches: [],
+    marketHistory: lineage.filter((node) => node.status !== "migration").map((node) => ({
+      ticker: node.ticker,
+      contract: node.contract,
+      status: node.status,
+      sourceUrls: node.sourceUrls
+    })),
+    coverage: {
+      required: Boolean(currentToken?.contract),
+      state: complete ? "complete" : "partial",
+      reason: complete ? "Historical aliases, migration mechanics and both sides of the token lineage were recovered from primary records." : "A lifecycle signal was found, but one or more predecessor, contract, migration-ratio or dated-event fields remain unresolved.",
+      primarySourceCount,
+      searchedAt: (/* @__PURE__ */ new Date()).toISOString()
+    }
+  });
+}
+var EXTRACTION_SYSTEM = `You extract entity and token lifecycle evidence from supplied web results. Return JSON only. Never infer a contract, ratio, date, alias, architecture change or status. Every event and tokenLineage node must include sourceUrls copied exactly from supplied pages. Prefer official project documents, official exchange notices, explorers and regulators. Secondary reporting is a lead only. Schema: {historicalAliases:string[], predecessorName:string|null, oldTicker:string|null, oldContract:string|null, migrationRatio:string|null, migrationDate:string|null, replacementContract:string|null, migrationContract:string|null, currentStatus:string|null, architectureChanges:string[], exchangeHandling:string[], tokenLineage:[{name,ticker,contract,chain,status:"predecessor"|"migration"|"current",validFrom,validTo,sourceUrls:string[]}], events:[{date,kind:"predecessor"|"rebrand"|"token_migration"|"contract_replacement"|"exchange_handling"|"architecture_change"|"current_status",title,detail,sourceUrls:string[]}]}`;
+async function collectEntityContinuity(ctx) {
+  const subject = ctx.evidence.projectToken?.name || ctx.evidence.profile.resolved_name || ctx.evidence.profile.display_name;
+  const currentToken = ctx.evidence.projectToken ? {
+    name: ctx.evidence.projectToken.name,
+    ticker: ctx.evidence.projectToken.symbol,
+    contract: ctx.evidence.projectToken.address,
+    chain: ctx.evidence.projectToken.chain
+  } : ctx.tokenAddress ? {
+    name: subject,
+    ticker: ctx.tokenSymbol,
+    contract: ctx.tokenAddress,
+    chain: ctx.tokenChain
+  } : void 0;
+  const searchedAt = (/* @__PURE__ */ new Date()).toISOString();
+  if (!groundedSearchProvisioned()) return {
+    subject,
+    historicalAliases: [],
+    predecessorName: null,
+    oldTicker: null,
+    oldContract: null,
+    migrationRatio: null,
+    migrationDate: null,
+    replacementContract: currentToken?.contract ?? null,
+    migrationContract: null,
+    currentStatus: null,
+    architectureChanges: [],
+    exchangeHandling: [],
+    tokenLineage: [],
+    events: [],
+    sources: [],
+    aliasSearches: [],
+    marketHistory: [],
+    coverage: { required: Boolean(currentToken?.contract), state: currentToken?.contract ? "unavailable" : "not_applicable", reason: "Lifecycle search requires Serper and a configured extraction model.", primarySourceCount: 0, searchedAt }
+  };
+  const organic = [];
+  const raw = await groundedSearch(EXTRACTION_SYSTEM, `Recover the full predecessor, rebrand, migration and contract history for ${subject}${currentToken?.ticker ? ` ($${currentToken.ticker})` : ""}. Challenge any clean-new-token framing and keep project architecture changes distinct from token price performance.`, {
+    cacheKey: `entity-continuity:${subject.toLowerCase()}:${currentToken?.contract?.toLowerCase() ?? "none"}`,
+    // The grounded-search cache currently stores extraction text but not the
+    // organic URL receipts required by normalizeEntityContinuity. Replaying
+    // only the text would correctly fail source admission and make a rescan
+    // less complete than the first run. The saved dossier is the lifecycle
+    // cache until result+receipt caching is atomic.
+    bypassCache: true,
+    queries: buildEntityContinuityQueries(subject, currentToken?.ticker),
+    onOrganicResults: (results) => organic.push(...results)
+  });
+  let snapshot = raw ? normalizeEntityContinuity(raw, subject, organic, officialHosts(ctx), currentToken) : null;
+  if (!snapshot) {
+    const completedEmptySearch = isCompletedContinuityExtraction(raw);
+    return {
+      subject,
+      historicalAliases: [],
+      predecessorName: null,
+      oldTicker: null,
+      oldContract: null,
+      migrationRatio: null,
+      migrationDate: null,
+      replacementContract: currentToken?.contract ?? null,
+      migrationContract: null,
+      currentStatus: null,
+      architectureChanges: [],
+      exchangeHandling: [],
+      tokenLineage: [],
+      events: [],
+      sources: organic.map((item) => ({ url: canonicalUrl(item.url), title: item.title, sourceClass: sourceClass(item.url, officialHosts(ctx)) })),
+      aliasSearches: [],
+      marketHistory: [],
+      coverage: {
+        required: Boolean(currentToken?.contract),
+        state: currentToken?.contract ? completedEmptySearch ? "complete" : "partial" : "not_applicable",
+        reason: completedEmptySearch ? "The history search completed and found no earlier project name, predecessor token, migration, or replacement contract. This is a completed negative search, not proof that no private or undisclosed history exists." : "The history search did not return a usable result, so earlier names and token history remain unchecked.",
+        primarySourceCount: 0,
+        searchedAt
+      }
+    };
+  }
+  if (snapshot.coverage.state !== "complete") {
+    const recoveryOrganic = [];
+    const recoveryRaw = await groundedSearch(
+      EXTRACTION_SYSTEM,
+      `Complete the verified token lineage for ${subject}. The broad pass discovered these possible historical names: ${snapshot.historicalAliases.join(", ") || "none"}. Resolve the predecessor ticker and contract, dated rebrand, migration ratio, replacement contract, migration contract, exchange handling and current status. A missing field must remain null.`,
+      {
+        cacheKey: `entity-continuity-recovery:v2:${subject.toLowerCase()}:${currentToken?.contract?.toLowerCase() ?? "none"}:${snapshot.historicalAliases.map((alias) => alias.toLowerCase()).sort().join(":")}`,
+        bypassCache: true,
+        queries: buildEntityContinuityRecoveryQueries(subject, snapshot.historicalAliases, currentToken?.ticker),
+        onOrganicResults: (results) => recoveryOrganic.push(...results)
+      }
+    );
+    const recovered = recoveryRaw ? normalizeEntityContinuity(recoveryRaw, subject, recoveryOrganic, officialHosts(ctx), currentToken) : null;
+    if (recovered) snapshot = mergeContinuitySnapshots(snapshot, recovered);
+  }
+  if (snapshot.historicalAliases.length) {
+    const aliasOrganic = [];
+    const aliasQueries = snapshot.historicalAliases.flatMap((alias) => [
+      `"${alias}" team founders leadership`,
+      `"${alias}" security audit exploit incident`,
+      `"${alias}" token contract market price history`,
+      `"${alias}" legal regulatory governance`
+    ]).slice(0, 8);
+    await groundedSearch(
+      "Find primary-source records under historical project aliases. Return JSON only: {summary:string, sourceUrls:string[]}. Do not make claims without exact supplied URLs.",
+      `Repeat team, security, audit, incident, legal, governance and market-history discovery for the historical aliases of ${subject}: ${snapshot.historicalAliases.join(", ")}.`,
+      {
+        cacheKey: `entity-continuity-aliases:${snapshot.historicalAliases.map((alias) => alias.toLowerCase()).sort().join(":")}`,
+        bypassCache: true,
+        queries: aliasQueries,
+        onOrganicResults: (results) => aliasOrganic.push(...results)
+      }
+    );
+    const urls = [...new Set(aliasOrganic.map((item) => canonicalUrl(item.url)))];
+    snapshot.aliasSearches = snapshot.historicalAliases.map((alias) => ({
+      alias,
+      categories: ["team", "security", "market", "legal", "audit", "incident"],
+      sourceUrls: urls
+    }));
+    for (const result of aliasOrganic) {
+      const url = canonicalUrl(result.url);
+      if (!snapshot.sources.some((source2) => source2.url === url)) snapshot.sources.push({ url, title: result.title, sourceClass: sourceClass(url, officialHosts(ctx)) });
+    }
+  }
+  return snapshot;
+}
+
 // src/lib/json.ts
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -16334,8 +16656,8 @@ function hostOf2(value) {
   }
 }
 function websiteUrl(value) {
-  const host = hostOf2(value);
-  return host ? `https://${host}` : null;
+  const host2 = hostOf2(value);
+  return host2 ? `https://${host2}` : null;
 }
 function normalizeSections(input) {
   if (!input || input.length === 0) return [...DEFAULT_SECTIONS];
@@ -16453,9 +16775,9 @@ function normalizedCompanyName(value) {
   return value.trim().toLowerCase().replace(/&/g, " and ").replace(COMPANY_LEGAL_SUFFIX, " ").replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
 }
 function domainLabel(value) {
-  const host = hostOf2(value);
-  if (!host || !host.includes(".")) return "";
-  return normalizedCompanyName(host.split(".")[0]);
+  const host2 = hostOf2(value);
+  if (!host2 || !host2.includes(".")) return "";
+  return normalizedCompanyName(host2.split(".")[0]);
 }
 function relatedOfficialHosts(expected, candidate) {
   if (expected === candidate) return "exact_host";
@@ -16464,9 +16786,9 @@ function relatedOfficialHosts(expected, candidate) {
   }
   return null;
 }
-function registrableProjectDomain(host) {
-  const parts = host.split(".").filter(Boolean);
-  if (parts.length <= 2) return host;
+function registrableProjectDomain(host2) {
+  const parts = host2.split(".").filter(Boolean);
+  if (parts.length <= 2) return host2;
   const lastTwo = parts.slice(-2).join(".");
   return /^(?:co|com|org|net|gov|ac|edu)\.[a-z]{2}$/.test(lastTwo) ? parts.slice(-3).join(".") : lastTwo;
 }
@@ -16871,9 +17193,9 @@ async function enrichPersonViaMonid(params, fetcher = fetch) {
   }
   const data = outcome.data;
   if (!data || typeof data !== "object" || Array.isArray(data)) return { outcome: "no_match" };
-  const record4 = data;
-  if (!isNonEmptyString(record4.full_name) && !isNonEmptyString(record4.id)) return { outcome: "no_match" };
-  return { outcome: "match", record: record4 };
+  const record5 = data;
+  if (!isNonEmptyString(record5.full_name) && !isNonEmptyString(record5.id)) return { outcome: "no_match" };
+  return { outcome: "match", record: record5 };
 }
 
 // src/lib/employmentCurrency.ts
@@ -16898,14 +17220,14 @@ var monthYear2 = (value) => {
 };
 function employmentCurrency(records, company, person) {
   const who = person?.trim() ? person.trim() : "This person";
-  const matches = records.filter((record4) => typeof record4.company === "string" && sameCompany(record4.company, company));
+  const matches = records.filter((record5) => typeof record5.company === "string" && sameCompany(record5.company, company));
   if (!matches.length) {
     return {
       state: "absent",
       summary: `${who} has no ${company} role on their employment record. That record may simply be incomplete, so it is not evidence they were never involved.`
     };
   }
-  const open = matches.find((record4) => !record4.end?.trim());
+  const open = matches.find((record5) => !record5.end?.trim());
   if (open) {
     return {
       state: "current",
@@ -17086,8 +17408,8 @@ function socialHandle(value) {
   if (!raw.includes("/") && !raw.includes(".")) return raw.toLowerCase();
   try {
     const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
-    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-    if (host !== "twitter.com" && host !== "x.com") return null;
+    const host2 = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (host2 !== "twitter.com" && host2 !== "x.com") return null;
     const handle = decodeURIComponent(parsed.pathname.split("/").filter(Boolean)[0] ?? "").replace(/^@/, "");
     return handle ? handle.toLowerCase() : null;
   } catch {
@@ -17287,8 +17609,8 @@ var sha256 = (value) => createHash4("sha256").update(value).digest("hex");
 function safeOfficialAvatarUrl(raw) {
   try {
     const url = new URL(raw);
-    const host = url.hostname.toLowerCase();
-    const allowedHost = host === "pbs.twimg.com" || host === "abs.twimg.com" || host.endsWith(".twimg.com");
+    const host2 = url.hostname.toLowerCase();
+    const allowedHost = host2 === "pbs.twimg.com" || host2 === "abs.twimg.com" || host2.endsWith(".twimg.com");
     if (url.protocol !== "https:" || !allowedHost || url.username || url.password || url.port && url.port !== "443") return null;
     url.hash = "";
     return url;
@@ -17689,29 +18011,65 @@ async function collectProfilePhoto(ctx) {
 
 // server/adapters/teamEnrichment.ts
 var MAX_ENRICHED_MEMBERS = 15;
-async function enrichOne(member) {
+var ORGANIZATION_NAME2 = /\b(?:dao|foundation|collective|company|studio|studios|network|media|magazine|protocol|community)\b/i;
+var ORGANIZATION_BIO = /\b(?:nft\s+(?:project|collection|community)|digital\s+collectibles?|official\s+(?:account|community)|community[- ](?:led|owned)\s+(?:project|platform)|we\s+(?:build|are|create|represent)|our\s+(?:community|project|mission|platform|collection))\b/i;
+var COLLECTIVE_NAME = /^(?:women|men|builders|artists|developers|friends|fans|community)\s+(?:of|for)\b/i;
+function teamProfileEntityType(profile) {
+  const name = String(profile.name ?? "").replace(/\s+/g, " ").trim();
+  const bio = String(profile.bio ?? "").replace(/\s+/g, " ").trim();
+  return COLLECTIVE_NAME.test(name) || ORGANIZATION_NAME2.test(name) || ORGANIZATION_BIO.test(bio) ? "organization" : "unknown";
+}
+function preserveRelatedOrganization(ctx, member, profile) {
+  member.kind = "org";
+  member.name = profile.name?.trim() || member.name;
+  member.biography = profile.bio?.trim() || member.biography;
+  const originalRole = member.role;
+  member.role = "related organization";
+  member.evidence = `${member.evidence ?? "The official account mentioned this handle."} The handle's own profile describes an organization, so ARGUS excluded it from the team roster.`;
+  const handle = member.handle;
+  const key = handle.replace(/^@/, "").toLowerCase();
+  if (!ctx.evidence.associates.some((associate) => associate.associate_handle.replace(/^@/, "").toLowerCase() === key)) {
+    ctx.evidence.associates.push({
+      associate_handle: handle,
+      relation: "official-post mention",
+      notes: `Mentioned beside the role "${originalRole}", but ${handle}'s own profile identifies an organization rather than a person. Preserved as related context; not team evidence.`,
+      evidence_url: member.sourceUrl ?? profile.statusSourceUrl,
+      provider: "twitterapi",
+      evidence_origin: "deterministic",
+      artifact_verified: true
+    });
+  }
+}
+async function enrichOne(ctx, member) {
   const profile = await getProfile2(member.handle);
   if (!profile) return false;
   member.accountStatus = profile.accountStatus;
   member.followers = profile.followers;
   member.enrichmentProvider = "twitterapi";
   member.enrichmentSourceUrl = profile.statusSourceUrl;
-  if (!profile.image) return true;
+  if (teamProfileEntityType(profile) === "organization") {
+    preserveRelatedOrganization(ctx, member, profile);
+    return "organization";
+  }
+  if (!profile.image) return "person";
   const image = await fetchTrustedProfileImage(profile.image);
-  if (!image) return true;
+  if (!image) return "person";
   member.avatarUrl = image.url;
   member.avatarContentHash = image.contentHash;
   member.avatarCapturedAt = profile.statusCapturedAt;
-  return true;
+  return "person";
 }
 async function enrichFirstPartyTeamAvatars(ctx) {
   const webTeam = ctx.evidence.webTeam ?? [];
   const targets = webTeam.filter((member) => member.handle && member.handleProvenance === "subject_first_party" && !member.avatarUrl).slice(0, MAX_ENRICHED_MEMBERS);
   if (!targets.length) return;
   let enriched = 0;
+  let reclassified = 0;
   for (const member of targets) {
     try {
-      if (await enrichOne(member)) enriched++;
+      const result = await enrichOne(ctx, member);
+      if (result === "person") enriched++;
+      if (result === "organization") reclassified++;
     } catch (error) {
       ctx.emit({
         phase: "P1 \xB7 Team",
@@ -17729,6 +18087,15 @@ async function enrichFirstPartyTeamAvatars(ctx) {
       detail: `Enriched ${enriched} of ${targets.length} team handle${targets.length === 1 ? "" : "s"} the subject account itself bound (its own posts, following, or amplification) with a profile photo, follower count, and account status.`,
       source: "twitterapi.io",
       tone: "good"
+    });
+  }
+  if (reclassified) {
+    ctx.emit({
+      phase: "P1 \xB7 Team",
+      label: "Organizations separated from people",
+      detail: `Moved ${reclassified} organization account${reclassified === 1 ? "" : "s"} out of the team roster and into related-organization evidence after checking the handle's own profile.`,
+      source: "twitterapi.io",
+      tone: "neutral"
     });
   }
 }
@@ -17762,21 +18129,22 @@ async function lookupToken(address) {
     recordDex("token-pairs", "failed", "response_json_error");
     return null;
   }
-  if (!isRecord2(data) || !Array.isArray(data.pairs)) {
+  if (!isRecord2(data) || data.pairs !== null && !Array.isArray(data.pairs)) {
     recordDex("token-pairs", "partial", "result_shape_error");
     return null;
   }
-  if (!data.pairs.length) {
+  const rawPairs = Array.isArray(data.pairs) ? data.pairs : [];
+  if (!rawPairs.length) {
     recordDex("token-pairs", "succeeded", "no_pairs");
     return { address };
   }
-  const pairs = data.pairs.filter(isPair);
+  const pairs = rawPairs.filter(isPair);
   if (!pairs.length) {
     recordDex("token-pairs", "partial", "invalid_pair_rows");
     return null;
   }
   const top = pairs.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
-  const incomplete = pairs.length !== data.pairs.length || !top.chainId && !top.baseToken?.symbol && top.priceUsd == null && top.liquidity?.usd == null;
+  const incomplete = pairs.length !== rawPairs.length || !top.chainId && !top.baseToken?.symbol && top.priceUsd == null && top.liquidity?.usd == null;
   recordDex("token-pairs", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : void 0);
   return {
     address,
@@ -18040,11 +18408,11 @@ function normalizeDomain(value) {
   if (!raw) return null;
   try {
     const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
-    const host = url.hostname.replace(/^www\./i, "").toLowerCase().replace(/\.$/, "");
-    return host || null;
+    const host2 = url.hostname.replace(/^www\./i, "").toLowerCase().replace(/\.$/, "");
+    return host2 || null;
   } catch {
-    const host = raw.replace(/^www\./i, "").toLowerCase().replace(/[/:].*$/, "");
-    return host || null;
+    const host2 = raw.replace(/^www\./i, "").toLowerCase().replace(/[/:].*$/, "");
+    return host2 || null;
   }
 }
 function titleFromExcerpt(excerpt) {
@@ -18609,7 +18977,12 @@ var RELATIONSHIP_CAPABILITIES = /* @__PURE__ */ new Set([
 ]);
 var priorityWeight = { critical: 300, high: 200, medium: 100 };
 var costPenalty = { free: 0, low: 4, medium: 12, high: 24 };
+function organizationBoundByOfficialSite(evidence) {
+  const profile = evidence.profile;
+  return profile.profile_collection_state === "resolved" && profile.profile_provider === "twitterapi" && canonicalOfficialWebsite(profile.website) !== null && isOrganizationAccount(evidence);
+}
 function unresolvedIdentityQuestions(evidence, capability) {
+  if ((capability === "portfolio_and_outcomes" || capability === "fund_scale") && organizationBoundByOfficialSite(evidence)) return [];
   const blockingPredicates = capability === "fund_scale" ? ["official_identity", "legal_entity", "current_role"] : ["official_identity", "current_role"];
   return (evidence.basicFactQuestionLedger ?? []).filter((entry) => entry.status === "unanswered" && entry.critical && blockingPredicates.includes(entry.predicate)).map((entry) => entry.questionId);
 }
@@ -20284,8 +20657,8 @@ function isLinkedInPersonProfile(url) {
   if (!url) return false;
   try {
     const parsed = new URL(url);
-    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
-    if (host !== "linkedin.com" && !host.endsWith(".linkedin.com")) return false;
+    const host2 = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    if (host2 !== "linkedin.com" && !host2.endsWith(".linkedin.com")) return false;
     return /^\/in\/[^/]+/.test(parsed.pathname.toLowerCase());
   } catch {
     return false;
@@ -20295,9 +20668,9 @@ function isExactOfficialXProfile(url, handle) {
   if (!url) return false;
   try {
     const parsed = new URL(url);
-    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    const host2 = parsed.hostname.replace(/^www\./, "").toLowerCase();
     const path = parsed.pathname.replace(/\/+$/, "").toLowerCase();
-    return (host === "x.com" || host === "twitter.com") && path === `/${handle.replace(/^@/, "").toLowerCase()}`;
+    return (host2 === "x.com" || host2 === "twitter.com") && path === `/${handle.replace(/^@/, "").toLowerCase()}`;
   } catch {
     return false;
   }
@@ -20984,8 +21357,8 @@ function structuredValueIsSupported(passage, lead, trustedContextTokens = /* @__
   const required = valueTokens.length <= 3 ? valueTokens.length : Math.ceil(valueTokens.length * 0.7);
   return matched >= required;
 }
-function trustedHostContextTokens(host) {
-  return new Set(canonicalValueTokens(host.replace(/\./g, " ")).filter((token) => !HOST_CONTEXT_STOP_TOKENS.has(token)));
+function trustedHostContextTokens(host2) {
+  return new Set(canonicalValueTokens(host2.replace(/\./g, " ")).filter((token) => !HOST_CONTEXT_STOP_TOKENS.has(token)));
 }
 var MATERIAL_SECURITY_CLAIMS = [
   /\bclass\s+[a-z0-9]+\b/i,
@@ -21050,8 +21423,8 @@ function safeCandidateUrl(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
   try {
     const url = new URL(value);
-    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host || isIP2(host) || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM4.test(key))) return null;
+    const host2 = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host2 || isIP2(host2) || host2 === "localhost" || host2.endsWith(".localhost") || host2.endsWith(".local") || host2.endsWith(".internal") || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM4.test(key))) return null;
     url.hash = "";
     return url.toString();
   } catch {
@@ -21314,8 +21687,8 @@ function officialSiteBindingCandidate(handle, sourceUrl2) {
     return null;
   }
   if (!/^https?:$/.test(url.protocol)) return null;
-  const host = normalizedHost2(url.hostname);
-  if (PATH_TENANTED_HOSTS.has(host) || NON_COUNTERPARTY_RELATIONSHIP_HOSTS.has(host)) return null;
+  const host2 = normalizedHost2(url.hostname);
+  if (PATH_TENANTED_HOSTS.has(host2) || NON_COUNTERPARTY_RELATIONSHIP_HOSTS.has(host2)) return null;
   const registered = registrableDomain(url.toString());
   const brandLabel = registered?.split(".")[0] ?? "";
   const brandKey = looseTokens(brandLabel).join("");
@@ -21536,17 +21909,17 @@ function questionSearchGroups(questions, phase) {
 function deterministicFundingSearchQueries(ctx, questions) {
   if (questions.length !== 1 || questions[0]?.audience !== "project" || questions[0]?.predicate !== "funding") return void 0;
   const subject = subjectName(ctx).replace(/"/g, "").trim();
-  let host = "";
+  let host2 = "";
   try {
-    host = ctx.evidence.profile.website ? new URL(ctx.evidence.profile.website).hostname : "";
+    host2 = ctx.evidence.profile.website ? new URL(ctx.evidence.profile.website).hostname : "";
   } catch {
   }
   const ticker = ctx.evidence.projectToken?.verified ? (ctx.evidence.projectToken.symbol ?? "").replace(/"/g, "").trim() : "";
   const unscoped = ticker ? `"${subject}" ${ticker.startsWith("$") ? ticker : `$${ticker}`} funding round investors` : `"${subject}" crypto funding round valuation investors`;
   return [
-    host ? `site:${host} "${subject}" funding raised financing` : "",
-    host ? `site:${host} "${subject}" "Series A" OR "Series B" OR "seed round"` : "",
-    host ? `site:${host} (team OR about OR founders)` : "",
+    host2 ? `site:${host2} "${subject}" funding raised financing` : "",
+    host2 ? `site:${host2} "${subject}" "Series A" OR "Series B" OR "seed round"` : "",
+    host2 ? `site:${host2} (team OR about OR founders)` : "",
     unscoped
   ].filter(Boolean);
 }
@@ -22629,7 +23002,7 @@ function supportingSourcePassage(page, lead, aliases, trustedContextTokens = /* 
   if (!candidates.length) return null;
   return candidates.sort((left, right) => overlapScore(right, excerpt) - overlapScore(left, excerpt) || left.length - right.length)[0];
 }
-var normalizedHost2 = (host) => host.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
+var normalizedHost2 = (host2) => host2.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
 var PATH_TENANTED_HOSTS = /* @__PURE__ */ new Set([
   "bitbucket.org",
   "docs.google.com",
@@ -22644,9 +23017,9 @@ var PATH_TENANTED_HOSTS = /* @__PURE__ */ new Set([
   "youtube.com"
 ]);
 var CASE_INSENSITIVE_TENANT_PATH_HOSTS = /* @__PURE__ */ new Set(["github.com", "x.com"]);
-var sameOfficialDomain = (host, officialHosts) => {
-  const candidate = normalizedHost2(host);
-  return officialHosts.some((official) => {
+var sameOfficialDomain = (host2, officialHosts2) => {
+  const candidate = normalizedHost2(host2);
+  return officialHosts2.some((official) => {
     const configured = normalizedHost2(official);
     return candidate === configured || candidate.endsWith(`.${configured}`);
   });
@@ -22718,9 +23091,9 @@ var RELATIONSHIP_HOST_STOP_TOKENS = /* @__PURE__ */ new Set([
   "technologies"
 ]);
 function relationshipCounterpartyHostMatches(document, value) {
-  const host = normalizedHost2(document.host);
-  if (NON_COUNTERPARTY_RELATIONSHIP_HOSTS.has(host)) return false;
-  const registered = registrableDomain(`https://${host}`);
+  const host2 = normalizedHost2(document.host);
+  if (NON_COUNTERPARTY_RELATIONSHIP_HOSTS.has(host2)) return false;
+  const registered = registrableDomain(`https://${host2}`);
   const organizationLabel = registered?.split(".")[0] ?? "";
   const hostTokens = looseTokens(organizationLabel).filter((token) => !RELATIONSHIP_HOST_STOP_TOKENS.has(token));
   const valueTokens = looseTokens(value).filter((token) => !RELATIONSHIP_HOST_STOP_TOKENS.has(token));
@@ -22736,7 +23109,7 @@ var REGULATORY_HOSTS = [
   "fca.org.uk",
   "esma.europa.eu"
 ];
-var regulatorySourceSupports = (host, predicate) => ["legal_regulatory_event", "public_security", "legal_entity"].includes(predicate) && sameOfficialDomain(host, REGULATORY_HOSTS);
+var regulatorySourceSupports = (host2, predicate) => ["legal_regulatory_event", "public_security", "legal_entity"].includes(predicate) && sameOfficialDomain(host2, REGULATORY_HOSTS);
 var exactEntityKey = (value) => looseTokens(value).join(" ");
 var attributionScopeFor = (attributedEntity, aliases) => {
   const attributedKey = exactEntityKey(attributedEntity);
@@ -22947,11 +23320,11 @@ function officialVentureAssetPagePassage(document, page, lead, relationships) {
   }
   return null;
 }
-function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject, officialHosts = [], officialCounterpartyHosts = [], ventureAssetRelationships = []) {
+function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject, officialHosts2 = [], officialCounterpartyHosts = [], ventureAssetRelationships = []) {
   const page = documentText(document);
   if (!isAtomicValue(lead.predicate, lead.value)) return null;
   if (lead.predicate === "legal_regulatory_event" && (!lead.eventStatus || !lead.attributedEntity)) return null;
-  const official = sameOfficialScope(document, officialHosts);
+  const official = sameOfficialScope(document, officialHosts2);
   const publicSecurityRegulator = lead.predicate === "public_security" && regulatorySourceSupports(document.host, lead.predicate);
   const ventureAssetPredicate = lead.predicate === "public_security" || lead.predicate === "official_token";
   const authoritativeAssetRelationships = ventureAssetPredicate ? ventureAssetRelationships.filter((relationship) => {
@@ -23007,7 +23380,7 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
     if (!projectLeadIsRelevant({
       handle: subjectKey,
       display_name: displayName,
-      website: officialHosts[0] ?? null
+      website: officialHosts2[0] ?? null
     }, {
       predicate: lead.predicate,
       value: lead.value,
@@ -23104,9 +23477,9 @@ var MULTI_VALUE_PREDICATES = /* @__PURE__ */ new Set([
 var NON_INDEPENDENT_HOSTS = /(?:^|\.)(?:prnewswire|globenewswire|businesswire|accesswire|einpresswire|prweb|newsfilecorp|prlog|openpr|issuewire|medium|substack|mirror\.xyz|wordpress|blogspot|tumblr|dev\.to|beehiiv|notion\.site)\.[a-z]/i;
 function registrableDomain(url) {
   try {
-    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
-    const parts = host.split(".");
-    if (parts.length <= 2) return host;
+    const host2 = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    const parts = host2.split(".");
+    if (parts.length <= 2) return host2;
     const lastTwo = parts.slice(-2).join(".");
     return /^(?:co|com|org|net|gov|ac|edu)\.[a-z]{2}$/.test(lastTwo) ? parts.slice(-3).join(".") : lastTwo;
   } catch {
@@ -23117,13 +23490,13 @@ function pressWitnessDomains(sources) {
   const domains = /* @__PURE__ */ new Set();
   for (const source2 of sources) {
     if (source2.sourceClass !== "independent_press") continue;
-    let host;
+    let host2;
     try {
-      host = new URL(source2.url).hostname;
+      host2 = new URL(source2.url).hostname;
     } catch {
       continue;
     }
-    if (NON_INDEPENDENT_HOSTS.test(`.${host}.`)) continue;
+    if (NON_INDEPENDENT_HOSTS.test(`.${host2}.`)) continue;
     const domain = registrableDomain(source2.url);
     if (domain) domains.add(domain);
   }
@@ -23303,7 +23676,7 @@ function teamSourceCandidates(ctx, lead) {
     return [{ url, ...title ? { title } : {} }];
   });
 }
-function verificationLeadVariants(ctx, leads, officialHosts, officialCounterpartyHosts = []) {
+function verificationLeadVariants(ctx, leads, officialHosts2, officialCounterpartyHosts = []) {
   const variants = [];
   const seen = /* @__PURE__ */ new Set();
   const add = (lead, value, title, primary) => {
@@ -23314,8 +23687,8 @@ function verificationLeadVariants(ctx, leads, officialHosts, officialCounterpart
     seen.add(key);
     let official = false;
     try {
-      const host = new URL(sourceUrl2).hostname;
-      official = sameOfficialScope({ host, url: sourceUrl2 }, officialHosts) || sameOfficialScope({ host, url: sourceUrl2 }, officialCounterpartyHosts);
+      const host2 = new URL(sourceUrl2).hostname;
+      official = sameOfficialScope({ host: host2, url: sourceUrl2 }, officialHosts2) || sameOfficialScope({ host: host2, url: sourceUrl2 }, officialCounterpartyHosts);
     } catch {
     }
     const variantLead = { ...lead, sourceUrl: sourceUrl2 };
@@ -23472,10 +23845,10 @@ function evidenceUrlMatchesVentureIdentity(scope, venture) {
   } catch {
     return false;
   }
-  const host = normalizedHost2(url.hostname);
+  const host2 = normalizedHost2(url.hostname);
   const identityTokens = ventureIdentityTokens(venture);
   if (!identityTokens.length) return false;
-  if (PATH_TENANTED_HOSTS.has(host)) {
+  if (PATH_TENANTED_HOSTS.has(host2)) {
     let decodedPath;
     try {
       decodedPath = decodeURIComponent(url.pathname);
@@ -23485,7 +23858,7 @@ function evidenceUrlMatchesVentureIdentity(scope, venture) {
     const pathTokens = looseTokens(decodedPath);
     return identityTokens.some((token) => pathTokens.includes(token));
   }
-  const hostLabels = host.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
+  const hostLabels = host2.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
   return identityTokens.some((token) => hostLabels.includes(token));
 }
 function verifiedVentureOfficialScopes(venture) {
@@ -23553,8 +23926,8 @@ function scopeMatchesOrganizationIdentity(scope, name) {
   }
   const identityTokens = looseTokens(name).filter((token) => token.length >= 4 && !VENTURE_IDENTITY_STOP_WORDS.has(token));
   if (!identityTokens.length) return false;
-  const host = normalizedHost2(url.hostname);
-  if (PATH_TENANTED_HOSTS.has(host)) {
+  const host2 = normalizedHost2(url.hostname);
+  if (PATH_TENANTED_HOSTS.has(host2)) {
     let decodedPath;
     try {
       decodedPath = decodeURIComponent(url.pathname);
@@ -23564,7 +23937,7 @@ function scopeMatchesOrganizationIdentity(scope, name) {
     const pathTokens = looseTokens(decodedPath);
     return identityTokens.some((token) => pathTokens.includes(token));
   }
-  const hostLabels = host.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
+  const hostLabels = host2.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
   const lastLabel = hostLabels.at(-1) ?? "";
   const penultimateLabel = hostLabels.at(-2) ?? "";
   const suffixWidth = hostLabels.length >= 3 && lastLabel.length === 2 && COMMON_COUNTRY_PUBLIC_SUFFIX_LABELS.has(penultimateLabel) ? 2 : 1;
@@ -23579,9 +23952,9 @@ function verifiedOrganizationScope(scope, name) {
   } catch {
     return null;
   }
-  const host = normalizedHost2(url.hostname);
-  if (PATH_TENANTED_HOSTS.has(host)) return safeVentureScope(scope);
-  const hostLabels = host.split(".");
+  const host2 = normalizedHost2(url.hostname);
+  if (PATH_TENANTED_HOSTS.has(host2)) return safeVentureScope(scope);
+  const hostLabels = host2.split(".");
   const lastLabel = hostLabels.at(-1) ?? "";
   const penultimateLabel = hostLabels.at(-2) ?? "";
   const suffixWidth = hostLabels.length >= 3 && lastLabel.length === 2 && COMMON_COUNTRY_PUBLIC_SUFFIX_LABELS.has(penultimateLabel) ? 2 : 1;
@@ -23978,7 +24351,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   ]);
   ctx.evidence.basicFacts = [];
   let aliases = subjectAliases(ctx);
-  let officialHosts = [ctx.evidence.profile.website].filter((value) => Boolean(value)).flatMap((value) => {
+  let officialHosts2 = [ctx.evidence.profile.website].filter((value) => Boolean(value)).flatMap((value) => {
     try {
       return [new URL(value).toString()];
     } catch {
@@ -24045,7 +24418,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
       }
       if (!boundDocument || !boundIdentity) continue;
       const officialScope = `${candidate.origin}/`;
-      officialHosts = [.../* @__PURE__ */ new Set([...officialHosts, officialScope])];
+      officialHosts2 = [.../* @__PURE__ */ new Set([...officialHosts2, officialScope])];
       aliases = [.../* @__PURE__ */ new Set([...aliases, boundIdentity])];
       ctx.evidence.profile.website = officialScope;
       ctx.evidence.profile.display_name = boundIdentity;
@@ -24082,7 +24455,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   const primaryVerificationLeads = mergeLeads(primaryLeads, primaryBindingLeads);
   ctx.evidence.basicFactLeads = primaryVerificationLeads.map((lead) => ({ ...lead }));
   const verifyLeads = async (leads, sourceLimit, assetRelationships = ventureAssetRelationships) => {
-    const variants = verificationLeadVariants(ctx, leads, officialHosts, officialCounterpartyHosts);
+    const variants = verificationLeadVariants(ctx, leads, officialHosts2, officialCounterpartyHosts);
     const primarySources = leads.flatMap((lead) => {
       const sourceUrl2 = safeCandidateUrl(lead.sourceUrl);
       return sourceUrl2 ? [sourceUrl2] : [];
@@ -24098,7 +24471,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
         result,
         aliases,
         ctx.handle,
-        officialHosts,
+        officialHosts2,
         officialCounterpartyHosts,
         assetRelationships
       ) : null;
@@ -24252,22 +24625,25 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   });
   const attempts = primary.attempts + repair.attempts;
   const providerDetail = `primary ${primary.provider}:${primary.state}; repair ${repair.provider}:${repair.state}`;
+  const collectionCompleted = ["succeeded", "completed_empty"].includes(primary.state) && ["succeeded", "completed_empty", "skipped"].includes(repair.state) && (await Promise.all(sourceByUrl.values())).every((source2) => source2.status === "ok");
   if (!allLeads.length) {
     const completedEmpty = primary.state === "completed_empty" && (repair.state === "completed_empty" || repair.state === "skipped");
     if (completedEmpty) {
       return {
         state: "partial",
         detail: `broad search returned no source-linked basic-fact candidates; individual questions remain unresolved \xB7 ${providerDetail}`,
-        attempts
+        attempts,
+        collectionCompleted
       };
     }
     return {
       state: primary.state === "failed" && ["failed", "skipped"].includes(repair.state) ? "failed" : "partial",
       detail: `basic-facts discovery produced no usable leads \xB7 ${providerDetail}`,
-      attempts
+      attempts,
+      collectionCompleted
     };
   }
-  return ctx.evidence.basicFacts.length ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified \xB7 ${allLeads.length} leads \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts } : { state: "partial", detail: `${allLeads.length} leads \xB7 0 passed source verification \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts };
+  return ctx.evidence.basicFacts.length ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified \xB7 ${allLeads.length} leads \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts, collectionCompleted } : { state: "partial", detail: `${allLeads.length} leads \xB7 0 passed source verification \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts, collectionCompleted };
 }
 var basicFactsAdapter = {
   id: "basic-facts",
@@ -25676,7 +26052,7 @@ var ACCEPTED_CHECK_CONTRACTS = [
   new Set(PRE_ORGANIZATION_SAFETY_PERSON_CHECK_IDS),
   EXPECTED_PERSON_CHECK_IDS
 ];
-var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+var record2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
 var text = (value, max = 1e3) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
 function credentials() {
   const url = env("SUPABASE_URL")?.replace(/\/$/, "");
@@ -25756,7 +26132,7 @@ async function readExactRows(c, table, params) {
   }
   try {
     const parsed = await boundedJson(response);
-    if (!Array.isArray(parsed) || parsed.some((value) => !record(value))) {
+    if (!Array.isArray(parsed) || parsed.some((value) => !record2(value))) {
       throw new Error(`${table} returned malformed rows`);
     }
     exactCount(response, parsed.length);
@@ -25768,13 +26144,13 @@ async function readExactRows(c, table, params) {
   }
 }
 function parseNode(value) {
-  const row = record(value);
+  const row = record2(value);
   const key = row ? text(row.key, 1e3) : null;
   const type = row ? text(row.type, 100) : null;
   return row && key && type ? { ...row, key, type } : null;
 }
 function parseEdge(value) {
-  const row = record(value);
+  const row = record2(value);
   const src = row ? text(row.src, 1e3) : null;
   const dst = row ? text(row.dst, 1e3) : null;
   const type = row ? text(row.type, 100) : null;
@@ -25872,7 +26248,7 @@ async function readChecks(c, organizationId, ids) {
       const state = raw.state;
       const staleAt = raw.stale_at;
       const attestation = raw.attestation_state;
-      const metadata = record(raw.metadata);
+      const metadata = record2(raw.metadata);
       if (!group.includes(reportVersionId) || !EXPECTED_PERSON_CHECK_IDS.has(checkId) || state !== "complete" && state !== "partial" && state !== "unavailable" && state !== "failed" && state !== "not_run" || staleAt !== null && (typeof staleAt !== "string" || !Number.isFinite(Date.parse(staleAt))) || attestation !== "server_collected" && attestation !== "analyst_submitted" && attestation !== "legacy_unattested" || !metadata) {
         throw new Error("graph check-run metadata was malformed or outside the requested versions");
       }
@@ -25908,7 +26284,7 @@ async function readActiveVersionIds(c, organizationId, ids) {
 }
 function stableValue(value) {
   if (Array.isArray(value)) return value.map(stableValue);
-  const row = record(value);
+  const row = record2(value);
   if (!row) return value;
   return Object.fromEntries(
     Object.keys(row).sort().map((key) => [key, stableValue(row[key])])
@@ -26157,7 +26533,7 @@ async function collectTrustGraph(ctx, current) {
       return tie?.strength === "hard" && HARD_TIE_KEY.test(tie.key);
     });
     const status = connectedUnqualified.length ? "incomplete" : adverse.length ? "risk" : "clear";
-    const line = connectedUnqualified.length ? `${connectedUnqualified.length} graph connection${connectedUnqualified.length === 1 ? "" : "s"} could not be qualified because the linked immutable report is not the active case projection, or is stale, partial, or incompletely attested.` : adverse.length ? `${adverse.length} exact, coverage-qualified connection${adverse.length === 1 ? "" : "s"} lead to prior FAIL/AVOID reports. Review the frozen ties before relying on the score.` : connections.length ? `${connections.length} exact graph connection${connections.length === 1 ? "" : "s"} were reconciled; none lead to a coverage-qualified FAIL/AVOID report.` : "No connection to a prior authoritative ARGUS report was found in the organization graph.";
+    const line = connectedUnqualified.length ? `${connectedUnqualified.length} saved relationship${connectedUnqualified.length === 1 ? " is" : "s are"} excluded from this comparison because the linked case is older, incomplete, or no longer the active version. ${connectedUnqualified.length === 1 ? "It has not been treated as evidence about this subject and does not affect" : "They have not been treated as evidence about this subject and do not affect"} the score or verdict.` : adverse.length ? `${adverse.length} exact, coverage-qualified connection${adverse.length === 1 ? "" : "s"} lead to prior FAIL/AVOID reports. Review the frozen ties before relying on the score.` : connections.length ? `${connections.length} exact graph connection${connections.length === 1 ? "" : "s"} were reconciled; none lead to a coverage-qualified FAIL/AVOID report.` : "No connection to a prior authoritative ARGUS report was found in the organization graph.";
     const screen2 = {
       provider: "argus-graph",
       capturedAt,
@@ -26342,12 +26718,12 @@ function hasRecordedPartialPortfolioOutcome(verified, incomplete) {
   return verified * 100 >= (verified + incomplete) * MIN_VERIFIED_DISPOSITION_PERCENT;
 }
 var clean2 = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
-var hostMatches2 = (host, expected) => {
-  const left = host.replace(/^www\./i, "").toLowerCase();
+var hostMatches2 = (host2, expected) => {
+  const left = host2.replace(/^www\./i, "").toLowerCase();
   const right = expected.replace(/^www\./i, "").toLowerCase();
   return left === right || left.endsWith(`.${right}`);
 };
-var listedHost2 = (host, list) => list.some((candidate) => hostMatches2(host, candidate));
+var listedHost2 = (host2, list) => list.some((candidate) => hostMatches2(host2, candidate));
 function domainFromWebsite(value) {
   const scope = canonicalOfficialWebsite(value);
   return scope && isCredibleOfficialDomain(scope.domain) ? scope.domain : void 0;
@@ -26356,8 +26732,8 @@ function safeCandidateUrl2(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
   try {
     const url = new URL(value);
-    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host || isIP3(host) || host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return null;
+    const host2 = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host2 || isIP3(host2) || host2 === "localhost" || host2.endsWith(".local") || host2.endsWith(".internal")) return null;
     if ([...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM5.test(key))) return null;
     url.hash = "";
     return url.toString();
@@ -26632,21 +27008,21 @@ var defaultInvestorDomainResolver = async (lead, entity, lookupProfile = getProf
     profileWebsite
   };
 };
-function sourceClass(sourceUrl2, investorDomain, investorDomainScope, projectDomain, attribution = "direct_subject") {
-  let host;
+function sourceClass2(sourceUrl2, investorDomain, investorDomainScope, projectDomain, attribution = "direct_subject") {
+  let host2;
   try {
     const url = new URL(sourceUrl2);
     if (url.protocol !== "https:" || url.username || url.password) return "other_public";
-    host = url.hostname;
+    host2 = url.hostname;
   } catch {
     return "other_public";
   }
-  if (listedHost2(host, PRIMARY_HOSTS)) return "public_primary";
-  if (listedHost2(host, PRESS_HOSTS)) return "independent_press";
-  if (investorDomain && hostMatches2(host, investorDomain) && (!investorDomainScope || sourceMatchesOfficialWebsiteScope(sourceUrl2, investorDomainScope))) {
+  if (listedHost2(host2, PRIMARY_HOSTS)) return "public_primary";
+  if (listedHost2(host2, PRESS_HOSTS)) return "independent_press";
+  if (investorDomain && hostMatches2(host2, investorDomain) && (!investorDomainScope || sourceMatchesOfficialWebsiteScope(sourceUrl2, investorDomainScope))) {
     return attribution === "direct_subject" ? "first_party_subject" : "first_party_investor";
   }
-  if (projectDomain && hostMatches2(host, projectDomain)) return "first_party_project";
+  if (projectDomain && hostMatches2(host2, projectDomain)) return "first_party_project";
   return "other_public";
 }
 function htmlToVisibleText(raw) {
@@ -26776,8 +27152,8 @@ function supportsPortfolioRelationship(input) {
   if (!supportedSegment) return { supported: false };
   return { supported: true, excerpt: supportedSegment.slice(0, 700) };
 }
-function registrableApprox2(host) {
-  const parts = host.replace(/^www\./i, "").toLowerCase().split(".").filter(Boolean);
+function registrableApprox2(host2) {
+  const parts = host2.replace(/^www\./i, "").toLowerCase().split(".").filter(Boolean);
   if (parts.length <= 2) return parts.join(".");
   const twoLevelSuffix = /* @__PURE__ */ new Set(["co.uk", "org.uk", "com.au", "com.br", "co.nz", "co.jp"]);
   const tail = parts.slice(-2).join(".");
@@ -26880,7 +27256,7 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
       if (result.status !== "ok") {
         return { lead, entity, source: source2, officialProjectDomain, officialInvestorDomain, investorDomainProof, failed: true };
       }
-      const classification = sourceClass(
+      const classification = sourceClass2(
         result.url,
         officialInvestorDomain,
         officialInvestorDomainScope,
@@ -27061,8 +27437,8 @@ function safeCandidateUrl3(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
   try {
     const url = new URL(value);
-    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host || isIP4(host) || host === "localhost" || host.endsWith(".local") || host.endsWith(".internal") || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM6.test(key))) return null;
+    const host2 = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host2 || isIP4(host2) || host2 === "localhost" || host2.endsWith(".local") || host2.endsWith(".internal") || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM6.test(key))) return null;
     url.hash = "";
     return url.toString();
   } catch {
@@ -27336,12 +27712,12 @@ function supportsFundScaleClaim(input) {
   }
   return matches;
 }
-function hostMatches3(host, expected) {
-  const left = host.replace(/^www\./i, "").toLowerCase();
+function hostMatches3(host2, expected) {
+  const left = host2.replace(/^www\./i, "").toLowerCase();
   const right = expected.replace(/^www\./i, "").toLowerCase();
   return left === right || left.endsWith(`.${right}`);
 }
-var listedHost3 = (host, list) => list.some((candidate) => hostMatches3(host, candidate));
+var listedHost3 = (host2, list) => list.some((candidate) => hostMatches3(host2, candidate));
 function isRegulatoryRecordUrl(raw) {
   let url;
   try {
@@ -27350,20 +27726,20 @@ function isRegulatoryRecordUrl(raw) {
     return false;
   }
   if (url.protocol !== "https:") return false;
-  const host = url.hostname.replace(/^www\./i, "").toLowerCase();
+  const host2 = url.hostname.replace(/^www\./i, "").toLowerCase();
   const path = url.pathname;
-  if (host === "sec.gov" || host.endsWith(".sec.gov")) {
+  if (host2 === "sec.gov" || host2.endsWith(".sec.gov")) {
     return /^\/Archives\/edgar\/data\/\d{1,12}\/\d{18}\/[^/]+\.(?:html?|txt|xml|json)$/i.test(path) || /^\/firm\/summary\/\d+\/?$/i.test(path);
   }
-  if (host === "fca.org.uk" || host.endsWith(".fca.org.uk")) {
+  if (host2 === "fca.org.uk" || host2.endsWith(".fca.org.uk")) {
     return /\/(?:firm|individual)\/details\/\d+/i.test(path) || /\/services\/v1\/(?:firm|individual)\//i.test(path);
   }
-  if (host === "companieshouse.gov.uk" || host.endsWith(".companieshouse.gov.uk") || host === "find-and-update.company-information.service.gov.uk" || host === "api.company-information.service.gov.uk") {
+  if (host2 === "companieshouse.gov.uk" || host2.endsWith(".companieshouse.gov.uk") || host2 === "find-and-update.company-information.service.gov.uk" || host2 === "api.company-information.service.gov.uk") {
     return /^\/company\/[A-Z0-9]{6,12}(?:\/|$)/i.test(path);
   }
   return false;
 }
-function sourceClass2(document, investorDomain, investorDomainScope, attribution) {
+function sourceClass3(document, investorDomain, investorDomainScope, attribution) {
   let url;
   try {
     url = new URL(document.url);
@@ -27371,16 +27747,16 @@ function sourceClass2(document, investorDomain, investorDomainScope, attribution
   } catch {
     return "other_public";
   }
-  const host = url.hostname;
-  if (listedHost3(host, PRIMARY_HOSTS2) && isRegulatoryRecordUrl(document.url)) return "public_primary";
-  if (listedHost3(host, PRESS_HOSTS2)) return "independent_press";
-  if (investorDomain && hostMatches3(host, investorDomain) && (!investorDomainScope || sourceMatchesOfficialWebsiteScope(document.url, investorDomainScope))) {
+  const host2 = url.hostname;
+  if (listedHost3(host2, PRIMARY_HOSTS2) && isRegulatoryRecordUrl(document.url)) return "public_primary";
+  if (listedHost3(host2, PRESS_HOSTS2)) return "independent_press";
+  if (investorDomain && hostMatches3(host2, investorDomain) && (!investorDomainScope || sourceMatchesOfficialWebsiteScope(document.url, investorDomainScope))) {
     return attribution === "direct_subject" ? "first_party_subject" : "first_party_investor";
   }
   return "other_public";
 }
-function registrableApprox3(host) {
-  const parts = host.replace(/^www\./i, "").toLowerCase().split(".").filter(Boolean);
+function registrableApprox3(host2) {
+  const parts = host2.replace(/^www\./i, "").toLowerCase().split(".").filter(Boolean);
   if (parts.length <= 2) return parts.join(".");
   const twoLevelSuffix = /* @__PURE__ */ new Set(["co.uk", "org.uk", "com.au", "com.br", "co.nz", "co.jp"]);
   const tail = parts.slice(-2).join(".");
@@ -27572,7 +27948,7 @@ async function collectFundScale(ctx, dependencies = {}) {
       if (result.status !== "ok") {
         return { lead, entity, source: source2, officialInvestorDomain, investorDomainProof, matches: [], failed: true };
       }
-      const classification = sourceClass2(result, officialInvestorDomain, officialInvestorDomainScope, entity.attribution);
+      const classification = sourceClass3(result, officialInvestorDomain, officialInvestorDomainScope, entity.attribution);
       const matches = supportsFundScaleClaim({ document: result, sourceClass: classification, subjectAliases: aliases, now });
       return { lead, entity, source: source2, document: result, sourceClass: classification, officialInvestorDomain, investorDomainProof, matches, failed: false };
     }));
@@ -27735,6 +28111,44 @@ async function collectFundScale(ctx, dependencies = {}) {
   return { state: "partial", detail: `${successfulFetches} sources inspected \xB7 ${reportedClaims} reported \xB7 0 verified` };
 }
 
+// src/lib/officialXProfile.ts
+var X_RESERVED_PATHS = /* @__PURE__ */ new Set([
+  "i",
+  "home",
+  "search",
+  "intent",
+  "share",
+  "hashtag",
+  "explore",
+  "settings",
+  "messages",
+  "notifications",
+  "compose",
+  "login",
+  "signup",
+  "privacy",
+  "tos",
+  "about",
+  "download",
+  "jobs",
+  "help"
+]);
+function officialXProfileHandle(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    const host2 = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (!["https:", "http:"].includes(url.protocol) || host2 !== "x.com" && host2 !== "twitter.com") return null;
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length !== 1) return null;
+    const handle = segments[0];
+    if (!/^[A-Za-z0-9_]{2,30}$/.test(handle) || X_RESERVED_PATHS.has(handle.toLowerCase())) return null;
+    return handle;
+  } catch {
+    return null;
+  }
+}
+
 // src/lib/priceHistory.ts
 var NETWORK = {
   solana: "solana",
@@ -27758,7 +28172,7 @@ var NETWORK = {
 var PERIOD_SECONDS = { day: 86400, hour: 3600 };
 var VOLUME_WINDOW_MAX = 7;
 var GT = "https://api.geckoterminal.com/api/v2";
-function record2(value) {
+function record3(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 function finiteNumber(value) {
@@ -27861,9 +28275,9 @@ async function gt(path) {
 }
 async function topPool(network, address) {
   const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
-  const rows = record2(d).data;
-  const first = Array.isArray(rows) ? record2(rows[0]) : {};
-  const attributes = record2(first.attributes);
+  const rows = record3(d).data;
+  const first = Array.isArray(rows) ? record3(rows[0]) : {};
+  const attributes = record3(first.attributes);
   const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
   return id ? id.replace(`${network}_`, "") : null;
 }
@@ -27874,7 +28288,7 @@ async function fetchPriceHistory(address, chain, pairAddress) {
   if (!pool) return null;
   for (const timeframe of ["day", "hour"]) {
     const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
-    const rawList = record2(record2(record2(d).data).attributes).ohlcv_list;
+    const rawList = record3(record3(record3(d).data).attributes).ohlcv_list;
     const candles = Array.isArray(rawList) ? rawList.map(readCandle).filter((candle) => candle !== null) : [];
     if (candles.length < 3) continue;
     const summary = summarizeCandles(candles, timeframe);
@@ -27891,6 +28305,8 @@ var DEXSCREENER = "https://api.dexscreener.com/latest/dex/tokens";
 var DEXSCREENER_SEARCH = "https://api.dexscreener.com/latest/dex/search";
 var GECKOTERMINAL = "https://api.geckoterminal.com/api/v2";
 var MAX_CANDIDATES3 = 3;
+var MAX_DETAIL_FETCHES = 6;
+var coingeckoThrottle = { backoffMs: 1500 };
 var MAX_HISTORY_POINTS = 90;
 var PRICE_TOLERANCE = 0.25;
 var MIN_POOL_LIQUIDITY_USD = 25e3;
@@ -27932,10 +28348,39 @@ var finiteNumber2 = (value) => {
 };
 var cleanText2 = (value) => typeof value === "string" ? value.trim() : "";
 var normalized3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
-var projectName = (value) => value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*/)[0]?.trim() || value.trim();
+var projectName = (value) => value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*|\s+-\s+/)[0]?.trim() || value.trim();
+var CASHTAG = /\$([A-Za-z][A-Za-z0-9]{1,11})(?![A-Za-z0-9])/g;
+var BRACKETED_TICKER_SHAPE = /^\$?[A-Z][A-Z0-9]{1,11}$/;
+var MAX_TICKER_QUERIES = 3;
+var MAX_BIO_CASHTAGS_FOR_SELF_DECLARATION = 3;
+function cashtagTickers(text2) {
+  const out = [];
+  for (const match of (text2 ?? "").matchAll(CASHTAG)) {
+    const ticker = match[1].toUpperCase();
+    if (!out.includes(ticker)) out.push(ticker);
+  }
+  return out;
+}
+function bioTickerQueries(bio) {
+  const tickers = cashtagTickers(bio);
+  if (!tickers.length || tickers.length > MAX_BIO_CASHTAGS_FOR_SELF_DECLARATION) return [];
+  return tickers.slice(0, 2);
+}
+function cleanRegistryName(raw) {
+  return raw.replace(CASHTAG, " ").replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, " ").replace(/[^\p{L}\p{N}\s.&'-]/gu, " ").replace(/\s+/g, " ").replace(/^[\s.&'-]+|[\s.&'-]+$/g, "").trim();
+}
+var bracketedTickers = (raw) => {
+  const out = [];
+  for (const match of raw.matchAll(/\(([^)]{2,12})\)|\[([^\]]{2,12})\]/g)) {
+    const inner = (match[1] ?? match[2] ?? "").trim();
+    if (!BRACKETED_TICKER_SHAPE.test(inner)) continue;
+    const ticker = inner.replace(/^\$/, "").toUpperCase();
+    if (!out.includes(ticker)) out.push(ticker);
+  }
+  return out;
+};
 var GENERIC_NAME_SUFFIX = /^(?:finance|protocol|labs?|network|official|app|exchange|capital|fund|foundation|dao|token|coin|money|cash|club|world|games?|inu)$/i;
 function tokenSearchQueries(raw) {
-  const primary = projectName(raw);
   const queries = [];
   const push = (candidate) => {
     const trimmed = candidate.trim();
@@ -27943,12 +28388,15 @@ function tokenSearchQueries(raw) {
       queries.push(trimmed);
     }
   };
+  const primary = cleanRegistryName(projectName(raw)) || cleanRegistryName(raw);
   push(primary);
   const words = primary.split(/\s+/);
   while (words.length > 1 && GENERIC_NAME_SUFFIX.test(words[words.length - 1])) {
     words.pop();
     push(words.join(" "));
   }
+  const tickers = [...cashtagTickers(raw), ...bracketedTickers(raw)].filter((ticker, index, all) => all.indexOf(ticker) === index).slice(0, MAX_TICKER_QUERIES);
+  for (const ticker of tickers) push(ticker);
   return queries;
 }
 var MAX_LAUNCHED_PRODUCT_QUERIES = 4;
@@ -27985,15 +28433,27 @@ var coingeckoConfig = () => {
     tier: key ? "subscription/keyed" : "keyless"
   };
 };
+async function coingeckoFetch(url, headers4, label, tier) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response;
+    try {
+      response = await fetch(url, { headers: headers4, signal: AbortSignal.timeout(1e4) });
+    } catch {
+      return null;
+    }
+    if (response.status === 429 && attempt === 0) {
+      recordCall("coingecko", label, 0, `${tier} \xB7 http_429 \xB7 backing_off_once`, "partial");
+      await new Promise((resolve) => setTimeout(resolve, coingeckoThrottle.backoffMs));
+      continue;
+    }
+    return response;
+  }
+  return null;
+}
 async function coinSearch(query) {
   const { base, headers: headers4, tier } = coingeckoConfig();
-  let response;
-  try {
-    response = await fetch(`${base}/search?query=${encodeURIComponent(query)}`, {
-      headers: headers4,
-      signal: AbortSignal.timeout(1e4)
-    });
-  } catch {
+  const response = await coingeckoFetch(`${base}/search?query=${encodeURIComponent(query)}`, headers4, "project-search", tier);
+  if (!response) {
     recordCall("coingecko", "project-search", 0, `${tier} \xB7 transport_error`, "failed");
     return null;
   }
@@ -28055,10 +28515,8 @@ function rankedCandidates(query, rows) {
 async function coinDetails(id) {
   const { base, headers: headers4, tier } = coingeckoConfig();
   const url = `${base}/coins/${encodeURIComponent(id)}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
-  let response;
-  try {
-    response = await fetch(url, { headers: headers4, signal: AbortSignal.timeout(1e4) });
-  } catch {
+  const response = await coingeckoFetch(url, headers4, "project-details", tier);
+  if (!response) {
     recordCall("coingecko", "project-details", 0, `${tier} \xB7 transport_error`, "failed");
     return null;
   }
@@ -28157,45 +28615,75 @@ var officialHomepages = (details) => {
   );
 };
 var domainsMatch = (left, right) => left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
+function profileOfficialScopes(ctx) {
+  const profile = ctx.evidence.profile;
+  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
+  if (profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi" || !Number.isFinite(capturedAt)) return [];
+  const seen = /* @__PURE__ */ new Set();
+  const scopes = [];
+  for (const value of [profile.website, ...profile.official_websites ?? []]) {
+    const scope = canonicalOfficialWebsite(value);
+    if (!scope || seen.has(scope.domain)) continue;
+    seen.add(scope.domain);
+    scopes.push(scope);
+  }
+  return scopes;
+}
+var homepageOnProfileDomain = (scopes, homepages) => scopes.length ? homepages.find((candidate) => {
+  const tokenScope = canonicalOfficialWebsite(candidate);
+  return tokenScope !== null && scopes.some((scope) => domainsMatch(scope.domain, tokenScope.domain));
+}) : void 0;
 function verifyIdentity(ctx, details) {
   const links = isRecord4(details.links) ? details.links : {};
   const officialHandle = cleanText2(links.twitter_screen_name);
-  const exactX = officialHandle && normalizeHandle3(officialHandle) === normalizeHandle3(ctx.handle);
+  const matchedX = matchedOfficialX(ctx, details);
   const homepages = officialHomepages(details);
-  if (exactX) {
+  if (matchedX) {
     return {
       verification: "official_x",
       ...homepages[0] ? { homepage: homepages[0] } : {},
-      officialX: `@${officialHandle.replace(/^@/, "")}`
+      officialX: `@${matchedX}`
     };
   }
-  const profile = ctx.evidence.profile;
-  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
-  const profileScope = profile.profile_collection_state === "resolved" && profile.profile_provider === "twitterapi" && Number.isFinite(capturedAt) ? canonicalOfficialWebsite(profile.website) : null;
-  const homepage = profileScope ? homepages.find((candidate) => {
-    const tokenScope = canonicalOfficialWebsite(candidate);
-    return tokenScope !== null && domainsMatch(profileScope.domain, tokenScope.domain);
-  }) : void 0;
-  if (!profileScope || !homepage) return null;
+  const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), homepages);
+  if (!homepage) return null;
   return {
     verification: "official_domain",
     homepage,
     ...officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}
   };
 }
+var xHandleFromUrlRaw = officialXProfileHandle;
 var xHandleFromUrl = (value) => {
-  const raw = cleanText2(value);
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    if (host !== "x.com" && host !== "twitter.com") return null;
-    const handle = url.pathname.split("/").filter(Boolean)[0] ?? "";
-    return handle ? normalizeHandle3(handle) : null;
-  } catch {
-    return null;
-  }
+  const handle = xHandleFromUrlRaw(value);
+  return handle ? normalizeHandle3(handle) : null;
 };
+var COINGECKO_LINK_ARRAYS = [
+  "homepage",
+  "official_forum_url",
+  "announcement_url",
+  "blockchain_site",
+  "chat_url"
+];
+function firstMatchingOfficialX(details, auditedHandle) {
+  const audited = normalizeHandle3(auditedHandle);
+  if (!audited) return null;
+  const links = isRecord4(details.links) ? details.links : {};
+  const officialHandle = cleanText2(links.twitter_screen_name).replace(/^@/, "");
+  if (officialHandle && normalizeHandle3(officialHandle) === audited) return officialHandle;
+  for (const key of COINGECKO_LINK_ARRAYS) {
+    const value = links[key];
+    const rows = Array.isArray(value) ? value : value ? [value] : [];
+    for (const row of rows) {
+      const handle = xHandleFromUrlRaw(row);
+      if (handle && normalizeHandle3(handle) === audited) return handle;
+    }
+  }
+  return null;
+}
+function matchedOfficialX(ctx, details) {
+  return firstMatchingOfficialX(details, ctx.handle);
+}
 function dexIdentity(ctx, row) {
   const info = isRecord4(row.info) ? row.info : {};
   const websites = Array.isArray(info.websites) ? info.websites.flatMap((candidate) => {
@@ -28208,32 +28696,39 @@ function dexIdentity(ctx, row) {
     const handle = xHandleFromUrl(candidate.url);
     return handle ? [handle] : [];
   }) : [];
-  const profile = ctx.evidence.profile;
-  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
-  const profileScope = profile.profile_collection_state === "resolved" && profile.profile_provider === "twitterapi" && Number.isFinite(capturedAt) ? canonicalOfficialWebsite(profile.website) : null;
-  const homepage = profileScope ? websites.find((candidate) => {
-    const tokenScope = canonicalOfficialWebsite(candidate);
-    return tokenScope !== null && domainsMatch(profileScope.domain, tokenScope.domain);
-  }) : void 0;
+  const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), websites);
   const exactHandle = handles.find((handle) => handle === normalizeHandle3(ctx.handle));
-  if (!profileScope || !homepage || !exactHandle) return null;
+  if (!homepage || !exactHandle) return null;
   return {
     verification: "official_x",
     homepage,
     officialX: `@${exactHandle}`
   };
 }
+var SITE_EVM_ADDRESS = /0x[a-fA-F0-9]{40}/g;
+var SITE_SOLANA_ADDRESS = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/g;
+var addressKey = (address) => address.startsWith("0x") ? address.toLowerCase() : address;
 function siteContractCandidates(html, limit = 10) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const match of html.matchAll(/0x[a-fA-F0-9]{40}/g)) {
+  const take = (address) => {
+    const key = addressKey(address);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(address);
+    }
+    return out.length >= limit;
+  };
+  for (const match of html.matchAll(SITE_EVM_ADDRESS)) {
     const address = match[0];
-    const key = address.toLowerCase();
     if (/^0x0{40}$/i.test(address) || /^0x0{38}dead$/i.test(address)) continue;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(address);
-    if (out.length >= limit) break;
+    if (take(address)) return out;
+  }
+  const rest = html.replace(SITE_EVM_ADDRESS, " ");
+  for (const match of rest.matchAll(SITE_SOLANA_ADDRESS)) {
+    const address = match[1];
+    if (/^1+$/.test(address) || /^[0-9a-f]+$/i.test(address)) continue;
+    if (take(address)) break;
   }
   return out;
 }
@@ -28297,6 +28792,7 @@ function dexProjectCandidates(ctx, query, rows) {
     if (!identity) return [];
     const liquidity = isRecord4(row.liquidity) ? finiteNumber2(row.liquidity.usd) : void 0;
     const volume = isRecord4(row.volume) ? finiteNumber2(row.volume.h24) : void 0;
+    const pairCreatedAt = finiteNumber2(row.pairCreatedAt);
     return [{
       name,
       symbol,
@@ -28310,7 +28806,8 @@ function dexProjectCandidates(ctx, query, rows) {
       ...finiteNumber2(row.marketCap) !== void 0 ? { marketCapUsd: finiteNumber2(row.marketCap) } : {},
       ...finiteNumber2(row.fdv) !== void 0 ? { fdvUsd: finiteNumber2(row.fdv) } : {},
       ...volume !== void 0 ? { volume24hUsd: volume } : {},
-      ...liquidity !== void 0 ? { liquidityUsd: liquidity } : {}
+      ...liquidity !== void 0 ? { liquidityUsd: liquidity } : {},
+      ...pairCreatedAt !== void 0 ? { pairCreatedAt } : {}
     }];
   });
   return candidates.sort(
@@ -28375,14 +28872,13 @@ async function collectDexProjectToken(ctx, query) {
       ...candidate.volume24hUsd !== void 0 ? { volume24hUsd: candidate.volume24hUsd } : {},
       ...candidate.liquidityUsd !== void 0 ? { liquidityUsd: candidate.liquidityUsd } : {},
       pairAddress: candidate.pairAddress,
+      ...candidate.pairCreatedAt !== void 0 ? { pairCreatedAt: candidate.pairCreatedAt } : {},
       ...history ? { history } : {}
     }
   };
 }
 function cgHandleBoundHomepages(ctx, details) {
-  const links = isRecord4(details.links) ? details.links : {};
-  const officialHandle = cleanText2(links.twitter_screen_name);
-  if (!officialHandle || normalizeHandle3(officialHandle) !== normalizeHandle3(ctx.handle)) return [];
+  if (!matchedOfficialX(ctx, details)) return [];
   return officialHomepages(details);
 }
 function dexHandleBoundHomepages(ctx, row) {
@@ -28440,11 +28936,11 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
           recordCall("site-fetch", "token-declaration", 0, `reader_recovery_after_http_${response.status}`, "succeeded");
         } else {
           recordCall("site-fetch", "token-declaration", 0, `http_${response.status} \xB7 ${recovered.reason}`, "failed");
-          return null;
+          return { state: "failed" };
         }
       } else {
         recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
-        return null;
+        return { state: "failed" };
       }
     } else {
       html = (await response.text()).slice(0, 4e5);
@@ -28454,7 +28950,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
     const recovered = await recoverOfficialText(scope.canonicalUrl);
     if (recovered.status !== "ok") {
       recordCall("site-fetch", "token-declaration", 0, `transport_error \xB7 ${recovered.reason}`, "failed");
-      return null;
+      return { state: "failed" };
     }
     html = recovered.text.slice(0, 4e5);
     identityCapturedAt = captureTimestamp();
@@ -28463,16 +28959,40 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
   const candidates = siteContractCandidates(html);
   if (!candidates.length) {
     recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
-    return null;
+    return { state: "empty" };
   }
-  const resolved = [];
-  for (const address of candidates.slice(0, 6)) {
-    const pairs = await dexPairs(address);
-    if (pairs && pairs.length) resolved.push({ address, pairs, capturedAt: captureTimestamp() });
+  const batch = await dexTokenPairs(candidates);
+  if (!batch) {
+    recordCall("site-fetch", "token-declaration", 0, "candidate_resolution_failed", "failed");
+    return { state: "failed" };
   }
+  const pairsByAddress = /* @__PURE__ */ new Map();
+  const candidateKeys = new Set(candidates.map(addressKey));
+  for (const pair of batch.pairs) {
+    const base2 = isRecord4(pair.baseToken) ? pair.baseToken : {};
+    const key = addressKey(cleanText2(base2.address));
+    if (!candidateKeys.has(key)) continue;
+    pairsByAddress.set(key, [...pairsByAddress.get(key) ?? [], pair]);
+  }
+  if (batch.capped) {
+    for (const address of candidates) {
+      if (pairsByAddress.has(addressKey(address))) continue;
+      const pairs = await dexPairs(address);
+      if (!pairs) {
+        recordCall("site-fetch", "token-declaration", 0, "candidate_followup_failed", "failed");
+        return { state: "failed" };
+      }
+      if (pairs.length) pairsByAddress.set(addressKey(address), pairs);
+    }
+  }
+  const capturedAt = captureTimestamp();
+  const resolved = candidates.flatMap((address) => {
+    const pairs = pairsByAddress.get(addressKey(address));
+    return pairs && pairs.length ? [{ address, pairs, capturedAt }] : [];
+  });
   if (resolved.length !== 1) {
-    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", "succeeded");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", resolved.length ? "partial" : "succeeded");
+    return { state: resolved.length ? "failed" : "empty" };
   }
   const [only] = resolved;
   const best = [...only.pairs].sort((left, right) => {
@@ -28485,7 +29005,11 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
   const symbol = cleanText2(base.symbol);
   const chain = cleanText2(best.chainId);
   const pairAddress = cleanText2(best.pairAddress);
-  if (!symbol || !chain) return null;
+  const pairCreatedAt = finiteNumber2(best.pairCreatedAt);
+  if (!symbol || !chain) {
+    recordCall("site-fetch", "token-declaration", 0, "candidate_metadata_incomplete", "failed");
+    return { state: "failed" };
+  }
   const info = isRecord4(best.info) ? best.info : {};
   const priceUsd = finiteNumber2(best.priceUsd);
   const liquidityUsd = isRecord4(best.liquidity) ? finiteNumber2(best.liquidity.usd) : void 0;
@@ -28496,6 +29020,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
   const hasMarketRead = priceUsd !== void 0 || marketCapUsd !== void 0 || fdvUsd !== void 0 || volume24hUsd !== void 0;
   const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: void 0, attempts: 0 };
   return {
+    state: "declared",
     sourceUrl: scope.canonicalUrl,
     snapshot: {
       verified: true,
@@ -28528,30 +29053,39 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
       ...volume24hUsd !== void 0 ? { volume24hUsd } : {},
       ...historyResult.history ? { history: historyResult.history } : {},
       ...cleanText2(info.imageUrl) ? { imageUrl: cleanText2(info.imageUrl) } : {},
-      ...pairAddress ? { pairAddress } : {}
+      ...pairAddress ? { pairAddress } : {},
+      ...pairCreatedAt !== void 0 ? { pairCreatedAt } : {}
     }
   };
 }
 async function collectSiteDeclaredToken(ctx, fetchImpl = fetch, extraOfficialUrls = [], recoverOfficialText = fetchPublicTextWithRecovery) {
   const scopes = officialWebsiteScopes(ctx, extraOfficialUrls);
-  if (!scopes.length) return null;
+  if (!scopes.length) return { state: "empty" };
   const declared = [];
+  let failed = false;
   for (const scope of scopes) {
     const found = await resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialText);
-    if (found) declared.push(found);
+    if (found.state === "declared") declared.push(found);
+    if (found.state === "failed") failed = true;
   }
-  if (!declared.length) return null;
+  if (failed) return { state: "failed" };
+  if (!declared.length) return { state: "empty" };
   const addresses = new Set(declared.map((row) => row.snapshot.address.toLowerCase()));
   if (addresses.size !== 1) {
-    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "succeeded");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "partial");
+    return { state: "failed" };
   }
   return declared[0];
 }
+var DEX_BATCH_PAIR_CAP = 30;
 async function dexPairs(address) {
+  const result = await dexTokenPairs([address]);
+  return result ? result.pairs : null;
+}
+async function dexTokenPairs(addresses) {
   let response;
   try {
-    response = await fetch(`${DEXSCREENER}/${encodeURIComponent(address)}`, {
+    response = await fetch(`${DEXSCREENER}/${addresses.map((address) => encodeURIComponent(address)).join(",")}`, {
       signal: AbortSignal.timeout(8e3)
     });
   } catch {
@@ -28569,19 +29103,20 @@ async function dexPairs(address) {
     recordCall("dexscreener", "project-token-pairs", 0, "keyless \xB7 response_json_error", "failed");
     return null;
   }
-  if (!isRecord4(payload) || !Array.isArray(payload.pairs)) {
+  if (!isRecord4(payload) || payload.pairs !== null && !Array.isArray(payload.pairs)) {
     recordCall("dexscreener", "project-token-pairs", 0, "keyless \xB7 result_shape_error", "partial");
     return null;
   }
-  const pairs = payload.pairs.filter(isRecord4);
+  const rawPairs = Array.isArray(payload.pairs) ? payload.pairs : [];
+  const pairs = rawPairs.filter(isRecord4);
   recordCall(
     "dexscreener",
     "project-token-pairs",
     0,
-    `keyless \xB7 ${pairs.length ? `${pairs.length} pairs` : "no_pairs"}`,
-    pairs.length === payload.pairs.length ? "succeeded" : "partial"
+    `keyless \xB7 ${pairs.length ? `${pairs.length} pairs` : "no_pairs"}${addresses.length > 1 ? ` \xB7 ${addresses.length} addresses` : ""}`,
+    pairs.length === rawPairs.length ? "succeeded" : "partial"
   );
-  return pairs;
+  return { pairs, capped: rawPairs.length >= DEX_BATCH_PAIR_CAP };
 }
 var quotePriority = (symbol) => {
   switch (symbol.toUpperCase()) {
@@ -28616,7 +29151,8 @@ function selectPriceCorroboratedPair(rows, token, coingeckoPrice) {
       quoteSymbol: cleanText2(quoteToken.symbol),
       priceUsd,
       liquidityUsd: liquidity,
-      sourceUrl: cleanText2(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`
+      sourceUrl: cleanText2(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`,
+      ...finiteNumber2(row.pairCreatedAt) !== void 0 ? { pairCreatedAt: finiteNumber2(row.pairCreatedAt) } : {}
     }];
   });
   return candidates.sort(
@@ -28724,6 +29260,7 @@ async function collectProfileDeclaredToken(ctx, candidate) {
   const symbol = cleanText2(base.symbol).toUpperCase();
   const chain = cleanText2(best.chainId).toLowerCase();
   const pairAddress = cleanText2(best.pairAddress);
+  const pairCreatedAt = finiteNumber2(best.pairCreatedAt);
   if (!name || !symbol || !chain || !pairAddress) {
     return {
       state: "failed",
@@ -28776,22 +29313,84 @@ async function collectProfileDeclaredToken(ctx, candidate) {
       ...volume24hUsd !== void 0 ? { volume24hUsd } : {},
       ...liquidityUsd !== void 0 ? { liquidityUsd } : {},
       pairAddress,
+      ...pairCreatedAt !== void 0 ? { pairCreatedAt } : {},
       ...history ? { history } : {},
       ...cleanText2(info.imageUrl) ? { imageUrl: cleanText2(info.imageUrl) } : {}
     }
   };
 }
+var completedEmptyQueries = /* @__PURE__ */ new WeakMap();
+function emptyQueryLedger(evidence) {
+  let ledger = completedEmptyQueries.get(evidence);
+  if (!ledger) {
+    ledger = { coingecko: /* @__PURE__ */ new Set(), dexscreener: /* @__PURE__ */ new Set() };
+    completedEmptyQueries.set(evidence, ledger);
+  }
+  return ledger;
+}
+function registryContractMatchingDeclared(details, candidate) {
+  const platforms = isRecord4(details.platforms) ? details.platforms : {};
+  for (const [platform, value] of Object.entries(platforms)) {
+    const address = cleanText2(value);
+    if (!address || !sameAddress(address, candidate.address)) continue;
+    return { address: candidate.address, chain: PLATFORM_CHAIN[platform] ?? platform };
+  }
+  return null;
+}
+function recordDeclaredConflict(ctx, declared, registry, attempts) {
+  const handle = `@${normalizeHandle3(ctx.handle)}`;
+  ctx.evidence.unresolvedProjectToken = {
+    address: declared.candidate.address,
+    via: declared.candidate.via,
+    source: "official_bio",
+    state: "registry_conflict",
+    registry,
+    capturedAt: captureTimestamp()
+  };
+  const note = `the official X bio of ${handle} declares contract ${declared.candidate.address} (no exact-address DEX market), while the ${registry.provider === "official_site" ? "official site" : registry.provider} record bound to this account lists ${registry.name} ($${registry.symbol}) at ${registry.address} on ${registry.chain}. The two contracts differ, so no token was bound; a stale or migrated contract must be reconciled before token conduct is assessed.`;
+  ctx.recordCheck?.({
+    id: "project-token-identity",
+    status: "finding",
+    note,
+    provider: `twitterapi/${registry.provider}`,
+    sourceCount: 2
+  });
+  ctx.emit({
+    phase: "P0 \xB7 Routing",
+    label: "Official bio contract and registry contract disagree",
+    detail: note,
+    source: `twitterapi / ${registry.provider}`,
+    tone: "warn"
+  });
+  return { state: "executed", detail: "official bio contract and identity-bound registry contract differ", attempts };
+}
 async function collectProjectTokenIdentity(ctx, dependencies = {}) {
-  const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
+  const handleQuery = ctx.handle.replace(/^@/, "");
+  const query = projectName(ctx.evidence.profile.display_name || handleQuery);
   const registryQueries = projectRegistrySearchQueries(
-    ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""),
+    ctx.evidence.profile.display_name || handleQuery,
     ctx.evidence.subjectOrientation?.launchedProducts
   );
+  const displayKey = normalized3(ctx.evidence.profile.display_name || handleQuery);
+  const handleKey = normalized3(handleQuery);
+  const handleAlreadyCovered = !handleKey || handleKey.length < 2 || displayKey === handleKey || displayKey.includes(handleKey) || handleKey.includes(displayKey) || registryQueries.some((existing) => existing.toLowerCase() === handleQuery.toLowerCase());
+  if (!handleAlreadyCovered) {
+    registryQueries.push(handleQuery);
+  }
+  const profileFrozen = ctx.evidence.profile.profile_collection_state === "resolved" && ctx.evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(ctx.evidence.profile.profile_captured_at ?? ""));
+  if (profileFrozen) {
+    for (const ticker of bioTickerQueries(ctx.evidence.profile.bio)) {
+      if (!registryQueries.some((existing) => existing.toLowerCase() === ticker.toLowerCase())) {
+        registryQueries.push(ticker);
+      }
+    }
+  }
   const seeded = parseSeededContract(ctx);
-  const profileDeclaredToken = ctx.evidence.profile.profile_collection_state === "resolved" && ctx.evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(ctx.evidence.profile.profile_captured_at ?? "")) ? declaredTokenFromBio(ctx.evidence.profile.bio) : null;
+  const profileDeclaredToken = profileFrozen ? declaredTokenFromBio(ctx.evidence.profile.bio) : null;
   if (!registryQueries.length && !seeded && !profileDeclaredToken) {
     return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
   }
+  let declaredOutcome = null;
   if (profileDeclaredToken) {
     const declared = await collectProfileDeclaredToken(ctx, profileDeclaredToken);
     if (declared.state === "matched" && declared.snapshot) {
@@ -28829,26 +29428,14 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       });
       return { state: "executed", detail: declared.detail, attempts: declared.attempts };
     }
-    const providerUnavailable = declared.state === "failed";
-    ctx.recordCheck?.({
-      id: "project-token-identity",
-      status: providerUnavailable ? "unavailable" : "finding",
-      note: declared.detail,
-      provider: "twitterapi/dexscreener",
-      sourceCount: 1
-    });
+    declaredOutcome = { candidate: profileDeclaredToken, result: declared };
     ctx.emit({
       phase: "P0 \xB7 Routing",
-      label: providerUnavailable ? "Official bio contract could not be checked" : "Official bio contract has no resolved market",
-      detail: declared.detail,
+      label: declared.state === "failed" ? "Official bio contract could not be checked" : "Official bio contract has no resolved market",
+      detail: `${declared.detail} Continuing into the CoinGecko, DexScreener and official-site tiers before recording an outcome.`,
       source: "twitterapi / dexscreener",
       tone: "warn"
     });
-    return {
-      state: providerUnavailable ? "partial" : "executed",
-      detail: declared.detail,
-      attempts: declared.attempts
-    };
   }
   const registryHomepages = [];
   let selected = null;
@@ -28877,23 +29464,37 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       }
     }
   }
+  let searchFailures = 0;
+  const emptyLedger = emptyQueryLedger(ctx.evidence);
   if (!selected && registryQueries.length) {
     const seenIds = /* @__PURE__ */ new Set();
     let anySearchCompleted = false;
     for (const registryQuery of registryQueries) {
+      const queryKey = registryQuery.toLowerCase();
+      if (emptyLedger.coingecko.has(queryKey)) {
+        anySearchCompleted = true;
+        search ??= [];
+        continue;
+      }
       const rows = await coinSearch(registryQuery);
-      if (rows === null) continue;
+      if (rows === null) {
+        searchFailures += 1;
+        continue;
+      }
       anySearchCompleted = true;
       search = rows;
-      for (const row of rankedCandidates(registryQuery, rows)) {
+      const ranked = rankedCandidates(registryQuery, rows);
+      if (!ranked.length) emptyLedger.coingecko.add(queryKey);
+      for (const row of ranked) {
         if (seenIds.has(row.id)) continue;
         seenIds.add(row.id);
         candidates.push(row);
       }
     }
     if (!anySearchCompleted) search = null;
-    detailAttempts += candidates.length;
-    inspected = await Promise.all(candidates.map(async (candidate) => {
+    const inspectedCandidates = candidates.slice(0, MAX_DETAIL_FETCHES);
+    detailAttempts += inspectedCandidates.length;
+    inspected = await Promise.all(inspectedCandidates.map(async (candidate) => {
       const details2 = await coinDetails(candidate.id);
       if (!details2) return { details: null, selected: null };
       registryHomepages.push(...cgHandleBoundHomepages(ctx, details2));
@@ -28917,16 +29518,26 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     let dexSearchEverFailed = false;
     const dexNameMatches = /* @__PURE__ */ new Set();
     let dexNameMatchCount = 0;
+    let dexQueriesSkipped = 0;
     for (const fallbackQuery of dexQueries) {
       if (dexFallback.state === "matched") break;
+      const queryKey = fallbackQuery.toLowerCase();
+      if (emptyLedger.dexscreener.has(queryKey)) {
+        dexQueriesSkipped += 1;
+        continue;
+      }
       const retry = await collectDexProjectToken(ctx, fallbackQuery);
       dexAttempts += retry.attempts;
       if (retry.state === "failed") dexSearchEverFailed = true;
       if (retry.state === "empty") {
+        if (!(retry.nameMatchCount ?? 0) && !retry.nameMatches?.length) emptyLedger.dexscreener.add(queryKey);
         for (const match of retry.nameMatches ?? []) dexNameMatches.add(match);
         dexNameMatchCount = Math.max(dexNameMatchCount, retry.nameMatchCount ?? 0);
       }
       if (retry.state === "matched") dexFallback = retry;
+    }
+    if (dexFallback.state === "empty" && dexQueriesSkipped && dexQueriesSkipped === dexQueries.length) {
+      dexFallback = { ...dexFallback, detail: "DexScreener project search already completed empty earlier in this run" };
     }
     if (dexFallback.state !== "matched" && dexNameMatches.size) {
       dexFallback = {
@@ -28936,9 +29547,19 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
         nameMatchCount: Math.max(dexNameMatchCount, dexNameMatches.size)
       };
     }
-    const attempts = (query.length >= 2 ? 1 : 0) + detailAttempts + seedPairAttempts + dexAttempts;
+    const attempts = (query.length >= 2 ? 1 : 0) + detailAttempts + seedPairAttempts + dexAttempts + (declaredOutcome?.result.attempts ?? 0);
     if (dexFallback.state === "matched" && dexFallback.snapshot) {
       const snapshot2 = dexFallback.snapshot;
+      if (declaredOutcome && !sameAddress(snapshot2.address, declaredOutcome.candidate.address)) {
+        return recordDeclaredConflict(ctx, declaredOutcome, {
+          provider: "dexscreener",
+          address: snapshot2.address,
+          chain: snapshot2.chain,
+          name: snapshot2.name,
+          symbol: snapshot2.symbol,
+          sourceUrl: snapshot2.sourceUrl
+        }, attempts);
+      }
       ctx.evidence.projectToken = snapshot2;
       if (!canonicalOfficialWebsite(ctx.evidence.profile.website) && snapshot2.homepage) {
         ctx.evidence.profile.website = snapshot2.homepage;
@@ -28974,7 +29595,17 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       registryHomepages,
       dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery
     );
-    if (declared) {
+    if (declared.state === "declared" && declaredOutcome && !sameAddress(declared.snapshot.address, declaredOutcome.candidate.address)) {
+      return recordDeclaredConflict(ctx, declaredOutcome, {
+        provider: "official_site",
+        address: declared.snapshot.address,
+        chain: declared.snapshot.chain,
+        name: declared.snapshot.name,
+        symbol: declared.snapshot.symbol,
+        sourceUrl: declared.sourceUrl
+      }, attempts + 1);
+    }
+    if (declared.state === "declared") {
       ctx.evidence.projectToken = declared.snapshot;
       ctx.recordCheck?.({
         id: "project-token-identity",
@@ -28993,13 +29624,39 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       return { state: "executed", detail: `bound $${declared.snapshot.symbol} from the project's own site`, attempts: attempts + 1 };
     }
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
-    if (registryQueries.length > 0 && !search || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
-      const gaps = [
-        contractLookupFailed ? "CoinGecko contract lookup failed" : null,
-        registryQueries.length > 0 && !search ? "CoinGecko search failed" : null,
-        coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
-        dexSearchEverFailed ? "DexScreener project search failed" : null
-      ].filter((part) => Boolean(part));
+    const coinSearchIncomplete = registryQueries.length > 0 && (!search || searchFailures > 0);
+    const gaps = [
+      declared.state === "failed" ? "official site token declarations could not be fully resolved" : null,
+      contractLookupFailed ? "CoinGecko contract lookup failed" : null,
+      coinSearchIncomplete ? !search ? "CoinGecko search failed" : `CoinGecko search failed for ${searchFailures} of ${registryQueries.length} queries` : null,
+      coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
+      dexSearchEverFailed ? "DexScreener project search failed" : null,
+      declaredOutcome?.result.state === "failed" ? "DexScreener could not read the contract declared in the official bio" : null
+    ].filter((part) => Boolean(part));
+    if (declaredOutcome) {
+      const providerGap = gaps.length > 0;
+      ctx.evidence.unresolvedProjectToken = {
+        address: declaredOutcome.candidate.address,
+        via: declaredOutcome.candidate.via,
+        source: "official_bio",
+        state: providerGap ? "provider_unavailable" : "no_market",
+        capturedAt: captureTimestamp()
+      };
+      const note = providerGap ? `${declaredOutcome.result.detail} The registry tiers could not be fully read either (${gaps.join("; ")}); this is a provider gap, not an assessed result, and a rescan can close it.` : `${declaredOutcome.result.detail} The CoinGecko, DexScreener and official-site tiers also completed without binding a token to this account, so the declared contract stays unresolved.`;
+      ctx.recordCheck?.({
+        id: "project-token-identity",
+        status: providerGap ? "unavailable" : "finding",
+        note,
+        provider: "twitterapi/dexscreener/coingecko",
+        sourceCount: 1
+      });
+      return {
+        state: providerGap ? "partial" : "executed",
+        detail: declaredOutcome.result.detail,
+        attempts
+      };
+    }
+    if (gaps.length) {
       ctx.recordCheck?.({
         id: "project-token-identity",
         status: "unavailable",
@@ -29029,7 +29686,22 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       attempts
     };
   }
-  const { details, identity, contract } = selected;
+  const { details, identity } = selected;
+  let contract = selected.contract;
+  if (declaredOutcome) {
+    const declaredMatch = registryContractMatchingDeclared(details, declaredOutcome.candidate);
+    if (!declaredMatch) {
+      return recordDeclaredConflict(ctx, declaredOutcome, {
+        provider: "coingecko",
+        address: contract.address,
+        chain: contract.chain,
+        name: cleanText2(details.name),
+        symbol: cleanText2(details.symbol).toUpperCase(),
+        sourceUrl: `https://www.coingecko.com/en/coins/${encodeURIComponent(cleanText2(details.id))}`
+      }, 1 + detailAttempts + declaredOutcome.result.attempts);
+    }
+    contract = declaredMatch;
+  }
   const market = isRecord4(details.market_data) ? details.market_data : {};
   const currentPrice = isRecord4(market.current_price) ? finiteNumber2(market.current_price.usd) : void 0;
   const marketCap = isRecord4(market.market_cap) ? finiteNumber2(market.market_cap.usd) : void 0;
@@ -29097,7 +29769,11 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     ...circulatingSupply !== void 0 ? { circulatingSupply } : {},
     ...totalSupply !== void 0 ? { totalSupply } : {},
     ...maxSupply !== void 0 ? { maxSupply } : {},
-    ...pair ? { liquidityUsd: pair.liquidityUsd, pairAddress: pair.pairAddress } : {},
+    ...pair ? {
+      liquidityUsd: pair.liquidityUsd,
+      pairAddress: pair.pairAddress,
+      ...pair.pairCreatedAt !== void 0 ? { pairCreatedAt: pair.pairCreatedAt } : {}
+    } : {},
     ...ath ? { ath } : {},
     ...history ? { history } : {}
   };
@@ -29108,9 +29784,9 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
   ctx.recordCheck?.({
     id: "project-token-identity",
     status: "confirmed",
-    note: `$${snapshot.symbol} matched this project through its ${snapshot.verification === "official_x" ? "official X account" : "official website domain"} and canonical ${snapshot.chain} contract`,
-    provider: "coingecko",
-    sourceCount: 1
+    note: `$${snapshot.symbol} matched this project through its ${snapshot.verification === "official_x" ? "official X account" : "official website domain"} and canonical ${snapshot.chain} contract${declaredOutcome ? "; the registry lists the exact contract declared in the official X bio, which has no DEX market of its own" : ""}`,
+    provider: declaredOutcome ? "coingecko/twitterapi" : "coingecko",
+    sourceCount: declaredOutcome ? 2 : 1
   });
   if (pair) {
     ctx.recordCheck?.({
@@ -29147,7 +29823,8 @@ async function collectVentureTokenIdentity(venture) {
     if (!details) continue;
     const links = isRecord4(details.links) ? details.links : {};
     const officialHandle = cleanText2(links.twitter_screen_name);
-    const exactX = Boolean(ventureHandle && officialHandle && normalizeHandle3(officialHandle) === ventureHandle);
+    const matchedVentureX = ventureHandle ? firstMatchingOfficialX(details, ventureHandle) : null;
+    const exactX = Boolean(matchedVentureX);
     const homepages = officialHomepages(details);
     const domainHomepage = ventureScope ? homepages.find((candidateHome) => {
       const tokenScope = canonicalOfficialWebsite(candidateHome);
@@ -29179,7 +29856,7 @@ async function collectVentureTokenIdentity(venture) {
       address: contract.address,
       chain: contract.chain,
       ...homepages[0] ? { homepage: homepages[0] } : {},
-      ...officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {},
+      ...matchedVentureX ? { officialX: `@${matchedVentureX}` } : officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {},
       sourceUrl: sourceUrl2,
       capturedAt,
       producerSources: {
@@ -29228,11 +29905,11 @@ function officialHost(evidence) {
     return null;
   }
 }
-function isOfficialUrl(url, host) {
-  if (!host) return false;
+function isOfficialUrl(url, host2) {
+  if (!host2) return false;
   try {
     const candidate = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
-    return candidate === host || candidate.endsWith(`.${host}`);
+    return candidate === host2 || candidate.endsWith(`.${host2}`);
   } catch {
     return false;
   }
@@ -29306,8 +29983,8 @@ var VENTURE_HOST_STOP_WORDS = /* @__PURE__ */ new Set([
   "technology",
   "the"
 ]);
-function hostIdentifiesVenture(host, projectName2) {
-  const labels = host.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
+function hostIdentifiesVenture(host2, projectName2) {
+  const labels = host2.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
   const tokens = normalizeValue(projectName2).replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter((token) => token.length >= 4 && !VENTURE_HOST_STOP_WORDS.has(token));
   return tokens.some((token) => labels.includes(token));
 }
@@ -29322,14 +29999,14 @@ function verifiedVentureHosts(venture) {
   return [...new Set(hosts)];
 }
 function sourceMatchesVenture(candidate, venture) {
-  const host = sourceHost(candidate.url);
-  if (!host) return false;
+  const host2 = sourceHost(candidate.url);
+  if (!host2) return false;
   if (venture.domain) {
     const ventureUrl = safePublicUrl2(venture.domain.includes("://") ? venture.domain : `https://${venture.domain}`);
     const ventureHost = ventureUrl ? sourceHost(ventureUrl) : null;
-    if (ventureHost && (host === ventureHost || host.endsWith(`.${ventureHost}`))) return true;
+    if (ventureHost && (host2 === ventureHost || host2.endsWith(`.${ventureHost}`))) return true;
   }
-  return verifiedVentureHosts(venture).some((ventureHost) => host === ventureHost || host.endsWith(`.${ventureHost}`));
+  return verifiedVentureHosts(venture).some((ventureHost) => host2 === ventureHost || host2.endsWith(`.${ventureHost}`));
 }
 var MATERIAL_AUTHORITY_ROLES = [
   { claimed: /\b(?:co[- ]?)?founder\b|\bcreator\b/i, supportedPattern: "(?:co[- ]?founder|founder|creator)" },
@@ -29563,8 +30240,11 @@ function corroborateVenturesAgainstFirstPartySources(evidence) {
     }
   }
 }
+function isInstitutionalOrganizationSubject(evidence) {
+  return !evidence.roles.includes("PROJECT" /* PROJECT */) && evidence.roles.some((role) => role === "INVESTOR" /* INVESTOR */ || role === "AGENCY" /* AGENCY */) && isOrganizationAccount(evidence);
+}
 function hydrateProjectTeamFromVerifiedFacts(evidence) {
-  if (!evidence.roles.includes("PROJECT" /* PROJECT */)) return;
+  if (!evidence.roles.includes("PROJECT" /* PROJECT */) && !isInstitutionalOrganizationSubject(evidence)) return;
   const team = evidence.webTeam ?? (evidence.webTeam = []);
   const existing = new Set(team.flatMap((member) => [
     normalizeValue(member.name),
@@ -29583,7 +30263,7 @@ function hydrateProjectTeamFromVerifiedFacts(evidence) {
       name,
       ...name.startsWith("@") ? { handle: name } : {},
       role,
-      source: supportingSource.title || "Verified project leadership source",
+      source: supportingSource.title || (evidence.roles.includes("PROJECT" /* PROJECT */) ? "Verified project leadership source" : "Verified organization leadership source"),
       sourceUrl: supportingSource.url,
       evidence: supportingSource.excerpt,
       evidence_origin: "deterministic",
@@ -30268,7 +30948,7 @@ function sourceHost2(url) {
   }
 }
 function independentHostCount(fact) {
-  return new Set(fact.sources.filter((source2) => source2.relation === "supports" && source2.artifactVerified === true && source2.sourceClass === "independent_press").map((source2) => sourceHost2(source2.url)).filter((host) => Boolean(host))).size;
+  return new Set(fact.sources.filter((source2) => source2.relation === "supports" && source2.artifactVerified === true && source2.sourceClass === "independent_press").map((source2) => sourceHost2(source2.url)).filter((host2) => Boolean(host2))).size;
 }
 function enforceProjectFactCoherence(evidence) {
   if (!evidence.roles.includes("PROJECT" /* PROJECT */) || !evidence.basicFacts?.length) {
@@ -30610,10 +31290,10 @@ function parseKnownAccounts(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return accounts;
   for (const [address, entry] of Object.entries(value)) {
     if (!address.trim() || !entry || typeof entry !== "object") continue;
-    const record4 = entry;
+    const record5 = entry;
     accounts[address] = {
-      ...typeof record4.name === "string" ? { name: record4.name } : {},
-      ...typeof record4.type === "string" ? { type: record4.type } : {}
+      ...typeof record5.name === "string" ? { name: record5.name } : {},
+      ...typeof record5.type === "string" ? { type: record5.type } : {}
     };
   }
   return accounts;
@@ -30897,18 +31577,18 @@ function describeOutcomeDelta(prior, current) {
 }
 
 // src/lib/reportDelta.ts
-var record3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+var record4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 var finite2 = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
 function tokenPayload(kind, payload) {
-  const root = record3(payload);
+  const root = record4(payload);
   const candidate = kind === "investigation" ? root.token : payload;
-  const token = record3(candidate);
+  const token = record4(candidate);
   return typeof token.address === "string" && token.address ? candidate : null;
 }
 function basicFacts(kind, payload) {
   if (kind === "token") return [];
-  const root = record3(payload);
-  const subject = kind === "investigation" ? record3(root.projectAccount) : root;
+  const root = record4(payload);
+  const subject = kind === "investigation" ? record4(root.projectAccount) : root;
   return Array.isArray(subject.basicFacts) ? subject.basicFacts : [];
 }
 function eligibleFact(fact) {
@@ -31081,27 +31761,27 @@ var registrableHost = (url) => {
     return null;
   }
 };
-var hostMatchesDomain = (host, domain) => host === domain || host.endsWith(`.${domain}`);
+var hostMatchesDomain = (host2, domain) => host2 === domain || host2.endsWith(`.${domain}`);
 function outboundLinksTo(html, domains) {
   const links = [];
   for (const match of html.matchAll(/href=["']?(https?:\/\/[^"'\s>]+)/gi)) {
-    const host = registrableHost(match[1]);
-    if (host && domains.some((domain) => hostMatchesDomain(host, domain))) links.push(match[1]);
+    const host2 = registrableHost(match[1]);
+    if (host2 && domains.some((domain) => hostMatchesDomain(host2, domain))) links.push(match[1]);
   }
   return [...new Set(links)];
 }
 var urlIdentityText = (rawUrl) => {
   const addresses = rawUrl.match(/0x[a-fA-F0-9]{40}/g) ?? [];
-  const host = registrableHost(rawUrl.replace(/[),.;]+$/, ""));
-  return ` ${[host, ...addresses].filter(Boolean).join(" ")} `;
+  const host2 = registrableHost(rawUrl.replace(/[),.;]+$/, ""));
+  return ` ${[host2, ...addresses].filter(Boolean).join(" ")} `;
 };
 function htmlToText2(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi, (_tag, href) => urlIdentityText(href)).replace(/<[^>]+>/g, " ").replace(/https?:\/\/[^\s"'<>]+/gi, (url) => urlIdentityText(url)).replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ");
 }
 var EXPLICIT_AUDIT_CONTEXT = /\b(?:audit(?:s|ed|ing)?|security\s+(?:review|reviews|assessment|assessments)|formal\s+verification)\b/i;
 var ADVERSE_CONTEXT = /\b(?:exploit(?:s|ed)?|hack(?:s|ed)?|incident|post-?mortem|stolen|drained|rug(?:ged)?|scam)\b/i;
-var domainLiteralPattern = (host) => new RegExp(
-  `(?:^|[^a-z0-9.-])(?:[a-z0-9-]+\\.)*${escapeRegExp2(host)}(?=$|[^a-z0-9.-]|\\.(?:\\s|$))`,
+var domainLiteralPattern = (host2) => new RegExp(
+  `(?:^|[^a-z0-9.-])(?:[a-z0-9-]+\\.)*${escapeRegExp2(host2)}(?=$|[^a-z0-9.-]|\\.(?:\\s|$))`,
   "i"
 );
 var contractLiteralPattern = (address) => new RegExp(
@@ -31165,14 +31845,14 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
     } catch {
       continue;
     }
-    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    const host2 = parsed.hostname.replace(/^www\./, "").toLowerCase();
     let path = `${parsed.pathname}${parsed.search}`;
     try {
       path = decodeURIComponent(path);
     } catch {
     }
     for (const auditor of AUDITOR_REGISTRY) {
-      const domainHit = auditor.domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+      const domainHit = auditor.domains.some((domain) => host2 === domain || host2.endsWith(`.${domain}`));
       const pathHit = auditor.pattern.test(path);
       if (!domainHit && !pathHit) continue;
       const current = urlLeads.get(auditor.name) ?? { auditor, sourceLinks: [], auditorDomainLinks: [] };
@@ -31194,8 +31874,8 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
   const named = AUDITOR_REGISTRY.filter((auditor) => matchedPages.some((page) => page.named.includes(auditor)) || urlLeads.has(auditor.name));
   const selfAttested = named.map((auditor) => auditor.name);
   const isSubjectPage = (url) => {
-    const host = registrableHost(url);
-    return Boolean(host && officialHost2 && (host === officialHost2 || host.endsWith(`.${officialHost2}`) || officialHost2.endsWith(`.${host}`)));
+    const host2 = registrableHost(url);
+    return Boolean(host2 && officialHost2 && (host2 === officialHost2 || host2.endsWith(`.${officialHost2}`) || officialHost2.endsWith(`.${host2}`)));
   };
   const attestations = [];
   const seenAttestations = /* @__PURE__ */ new Set();
@@ -31831,8 +32511,8 @@ function trustedOfficialXAvatarUrl(raw) {
   if (!raw) return null;
   try {
     const url = new URL(raw);
-    const host = url.hostname.toLowerCase();
-    if (url.protocol !== "https:" || host !== "pbs.twimg.com" && host !== "abs.twimg.com" && !host.endsWith(".twimg.com") || url.username || url.password || url.port && url.port !== "443") return null;
+    const host2 = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" || host2 !== "pbs.twimg.com" && host2 !== "abs.twimg.com" && !host2.endsWith(".twimg.com") || url.username || url.password || url.port && url.port !== "443") return null;
     url.hash = "";
     return url.href;
   } catch {
@@ -31842,18 +32522,19 @@ function trustedOfficialXAvatarUrl(raw) {
 
 // src/data/socialActivity.ts
 var SOCIAL_MENTION_CARD_MAX = 8;
+var SOCIAL_ADVERSE_MENTION_MAX = 12;
 var clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-var HANDLE2 = /^[A-Za-z0-9_]{1,15}$/;
+var HANDLE3 = /^[A-Za-z0-9_]{1,15}$/;
 function normalizedSocialHandle(value) {
   const handle = value?.trim().replace(/^@/, "") ?? "";
-  return HANDLE2.test(handle) ? handle.toLowerCase() : null;
+  return HANDLE3.test(handle) ? handle.toLowerCase() : null;
 }
 function tweetPermalink(handle, postId, rawUrl) {
   if (rawUrl) {
     try {
       const parsed = new URL(rawUrl);
-      const host = parsed.hostname.toLowerCase();
-      if ((parsed.protocol === "https:" || parsed.protocol === "http:") && (host === "x.com" || host === "www.x.com" || host === "twitter.com" || host === "www.twitter.com") && /\/status\/\d+/i.test(parsed.pathname) && !parsed.username && !parsed.password) return parsed.href;
+      const host2 = parsed.hostname.toLowerCase();
+      if ((parsed.protocol === "https:" || parsed.protocol === "http:") && (host2 === "x.com" || host2 === "www.x.com" || host2 === "twitter.com" || host2 === "www.twitter.com") && /\/status\/\d+/i.test(parsed.pathname) && !parsed.username && !parsed.password) return parsed.href;
     } catch {
     }
   }
@@ -31903,6 +32584,62 @@ function selectSocialMentioners(posts, subjectHandle, limit = SOCIAL_MENTION_CAR
     return Date.parse(right.createdAt) - Date.parse(left.createdAt);
   }).slice(0, Math.max(0, Math.min(SOCIAL_MENTION_CARD_MAX, Math.round(limit))));
 }
+var ADVERSE_PATTERNS = [
+  { signal: "scam warning", pattern: /\bscam(?:mer|ming|med)?\b/i },
+  { signal: "rug warning", pattern: /\brug(?:ged|ging|pull|pulls)?\b/i },
+  { signal: "credibility warning", pattern: /\blarp\b/i },
+  { signal: "prior exploit allegation", pattern: /\bhack(?:er|ed|ing)?\b/i },
+  { signal: "wallet bundling claim", pattern: /\bbundl(?:e|ed|ing)\b/i },
+  { signal: "fresh-wallet claim", pattern: /\bfresh wallets?\b/i },
+  { signal: "funding-link claim", pattern: /\b(?:same|shared) fund(?:er|ing|ing source)?\b/i },
+  { signal: "deployer claim", pattern: /\bdeployer\b/i },
+  { signal: "operator-history claim", pattern: /\b(?:same|previous|prior|old) dev(?:eloper)?\b/i },
+  { signal: "avoidance warning", pattern: /\b(?:don['’]?t buy|do not buy|stay away|beware|avoid)\b/i },
+  { signal: "dump warning", pattern: /\b(?:dump(?:ed|ing)?|crash(?:ed|ing)?)\b/i }
+];
+function adverseCategory(text2) {
+  if (/\b(?:bundl(?:e|ed|ing)|fresh wallets?|fund(?:er|ing|ing source)|deployer|holders?|liquidity|pool)\b/i.test(text2)) {
+    return "wallet_cluster";
+  }
+  if (/\b(?:same|previous|prior|old) dev(?:eloper)?\b|\b(?:previously|formerly)\b|\bhack(?:er|ed|ing)?\b/i.test(text2)) {
+    return "operator_history";
+  }
+  if (/\b(?:scam(?:mer|ming|med)?|rug(?:ged|ging|pull|pulls)?)\b/i.test(text2)) return "fraud_accusation";
+  return "general_warning";
+}
+function selectSocialAdverseMentions(posts, subjectHandle, limit = SOCIAL_ADVERSE_MENTION_MAX) {
+  const subject = normalizedSocialHandle(subjectHandle);
+  const byPost = /* @__PURE__ */ new Map();
+  for (const post of posts) {
+    const handle = normalizedSocialHandle(post.handle);
+    if (!handle || handle === subject) continue;
+    const text2 = post.text?.replace(/\s+/g, " ").trim() ?? "";
+    if (!text2) continue;
+    const signals = ADVERSE_PATTERNS.filter(({ pattern }) => pattern.test(text2)).map(({ signal: signal2 }) => signal2);
+    if (!signals.length) continue;
+    const tweetUrl = tweetPermalink(handle, post.id, post.tweetUrl);
+    if (!tweetUrl) continue;
+    const specific = /\b(?:wallet|holder|liquidity|pool|deployer|fund(?:er|ing)|contract|address|same dev|previous|prior|old dev)\b/i.test(text2) || /\b\d+(?:\.\d+)?%\b/.test(text2) || /\b[1-9]\d*\s+(?:wallets?|holders?)\b/i.test(text2);
+    byPost.set(post.id, {
+      postId: post.id,
+      handle: `@${handle}`,
+      ...post.displayName?.trim() ? { displayName: post.displayName.trim() } : {},
+      text: text2,
+      tweetUrl,
+      createdAt: post.createdAt,
+      ...typeof post.followers === "number" && Number.isFinite(post.followers) && post.followers >= 0 ? { followers: Math.round(post.followers) } : {},
+      ...post.avatarUrl ? { avatarUrl: post.avatarUrl } : {},
+      category: adverseCategory(text2),
+      specificity: specific ? "specific" : "general",
+      signals
+    });
+  }
+  return [...byPost.values()].sort((left, right) => {
+    if (left.specificity !== right.specificity) return left.specificity === "specific" ? -1 : 1;
+    if ((left.followers ?? -1) !== (right.followers ?? -1)) return (right.followers ?? -1) - (left.followers ?? -1);
+    return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+  }).slice(0, Math.max(0, Math.min(SOCIAL_ADVERSE_MENTION_MAX, Math.round(limit))));
+}
 function socialActivityScore(input) {
   const breadth = clamp(Math.log10(input.uniqueAccounts7d + 1) / Math.log10(1001), 0, 1) * 50;
   const prior = Math.max(1, input.uniqueAccountsPrevious24h);
@@ -31938,6 +32675,10 @@ function safeProjectName(value) {
   const name = value?.replace(/["\\]/g, " ").replace(/\s+/g, " ").trim() ?? "";
   return name.length >= 3 && name.length <= 48 && /[A-Za-z]/.test(name) ? name : null;
 }
+function safeContractAddress(value) {
+  const address = value?.trim() ?? "";
+  return /^(?:0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(address) ? address : null;
+}
 var SHORT_GENERIC_PROJECT_NAME = /^[A-Za-z]{1,4}$/;
 function pastDeadline(deadlineAt) {
   return typeof deadlineAt === "number" && Number.isFinite(deadlineAt) && Date.now() >= deadlineAt;
@@ -31957,8 +32698,10 @@ function buildSocialActivityQuery(identity) {
   if (!handle) return null;
   const ticker = safeTicker(identity.ticker);
   const projectName2 = safeProjectName(identity.projectName);
+  const contractAddress = safeContractAddress(identity.contractAddress);
   const terms = [`@${handle}`];
   if (ticker) terms.push(`$${ticker}`);
+  if (contractAddress) terms.push(`"${contractAddress}"`);
   const nameTerm = projectName2 ? projectNameSearchTerm(projectName2, handle, ticker) : null;
   if (nameTerm) terms.push(`"${nameTerm}"`);
   return {
@@ -32043,9 +32786,9 @@ async function collectCounts(fetchImpl, bearer, query, start, end) {
   const payload = await fetchJson(fetchImpl, url, bearer, "counts");
   if (!payload) return { ok: false, buckets: [] };
   const buckets = (Array.isArray(payload.data) ? payload.data : []).flatMap((row) => {
-    const record4 = asRecord6(row);
-    const count = typeof record4.tweet_count === "number" && Number.isFinite(record4.tweet_count) ? Math.max(0, Math.round(record4.tweet_count)) : null;
-    return typeof record4.start === "string" && typeof record4.end === "string" && count !== null ? [{ start: record4.start, end: record4.end, postCount: count }] : [];
+    const record5 = asRecord6(row);
+    const count = typeof record5.tweet_count === "number" && Number.isFinite(record5.tweet_count) ? Math.max(0, Math.round(record5.tweet_count)) : null;
+    return typeof record5.start === "string" && typeof record5.end === "string" && count !== null ? [{ start: record5.start, end: record5.end, postCount: count }] : [];
   });
   return { ok: true, buckets };
 }
@@ -32139,8 +32882,8 @@ function usersById(payload) {
   const users = Array.isArray(includes.users) ? includes.users : [];
   const map = /* @__PURE__ */ new Map();
   for (const row of users) {
-    const record4 = asRecord6(row);
-    if (typeof record4.id === "string") map.set(record4.id, record4);
+    const record5 = asRecord6(row);
+    if (typeof record5.id === "string") map.set(record5.id, record5);
   }
   return map;
 }
@@ -32167,8 +32910,8 @@ function providedTweetUrl(...values) {
     if (typeof value !== "string") continue;
     try {
       const parsed = new URL(value);
-      const host = parsed.hostname.toLowerCase();
-      if ((parsed.protocol === "https:" || parsed.protocol === "http:") && (host === "x.com" || host === "www.x.com" || host === "twitter.com" || host === "www.twitter.com") && /\/status\/\d+/i.test(parsed.pathname) && !parsed.username && !parsed.password) return parsed.href;
+      const host2 = parsed.hostname.toLowerCase();
+      if ((parsed.protocol === "https:" || parsed.protocol === "http:") && (host2 === "x.com" || host2 === "www.x.com" || host2 === "twitter.com" || host2 === "www.twitter.com") && /\/status\/\d+/i.test(parsed.pathname) && !parsed.username && !parsed.password) return parsed.href;
     } catch {
     }
   }
@@ -32195,35 +32938,35 @@ function authorFields(author) {
   };
 }
 function officialXPost(row, users) {
-  const record4 = asRecord6(row);
-  if (typeof record4.id !== "string" || typeof record4.author_id !== "string" || typeof record4.created_at !== "string") {
+  const record5 = asRecord6(row);
+  if (typeof record5.id !== "string" || typeof record5.author_id !== "string" || typeof record5.created_at !== "string") {
     return null;
   }
-  const at = Date.parse(record4.created_at);
+  const at = Date.parse(record5.created_at);
   if (!Number.isFinite(at)) return null;
-  const author = users.get(record4.author_id) ?? {};
-  const text2 = providedText(record4.text);
-  const tweetUrl = providedTweetUrl(record4.url);
+  const author = users.get(record5.author_id) ?? {};
+  const text2 = providedText(record5.text);
+  const tweetUrl = providedTweetUrl(record5.url);
   return {
-    id: record4.id,
-    authorId: record4.author_id,
-    createdAt: record4.created_at,
+    id: record5.id,
+    authorId: record5.author_id,
+    createdAt: record5.created_at,
     ...authorFields(author),
     ...text2 ? { text: text2 } : {},
     ...tweetUrl ? { tweetUrl } : {}
   };
 }
 function twitterApiIoPost(row) {
-  const record4 = asRecord6(row);
-  const author = asRecord6(record4.author);
-  const id = typeof record4.id === "string" ? record4.id : null;
+  const record5 = asRecord6(row);
+  const author = asRecord6(record5.author);
+  const id = typeof record5.id === "string" ? record5.id : null;
   const handle = providedHandle(author.userName, author.username, author.screen_name);
   const authorId = typeof author.id === "string" ? author.id : handle ? handle.toLowerCase() : null;
-  const createdAt = typeof record4.createdAt === "string" ? record4.createdAt : null;
-  const text2 = typeof record4.text === "string" ? record4.text : "";
-  const isRepost = record4.retweeted_tweet !== void 0 && record4.retweeted_tweet !== null || /^RT\s+@/i.test(text2);
+  const createdAt = typeof record5.createdAt === "string" ? record5.createdAt : null;
+  const text2 = typeof record5.text === "string" ? record5.text : "";
+  const isRepost = record5.retweeted_tweet !== void 0 && record5.retweeted_tweet !== null || /^RT\s+@/i.test(text2);
   if (!id || !authorId || !createdAt || isRepost || !Number.isFinite(Date.parse(createdAt))) return null;
-  const tweetUrl = providedTweetUrl(record4.url, record4.twitterUrl);
+  const tweetUrl = providedTweetUrl(record5.url, record5.twitterUrl);
   return {
     id,
     authorId,
@@ -32359,7 +33102,7 @@ async function collectSocialActivity(rawIdentity, options = {}) {
   );
   const fetchImpl = options.fetchImpl ?? fetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1e3));
-  const cacheKey = `social-activity:v2:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
+  const cacheKey = `social-activity:v3:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
   if (!options.fetchImpl) {
     const cached = await cacheGet(cacheKey, { operation: "social-activity-hit", meta: "15 minute activity snapshot" });
     if (cached) {
@@ -32396,6 +33139,7 @@ async function collectSocialActivity(rawIdentity, options = {}) {
   }) : null;
   const state = counts.ok && last7Days.authorCoverageComplete ? "complete" : "partial";
   const mentioners = selectSocialMentioners(search.posts, identity.handle);
+  const adverseMentions = selectSocialAdverseMentions(search.posts, identity.handle);
   const snapshot = {
     schemaVersion: 1,
     provider,
@@ -32424,7 +33168,8 @@ async function collectSocialActivity(rawIdentity, options = {}) {
       ...search.incompleteReason ? { incompleteReason: search.incompleteReason } : {}
     },
     note: state === "complete" ? `Public X posts matched to the bound project identifiers through ${provider === "x-api-v2" ? "the official X API" : "twitterapi.io"}. Reposts are excluded.` : search.incompleteReason === "post_limit" ? `ARGUS collected the maximum ${maxPosts.toLocaleString()} posts allowed for this saved scan. Unique-account counts are minimums.` : search.incompleteReason === "provider_error" ? `X stopped responding before ARGUS finished the search. Unique-account counts are minimums.` : search.incompleteReason === "time_budget" ? "ARGUS stopped the social-activity search to leave time for required checks. Unique-account counts are minimums." : `X returned more result pages than this saved scan collected. Unique-account counts are minimums.`,
-    ...mentioners.length ? { mentioners } : {}
+    ...mentioners.length ? { mentioners } : {},
+    ...adverseMentions.length ? { adverseMentions } : {}
   };
   if (!options.fetchImpl) void cacheSet(cacheKey, JSON.stringify(snapshot));
   return snapshot;
@@ -32453,7 +33198,7 @@ function deriveFounderVentureCandidate(evidence) {
     } catch {
       return "";
     }
-  }).find((host) => host && !/(^|\.)x\.com$|(^|\.)twitter\.com$/i.test(host));
+  }).find((host2) => host2 && !/(^|\.)x\.com$|(^|\.)twitter\.com$/i.test(host2));
   const bioHandle = BIO_FOUNDER_CLAIM.test(evidence.profile.bio) ? evidence.profile.bio.match(/@([A-Za-z0-9_]{2,15})/)?.[1] : void 0;
   const handleKey = bioHandle?.toLowerCase() ?? "";
   const roleFact = verifiedFacts.find((fact) => (fact.predicate === "founder" || fact.predicate === "current_role") && cleanVentureName(fact.value).length > 1);
@@ -32488,13 +33233,6 @@ function deriveFounderVentureCandidate(evidence) {
 var MONID_ENRICHMENT_BUDGET_MS = 25e3;
 var SECURITY_AUDITS_BUDGET_MS = 45e3;
 var EVM_CONTROL_RPC_TIMEOUT_MS = 2500;
-var withWallClockBox = (work, budgetMs) => Promise.race([
-  work,
-  new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), budgetMs);
-    if (typeof timer === "object" && "unref" in timer) timer.unref();
-  })
-]);
 var VERIFIED_EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 function verifiedEvmControlTarget(evidence) {
   const token = evidence.projectToken;
@@ -32595,6 +33333,7 @@ function coalesceTeamMembersByHandle(members) {
       merged.projects = secondary.projects;
       merged.projects_evidence_origin = secondary.projects_evidence_origin;
     }
+    if (!merged.biography && secondary.biography) merged.biography = secondary.biography;
     if (secondary.identity_link_evidence_origin !== "model_lead" && preferred.identity_link_evidence_origin === "model_lead") {
       merged.identity_link_evidence_origin = secondary.identity_link_evidence_origin;
       if (secondary.handle) merged.handle = secondary.handle;
@@ -32767,9 +33506,10 @@ async function resolveProfile(ctx) {
       ctx.evidence.profile.avatar_source_state = "none";
     }
     ctx.evidence.profile.bio = prof.bio ?? "";
-    const profileWebsite = canonicalPublicProfileWebsite(prof.website) ?? void 0;
-    ctx.evidence.profile.website = profileWebsite;
     const officialWebsites = (prof.officialWebsites ?? []).map((url) => canonicalPublicProfileWebsite(url)).filter((url) => Boolean(url));
+    const firstWebsite = canonicalPublicProfileWebsite(prof.website) ?? void 0;
+    const profileWebsite = firstWebsite && canonicalOfficialWebsite(firstWebsite) ? firstWebsite : officialWebsites.find((url) => canonicalOfficialWebsite(url) !== null) ?? firstWebsite;
+    ctx.evidence.profile.website = profileWebsite;
     if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
     if (isLinkHubUrl(profileWebsite)) {
       const hubResolved = await resolveLinkHubWebsite(profileWebsite, ctx.handle);
@@ -32834,10 +33574,13 @@ function applySiteSubstanceOutcome(ctx, domain, site) {
   const verifiedProjectToken = ctx.evidence.projectToken?.verified === true ? ctx.evidence.projectToken : void 0;
   const verifiedNotLive = site.status === "coming_soon" && (site.reason === "coming_soon" || site.reason === "parked");
   if (!isProject) {
+    const organization = isOrganizationAccount(ctx.evidence);
+    const profileKind = organization ? "organization-profile" : "personal-profile";
+    const subjectNoun = organization ? "organization" : "person";
     ctx.emit({
       phase: "P2 \xB7 Substance",
       label: verifiedNotLive ? "Profile website is not launched" : site.status === "coming_soon" ? "Profile website check unavailable" : "Profile website checked",
-      detail: verifiedNotLive ? `${domain} serves a verified coming-soon or parked page. This personal-profile URL is not treated as project counter-evidence.` : site.status === "coming_soon" ? `${domain} returned an ungrounded coming-soon label. No profile or project-liveness conclusion was drawn.` : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this person profile.`,
+      detail: verifiedNotLive ? `${domain} serves a verified coming-soon or parked page. This ${profileKind} URL is not treated as project counter-evidence.` : site.status === "coming_soon" ? `${domain} returned an ungrounded coming-soon label. No profile or project-liveness conclusion was drawn.` : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this ${subjectNoun} profile.`,
       source: "site-fetch",
       tone: "neutral"
     });
@@ -32942,8 +33685,14 @@ async function collectProjectSiteSubstance(ctx, domain) {
   applySiteSubstanceOutcome(ctx, domain, site);
   return site;
 }
+var BIO_DOMAIN = /\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money|cash|markets|trade|exchange|capital|fund|vc|tech|info|me|pro|club|link|wtf|lol|world|digital|ventures|partners|group|global|studio|tools|crypto|dao|games|foundation|labs|protocol|systems|cloud|market|social|solutions))\b/gi;
 function bioWebsiteDomain(bio) {
-  return bio.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, " ").match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const text2 = bio.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, " ");
+  for (const match of text2.matchAll(BIO_DOMAIN)) {
+    const host2 = match[1];
+    if (canonicalOfficialWebsite(`https://${host2}/`)) return host2;
+  }
+  return void 0;
 }
 function mergeDiscoveredAffiliations(ventures, discovered) {
   const byName = new Map(ventures.map((row) => [row.project_name.toLowerCase(), row]));
@@ -33130,6 +33879,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       claimed_endorser_handle: t.claimed_endorser_handle,
       claimed_relationship: t.claimed_relationship,
       appears_at: "subject surfaces",
+      ...t.evidence_url ? { evidence_url: t.evidence_url } : {},
       evidence_origin: "model_lead",
       artifact_verified: false
     }));
@@ -33304,6 +34054,12 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     const h = t.handle ? norm2(t.handle) : "";
     const n = norm2(t.name);
     if (!h && !n) continue;
+    if (!isPlausiblePersonRosterIdentity({
+      name: t.name,
+      handle: t.handle,
+      handleBoundBySubject: t.handleProvenance === "subject_first_party" && t.identity_link_evidence_origin === "deterministic"
+    })) continue;
+    if (!teamCandidateSourceMatchesIdentity(t)) continue;
     if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
     const existing = h && byHandle.get(h) || n && byName.get(n) || null;
     if (existing) {
@@ -33320,6 +34076,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         existing.projects = t.projects;
         existing.projects_evidence_origin = t.projects_evidence_origin;
       }
+      if (!existing.biography && t.biography) existing.biography = t.biography;
       if (!existing.officialPortraitUrl && t.officialPortraitUrl) {
         existing.officialPortraitUrl = t.officialPortraitUrl;
         existing.officialPortraitSourceUrl = t.officialPortraitSourceUrl;
@@ -33346,6 +34103,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       name: t.name,
       handle: t.handle,
       role: t.role,
+      biography: t.biography,
       kind: "kind" in t && (t.kind === "org" || t.kind === "person") ? t.kind : "person",
       linkedin: t.linkedin,
       evidence: t.evidence,
@@ -33414,6 +34172,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       ctx.evidence.associates.push({
         associate_handle: org.handle,
         relation: org.role,
+        kind: "org",
         notes: org.evidence,
         evidence_url: org.sourceUrl,
         provider: "twitterapi",
@@ -33607,6 +34366,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         claimed_endorser_handle: a.handle,
         claimed_relationship: "advisor",
         appears_at: "model search of project X content",
+        ...a.sourceUrl ? { evidence_url: a.sourceUrl } : {},
         evidence_origin: "model_lead",
         artifact_verified: false
       });
@@ -33717,6 +34477,11 @@ async function maybeOrientSubject(ctx, siteExcerpt) {
   }
   ctx.evidence.roles = providerBackedRoles(ctx.evidence);
 }
+function launchedProductTokenBindPending(evidence, roles) {
+  if (!roles.includes("PROJECT" /* PROJECT */)) return false;
+  if (evidence.projectToken?.verified === true) return false;
+  return launchedProductSearchQueries(evidence.subjectOrientation?.launchedProducts).length > 0;
+}
 function providerBackedRoles(evidence) {
   const roles = /* @__PURE__ */ new Set();
   let bioPrimaryProjectVerified = false;
@@ -33784,9 +34549,9 @@ function providerBackedRoles(evidence) {
     roles.add("PROJECT" /* PROJECT */);
   }
   if (roles.has("INVESTOR" /* INVESTOR */)) {
-    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null) && !investorBeyondBio) {
+    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null || projectBound) && !investorBeyondBio) {
       roles.delete("INVESTOR" /* INVESTOR */);
-    } else if (!evidence.projectToken?.verified) {
+    } else if (!evidence.projectToken?.verified && !projectBound) {
       roles.delete("PROJECT" /* PROJECT */);
     }
   }
@@ -33870,8 +34635,8 @@ function projectVerifiedBasicFacts(ctx) {
   const officialWebsiteSources = officialWebsite ? facts.flatMap((fact) => fact.sources).filter((source2) => {
     if (source2.sourceClass !== "official_subject") return false;
     try {
-      const host = new URL(source2.url).hostname.replace(/^www\./, "").toLowerCase();
-      return host === officialWebsite.domain || host.endsWith(`.${officialWebsite.domain}`);
+      const host2 = new URL(source2.url).hostname.replace(/^www\./, "").toLowerCase();
+      return host2 === officialWebsite.domain || host2.endsWith(`.${officialWebsite.domain}`);
     } catch {
       return false;
     }
@@ -34032,6 +34797,65 @@ function projectVerifiedBasicFacts(ctx) {
     }
   }
 }
+function organizationVerifiedBasicFacts(ctx) {
+  const roles = providerBackedRoles(ctx.evidence);
+  if (!isInstitutionalOrganizationSubject({ ...ctx.evidence, roles })) return;
+  const facts = (ctx.evidence.basicFacts ?? []).filter(isRetainedSourceFact).filter(isStrictlyVerifiedFact);
+  if (!facts.length) return;
+  const audience = roles.includes("INVESTOR" /* INVESTOR */) ? "fund" : "organization";
+  const brandIdentity = facts.find((fact) => fact.predicate === "official_identity" && fact.sources.some((source2) => source2.sourceClass === "official_subject"));
+  const officialWebsite = canonicalOfficialWebsite(ctx.evidence.profile.website);
+  const officialWebsiteSources = officialWebsite ? facts.flatMap((fact) => fact.sources).filter((source2) => {
+    if (source2.sourceClass !== "official_subject") return false;
+    try {
+      const host2 = new URL(source2.url).hostname.replace(/^www\./, "").toLowerCase();
+      return host2 === officialWebsite.domain || host2.endsWith(`.${officialWebsite.domain}`);
+    } catch {
+      return false;
+    }
+  }) : [];
+  const brandIdentityBound = Boolean(
+    brandIdentity && officialWebsite && ctx.evidence.profile.profile_collection_state === "resolved" && ctx.evidence.profile.profile_provider === "twitterapi" && (ctx.evidence.profile.site_substance_status === "live" || officialWebsiteSources.length > 0) && ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation"
+  );
+  if (brandIdentityBound && brandIdentity && officialWebsite) {
+    ctx.evidence.profile.identity_confidence = "Confirmed";
+    ctx.recordCheck?.({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: `${audience} brand identity confirmed by the provider-resolved official X account and official site ${officialWebsite.domain}; the people who run it remain a separate team finding`,
+      provider: "twitterapi/basic-facts-web/site-fetch",
+      sourceCount: brandIdentity.sources.length + Math.max(1, officialWebsiteSources.length)
+    });
+  }
+  const people = facts.filter((fact) => (fact.predicate === "founder" || fact.predicate === "executive") && !handlesMatch(fact.value, ctx.handle));
+  if (!people.length) return;
+  const peopleSourceCount = people.reduce((total, fact) => total + fact.sources.length, 0);
+  const publicRecordIdentity = people.some((fact) => {
+    const domains = new Set(fact.sources.filter((src) => src.sourceClass !== "official_subject").map((src) => registrableDomain(src.url)).filter((domain) => Boolean(domain)));
+    return domains.size >= 2;
+  });
+  if (ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation") {
+    if (publicRecordIdentity) {
+      ctx.evidence.profile.identity_confidence = "Confirmed";
+    } else if (ctx.evidence.profile.identity_confidence === "Unverified") {
+      ctx.evidence.profile.identity_confidence = "Probable";
+    }
+  }
+  ctx.recordCheck?.({
+    id: "identity-resolution",
+    status: "confirmed",
+    note: `${audience} identity resolved through ${people.length} founder or executive record${people.length === 1 ? "" : "s"} verified from fetched, cited public sources`,
+    provider: "basic-facts-web",
+    sourceCount: peopleSourceCount
+  });
+  ctx.recordCheck?.({
+    id: "affiliations-associates",
+    status: "confirmed",
+    note: `${people.length} ${audience} leadership affiliation${people.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+    provider: "basic-facts-web",
+    sourceCount: peopleSourceCount
+  });
+}
 var FOUNDER_DECISION_QUESTION_GROUPS = [
   {
     id: "founder-identity-authority",
@@ -34190,8 +35014,8 @@ function collectProjectCoreEvidenceOutcomes(ctx, options = {}) {
     const assessable = (ctx.evidence.webTeam ?? []).length > 0 || (ctx.evidence.basicFacts ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live";
     ctx.recordCheck?.({
       id: "project-backing-partners",
-      status: assessable ? "finding" : "checked-empty",
-      note: assessable ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified funding, investor, advisor, counterparty, or operating-partner evidence appears. Project-only partnership claims and model-only leads were excluded. This is a null result on this axis, not adverse evidence." : "bounded scan of up to 32 frozen first-party team and account records found no verified funding, investor, advisor, counterparty, or operating-partner evidence; project-only partnership claims and model-only leads were excluded",
+      status: options.basicFactsCompleted === false ? "unavailable" : assessable ? "finding" : "checked-empty",
+      note: options.basicFactsCompleted === false ? "The backing search did not complete; collected material does not establish absence." : assessable ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified funding, investor, advisor, counterparty, or operating-partner evidence appears. Project-only partnership claims and model-only leads were excluded. This is a null result on this axis, not adverse evidence." : "bounded scan of up to 32 frozen first-party team and account records found no verified funding, investor, advisor, counterparty, or operating-partner evidence; project-only partnership claims and model-only leads were excluded",
       provider: "project-core-evidence"
     });
   }
@@ -34221,7 +35045,7 @@ function collectProjectCoreEvidenceOutcomes(ctx, options = {}) {
       note: "bounded disclosure search completed with an explicit no-match; no source-linked legal, governance, token-economic, repository, or security disclosure candidate was returned",
       provider: "basic-facts-web"
     });
-  } else if ((ctx.evidence.basicFacts ?? []).length > 0 || (ctx.evidence.webTeam ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live") {
+  } else if (options.basicFactsCompleted !== false && ((ctx.evidence.basicFacts ?? []).length > 0 || (ctx.evidence.webTeam ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live")) {
     ctx.recordCheck?.({
       id: "project-transparency",
       status: "finding",
@@ -34383,7 +35207,7 @@ function adverseSignalToFinding(sig) {
     }
   };
 }
-async function adverseSignalsAndTooling(ctx, record4) {
+async function adverseSignalsAndTooling(ctx, record5) {
   const { evidence } = ctx;
   const self = ctx.handle.replace(/^@/, "").toLowerCase();
   const ticker = (evidence.projectToken?.verified === true ? evidence.projectToken.symbol : null) ?? evidence.promotions.find((p) => p.ticker)?.ticker;
@@ -34400,7 +35224,7 @@ async function adverseSignalsAndTooling(ctx, record4) {
     searchAdverseSignals(ctx.handle, subjectKind, {
       relationship_to_subject: "self",
       relationship_label: "audited subject"
-    }, ticker),
+    }, ticker, evidence.projectToken?.address),
     Promise.all(projectTargets.map((p) => searchAdverseSignals(p.handle, "project", {
       relationship_to_subject: "venture",
       relationship_label: [p.role, p.name].filter(Boolean).join(" at ") || p.name
@@ -34468,23 +35292,23 @@ async function adverseSignalsAndTooling(ctx, record4) {
   const unanswered = screens.length - answered;
   const swept = `the subject, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}`;
   const gap = unanswered ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.` : "";
-  if (totalSigs || toolingLeads) {
-    record4({
+  if (!subjectScreen.completed) {
+    record5({
+      id: "adverse-screen",
+      status: "unavailable",
+      note: `The subject's own adverse search returned no readable answer. ${answered} of ${screens.length} target searches completed, but related targets cannot clear the unscreened subject. ${totalSigs + toolingLeads} candidate leads were retained for follow-up.${gap}`,
+      provider: "adverse-sweep"
+    });
+  } else if (totalSigs || toolingLeads) {
+    record5({
       id: "adverse-screen",
       status: "finding",
       note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: ${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}${toolingLeads ? ` and ${toolingLeads} manipulation-tooling lead${toolingLeads === 1 ? "" : "s"}` : ""} surfaced. Each is an unverified candidate source for follow-up, not a verified finding.${gap}`,
       provider: "adverse-sweep",
       sourceCount: totalSigs + toolingLeads
     });
-  } else if (!answered) {
-    record4({
-      id: "adverse-screen",
-      status: "unavailable",
-      note: `the model search returned no readable answer for any of the ${screens.length} adverse-screen target${screens.length === 1 ? "" : "s"}, so no rug, scam, or drain search was completed`,
-      provider: "adverse-sweep"
-    });
   } else {
-    record4({
+    record5({
       id: "adverse-screen",
       status: "checked-empty",
       // A completed empty search is an answer; it is not a clean record.
@@ -34862,9 +35686,9 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   resetDefiLlamaScanMemo();
   resetFollowScanMemo();
   const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
-  const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
+  const collectionDeadlineAt = analystDeadlineAt - (options?.collectionReserveMs ?? COLLECTION_ANALYST_RESERVE_MS);
   const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
-  const graphScreenDeadlineAt = collectionDeadlineAt + TRUST_GRAPH_SCREEN_RESERVE_MS;
+  const graphScreenDeadlineAt = collectionDeadlineAt + (options?.graphScreenReserveMs ?? TRUST_GRAPH_SCREEN_RESERVE_MS);
   const graphScreenOverBudget = () => Date.now() >= graphScreenDeadlineAt;
   const startRuntimeStage = (stage) => {
     const stageStartedAt = Date.now();
@@ -35001,7 +35825,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     }
   };
   const projectTokenPass = async () => {
-    const providers = ["coingecko", "dexscreener", "geckoterminal"];
+    const providers = ["coingecko", "dexscreener", "geckoterminal", "site-fetch"];
     const before = attemptTotals(providers);
     try {
       const result = await collectProjectTokenIdentity(ctx);
@@ -35177,13 +36001,13 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         {
           const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
           const auditsResult = await withWallClockBox(
-            collectSecurityAudits(
+            (fetcher) => collectSecurityAudits(
               projectName2,
               evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
               auditLinks.available ? auditLinks.value.auditLinks : [],
-              { canonicalContractAddress: evidence.projectToken.address }
+              { canonicalContractAddress: evidence.projectToken.address, fetcher }
             ),
-            SECURITY_AUDITS_BUDGET_MS
+            Math.min(SECURITY_AUDITS_BUDGET_MS, collectionDeadlineAt - Date.now())
           );
           if (auditsResult?.available) {
             evidence.securityAudits = {
@@ -35210,11 +36034,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
           if (companyLookup) {
             const sections = projectCompanyEnrichmentSections(evidence);
             const enrichment = await withWallClockBox(
-              collectProjectCompanyEnrichment(companyLookup, {
+              (fetcher) => collectProjectCompanyEnrichment(companyLookup, {
+                fetcher,
                 sections,
                 officialName: projectName2
               }),
-              MONID_ENRICHMENT_BUDGET_MS
+              Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now())
             );
             if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, companyLookup)) {
               evidence.companyEnrichment = { ...enrichment.value };
@@ -35380,7 +36205,8 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       evidence.socialActivity = await collectSocialActivity({
         handle: evidence.profile.handle,
         ticker: evidence.projectToken?.symbol ?? ctx.tokenSymbol,
-        projectName: evidence.projectToken?.name ?? evidence.profile.display_name
+        projectName: evidence.projectToken?.name ?? evidence.profile.display_name,
+        contractAddress: evidence.projectToken?.address
       }, {
         deadlineAt: Math.min(Date.now() + SOCIAL_ACTIVITY_BUDGET_MS, collectionDeadlineAt)
       });
@@ -35421,11 +36247,61 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     rolesAfterBasicFacts = providerBackedRoles(evidence);
     evidence.roles = rolesAfterBasicFacts;
   }
-  if (capabilityIsAuthorized("token_and_market", "project_fundamentals") && (fixture || recoveredProjectSite && !evidence.projectToken?.verified)) {
+  const launchedProductBindPending = launchedProductTokenBindPending(evidence, rolesAfterBasicFacts);
+  if (capabilityIsAuthorized("token_and_market", "project_fundamentals") && (fixture || (recoveredProjectSite || launchedProductBindPending) && !evidence.projectToken?.verified)) {
+    if (launchedProductBindPending && !recoveredProjectSite) {
+      emit({
+        phase: "Token",
+        label: "Searching registries for the launched product ticker",
+        detail: `${launchedProductSearchQueries(evidence.subjectOrientation?.launchedProducts).join(", ")}: the first token pass ran before orientation named these products. A hit still has to list ${ctx.handle} as its official X account or match the official domain.`,
+        source: "coingecko / dexscreener",
+        tone: "neutral"
+      });
+    }
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
   } else {
     evidence.roles = rolesAfterBasicFacts;
+  }
+  if (evidence.roles.includes("PROJECT" /* PROJECT */)) {
+    const continuityStartedAt = startRuntimeStage("entity-continuity");
+    try {
+      evidence.entityContinuity = await collectEntityContinuity(ctx);
+      const continuity = evidence.entityContinuity;
+      const complete = continuity.coverage.state === "complete";
+      const completedWithoutHistory = complete && continuity.historicalAliases.length === 0 && continuity.tokenLineage.length === 0 && continuity.events.length === 0;
+      checkTracker.record({
+        id: "entity-continuity",
+        status: completedWithoutHistory ? "checked-empty" : complete ? "confirmed" : continuity.coverage.state === "not_applicable" ? "not-applicable" : "unavailable",
+        note: continuity.coverage.reason,
+        provider: "serper+primary-source-verification",
+        sourceCount: continuity.coverage.primarySourceCount,
+        completedAt: continuity.coverage.searchedAt
+      });
+      checkTracker.provider(
+        "entity-continuity",
+        "Project and token continuity",
+        complete ? "executed" : continuity.coverage.state === "partial" ? "partial" : "unavailable",
+        continuity.coverage.reason
+      );
+      emit({
+        phase: "Continuity",
+        label: complete ? completedWithoutHistory ? "No earlier name or token migration found" : `Lifecycle recovered${continuity.predecessorName ? ` \xB7 ${continuity.predecessorName} \u2192 ${continuity.subject}` : ""}` : "Lifecycle coverage remains open",
+        detail: complete ? completedWithoutHistory ? continuity.coverage.reason : `${continuity.events.length} dated or sourced change records and ${continuity.tokenLineage.length} lineage nodes were frozen before scoring.` : continuity.coverage.reason,
+        source: "serper + primary records",
+        tone: complete ? "good" : "warn"
+      });
+    } catch (error) {
+      checkTracker.record({
+        id: "entity-continuity",
+        status: "unavailable",
+        note: `the mandatory lifecycle stage failed before a verified result was frozen: ${String(error)}`,
+        provider: "serper+primary-source-verification"
+      });
+      checkTracker.provider("entity-continuity", "Project and token continuity", "failed", String(error));
+      emit({ phase: "Continuity", label: "Lifecycle search failed", detail: String(error), tone: "warn" });
+    }
+    finishRuntimeStage("entity-continuity", continuityStartedAt);
   }
   if (capabilityIsAuthorized("legal_and_adverse")) await organizationSafetyPass();
   if (recoveredProjectSite && evidence.projectToken?.verified && !evidence.protocolTvl && capabilityIsAuthorized("project_fundamentals", "legal_and_adverse")) {
@@ -35447,11 +36323,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     try {
       const sections = projectCompanyEnrichmentSections(evidence);
       const enrichment = sections.length ? await withWallClockBox(
-        collectProjectCompanyEnrichment(recoveredCompanyLookup, {
+        (fetcher) => collectProjectCompanyEnrichment(recoveredCompanyLookup, {
+          fetcher,
           sections,
           officialName: evidence.profile.resolved_name ?? evidence.profile.display_name
         }),
-        MONID_ENRICHMENT_BUDGET_MS
+        Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now())
       ) : null;
       if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, recoveredCompanyLookup)) {
         evidence.companyEnrichment = { ...enrichment.value };
@@ -35473,11 +36350,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     if (primaryVenture) {
       try {
         const enrichment = primaryVenture.domain ? await withWallClockBox(
-          collectProjectCompanyEnrichment(primaryVenture.domain, {
+          (fetcher) => collectProjectCompanyEnrichment(primaryVenture.domain, {
+            fetcher,
             sections: ["funding_detail", "firmographic"],
             officialName: primaryVenture.project_name.trim()
           }),
-          MONID_ENRICHMENT_BUDGET_MS
+          Math.min(MONID_ENRICHMENT_BUDGET_MS, collectionDeadlineAt - Date.now())
         ) : null;
         if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, primaryVenture.domain)) {
           evidence.companyEnrichment = { ...enrichment.value };
@@ -35555,6 +36433,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     });
   }
   projectVerifiedBasicFacts(ctx);
+  organizationVerifiedBasicFacts(ctx);
   const trackedPass = (id, label, providers, work, onError) => {
     const before = attemptTotals(providers);
     return Promise.resolve().then(work).then(() => {
@@ -35636,6 +36515,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   collectFounderDecisionQuestionOutcomes(ctx);
   try {
     const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx, {
+      basicFactsCompleted: adapterResults.get("basic-facts")?.collectionCompleted === true,
       transparencySearchExplicitlyEmpty: adapterResults.get("basic-facts")?.explicitEmptyChecks?.includes("project-transparency") === true
     });
     checkTracker.provider(
@@ -35803,6 +36683,11 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const profileForLlm = { ...evidence.profile };
   delete profileForLlm.identity_confidence;
   delete profileForLlm.identity_note;
+  const frozenCheckOutcomes = checkTracker.snapshot(evidence.roles, {
+    resolvedRealName: hasResolvedRealName(ctx),
+    organizationSubject: isOrganizationAccount(evidence)
+  });
+  evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
     ventures: evidence.ventures,
@@ -35819,7 +36704,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     associates: evidence.associates,
     // The named people behind the project (from the site + LinkedIn + X content),
     // so identity/founder scoring reflects the team we actually found.
-    team: (evidence.webTeam ?? []).map((p) => ({
+    team: (evidence.webTeam ?? []).filter((p) => p.kind !== "org").map((p) => ({
       name: p.name,
       handle: p.identity_link_evidence_origin === "model_lead" ? void 0 : p.handle,
       role: p.role,
@@ -35834,20 +36719,21 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     })),
     ventureTeams: evidence.ventureTeams,
     findings: evidence.findings,
-    notableFollowers: evidence.notableFollowers.map((follower) => ({ ...follower, provider: "twitterapi" })),
+    // Notable-follower enumeration is intentionally retired: it is costly,
+    // incomplete for large accounts, and must not influence a diligence score.
+    notableFollowers: [],
     recentActivity: evidence.recentActivity.slice(0, 12).map((text2) => ({ text: text2, provider: "twitterapi" })),
     sourceArtifacts: evidence.sourceArtifacts,
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
     projectToken: evidence.projectToken,
+    entityContinuity: evidence.entityContinuity ? [evidence.entityContinuity] : [],
+    tokenApplicability: evidence.tokenApplicability,
     // The scale of the venture a founder verifiably founded is scoreable
     // evidence about them (F2/F4). It was collected and then dropped before.
     ventureToken: evidence.ventureToken,
     basicFacts: evidence.basicFacts,
-    checkOutcomes: checkTracker.snapshot(evidence.roles, {
-      resolvedRealName: hasResolvedRealName(ctx),
-      organizationSubject: isOrganizationAccount(evidence)
-    }),
+    checkOutcomes: frozenCheckOutcomes,
     providerRuns: checkTracker.providers().runs,
     // Keep the exclusion explicit at the packet boundary. The raw fixed-block
     // receipts persist in the dossier but cannot affect v1 scoring or model
@@ -35856,7 +36742,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   });
   const analystStartedAt = startRuntimeStage("analyst");
   if (analystAvailable()) {
-    const requestedAxes = axisCatalog(evidence.roles);
+    const requestedAxes = axisCatalog(evidence.roles).filter(({ axis, role }) => !(role === "PROJECT" /* PROJECT */ && axis === "P3_token_conduct" && (evidence.tokenApplicability?.axisTreatment === "not_applicable" || evidence.tokenApplicability?.axisTreatment === "deferred")));
     const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
     const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson, requestedAxes);
     const projectStrengthBands = deriveProjectStrengthBands(evidenceJson, requestedAxes);
@@ -35888,12 +36774,21 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     evidence.axes = [];
     const contradictionBefore = analystAttemptTotals(["record_contradictions"]);
     const scorerBefore = analystAttemptTotals(["record_verdict"]);
-    const [found, verdict] = await Promise.all([
+    const [found, rawVerdict] = await Promise.all([
       decisionPacketUsable ? scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt }) : Promise.resolve(null),
       scorerCanRun ? analyzeSubject(evidence.profile.handle, evidence.roles, scoringAxes, scoringEvidenceJson, {
         analystDeadlineAt
       }) : Promise.resolve(null)
     ]);
+    const lineageReconciliation = rawVerdict ? reconcileAnalystVerdictLineage(rawVerdict, frozenAxisEvidence, scoringAxes) : null;
+    const verdict = lineageReconciliation?.verdict ?? null;
+    if (lineageReconciliation?.removed.length) {
+      console.warn("[agent-lineage]", JSON.stringify({
+        state: verdict ? "reconciled" : "failed_closed",
+        removed: lineageReconciliation.removed,
+        ...lineageReconciliation.reason ? { reason: lineageReconciliation.reason } : {}
+      }));
+    }
     const contradictionAttempts = attemptDelta(
       contradictionBefore,
       analystAttemptTotals(["record_contradictions"])
@@ -36021,7 +36916,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const dossier = assembleDossier(evidence, cost.calls.some((line) => line.calls > 0));
   dossier.checkRuns = finalChecks;
   const checkCompleteness = checkTracker.completeness(evidence.roles, checkScope);
-  dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE" ? "partial" : checkCompleteness;
+  dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE" || dossier.report.score_coverage?.provisional === true || dossier.report.role_reports.some((role) => role.raw_total === null) ? "partial" : checkCompleteness;
   if (options?.organizationId) {
     const prior = await readPriorOutcome(options.organizationId, evidence.profile.handle);
     if (prior) {
@@ -36740,9 +37635,8 @@ function band(score) {
   return score >= 70 ? "PASS" : score >= 40 ? "CAUTION" : "FAIL";
 }
 function handleFromUrl(url) {
-  if (!url) return null;
-  const m = url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i);
-  return m ? "@" + m[1].toLowerCase() : null;
+  const handle = officialXProfileHandle(url);
+  return handle ? "@" + handle.toLowerCase() : null;
 }
 var isBurnAddr2 = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
 var isBurnTag2 = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
@@ -37332,7 +38226,8 @@ async function runTokenAudit(input, emit, opts) {
   const socialActivity = projectX && opts?.collectSocialActivity ? await opts.collectSocialActivity({
     handle: projectX,
     ticker: pair.baseToken.symbol,
-    projectName: pair.baseToken.name
+    projectName: pair.baseToken.name,
+    contractAddress: pair.baseToken.address
   }).catch(() => void 0) : void 0;
   const deployer = deployerAttribution?.address ?? null;
   const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
@@ -37563,8 +38458,8 @@ function normalizeWalletInput(input) {
   } catch {
     return null;
   }
-  const host = url.hostname.toLowerCase();
-  if (host !== "polymarket.com" && !host.endsWith(".polymarket.com")) return null;
+  const host2 = url.hostname.toLowerCase();
+  if (host2 !== "polymarket.com" && !host2.endsWith(".polymarket.com")) return null;
   const match = PROFILE_PATH.exec(url.pathname);
   return match ? match[1].toLowerCase() : null;
 }
@@ -37618,6 +38513,8 @@ function resolveInput(raw) {
 export {
   auditToken,
   collectSocialActivity,
+  fetchPublicAssetHash,
+  fetchPublicText,
   providerStatus,
   resolveInput,
   runAudit

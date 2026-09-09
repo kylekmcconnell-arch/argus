@@ -17,7 +17,6 @@ import {
   tokenFromVerifiedProjectToken,
   type TokenCandidate,
 } from "./projectTokenLeg";
-import { resolveProjectToken } from "./resolveProjectToken";
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
 import type { ResearchIntent } from "./researchDirector";
@@ -40,7 +39,7 @@ type Listener = () => void;
 const runs = new Map<string, BgRun>();
 const aborts = new Map<string, () => void>();
 const listeners = new Set<Listener>();
-let onComplete: ((d: Dossier, priv: boolean) => void) | null = null;
+let onComplete: ((d: Dossier, priv: boolean) => void | Promise<void>) | null = null;
 
 const norm = (h: string) => h.trim().toLowerCase().replace(/^@/, "");
 function emit() { for (const l of listeners) l(); }
@@ -49,7 +48,7 @@ function emit() { for (const l of listeners) l(); }
 // It must NOT change the view — a backgrounded audit finishing should not yank
 // the user out of whatever they're doing. Gets the run's private flag so it can
 // skip everything that would leave a trace.
-export function setOnComplete(fn: (d: Dossier, priv: boolean) => void) { onComplete = fn; }
+export function setOnComplete(fn: (d: Dossier, priv: boolean) => void | Promise<void>) { onComplete = fn; }
 
 export function subscribeRuns(cb: Listener): () => void {
   listeners.add(cb);
@@ -96,6 +95,7 @@ export function startPersonAudit(
   // finalized only once both legs land, so a full-scan report always carries its
   // token verdict. The standalone Threat tab remains the cheap, token-only tier.
   let threatLeg: Promise<ThreatScan | null> | null = null;
+  let threatCandidate: TokenCandidate | null = null;
   let threatSettled = false;
   let threatNote = "";
   let threatFailure = "";
@@ -106,6 +106,7 @@ export function startPersonAudit(
   };
   const startThreatLeg = (cand: TokenCandidate) => {
     if (threatLeg) return;
+    threatCandidate = cand;
     threatNote = `Token attributed via ${cand.source}.`;
     pushStep({ phase: "ARGUS · Threat", label: "Token threat leg", detail: `Full scan includes the token threat pipeline - scanning ${cand.address.slice(0, 10)}… (${cand.via}) in parallel.`, source: "argus", tone: "neutral" });
     threatLeg = threatScan({ kind: "token", ref: cand.address, via: cand.via }, pushStep)
@@ -124,31 +125,19 @@ export function startPersonAudit(
   };
 
   const finalize = async (d: Dossier) => {
-    // Fallback attribution when the server never announced a token: bio CA, a
-    // claimed promotion, then the canonical CoinGecko name-match - guarded
-    // against namesakes by the bio's own domain (never smear a subject with a
-    // same-name token that isn't theirs).
+    // Fallback attribution when the server never announced a token: the
+    // verified project token, then the contract in the subject's own bio, then
+    // a claimed promotion. Nothing else. A CoinGecko name match used to be the
+    // last resort here; it is gone on purpose (#321): anyone can mint a token
+    // in anyone's name, so a same-name listing is never evidence that the
+    // token is the subject's, and the server rightly refused to save it.
     if (!threatLeg) {
       const cand = tokenFromVerifiedProjectToken(d.projectToken)
         ?? tokenFromBio(d.bio)
         ?? tokenFromPromotions(d.evidence?.promotions);
       if (cand) startThreatLeg(cand);
       else {
-        const cg = await resolveProjectToken(d.display_name || d.handle).catch(() => null);
-        if (cg) {
-          const bioDomain = (d.bio ?? "").match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1]?.toLowerCase();
-          let homeHost: string | null = null;
-          try { homeHost = cg.homepage ? new URL(cg.homepage).hostname.replace(/^www\./, "").toLowerCase() : null; } catch { /* bad homepage URL */ }
-          const mismatch = !!bioDomain && !!homeHost && bioDomain !== homeHost && !homeHost.endsWith("." + bioDomain) && !bioDomain.endsWith("." + homeHost);
-          if (mismatch) {
-            threatNote = `A same-name token ($${cg.symbol}) exists, but its official site (${homeHost}) does not match this subject's bio domain (${bioDomain}) - treated as a namesake; no token leg run.`;
-            pushStep({ phase: "ARGUS · Threat", label: "Namesake token skipped", detail: threatNote, source: "argus", tone: "warn" });
-          } else {
-            startThreatLeg({ address: cg.contract, via: cg.chain === "solana" ? "solana" : "evm", source: `the canonical CoinGecko match for "${cg.name}" ($${cg.symbol})${homeHost && bioDomain ? " - site matches the bio" : ""}` });
-          }
-        } else {
-          threatNote = "No project token could be attributed to this subject (no contract in the bio, no claimed promotion, no canonical name match) - token threat leg skipped.";
-        }
+        threatNote = "No project token could be attributed to this subject (no verified project token, no contract in the bio, no claimed promotion). ARGUS does not attach tokens by name match, so the token threat leg was skipped.";
       }
     }
     if (threatLeg) {
@@ -156,10 +145,44 @@ export function startPersonAudit(
       // Bounded wait: the threat scanner's own fetches are all timeout-capped,
       // so this only guards against a pathological hang - never block a
       // finished person audit indefinitely on the token leg.
-      const scan = await Promise.race([
+      let scan = await Promise.race([
         threatLeg,
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 120_000)),
       ]);
+      // Newly launched tokens can reach the server's identity-bound search a
+      // moment before DexScreener's by-token endpoint reaches the browser. The
+      // first lookup then caches an empty result. Once the completed dossier
+      // confirms the exact token, retry that resolution once without the null
+      // cache. A completed token assessment is never rerun here.
+      if (!scan) {
+        const retryCandidate = tokenFromVerifiedProjectToken(d.projectToken) ?? threatCandidate;
+        if (retryCandidate) {
+          const projectPairAddress = d.projectToken?.pairAddress?.trim();
+          const projectPairChain = d.projectToken?.chain?.trim().toLowerCase();
+          const retryInput = projectPairAddress && projectPairChain
+            ? {
+                kind: "token" as const,
+                ref: `https://dexscreener.com/${encodeURIComponent(projectPairChain)}/${encodeURIComponent(projectPairAddress)}`,
+                via: "dexscreener" as const,
+              }
+            : { kind: "token" as const, ref: retryCandidate.address, via: retryCandidate.via };
+          pushStep({
+            phase: "ARGUS · Threat",
+            label: "Retrying the token safety check",
+            detail: "The first market lookup returned before the new token was fully indexed. Retrying the verified contract once.",
+            source: "argus",
+            tone: "neutral",
+          });
+          scan = await threatScan(
+            retryInput,
+            pushStep,
+            { force: true },
+          ).catch((error: unknown) => {
+            threatFailure = error instanceof Error ? error.message : String(error);
+            return null;
+          });
+        }
+      }
       d.threat = scan;
       threatNote = scan
         ? `${threatNote} $${scan.symbol}: ${scan.call.verdict} · ${scan.call.risk}/100 risk.`
@@ -167,12 +190,32 @@ export function startPersonAudit(
     }
     if (threatNote) d.threatNote = threatNote;
     if (runs.get(key) !== run) return; // cancelled / purged while the token leg ran
+
+    // A scan is not complete until its final, token-enriched payload is durable.
+    // Previously we emitted `done` first and only then queued the combined save.
+    // Opening the report, refreshing, or receiving a deployment in that window
+    // abandoned the save and left the active immutable version with an N/A token
+    // score even though the token leg had run. Keep the run live while the owner
+    // persists it, and surface a real failure rather than publishing the earlier
+    // project-only snapshot as a completed report.
+    try {
+      await onComplete?.(d, !!run.priv);
+    } catch (error) {
+      run.status = "error";
+      run.error = error instanceof Error
+        ? error.message
+        : "The combined project and token report could not be saved.";
+      aborts.delete(key);
+      emit();
+      return;
+    }
+
+    if (runs.get(key) !== run) return;
     run.status = "done";
     run.dossier = d;
     run.pct = 100;
     aborts.delete(key);
     emit();
-    onComplete?.(d, !!run.priv); // log + persist + graph (skipped entirely when private)
   };
 
   const abort = streamAudit(key, priv, {

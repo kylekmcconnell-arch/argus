@@ -7,6 +7,8 @@
  */
 export function plainLanguageSummary(value: string): string {
   return humanizeAxisIds(value)
+    .replace(/\bnull backing\b/gi, "no verified financial backing")
+    .replace(/\bproject and token continuity\b/gi, "Earlier names and token history")
     .replace(/\bproject[- _]attributed role\b/gi, "named by the project")
     .replace(/\bproject[- _]attributed\b/gi, "named by the project")
     .replace(/\bsource[- ]reported\b/gi, "reported by a source")
@@ -52,6 +54,7 @@ export function plainLanguageSummary(value: string): string {
     .replace(/\bchecked-empty\b/gi, "nothing found")
     .replace(/\ba null result on this axis(?:, not adverse(?: conduct)? evidence)?\b/gi, "no result was recorded in this area")
     .replace(/\bnull result on this axis\b/gi, "no result in this area")
+    .replace(/\bnull (?:result|record|evidence)\b/gi, "no verified result")
     .replace(/\bbound project identifiers\b/gi, "official X handle and ticker")
     .replace(/\bbound identifiers\b/gi, "official X handle and ticker")
     .replace(/\bare bound to this subject\b/gi, "are tied to this project")
@@ -59,37 +62,6 @@ export function plainLanguageSummary(value: string): string {
     .replace(/\bbound to this subject\b/gi, "tied to this project")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-const PUBLIC_CONCERN_FALLBACKS: Record<string, string> = {
-  F4_build_substance: "A live product could not be independently verified.",
-  P2_product_substance: "A live product could not be independently verified.",
-};
-
-const PROMOTIONAL_SOURCE_COPY = /(?:\b(?:our|we|we're|we’ve|my)\b|\bbiggest\s+releases?\b|\bnow\s+live\b|\bjust\s+launched\b|\b(?:announcing|introducing)\b|\bavailable\s+now\b|\bjoin\s+us\b)/i;
-const EMOJI_OR_PICTOGRAPH = /\p{Extended_Pictographic}/u;
-
-/**
- * Choose a reader-facing concern heading without mistaking source copy for
- * ARGUS's conclusion. Promotional claims remain available in the supporting
- * detail and source ledger; the heading names the evaluated risk instead.
- */
-export function publicConcernTitle({
-  axis,
-  axisLabel,
-  gap,
-}: {
-  axis: string;
-  axisLabel: string;
-  gap?: string | null;
-}): string {
-  const candidate = plainLanguageSummary(gap ?? "").trim();
-  const fallback = PUBLIC_CONCERN_FALLBACKS[axis]
-    ?? `Verified evidence on ${axisLabel.toLowerCase()} is thin.`;
-
-  if (!candidate || candidate.length > 140) return fallback;
-  if (PROMOTIONAL_SOURCE_COPY.test(candidate) || EMOJI_OR_PICTOGRAPH.test(candidate)) return fallback;
-  return /[.!?]$/.test(candidate) ? candidate : `${candidate}.`;
 }
 
 const PUBLIC_RELATIONSHIP_LABELS: Record<string, string> = {
@@ -234,6 +206,11 @@ export function savedSiteSubstanceStatus(payload: Record<string, unknown>): stri
 export function publicCheckNote(value: string | null | undefined): string {
   const trimmed = (value ?? "").replace(/\s+/g, " ").trim();
   if (!trimmed) return "";
+  const legacyGraphDiagnostic = trimmed.match(/^(\d+) graph connections? could not be qualified because the linked immutable report/i);
+  if (legacyGraphDiagnostic) {
+    const count = Number(legacyGraphDiagnostic[1]);
+    return `${count} saved relationship${count === 1 ? " is" : "s are"} excluded from this comparison because the linked case is older, incomplete, or no longer the active version. ${count === 1 ? "It has not been treated as evidence about this subject and does not affect" : "They have not been treated as evidence about this subject and do not affect"} the score or verdict.`;
+  }
   const rateLimited = /\bHTTP 429\b/i.test(trimmed) || /\brate-limited\b/i.test(trimmed);
   const accessDenied = /\bHTTP 40[13]\b/i.test(trimmed)
     || /denied the automated(?: liveness)? request/i.test(trimmed)

@@ -9,10 +9,12 @@ import type { TokenDossier } from "../token/audit";
 // result still lands in the library.
 export function TokenRun({
   input,
+  privateRun = false,
   onDone,
   onError,
 }: {
   input: RunnableTokenInput;
+  privateRun?: boolean;
   onDone: (d: TokenDossier, priv: boolean, scanId: string) => void;
   onError: (message: string) => void;
 }) {
@@ -24,7 +26,7 @@ export function TokenRun({
     return unsub; // detach the view only — the run continues in the background
   }, [input]);
 
-  const run = getScanRun("token", input.ref);
+  const run = getScanRun("token", input.ref, privateRun);
 
   useEffect(() => {
     if (!run) return;
@@ -45,6 +47,7 @@ export function TokenRun({
       working={working}
       mode="live"
       kind="token"
+      startedAt={run?.startedAt}
     />
   );
 }

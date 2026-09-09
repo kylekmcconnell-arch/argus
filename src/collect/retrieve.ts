@@ -31,6 +31,13 @@ export interface Retrieval {
    * that the page has no links.
    */
   links?: string[];
+  /**
+   * The page's own `<meta name="description">` / `og:description`, read from
+   * the raw HTML. This is the site's first-party one-line self-description, the
+   * thing a reader wants before any regex over the body. Undefined when there
+   * was no raw HTML (the rendering crawler returns markdown, which has no head).
+   */
+  description?: string | null;
   stages: RetrievalStage[];
   /** honest, human one-liner about what we did and did not get */
   coverageNote: string;
@@ -72,13 +79,43 @@ export function extractLinks(html: string): string[] {
   return [...out];
 }
 
+// Block-level boundaries become line breaks instead of spaces. A team roster is
+// a structural fact of the page (a heading with the name, the next block with
+// the role); flattening every tag to one space erased that structure and left
+// only an adjacency regex to guess where one person's card ended and the next
+// began. The lines are what the roster reader downstream works from.
+const BLOCK_TAG = /<\/?(?:p|div|br|h[1-6]|li|ul|ol|tr|td|th|section|article|header|footer|nav|aside|main|blockquote|figcaption|figure|dt|dd|table|hr|pre|address)\b[^>]*>/gi;
+const ENTITY: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ", "#39": "'", "#x27": "'", "#38": "&", "#x26": "&" };
+
+function decodeEntities(text: string): string {
+  return text.replace(/&([a-z]+|#x?[0-9a-f]+);/gi, (_whole, name: string) => ENTITY[name.toLowerCase()] ?? " ");
+}
+
 export function visibleText(html: string): string {
   const stripped = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(BLOCK_TAG, "\n")
     .replace(/<[^>]+>/g, " ");
-  return stripped.replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ").trim();
+  return decodeEntities(stripped)
+    .replace(/[ \t\f\v\r]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
+
+/** The page's own one-line self-description, from the head. Extraction only. */
+export function metaDescription(html: string): string | null {
+  const head = html.slice(0, 60_000);
+  for (const name of ["description", "og:description", "twitter:description"]) {
+    const re = new RegExp(`<meta\\b[^>]*(?:name|property)\\s*=\\s*["']${name.replace(":", "\\:")}["'][^>]*>`, "i");
+    const tag = head.match(re)?.[0];
+    const content = tag?.match(/\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+    const value = decodeEntities((content?.[1] ?? content?.[2] ?? "")).replace(/\s+/g, " ").trim();
+    if (value.length >= 12) return value.slice(0, 400);
+  }
+  return null;
 }
 
 // Is this raw HTML a usable render, or just an unrendered single-page-app shell?
@@ -101,6 +138,15 @@ function parseRendered(raw: string): { title: string | null; content: string } {
   const idx = raw.indexOf("Markdown Content:");
   const content = idx >= 0 ? raw.slice(idx + "Markdown Content:".length).trim() : raw.trim();
   return { title: t ? t[1].trim() : null, content };
+}
+
+// "Recovered by rendering the JavaScript app" was stamped on every crawler read,
+// including a plain server-rendered page whose direct fetch the browser's
+// cross-origin policy refused. Say what actually happened at stage one.
+export function recoveredNote(direct: StageOutcome): string {
+  if (direct === "spa-stub") return "The site is a JavaScript app that served no content directly; content recovered by rendering it.";
+  if (direct === "blocked") return "Direct fetch was blocked (cross-origin or network), not a site failure; content read through the rendering crawler.";
+  return "The host did not answer the direct fetch; content read through the rendering crawler.";
 }
 
 export async function retrieveSite(
@@ -136,11 +182,12 @@ export async function retrieveSite(
   // Whatever raw HTML we hold, we hold its hrefs too. Pull them before the tag
   // strip, or they are gone for the rest of the pipeline.
   const rawLinks = directHtml ? extractLinks(directHtml) : undefined;
+  const rawDescription = directHtml ? metaDescription(directHtml) : undefined;
 
   if (directOutcome === "ok" && directHtml) {
     const text = visibleText(directHtml);
     return {
-      url: u, status: "rendered", content: text, links: rawLinks, title: titleOf(directHtml), stages,
+      url: u, status: "rendered", content: text, links: rawLinks, description: rawDescription, title: titleOf(directHtml), stages,
       coverageNote: "Retrieved directly; full page content available.",
     };
   }
@@ -170,8 +217,8 @@ export async function retrieveSite(
     // an app shell happened to serve (a static footer, say). Undefined when the
     // direct fetch returned no HTML at all.
     return {
-      url: u, status: "recovered", content, links: rawLinks, title, stages,
-      coverageNote: "Direct retrieval failed; content recovered by rendering the JavaScript app.",
+      url: u, status: "recovered", content, links: rawLinks, description: rawDescription, title, stages,
+      coverageNote: recoveredNote(directOutcome),
     };
   }
 

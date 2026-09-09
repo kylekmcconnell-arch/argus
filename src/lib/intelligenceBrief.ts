@@ -33,6 +33,19 @@ export function isOfficialTokenQuestion(item: Pick<IntelligenceBriefItem, "id" |
     || /\bofficial (?:crypto )?token\b/i.test(item.title);
 }
 
+/** A frozen ledger can retain this question after subject orientation binds it. */
+export function isOfficialIdentityQuestion(item: Pick<IntelligenceBriefItem, "id" | "title">): boolean {
+  return /official[_ .-]identity/i.test(item.id)
+    || /what exact project or company does this account represent/i.test(item.title);
+}
+
+/** A product-description question is stale once bound orientation answers it. */
+export function isProductDescriptionQuestion(item: Pick<IntelligenceBriefItem, "id" | "title">): boolean {
+  return /(?:live[_ .-])?(?:product|service)[_ .-](?:surface|description|offering)/i.test(item.id)
+    || /what live products? or services? does the project provide/i.test(item.title)
+    || /what (?:does|is) (?:the )?(?:project|product).*(?:do|provide)/i.test(item.title);
+}
+
 const SEVERITY_RANK: Record<DerivedIntelligenceSignal["severity"], number> = {
   high: 0,
   medium: 1,
@@ -178,7 +191,10 @@ export function deriveIntelligenceBrief(
     // produced a brief that never mentioned it. Context is the honest home:
     // the reader sees it without ARGUS asserting a polarity it did not derive.
     context: orderedSignals
-      .filter((signal) => signal.polarity === "neutral" || signal.polarity === "unknown")
+      .filter((signal) => (signal.polarity === "neutral" || signal.polarity === "unknown")
+        // The score chapter already explains these bands. Repeating them under
+        // "Other useful context" adds no new fact and crowds out actual context.
+        && signal.ruleId !== "project-strength-band-summary")
       .map(signalItem),
     questions,
   };

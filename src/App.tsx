@@ -3,7 +3,7 @@ import { AppShell } from "./components/AppShell";
 import { ArgusMark } from "./components/ArgusMark";
 import { AuditConsole } from "./components/AuditConsole";
 import { Landing } from "./components/Landing";
-import { logAudit, hydrateSharedLog, reconcileAuditOutcome } from "./lib/auditlog";
+import { applyAuditCaseFamily, logAudit, hydrateSharedLog, reconcileAuditOutcome } from "./lib/auditlog";
 import {
   syncReport,
   savedVersionContext,
@@ -35,6 +35,7 @@ import type { TokenDossier } from "./token/audit";
 import { resolveTokenSubject, type TokenCandidate } from "./token/resolveSubject";
 import type { NavTarget } from "./components/Sidebar";
 import { personChecks, reconcileInvestigationChecks, tokenChecks } from "./lib/scanChecklist";
+import { applyReportCheckContract } from "./lib/reportCheckContract";
 import { deriveDecisionReadiness } from "./lib/decisionReadiness";
 import { normalizeSubjectRef } from "./lib/subjectRef";
 import { useArgusAuth } from "./auth-context";
@@ -229,6 +230,17 @@ function reconcileStoredPersonOutcome(ref: string, dossier: Dossier): void {
       hasAssociates: (dossier.evidence.associates ?? []).length > 0,
     })).status,
   });
+  const token = dossier.projectToken;
+  if (token?.verified === true && token.address) {
+    applyAuditCaseFamily(
+      [
+        { kind: "person", ref: dossier.handle },
+        { kind: "token", ref: token.address },
+      ],
+      token.address,
+      token.name || dossier.display_name,
+    );
+  }
 }
 
 function cachedFromStoredReport(report: StoredReport): Cached | null {
@@ -265,6 +277,39 @@ function preferredStoredCase(
     ?? subjects[0];
 }
 
+function exactStoredCase(subjects: StoredCaseSubject[], kind: ReportKind): StoredCaseSubject | null {
+  if (!subjects.length || new Set(subjects.map((subject) => subject.ref)).size > 1) return null;
+  return subjects.find((subject) => subject.kind === kind) ?? null;
+}
+
+function storedCaseRefsAreAmbiguous(subjects: StoredCaseSubject[]): boolean {
+  return new Set(subjects.map((subject) => subject.ref)).size > 1;
+}
+
+/** One chooser row per exact (kind, ref) facet, in the order the server returned them. */
+function ambiguousCaseChoices(subjects: StoredCaseSubject[]): StoredCaseSubject[] {
+  const seen = new Set<string>();
+  return subjects.filter((subject) => {
+    const key = `${subject.kind}:${subject.ref}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * The durable token case bound to one exact contract, whichever report kind
+ * saved it. A contract search prefers a fresh combined investigation, so this
+ * is only the last resort once live resolution cannot start one: a saved report
+ * and its score must stay reachable rather than dead-ending on a resolver miss.
+ */
+function storedTokenCaseFallback(subjects: StoredCaseSubject[]): StoredCaseSubject | null {
+  if (!subjects.length || storedCaseRefsAreAmbiguous(subjects)) return null;
+  return subjects.find((subject) => subject.kind === "investigation")
+    ?? subjects.find((subject) => subject.kind === "token")
+    ?? null;
+}
+
 // Deep links:
 //   ?s=<handle>    -> open the stored report for that subject (share links)
 //   ?live=<handle> -> resolve the person case before re-attaching or launching
@@ -296,6 +341,11 @@ export default function App() {
   const [evidenceReviewVersionId, setEvidenceReviewVersionId] = useState<string | null>(boot.openVersionId ?? null);
   const [phase, setPhase] = useState<Phase>(boot.phase);
   const [dossier, setDossier] = useState<Dossier | null>(boot.dossier);
+  const [researchReturn, setResearchReturn] = useState<{
+    ref: string;
+    label: string;
+    kind: ReportKind;
+  } | null>(null);
   const [personBriefTarget, setPersonBriefTarget] = useState<CaseBriefTarget | null>(null);
   const [query, setQuery] = useState(boot.query);
   const [tokenInput, setTokenInput] = useState<RunnableTokenInput | null>(null);
@@ -328,6 +378,8 @@ export default function App() {
     kind?: ReportKind;
     mode?: TokenLaunchMode;
     reuseStored?: boolean;
+    /** The exact durable cases behind an ambiguous label, offered as a chooser (case-ambiguous only). */
+    subjects?: StoredCaseSubject[];
   } | null>(null);
   const [tokenChoices, setTokenChoices] = useState<TokenCandidate[]>([]);
   const [tokenChoicePrivate, setTokenChoicePrivate] = useState(false);
@@ -364,7 +416,7 @@ export default function App() {
     kind: "person" | "token" | "investigation",
     ref: string,
     work: () => Promise<void>,
-  ) => {
+  ): Promise<void> => {
     const key = `${kind}:${normalizeSubjectRef(ref)}`;
     const previous = reportPersistenceQueues.current.get(key) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(work);
@@ -375,6 +427,7 @@ export default function App() {
       }
     };
     void next.then(clear, clear);
+    return next;
   }, []);
   const safeAuditRequestRef = useRef(0);
   // URL boot may re-run when onOpenRecent / onSafeAuditMode identities change.
@@ -478,10 +531,10 @@ export default function App() {
     }
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, setLiveError, setPhase, setPolymarketWallet, setPrivateMode, setQuery, setReconUrl, setTokenInput, showPrivacyConflict]);
 
-  // The main search bar runs the full autonomous investigation for a contract;
-  // handles and sites fall through to the normal routing. Internal clicks
-  // (Radar, recon, watchlist, founder buttons) keep using onAudit for a quick
-  // single-surface audit and don't auto-spend.
+  // Contract inputs run the full autonomous investigation; handles and sites
+  // fall through to their normal routing. This is the canonical research path
+  // regardless of whether the user starts from Home, the persistent search,
+  // or an entity pivot elsewhere in ARGUS.
   const onInvestigate = useCallback((raw: string, priv = false, force = false) => {
     if (!closeCaseBriefForNavigation()) return;
     leaveEvidenceReview();
@@ -692,25 +745,32 @@ export default function App() {
                 ? supplemented
                 : current
             ));
-            const contribution = investigationContribution(supplemented);
-            if (contribution) recordContribution(contribution);
+            // New discovery stays in this session until a subsequent immutable version saves it.
           });
       }
+      if (persisted.state !== "persisted" || !versionContext) return;
+      logAudit({
+        id: versionContext.reportVersionId,
+        kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
+        summary: inv.founderNote,
+        // Same completion contract the investigation report and the stored
+        // version apply. The raw token checklist carries the org-side rows
+        // (docs, news, GitHub) as required, so without the contract every
+        // finished investigation logged "incomplete" to recents and the shared
+        // feed while its own report read complete.
+        coverage: deriveDecisionReadiness(applyReportCheckContract("investigation", reconcileInvestigationChecks(
+          tokenChecks(inv.token),
+          inv.token.address,
+          inv.projectAccount,
+          inv.projectAccountAudit,
+          inv.projectAccountBinding,
+        ))).status,
+        flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
+      });
+      const c = investigationContribution(settled);
+      if (c) recordContribution({ ...c, reportVersionId: versionContext.reportVersionId, provenanceState: "client_submitted" });
     });
-    logAudit({
-      kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
-      summary: inv.founderNote,
-      coverage: deriveDecisionReadiness(reconcileInvestigationChecks(
-        tokenChecks(inv.token),
-        inv.token.address,
-        inv.projectAccount,
-        inv.projectAccountAudit,
-        inv.projectAccountBinding,
-      )).status,
-      flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
-    });
-    const c = investigationContribution(inv);
-    if (c) recordContribution(c);
+
   }, [enqueueReportPersistence, setDossier, setInvestigation, setTokenDossier]);
   const tokenData = useCallback((d: TokenDossier, priv: boolean, scanId: string, creditKey: string, startedAt: number) => {
     if (priv) {
@@ -761,14 +821,17 @@ export default function App() {
           ? settled
           : current
       ));
+      if (persisted.state !== "persisted" || !versionContext) return;
+      logAudit({
+        id: versionContext.reportVersionId,
+        kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
+        summary: d.headline,
+        coverage: deriveDecisionReadiness(applyReportCheckContract("token", tokenChecks(d))).status,
+        flags: [d.capApplied ? `cap:${d.capApplied}` : "", d.bundleRisk !== "low" ? `bundle:${d.bundleRisk}` : ""].filter(Boolean),
+      });
+      recordContribution({ ...tokenContribution(d.symbol, d.verdict, d.graph.nodes, d.graph.edges), reportVersionId: versionContext.reportVersionId, provenanceState: "client_submitted" });
     });
-    logAudit({
-      kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
-      summary: d.headline,
-      coverage: deriveDecisionReadiness(tokenChecks(d)).status,
-      flags: [d.capApplied ? `cap:${d.capApplied}` : "", d.bundleRisk !== "low" ? `bundle:${d.bundleRisk}` : ""].filter(Boolean),
-    });
-    recordContribution(tokenContribution(d.symbol, d.verdict, d.graph.nodes, d.graph.edges));
+
   }, [enqueueReportPersistence, setTokenDossier]);
   // The runner calls this for every finished token / investigation scan.
   useEffect(() => {
@@ -802,18 +865,32 @@ export default function App() {
   // this session, then publish it to audit and graph surfaces only when the
   // server returned an exact immutable version binding. This is view-independent
   // and never pulls the user away from their current screen.
-  const logPerson = useCallback((d: Dossier, priv = false) => {
+  const logPerson = useCallback(async (d: Dossier, priv = false) => {
     if (priv) return; // private: current view only — nothing is cached or leaves
     const persistedVersionId = d.persistence?.state === "persisted"
       && typeof d.persistence.reportVersionId === "string"
       && d.persistence.reportVersionId
       ? d.persistence.reportVersionId
       : null;
-    // A failed server save remains available in this session and the report UI
-    // explains how to rescan it, but it must not look like a durable audit or
-    // enter the shared graph without an exact immutable version binding.
+    // A failed server save stays available in this session with its real score,
+    // and the report UI explains how to rescan it. It must not look like a
+    // durable audit or enter the shared graph without an exact immutable
+    // version binding. Throwing here instead took the whole finished scan down
+    // with the save: the runner marked the run errored, so a collected report
+    // with a real verdict and score rendered as a failure with neither.
     if (!persistedVersionId) {
-      cacheResult(resultCache.current, d.handle, { kind: "person", dossier: d });
+      cacheResult(resultCache.current, d.handle, {
+        kind: "person",
+        dossier: {
+          ...d,
+          persistence: {
+            ...d.persistence,
+            state: "failed",
+            reason: d.persistence?.reason
+              || "This report finished without an immutable saved-version receipt, so it was not saved.",
+          },
+        },
+      });
       return;
     }
 
@@ -835,7 +912,7 @@ export default function App() {
     };
     cacheResult(resultCache.current, d.handle, { kind: "person", dossier: pending });
 
-    enqueueReportPersistence("person", d.handle, async () => {
+    await enqueueReportPersistence("person", d.handle, async () => {
       const persisted = await syncReport(
         "person",
         d.handle,
@@ -844,28 +921,35 @@ export default function App() {
         d.report.composite_verdict,
         d.report.governing_score,
       );
-      const versionContext = persisted.state === "persisted"
-        ? savedVersionContext("person", d, persisted)
-        : undefined;
-      const settled: Dossier = persisted.state === "persisted"
-        ? {
+      if (persisted.state !== "persisted") {
+        // The project evidence is already durable, but the combined
+        // token-enriched version did not land. Keep the completed report in
+        // this session, keep the durable version reachable, and publish
+        // nothing: audit and graph must never point at a version that does
+        // not carry the token score this page is showing.
+        settleCachedScan(resultCache.current, d.handle, scanId, {
+          kind: "person",
+          dossier: {
             ...d,
-            ...(persisted.reportDelta ? { reportDelta: persisted.reportDelta } : {}),
-            ...(versionContext ? { versionContext } : {}),
-            persistence: { ...persisted, scanId },
-          }
-        : {
-            ...d,
-            // Keep the server's durable fallback bound if the enriched save
-            // fails. The current session still renders the completed token leg.
             persistence: {
               ...d.persistence,
-              state: "persisted",
+              state: "failed",
               scanId,
               reportVersionId: persistedVersionId,
               reason: persisted.reason,
             },
-          };
+          },
+        });
+        return;
+      }
+
+      const versionContext = savedVersionContext("person", d, persisted);
+      const settled: Dossier = {
+        ...d,
+        ...(persisted.reportDelta ? { reportDelta: persisted.reportDelta } : {}),
+        ...(versionContext ? { versionContext } : {}),
+        persistence: { ...persisted, scanId },
+      };
 
       if (!settleCachedScan(
         resultCache.current,
@@ -881,9 +965,9 @@ export default function App() {
           ? settled
           : current
       ));
-      if (versionContext) setPersonBriefTarget(briefTargetForPerson(settled));
+      setPersonBriefTarget(briefTargetForPerson(settled));
 
-      const finalVersionId = versionContext?.reportVersionId ?? persistedVersionId;
+      const finalVersionId = versionContext.reportVersionId;
       logAudit({
         id: finalVersionId,
         kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
@@ -902,6 +986,17 @@ export default function App() {
           ...Array.from(new Set([d.report.governing_role, ...(d.report.roles ?? [])])).filter(Boolean).map((r) => `role:${r}`),
         ].filter(Boolean),
       });
+      const projectToken = d.projectToken;
+      if (projectToken?.verified === true && projectToken.address) {
+        applyAuditCaseFamily(
+          [
+            { kind: "person", ref: d.handle },
+            { kind: "token", ref: projectToken.address },
+          ],
+          projectToken.address,
+          projectToken.name || d.display_name,
+        );
+      }
       // Compound the trust graph only after the final report binding settles,
       // so graph/audit surfaces point at the same immutable evidence version.
       recordContribution(personContribution(settled));
@@ -1027,6 +1122,15 @@ export default function App() {
       clearCachedRef(resultCache.current, ref);
       setQuery(ref);
       setCaseNotice({ reason: "archived", ref, kind: requestedKind });
+      setLiveError(null);
+      setPhase("notfound");
+      return;
+    }
+    if (lookup.status === "ambiguous") {
+      // Not an outage: the label maps to several durable cases. Offer them;
+      // never guess between refs and never start a paid scan to disambiguate.
+      setQuery(ref);
+      setCaseNotice({ reason: "case-ambiguous", ref, kind: requestedKind, subjects: lookup.subjects ?? [] });
       setLiveError(null);
       setPhase("notfound");
       return;
@@ -1171,14 +1275,14 @@ export default function App() {
           return;
         }
         const preferredKind: ReportKind = mode === "token" ? "token" : "investigation";
-        const stored = preferredStoredCase(storedLookup.subjects, preferredKind);
+        const stored = exactStoredCase(storedLookup.subjects, preferredKind);
         if (stored) {
           await onOpenRecent(stored.ref, stored.kind);
           return;
         }
-        if (storedLookup.subjects.length) {
+        if (storedCaseRefsAreAmbiguous(storedLookup.subjects)) {
           setQuery(candidate.canonicalRef);
-          setCaseNotice({ reason: "case-ambiguous", ref: candidate.canonicalRef });
+          setCaseNotice({ reason: "case-ambiguous", ref: candidate.canonicalRef, subjects: storedLookup.subjects });
           setLiveError(null);
           setPhase("notfound");
           return;
@@ -1268,7 +1372,7 @@ export default function App() {
         }
         if (storedLookup.subjects.length) {
           setQuery(raw);
-          setCaseNotice({ reason: "case-ambiguous", ref: raw });
+          setCaseNotice({ reason: "case-ambiguous", ref: raw, subjects: storedLookup.subjects });
           setLiveError(null);
           setPhase("notfound");
           return;
@@ -1314,14 +1418,14 @@ export default function App() {
       // stored case currently uses that display label.
       if (reuseStored && parsed.via !== "ticker" && parsed.via !== "dexscreener") {
         const preferredKind: ReportKind = mode === "token" ? "token" : "investigation";
-        const stored = preferredStoredCase(storedLookup.subjects, preferredKind);
+        const stored = exactStoredCase(storedLookup.subjects, preferredKind);
         if (stored) {
           await onOpenRecent(stored.ref, stored.kind);
           return;
         }
-        if (storedLookup.subjects.length) {
+        if (storedCaseRefsAreAmbiguous(storedLookup.subjects)) {
           setQuery(raw);
-          setCaseNotice({ reason: "case-ambiguous", ref: raw });
+          setCaseNotice({ reason: "case-ambiguous", ref: raw, subjects: storedLookup.subjects });
           setLiveError(null);
           setPhase("notfound");
           return;
@@ -1330,6 +1434,21 @@ export default function App() {
 
       const resolution = await resolveTokenSubject(parsed);
       if (requestId !== safeAuditRequestRef.current) return;
+      // Live resolution could not produce a contract to scan. An exact input
+      // with one durable case is still the analyst's saved report: reopen it
+      // with its score instead of dead-ending, which is how a delisted or
+      // unindexed pair used to make a finished saved report unreachable.
+      const unresolvableExactInput = (resolution.state === "unavailable" || resolution.state === "not_found")
+        && reuseStored
+        && parsed.via !== "ticker"
+        && parsed.via !== "dexscreener";
+      const storedFallback = unresolvableExactInput
+        ? storedTokenCaseFallback(storedLookup.subjects)
+        : null;
+      if (storedFallback) {
+        await onOpenRecent(storedFallback.ref, storedFallback.kind);
+        return;
+      }
       if (resolution.state === "unavailable") {
         setQuery(raw);
         setCaseNotice({ reason: "search-unavailable", ref: raw, mode, reuseStored });
@@ -1374,9 +1493,28 @@ export default function App() {
   );
 
   const onSafeAudit = useCallback(
-    (raw: string, priv = false) => onSafeAuditMode(raw, priv, "token"),
+    (raw: string, priv = false) => onSafeAuditMode(raw, priv, "investigation"),
     [onSafeAuditMode],
   );
+
+  const onReportResearch = useCallback((raw: string, priv = false) => {
+    if (!dossier) return;
+    setResearchReturn({
+      ref: dossier.handle,
+      label: dossier.display_name || dossier.handle,
+      kind: "person",
+    });
+    // A paid rabbit-hole action is always a fresh investigation. Stored cases
+    // remain available through the free "Open saved report" path in the sheet.
+    void onSafeAuditMode(raw, priv, "investigation", true, false);
+  }, [dossier, onSafeAuditMode]);
+
+  const returnToResearchSource = useCallback(async () => {
+    if (!researchReturn) return;
+    const source = researchReturn;
+    await onOpenRecent(source.ref, source.kind);
+    setResearchReturn(null);
+  }, [onOpenRecent, researchReturn]);
 
   // Incognito pivots still need canonical ticker/address resolution, but must
   // skip durable public-case reuse all the way through that resolver.
@@ -1456,6 +1594,7 @@ export default function App() {
     setTokenChoiceMode("investigation");
     privRef.current = false;
     setPrivateMode(false);
+    setResearchReturn(null);
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, setDossier, setInvestigation, setInvestigationInput, setLiveError, setPhase, setPrivateMode, setQuery, setTokenDossier, setTokenInput]);
 
   // from the investigation report: open the full on-chain token report
@@ -1477,6 +1616,21 @@ export default function App() {
       return inv;
     });
   }, [closeCaseBriefForNavigation, setInvestigation, setPhase, setTokenDossier]);
+
+  // A project report's integrated token leg has already been collected and
+  // charged as part of that report. Opening it is navigation, never a new scan.
+  const onOpenIncludedToken = useCallback((included: TokenDossier) => {
+    if (!closeCaseBriefForNavigation()) return;
+    setTokenBriefTarget(null);
+    const versionContext = dossier?.versionContext ?? dossier?.viewVersionContext;
+    const persistence = dossier?.persistence ?? dossier?.viewPersistence;
+    setTokenDossier(versionContext
+      ? { ...included, viewVersionContext: versionContext }
+      : persistence
+        ? { ...included, viewPersistence: persistence }
+        : included);
+    setPhase("token-report");
+  }, [closeCaseBriefForNavigation, dossier, setPhase, setTokenDossier]);
 
   // from the investigation report: open the full people report for the project
   // account (already collected — no re-spend), which shows the axis/cap reasoning.
@@ -1503,6 +1657,7 @@ export default function App() {
     if ((t === "admin" || t === "providers" || t === "changelog") && role !== "owner") return;
     if (!closeCaseBriefForNavigation()) return;
     safeAuditRequestRef.current += 1;
+    setResearchReturn(null);
     setPersonBriefTarget(null);
     setTokenBriefTarget(null);
     leaveEvidenceReview();
@@ -1558,6 +1713,27 @@ export default function App() {
           <span>Opened in a separate tab so the Case Brief draft remains intact.</span>
         </div>
       )}
+      {researchReturn && inAudit && (
+        <div className="mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-950 shadow-sm" role="status">
+          <span className="font-semibold">Rabbit-hole investigation</span>
+          <span className="text-emerald-800">Opened from {researchReturn.label}.</span>
+          <button
+            type="button"
+            onClick={() => void returnToResearchSource()}
+            className="ml-auto rounded-full border border-emerald-300 bg-white px-3 py-1.5 font-medium text-emerald-950 transition hover:border-emerald-500 hover:bg-emerald-100"
+          >
+            Back to {researchReturn.label}
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss return link"
+            onClick={() => setResearchReturn(null)}
+            className="rounded-full px-2 py-1 text-emerald-800 transition hover:bg-emerald-100"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {phase === "idle" && <Landing onAudit={onHomeAudit} onAbout={() => setPhase("about")} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
@@ -1584,7 +1760,7 @@ export default function App() {
 
       {phase === "trending" && <TrendingPage onOpen={onOpenRecent} />}
 
-      {phase === "watchlist" && <WatchlistPage onAudit={onSafeAudit} />}
+      {phase === "watchlist" && <WatchlistPage onAudit={onOpenRecent} />}
 
 
       {phase === "referrals" && <ReferralsPage />}
@@ -1601,11 +1777,11 @@ export default function App() {
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 
-      {phase === "report" && dossier && <Report key={`person:${dossier.versionContext?.reportVersionId ?? dossier.viewVersionContext?.reportVersionId ?? dossier.persistence?.scanId ?? dossier.viewPersistence?.scanId ?? dossier.report.audit_id}`} dossier={dossier} onReset={reset} onAudit={personReportPrivate ? onPrivateAudit : onSafeAudit} onRescan={() => onAudit(dossier.handle, personReportPrivate)} onOpenProject={personReportPrivate ? onOpenPrivateProject : (name, domain, panelCostToken) => onOpenProject(name, domain, false, panelCostToken)} onOpenBrief={!evidenceReviewVersionId && !privateMode && personBriefTarget ? () => setCaseBriefTarget(personBriefTarget) : undefined} />}
+      {phase === "report" && dossier && <Report key={`person:${dossier.versionContext?.reportVersionId ?? dossier.viewVersionContext?.reportVersionId ?? dossier.persistence?.scanId ?? dossier.viewPersistence?.scanId ?? dossier.report.audit_id}`} dossier={dossier} onReset={reset} onAudit={personReportPrivate ? onPrivateAudit : onSafeAudit} onResearchAudit={(raw, priv) => onReportResearch(raw, personReportPrivate || priv)} onOpenSavedResearch={(raw, kind) => void onOpenRecent(raw, kind)} onOpenTokenReport={onOpenIncludedToken} onRescan={() => onAudit(dossier.handle, personReportPrivate)} onOpenProject={personReportPrivate ? onOpenPrivateProject : (name, domain, panelCostToken) => onOpenProject(name, domain, false, panelCostToken)} onOpenBrief={!evidenceReviewVersionId && !privateMode && personBriefTarget ? () => setCaseBriefTarget(personBriefTarget) : undefined} />}
       {phase === "project" && viewedProject && <ProjectView project={viewedProject} onAudit={viewedProject.privateMode ? onPrivateAudit : onSafeAudit} onReset={reset} record={!viewedProject.privateMode} panelCostToken={viewedProject.panelCostToken} />}
 
       {phase === "token-run" && tokenInput && (
-        <TokenRun input={tokenInput} onDone={onTokenDone} onError={onTokenError} />
+        <TokenRun privateRun={privateMode} input={tokenInput} onDone={onTokenDone} onError={onTokenError} />
       )}
 
       {phase === "token-report" && tokenDossier && <TokenReport key={`token:${tokenDossier.versionContext?.reportVersionId ?? tokenDossier.viewVersionContext?.reportVersionId ?? tokenDossier.persistence?.scanId ?? tokenDossier.viewPersistence?.scanId ?? tokenDossier.address}`} dossier={tokenDossier} onReset={reset} onAudit={tokenReportPrivate ? onPrivateAudit : onSafeAudit} onRescan={() => onAudit(tokenDossier.address, tokenReportPrivate, true)} onOpenBrief={!evidenceReviewVersionId && !privateMode && tokenBriefTarget ? () => setCaseBriefTarget(tokenBriefTarget) : undefined} />}
@@ -1617,7 +1793,7 @@ export default function App() {
           : <ThreatLanding onScan={onThreatScan} />)}
 
       {phase === "investigation" && investigationInput && (
-        <InvestigationRun input={investigationInput} expectedRunId={investigationScanId ?? undefined} onDone={onInvestigationDone} onError={onInvestigationError} />
+        <InvestigationRun privateRun={privateMode} input={investigationInput} expectedRunId={investigationScanId ?? undefined} onDone={onInvestigationDone} onError={onInvestigationError} />
       )}
 
       {phase === "investigation-report" && investigation && (
@@ -1729,9 +1905,29 @@ export default function App() {
                         : caseNotice.reason === "token-unresolved"
                           ? "No exact DexScreener contract matched that token input. ARGUS did not reinterpret it as a person or spend any investigation quota. Paste the contract address, a DexScreener URL, or an exact $TICKER."
                           : caseNotice.reason === "case-ambiguous"
-                            ? "Several durable cases share that label. Open the report library and choose the exact case facet; ARGUS will not guess or start a scan."
+                            ? caseNotice.subjects?.length
+                              ? "Several durable cases share that label. Choose the exact case below; ARGUS will not guess between them or start a scan."
+                              : "Several durable cases share that label. Open the report library and choose the exact case facet; ARGUS will not guess or start a scan."
                             : "ARGUS could not safely verify whether this case is active or archived. No cached report was opened and no paid scan was started."}
               </p>
+              {caseNotice.reason === "case-ambiguous" && caseNotice.subjects?.length ? (
+                <div className="mt-4 flex w-full max-w-md flex-col gap-2" data-testid="case-chooser">
+                  {ambiguousCaseChoices(caseNotice.subjects).map((subject) => (
+                    <button
+                      key={`${subject.kind}:${subject.ref}`}
+                      type="button"
+                      data-testid="case-choice"
+                      onClick={() => void onOpenRecent(subject.ref, subject.kind)}
+                      className="panel-inset flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-[13px] transition hover:border-line-2"
+                    >
+                      <span className="mono break-all text-ink">{subject.ref}</span>
+                      <span className="shrink-0 text-ink-dim">
+                        {subject.kind}{subject.status === "archived" ? " · archived" : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               {caseNotice.reason === "launch-failed" && liveError && (
                 <div role="alert" className="mono panel-inset mt-3 max-w-md break-words px-3 py-2 text-left text-[12.5px] text-ink-dim">
                   {liveError}

@@ -223,7 +223,16 @@
    measure, hairline-ruled sections, clamp-responsive serif headlines, no
    boxes around reading content. Ported from the approved mock's stylesheet,
    values translated to tokens. ── */
-.af-doc { max-width: 1020px; margin-inline: auto; }
+/* Between ~1024px and ~1300px the reading column is narrower than the 1020px
+   document but the sidebar still occupies the viewport, so `margin-inline: auto`
+   has no slack to spend and every section sits at just the frame's 16-26px
+   padding — the headline and eyebrow crowd the left edge while the section-head
+   score is flung to the far right. This padding restores a comfortable gutter
+   across that band (scaling with the viewport, ~0 on mobile where the frame
+   padding already suffices, capped at 24px), and only trims the centered
+   measure imperceptibly on wide screens. box-sizing is border-box, so the 1020
+   ceiling is unchanged. */
+.af-doc { max-width: 1020px; margin-inline: auto; padding-inline: clamp(0px, calc(2vw - 0.5rem), 1.5rem); }
 .af-sec { padding: 52px 0; border-bottom: 1px solid var(--color-line); }
 .af-sec-label { font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.22em; text-transform: uppercase; color: var(--color-ink-faint); }
 .af-h2 { font-family: var(--font-serif); font-weight: 400; letter-spacing: -0.01em; font-size: clamp(26px, 3.4vw, 34px); line-height: 1.18; color: var(--color-ink); max-width: 680px; text-wrap: balance; }
@@ -801,6 +810,104 @@
 .report-style-2 .dossier-report .panel-inset p:not(.mono) {
   font-size: 13px;
   line-height: 1.5;
+}
+.product-portfolio {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
+  max-width: 880px;
+  margin-top: 30px;
+}
+.product-portfolio-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 226px;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 22px;
+  border: 1px solid var(--color-line);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 88% 12%, color-mix(in srgb, var(--color-signal) 13%, transparent) 0, transparent 38%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-panel) 96%, white) 0%, var(--color-panel) 100%);
+  box-shadow: 0 14px 34px color-mix(in srgb, var(--color-ink) 7%, transparent);
+}
+.product-portfolio-card::after {
+  position: absolute;
+  right: -48px;
+  bottom: -62px;
+  width: 150px;
+  height: 150px;
+  border: 1px solid color-mix(in srgb, var(--color-signal) 15%, transparent);
+  border-radius: 999px;
+  content: "";
+  pointer-events: none;
+}
+.product-portfolio-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.product-portfolio-number {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .14em;
+  color: var(--color-ink-faint);
+}
+.product-portfolio-icon {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--color-signal) 22%, var(--color-line));
+  border-radius: 13px;
+  color: var(--color-sourced);
+  background: color-mix(in srgb, var(--color-signal) 9%, var(--color-panel));
+}
+.product-portfolio-card h3 {
+  position: relative;
+  z-index: 1;
+  margin-top: 22px;
+  font-size: clamp(1.25rem, 2vw, 1.55rem);
+  font-weight: 620;
+  line-height: 1.12;
+  color: var(--color-ink);
+}
+.product-portfolio-card p {
+  position: relative;
+  z-index: 1;
+  max-width: 38ch;
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.58;
+  color: var(--color-ink-dim);
+}
+.product-portfolio-source {
+  position: relative;
+  z-index: 1;
+  width: fit-content;
+  margin-top: auto;
+  padding-top: 20px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  color: var(--color-sourced);
+  text-decoration: none;
+}
+a.product-portfolio-source:hover,
+a.product-portfolio-source:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 720px) {
+  .product-portfolio { grid-template-columns: 1fr; }
+  .product-portfolio-card { min-height: 205px; }
+}
+@media (min-width: 721px) and (max-width: 1100px) {
+  .product-portfolio { grid-template-columns: 1fr; }
 }
 .report-style-2 .canonical-decision-brief,
 .report-style-2 .canonical-people-section {
@@ -2352,9 +2459,9 @@ h1.display-sm {
 }
 .public-access-eye { display: flex; flex-direction: column; align-items: center; justify-content: center; }
 
-/* Live evidence command deck. It follows the active application theme so a
-   light workspace never drops into an unrelated black page mid-investigation.
-   Dark mode keeps the terminal character through the same shared tokens. */
+/* Live evidence command deck. The command canvas follows the application
+   theme, while the evidence ledger is an intentionally persistent dark
+   execution chamber in both light and dark report modes. */
 .research-workspace {
   position: relative;
   min-height: 100%;
@@ -2378,10 +2485,12 @@ h1.display-sm {
 .research-live-dot.is-idle { background: var(--color-derived); box-shadow: none; }
 .research-command-title { max-width: 850px; margin-top: 1rem; font-family: var(--font-sans); font-size: clamp(2rem, 4vw, 4.1rem); font-weight: 620; letter-spacing: -.05em; line-height: 1; color: var(--color-ink); }
 .research-command-subtitle { max-width: 700px; margin-top: .85rem; font-size: 14.5px; line-height: 1.65; color: var(--color-ink-dim); }
-.research-eta { display: flex; max-width: 700px; flex-wrap: wrap; align-items: baseline; gap: .45rem 1rem; margin-top: 1.25rem; border-top: 1px solid var(--color-line); border-bottom: 1px solid var(--color-line); padding: .75rem 0; font-family: var(--font-mono); }
-.research-eta span { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--color-ink-faint); }
-.research-eta strong { font-size: 13px; font-weight: 600; color: var(--color-brand); }
-.research-eta small { width: 100%; font-size: 10px; color: var(--color-ink-faint); }
+.research-eta { display: grid; max-width: 760px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 1.35rem; overflow: hidden; border: 1px solid var(--color-line); border-radius: var(--radius-md); background: color-mix(in oklab, var(--color-panel-2) 60%, var(--color-panel)); font-family: var(--font-mono); }
+.research-eta > div { display: flex; min-height: 76px; flex-direction: column; justify-content: center; gap: .4rem; padding: .9rem 1rem; border-right: 1px solid var(--color-line); }
+.research-eta > div:last-of-type { border-right: 0; }
+.research-eta span { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--color-ink-dim); }
+.research-eta strong { font-size: clamp(14px, 1.4vw, 17px); font-weight: 650; line-height: 1.15; color: var(--color-brand); }
+.research-eta small { grid-column: 1 / -1; border-top: 1px solid var(--color-line); padding: .55rem 1rem; font-size: 10.5px; line-height: 1.45; color: var(--color-ink-dim); }
 .research-observation { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: clamp(1.5rem, 3vw, 3rem); align-items: center; margin-block: auto; padding-block: 2.5rem; }
 .research-eye-stage { display: flex; min-height: 190px; align-items: center; justify-content: center; border-right: 1px solid var(--color-line); }
 .research-observation-title { margin-top: .5rem; font-size: clamp(1.35rem, 2vw, 2.1rem); font-weight: 610; letter-spacing: -.03em; line-height: 1.12; color: var(--color-ink); }
@@ -2405,23 +2514,55 @@ h1.display-sm {
 .research-proof-stats dt { font-family: var(--font-mono); font-size: 8px; line-height: 1.25; letter-spacing: .05em; text-transform: uppercase; color: var(--color-ink-faint); }
 .research-proof-stats dd { margin-top: .3rem; font-size: 18px; font-weight: 620; color: var(--color-ink); }
 .research-sources { display: flex; min-height: 28px; flex-wrap: wrap; gap: .35rem; margin-top: 1rem; }
-.research-ledger { margin-top: 1rem; overflow: hidden; border: 1px solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-panel); box-shadow: 0 30px 90px -46px rgb(0 0 0 / 0.9); }
-.research-ledger-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.35rem 1.5rem; border-bottom: 1px solid var(--color-line); }
-.research-ledger-columns, .research-ledger-row { display: grid; grid-template-columns: 80px minmax(130px, .7fr) minmax(300px, 2fr) 100px; gap: 1rem; align-items: center; }
-.research-ledger-columns { padding: .65rem 1.5rem; background: var(--color-panel-2); font-family: var(--font-mono); font-size: 9px; letter-spacing: .09em; text-transform: uppercase; color: var(--color-ink-faint); }
+.research-ledger {
+  --color-panel: #071415;
+  --color-panel-2: #09191a;
+  --color-line: rgb(142 196 176 / .17);
+  --color-line-2: rgb(142 196 176 / .27);
+  --color-ink: #f2f7f4;
+  --color-ink-dim: #aebbb7;
+  --color-ink-faint: #7e908a;
+  --color-pass: #56d894;
+  --color-caution: #efbc57;
+  --color-avoid: #ef7973;
+  margin-top: 1rem;
+  overflow: hidden;
+  border: 1px solid var(--color-line-2);
+  border-radius: var(--radius-lg);
+  background: var(--color-panel);
+  color: var(--color-ink);
+  box-shadow: 0 30px 90px -42px rgb(0 20 17 / .8);
+}
+.research-ledger-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.35rem 1.75rem; border-bottom: 1px solid var(--color-line); }
+.research-ledger-heading { display: flex; align-items: flex-end; gap: clamp(1.5rem, 4vw, 4rem); }
+.research-ledger-heading .eyebrow { color: var(--color-pass); }
+.research-ledger-live { display: flex; align-items: center; gap: .4rem; padding-bottom: .1rem; font-family: var(--font-mono); font-size: 10px; color: var(--color-pass); }
+.research-ledger-live > svg { filter: drop-shadow(0 0 5px currentColor); }
+.research-ledger-live time { margin-left: .15rem; color: var(--color-ink-dim); font-variant-numeric: tabular-nums; }
+.research-ledger-live small { color: var(--color-ink-faint); font-family: var(--font-sans); font-size: 10px; }
+.research-ledger-check { display: inline-flex; min-height: 32px; align-items: center; gap: .45rem; border: 1px solid var(--color-line); border-radius: 999px; padding: .35rem .7rem; font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--color-ink-dim); }
+.research-ledger-check.is-live svg { color: var(--color-pass); }
+.research-ledger-columns, .research-ledger-row { display: grid; grid-template-columns: 64px minmax(170px, .75fr) minmax(100px, .5fr) minmax(300px, 2fr) 120px; gap: 1rem; align-items: center; }
+.research-ledger-columns { padding: .65rem 1.75rem; background: rgb(0 0 0 / .12); font-family: var(--font-mono); font-size: 9px; letter-spacing: .09em; text-transform: uppercase; color: var(--color-ink-faint); }
 .research-ledger-scroll { max-height: 420px; overflow-y: auto; }
 .research-ledger-scroll.is-resolution { max-height: 210px; }
-.research-ledger-row { min-height: 78px; padding: .9rem 1.5rem; border-top: 1px solid var(--color-line); }
+.research-ledger-row { min-height: 78px; padding: .9rem 1.75rem; border-top: 1px solid var(--color-line); transition: background .18s ease, box-shadow .18s ease; }
 .research-ledger-row:first-child { border-top: 0; }
+.research-ledger-row:hover, .research-ledger-row.is-current { background: rgb(18 79 62 / .18); box-shadow: inset 3px 0 var(--color-pass); }
 .research-ledger-order { display: flex; align-items: center; gap: .55rem; font-family: var(--font-mono); font-size: 10px; color: var(--color-ink-faint); }
 .research-ledger-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 99px; }
-.research-ledger-source { overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 10px; color: var(--color-ink-dim); }
+.research-ledger-source { display: flex; min-width: 0; align-items: center; gap: .65rem; font-family: var(--font-mono); font-size: 10px; color: var(--color-ink-dim); }
+.research-ledger-source > span:first-child { display: inline-flex; flex: 0 0 auto; color: var(--color-ink-faint); }
+.research-ledger-source > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.research-ledger-trace { display: flex; align-items: center; color: var(--color-pass); opacity: .88; }
+.research-ledger-trace svg { width: 100%; max-width: 116px; height: 24px; }
+.research-ledger-row[data-tone="neutral"] .research-ledger-trace { color: var(--color-ink-faint); opacity: .48; }
 .research-ledger-row h3 { font-size: 13px; font-weight: 600; color: var(--color-ink); }
 .research-ledger-row p { margin-top: .2rem; font-size: 11.5px; line-height: 1.45; color: var(--color-ink-dim); }
-.research-ledger-status { display: inline-flex; border: 1px solid var(--color-line-2); border-radius: 999px; padding: .25rem .55rem; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--color-ink-dim); }
-.research-ledger-status.is-confirmed { border-color: color-mix(in oklab, var(--color-pass) 35%, var(--color-line)); color: var(--color-pass); }
-.research-ledger-status.is-review { border-color: color-mix(in oklab, var(--color-caution) 40%, var(--color-line)); color: var(--color-caution); }
-.research-ledger-status.is-attention { border-color: color-mix(in oklab, var(--color-avoid) 40%, var(--color-line)); color: var(--color-avoid); }
+.research-ledger-status { display: inline-flex; align-items: center; gap: .45rem; font-family: var(--font-mono); font-size: 9px; letter-spacing: .05em; text-transform: uppercase; color: var(--color-caution); }
+.research-ledger-status.is-confirmed { color: var(--color-pass); }
+.research-ledger-status.is-review { color: var(--color-caution); }
+.research-ledger-status.is-attention { color: var(--color-avoid); }
 .research-ledger-working { display: flex; min-height: 64px; align-items: center; gap: .75rem; padding: 1rem 1.5rem; border-top: 1px solid var(--color-line); font-size: 11.5px; color: var(--color-ink-faint); }
 .research-ledger-footer { padding: .8rem 1.5rem; border-top: 1px solid var(--color-line); font-family: var(--font-mono); font-size: 9.5px; color: var(--color-ink-faint); }
 
@@ -2433,6 +2574,7 @@ h1.display-sm {
   .research-command-deck { grid-template-columns: minmax(0, 1fr); }
   .research-stage-rail { border-top: 1px solid var(--color-line); border-left: 0; }
   .research-proof-stats { margin-top: 1.5rem; }
+  .research-ledger-columns, .research-ledger-row { grid-template-columns: 58px minmax(140px, .7fr) 74px minmax(260px, 2fr) 105px; gap: .75rem; }
 }
 @media (max-width: 760px) {
   .public-access-backdrop { right: -15rem; top: 30%; width: 680px; }
@@ -2450,14 +2592,21 @@ h1.display-sm {
   .landing-method-eye { min-height: 150px; }
   .research-workspace { padding: .75rem; }
   .research-command-main { min-height: auto; }
+  .research-eta { grid-template-columns: 1fr; }
+  .research-eta > div { min-height: 64px; border-right: 0; border-bottom: 1px solid var(--color-line); }
+  .research-eta > div:last-of-type { border-bottom: 0; }
   .research-observation { grid-template-columns: 1fr; padding-block: 2rem; }
   .research-eye-stage { min-height: 150px; border-right: 0; border-bottom: 1px solid var(--color-line); }
   .research-command-footer { flex-direction: column; }
   .research-ledger-columns { display: none; }
-  .research-ledger-row { grid-template-columns: 48px minmax(0, 1fr) auto; gap: .75rem; align-items: start; }
+  .research-ledger-header { align-items: flex-start; padding-inline: 1rem; }
+  .research-ledger-heading { display: block; }
+  .research-ledger-live { margin-top: .65rem; }
+  .research-ledger-row { grid-template-columns: 48px minmax(0, 1fr) auto; gap: .75rem; align-items: start; padding-inline: 1rem; }
   .research-ledger-source { grid-column: 2; grid-row: 1; padding-top: .15rem; }
-  .research-ledger-row > div:nth-child(3) { grid-column: 2 / -1; }
-  .research-ledger-row > div:nth-child(4) { grid-column: 3; grid-row: 1; }
+  .research-ledger-trace { display: none; }
+  .research-ledger-row > div:nth-child(4) { grid-column: 2 / -1; }
+  .research-ledger-row > div:nth-child(5) { grid-column: 3; grid-row: 1; }
 }
 @media (max-width: 480px) {
   .landing-command-meta { align-items: flex-start; }

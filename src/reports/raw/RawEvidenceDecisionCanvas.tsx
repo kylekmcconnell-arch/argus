@@ -33,14 +33,14 @@ export function RawEvidenceDecisionCanvas(props: InvestigationDecisionCanvasProp
   const complete = applicable > 0 && successful >= applicable;
 
   return (
-    <section id="report-summary" className="raw-evidence-opening report-section scroll-mt-28" data-raw-evidence-record="true">
+    <section id="developer-evidence-record" className="raw-evidence-opening report-section scroll-mt-28" data-raw-evidence-record="true">
       <header>
         <div>
           <p className="eyebrow text-signal-lift">Verification view</p>
           <h1>{subjectName?.replace(/[.\s]+$/, "") || "Saved ARGUS report"}</h1>
           <p>
-            This view exposes the saved scan record without adding a lane-specific narrative.
-            Production, Kyle, and Enigma interpret these same frozen inputs.
+            Inspect the same saved evidence used by the production report.
+            These tools do not change its scores or conclusions.
           </p>
         </div>
         <span className="raw-evidence-badge mono"><Database size={16} weight="duotone" />Raw evidence</span>
@@ -56,7 +56,7 @@ export function RawEvidenceDecisionCanvas(props: InvestigationDecisionCanvasProp
       <dl className="raw-evidence-ledger">
         <div><dt><ShieldCheck size={17} weight="duotone" />Check coverage</dt><dd>{successful}/{applicable} {checkScopeLabel.toLowerCase()} · {coveragePercent}%</dd></div>
         <div><dt><FileMagnifyingGlass size={17} weight="duotone" />Saved evidence</dt><dd>{verified.length} verified · {supports.length} supportive · {concerns.length} adverse</dd></div>
-        <div><dt>Record state</dt><dd>{complete ? "Required checks complete" : "Required checks incomplete"}{capturedAt ? ` · captured ${capturedAt}` : ""}</dd></div>
+        <div><dt>Record state</dt><dd>{complete ? "Required checks complete" : "Evidence gaps recorded"}{capturedAt ? ` · captured ${capturedAt}` : ""}</dd></div>
       </dl>
 
       <nav aria-label="Raw evidence shortcuts">

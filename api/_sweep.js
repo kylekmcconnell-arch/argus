@@ -9,6 +9,44 @@ var GROK_ANALYST_MODEL = process.env.ARGUS_GROK_ANALYST_MODEL || process.env.ARG
 var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
+// src/lib/officialXProfile.ts
+var X_RESERVED_PATHS = /* @__PURE__ */ new Set([
+  "i",
+  "home",
+  "search",
+  "intent",
+  "share",
+  "hashtag",
+  "explore",
+  "settings",
+  "messages",
+  "notifications",
+  "compose",
+  "login",
+  "signup",
+  "privacy",
+  "tos",
+  "about",
+  "download",
+  "jobs",
+  "help"
+]);
+function officialXProfileHandle(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (!["https:", "http:"].includes(url.protocol) || host !== "x.com" && host !== "twitter.com") return null;
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length !== 1) return null;
+    const handle = segments[0];
+    if (!/^[A-Za-z0-9_]{2,30}$/.test(handle) || X_RESERVED_PATHS.has(handle.toLowerCase())) return null;
+    return handle;
+  } catch {
+    return null;
+  }
+}
+
 // src/lib/decisionBoundary.ts
 var CAP_BOUNDARIES = {
   honeypot_confirmed: {
@@ -1322,9 +1360,8 @@ function band(score) {
   return score >= 70 ? "PASS" : score >= 40 ? "CAUTION" : "FAIL";
 }
 function handleFromUrl(url) {
-  if (!url) return null;
-  const m = url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i);
-  return m ? "@" + m[1].toLowerCase() : null;
+  const handle = officialXProfileHandle(url);
+  return handle ? "@" + handle.toLowerCase() : null;
 }
 var isBurnAddr = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
 var isBurnTag = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
@@ -1914,7 +1951,8 @@ async function runTokenAudit(input, emit, opts) {
   const socialActivity = projectX && opts?.collectSocialActivity ? await opts.collectSocialActivity({
     handle: projectX,
     ticker: pair.baseToken.symbol,
-    projectName: pair.baseToken.name
+    projectName: pair.baseToken.name,
+    contractAddress: pair.baseToken.address
   }).catch(() => void 0) : void 0;
   const deployer = deployerAttribution?.address ?? null;
   const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
@@ -2367,12 +2405,14 @@ function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount, p
   if (!projectRows || !projectRows.length) {
     if (projectAccountAudit) {
       const note = projectAccountAudit.state === "complete" ? "Embedded project-account audit completed without a stored check ledger." : projectAccountAudit.note;
+      const unbound = projectAccountAudit.state === "unavailable";
       for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
         const target = rows.find((row) => row.checkId === bridge.tokenCheckId || row.label === bridge.tokenLabel);
         if (!target || !UNKNOWN_OR_FAILED.has(target.status)) continue;
         target.status = "unavailable";
         target.note = note;
         target.provider = "project-account-audit";
+        if (unbound) target.retryable = false;
       }
     }
     return rows;
@@ -2497,11 +2537,17 @@ var PERSON_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
   "founder-repeat-backing",
   "investor-fund-scale"
 ]);
+function isUnboundInvestigationGraphRow(check, checkId) {
+  return checkId === "trust-graph-connections" && check.provider === "project-account-audit" && check.retryable === false;
+}
 function applyReportCheckContract(kind, checks) {
   const requiredIds = kind === "investigation" ? INVESTIGATION_REQUIRED_CHECK_IDS : TOKEN_REQUIRED_CHECK_IDS;
   const normalized = checks.map((check) => {
     const checkId = check.checkId?.trim() ?? "";
     if (kind === "token" || kind === "investigation") {
+      if (kind === "investigation" && isUnboundInvestigationGraphRow(check, checkId)) {
+        return { ...check, decisionCritical: false };
+      }
       if (checkId && requiredIds.has(checkId)) {
         return { ...check, decisionCritical: true };
       }

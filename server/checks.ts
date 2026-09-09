@@ -81,6 +81,13 @@ const CHECKS: readonly CheckDefinition[] = [
   { id: "code-footprint-github", label: "Code footprint (GitHub)", defaultNote: "no completed GitHub resolution was recorded" },
   { id: "identity-continuity", label: "Identity continuity", defaultNote: "no completed handle-history result was recorded" },
   {
+    id: "entity-continuity",
+    label: "Project and token continuity",
+    defaultNote: "no completed predecessor, rebrand, migration, or contract-continuity search was recorded",
+    role: "PROJECT",
+    criticalFor: ["PROJECT"],
+  },
+  {
     id: "affiliations-associates",
     label: "Affiliations & associates",
     defaultNote: "no corroborated affiliation collection outcome was recorded",
@@ -389,6 +396,26 @@ function uniqueObservations(values: readonly ChecklistObservation[]): ChecklistO
 }
 
 /**
+ * Rows whose "finding" status is an assessed null ("searched, nothing bound"),
+ * never adverse evidence. The token-identity collector can run twice in one
+ * scan: once before intake, and again after orientation or source verification
+ * has recovered a launched-product ticker or the official site. When the second
+ * pass binds the token, the earlier null is answered, not contradicted, and
+ * must not outrank the bind (STATUS_PRIORITY otherwise keeps "finding" above
+ * "confirmed" so that a real adverse finding survives a later clean read).
+ */
+const NULL_FINDING_SUPERSEDED_BY_CONFIRMED = new Set<ChecklistCheckId>(["project-token-identity"]);
+
+function supersededObservations(
+  id: ChecklistCheckId,
+  observations: readonly ChecklistObservation[],
+): ChecklistObservation[] {
+  if (!NULL_FINDING_SUPERSEDED_BY_CONFIRMED.has(id)) return [...observations];
+  if (!observations.some((item) => item.status === "confirmed")) return [...observations];
+  return observations.filter((item) => item.status !== "finding");
+}
+
+/**
  * Records observable collector outcomes, then emits a stable checklist snapshot.
  * Merely invoking an adapter is tracked separately and never completes a check.
  */
@@ -499,7 +526,7 @@ export class PersonCheckTracker {
         });
       }
 
-      const observations = this.observations.get(definition.id) ?? [];
+      const observations = supersededObservations(definition.id, this.observations.get(definition.id) ?? []);
       if (!observations.length) {
         return Object.freeze({
           checkId: definition.id,

@@ -13,7 +13,8 @@ import { addGrokUsage, addClaudeUsage, recordCall, recordTwitterapi, grokSpendUs
 import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower, WebTeamMember } from "../../src/data/evidence";
-import { canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
+import { isPlausiblePersonRosterName } from "../../src/lib/personName";
+import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
 import {
   classifyPublicXAccountPage,
   shouldAnnounceOfficialXAccountStatus,
@@ -416,8 +417,19 @@ function twitterapiOfficialUrls(p: any): string[] {
   return out;
 }
 
+// The profile's official website is the FIRST credible first-party domain on
+// the record, not merely the first URL. An account with no website field whose
+// bio opens with t.me/... or youtube.com/... used to make that shared host the
+// profile website; canonicalOfficialWebsite() then rejected it downstream and
+// every official-domain gate ran with no domain at all, while the real site sat
+// one URL later on the same provider-frozen record. A record with no credible
+// domain keeps its first URL so link-hub dereference still runs on it.
+export function pickProfileWebsite(urls: readonly string[]): string | undefined {
+  return urls.find((url) => canonicalOfficialWebsite(url) !== null) ?? urls[0];
+}
+
 function pickWebsite(p: any): string | undefined {
-  return twitterapiOfficialUrls(p)[0];
+  return pickProfileWebsite(twitterapiOfficialUrls(p));
 }
 
 export async function getProfile(handle: string): Promise<XProfile | null> {
@@ -588,7 +600,7 @@ export async function getRecentPostsMeta(handle: string, limit = 40): Promise<Po
 // reads everything and decides what's a claim (keyword lists miss non-English /
 // novel slang; their job is only to get the right posts onto its desk).
 const num = (...v: any[]): number | undefined => { for (const x of v) if (typeof x === "number") return x; return undefined; };
-interface CorpusPost { text: string; at: number | null; views: number; likes: number; isReply: boolean; isRt: boolean; }
+interface CorpusPost { text: string; id?: string; at: number | null; views: number; likes: number; isReply: boolean; isRt: boolean; }
 
 const KW_IDENTITY = [
   "founder", "co-founder", "cofounder", "CEO", "CTO", "advisor",
@@ -621,7 +633,9 @@ function parseTweet(t: any): CorpusPost {
   const isRt = /^RT @/.test(text) || !!t.retweeted_tweet || !!t.retweeted_status || t.isRetweet === true;
   const isReply = !!(t.isReply ?? t.inReplyToId ?? t.in_reply_to_status_id ?? t.in_reply_to_user_id) || /^@\w/.test(text);
   return {
-    text, at: Number.isFinite(at) ? at : null,
+    text,
+    id: String(t.id ?? t.id_str ?? "").trim() || undefined,
+    at: Number.isFinite(at) ? at : null,
     views: num(t.viewCount, t.view_count, t.views) ?? 0,
     likes: num(t.likeCount, t.favorite_count, t.favoriteCount, t.likes) ?? 0,
     isReply, isRt,
@@ -652,11 +666,12 @@ export async function searchFrom(handle: string, terms: string[], key: string, q
   return d.tweets ?? d.data?.tweets ?? [];
 }
 
-const stamp = (p: CorpusPost): string => {
+const stamp = (p: CorpusPost, author: string): string => {
   const when = p.at ? new Date(p.at).toLocaleString("en-US", { month: "short", year: "numeric" }) : "";
   const v = p.views >= 1000 ? `${Math.round(p.views / 1000)}k views` : p.views ? `${p.views} views` : "";
   const meta = [when, v].filter(Boolean).join(" · ");
-  return (meta ? `[${meta}] ` : "") + p.text;
+  const source = p.id ? ` [Source: https://x.com/${author}/status/${p.id}]` : "";
+  return (meta ? `[${meta}] ` : "") + p.text + source;
 };
 
 export interface Corpus {
@@ -713,7 +728,7 @@ export async function collectCorpus(handle: string): Promise<Corpus> {
   for (const p of newest) if (!rankedKeys.has(p.text.slice(0, 80).toLowerCase())) ranked.push(p);
 
   return {
-    posts: ranked.map(stamp),
+    posts: ranked.map((post) => stamp(post, u)),
     newest: newest.map((p) => p.text),
     teamSignalPosts: [...new Set(sId
       .map((tweet) => String((tweet as { text?: unknown; full_text?: unknown })?.text ?? (tweet as { full_text?: unknown })?.full_text ?? "").trim())
@@ -1160,6 +1175,118 @@ export async function dynamicNotable(organizationId?: string): Promise<{ handle:
   } catch { return []; }
 }
 
+interface FollowerPageScan {
+  /** True once at least one page returned an explicit follower array. */
+  observedPage: boolean;
+  /** True only when pagination reached the end of the follower list. */
+  coverageComplete: boolean;
+  audience: AudienceTally;
+}
+
+/**
+ * Page the subject's follower list, tallying audience shape off the rows the
+ * request already paid for and handing each raw row to `onRow`. Bounded by
+ * `maxPages` and a shared wall-clock deadline; every early exit (budget, HTTP
+ * failure, provider-declared failure, schema drift, missing cursor) leaves
+ * coverage partial rather than asserting the list ran out.
+ */
+async function scanFollowerPages(
+  subject: string,
+  key: string,
+  opts: {
+    maxPages: number;
+    followerCount: number;
+    deadline: number;
+    onRow?: (row: unknown) => void;
+  },
+): Promise<FollowerPageScan> {
+  const audience = newAudienceTally();
+  const u = subject.replace(/^@/, "");
+  let cursor = "";
+  let observedFollowers = 0;
+  let observedPage = false;
+  let coverageComplete = false;
+  for (let page = 0; page < opts.maxPages; page++) {
+    if (Date.now() > opts.deadline) break; // out of budget: coverage stays partial
+    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res = await twFetch(url, key);
+    if (!res || !res.ok) break;
+    let d: JsonRecord;
+    try {
+      d = asRecord(await res.json());
+    } catch {
+      break;
+    }
+    if (twitterProviderFailure(d)) break;
+    const nested = asRecord(d.data);
+    const followerValue = Array.isArray(d.followers)
+      ? d.followers
+      : Array.isArray(nested.followers)
+        ? nested.followers
+        : null;
+    // A 200 without an explicit follower array is schema drift, not proof that
+    // the follower list ended here.
+    if (!followerValue) break;
+    const followers = followerValue;
+    observedPage = true;
+    observedFollowers += followers.length;
+    for (const follower of followers) {
+      tallyAudienceRow(audience, follower);
+      opts.onRow?.(follower);
+    }
+    const hasNextPage = typeof d.has_next_page === "boolean"
+      ? d.has_next_page
+      : typeof nested.has_next_page === "boolean"
+        ? nested.has_next_page
+        : undefined;
+    const nextCursorValue = d.next_cursor ?? nested.next_cursor;
+    const nextCursor = typeof nextCursorValue === "string" ? nextCursorValue : "";
+    if (hasNextPage === false || (hasNextPage === undefined && observedFollowers >= opts.followerCount)) {
+      coverageComplete = true;
+      break;
+    }
+    if (!hasNextPage || !nextCursor) break;
+    cursor = nextCursor;
+  }
+  return { observedPage, coverageComplete, audience };
+}
+
+/**
+ * Pages of follower profiles this lane is willing to buy for audience shape
+ * alone (200 rows each). A larger account is not measured rather than measured
+ * off its newest slice: an interrupted pass is a floor, and this lane has no
+ * reference set to make a truncated read worth its cost.
+ */
+export const AUDIENCE_MAX_PAGES = 6;
+
+/**
+ * Audience shape on its own, with no reference-set matching. The notable-follower
+ * lane that used to carry this read is retired, and its labeling was the
+ * unreliable half; the distribution is a neutral, first-party measurement that
+ * nobody can assemble by hand, so it keeps its own bounded pass.
+ *
+ * Returns undefined - never an empty sample - when no key is set, when the
+ * follower count is unknown or beyond the page budget, or when the provider
+ * returned no follower page. A shape nobody measured is not a measured zero.
+ */
+export async function followerAudience(
+  subject: string,
+  opts?: { followerCount?: number; budgetMs?: number },
+): Promise<AudienceSample | undefined> {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return undefined;
+  const followerCount = opts?.followerCount ?? Infinity;
+  if (!Number.isFinite(followerCount) || followerCount <= 0) return undefined;
+  const pages = Math.ceil(followerCount / 200);
+  if (pages > AUDIENCE_MAX_PAGES) return undefined;
+  const scan = await scanFollowerPages(subject, key, {
+    maxPages: pages + 1,
+    followerCount,
+    deadline: Date.now() + (opts?.budgetMs ?? 20_000),
+  });
+  return sealAudienceSample(scan.audience, scan.coverageComplete);
+}
+
 export async function notableFollowers(subject: string, opts?: { followerCount?: number; budgetMs?: number; organizationId?: string }): Promise<NotableScan> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return { list: [], checked: 0, coverage: "unavailable" };
@@ -1189,69 +1316,27 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
     const set = new Map(candidates.map((n) => [n.handle.toLowerCase(), n]));
     const hits: NotableFollower[] = [];
     const got = new Set<string>();
-    const audience = newAudienceTally();
-    const u = subject.replace(/^@/, "");
-    let cursor = "";
-    let observedFollowers = 0;
-    let observedPage = false;
-    let coverageComplete = false;
-    for (let page = 0; page < enumPages + 2; page++) {
-      if (Date.now() > deadline) break; // out of budget: keep the observed hits, coverage stays partial
-      const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-      const res = await twFetch(url, key);
-      if (!res || !res.ok) break;
-      let d: JsonRecord;
-      try {
-        d = asRecord(await res.json());
-      } catch {
-        break;
-      }
-      if (twitterProviderFailure(d)) break;
-      const nested = asRecord(d.data);
-      const followerValue = Array.isArray(d.followers)
-        ? d.followers
-        : Array.isArray(nested.followers)
-          ? nested.followers
-          : null;
-      // A 200 without an explicit follower array is schema drift, not proof that
-      // none of the reference accounts follows the subject.
-      if (!followerValue) break;
-      const followers = followerValue;
-      observedPage = true;
-      observedFollowers += followers.length;
-      for (const follower of followers) {
-        const f = asRecord(follower);
-        // The whole row was paid for whether or not it matches the reference
-        // set, so read its shape before dropping everything but the handle.
-        tallyAudienceRow(audience, follower);
+    const scan = await scanFollowerPages(subject, key, {
+      maxPages: enumPages + 2,
+      followerCount: fc,
+      deadline,
+      onRow: (row) => {
+        const f = asRecord(row);
         const h = String(f.userName ?? f.screen_name ?? "").toLowerCase();
         const m = set.get(h);
         if (m && !got.has(h)) { got.add(h); hits.push({ handle: m.handle, label: m.label, size: "" }); }
-      }
-      const hasNextPage = typeof d.has_next_page === "boolean"
-        ? d.has_next_page
-        : typeof nested.has_next_page === "boolean"
-          ? nested.has_next_page
-          : undefined;
-      const nextCursorValue = d.next_cursor ?? nested.next_cursor;
-      const nextCursor = typeof nextCursorValue === "string" ? nextCursorValue : "";
-      if (hasNextPage === false || (hasNextPage === undefined && observedFollowers >= fc)) {
-        coverageComplete = true;
-        break;
-      }
-      if (!hasNextPage || !nextCursor) break;
-      cursor = nextCursor;
-    }
+      },
+    });
     // Enumeration can assert a negative only after every page completed. On a
     // partial run, the positive matches are still observed facts, but every
     // unobserved candidate remains unknown.
     return {
       list: hits,
-      checked: coverageComplete ? total : hits.length,
-      coverage: coverageComplete ? "complete" : observedPage ? "partial" : "unavailable",
+      checked: scan.coverageComplete ? total : hits.length,
+      coverage: scan.coverageComplete ? "complete" : scan.observedPage ? "partial" : "unavailable",
       // The sample is complete only when pagination finished; an interrupted
       // pass reports the rows it read as a floor, never as the audience.
-      audience: sealAudienceSample(audience, coverageComplete),
+      audience: sealAudienceSample(scan.audience, scan.coverageComplete),
     };
   }
 
@@ -1414,6 +1499,8 @@ export interface TeamMember {
   name: string;
   handle?: string;
   role: string;
+  /** Descriptive first-party copy about the person; never parsed as another name. */
+  biography?: string;
   evidence?: string;
   kind: "team" | "advisor";
   linkedin?: string;
@@ -2532,12 +2619,12 @@ export function scanPostsForRoles(posts: string[], projectName?: string, subject
       const role = match[1].toLowerCase().replace(/^our\s+/, "");
       const gap = match[0].slice(match[1].length, match[0].length - match[2].length - 1);
       if (!connectorAllowed(gap, AFTER_ROLE_CONNECTORS)) continue;
-      // Official posts are the owner: founder/co-founder next to a handle
-      // does not need "our" or the display name. CEO/CTO still do. Guest
-      // "@x Co-Founder of @other" is the before-pattern (kept owned-check)
-      // plus (?!\s+of\b) on this arm.
-      const founderOwned = /^(?:co-)?founders?$/i.test(role);
-      if (!founderOwned && !roleIsProjectOwned(p, match.index ?? 0, match[0].length, role)) continue;
+      // Role proximity alone is not ownership. Official accounts routinely
+      // mention guests, partner founders, NFT projects and collaborators. The
+      // clause must say "our founder", "Project founder", or "founder at/for
+      // Project" before this deterministic lane can promote the handle into
+      // the audited project's team. Broader mentions remain discovery leads.
+      if (!roleIsProjectOwned(p, match.index ?? 0, match[0].length, role)) continue;
       const kind: "team" | "advisor" = /advisor/i.test(role) ? "advisor" : "team";
       const handles = [match[2]];
       if (isPluralFounderRole(role)) {
@@ -2633,7 +2720,7 @@ export function officialXNamedOrgs(posts: string[]): LinkedOrg[] {
 
 
 // Shared parser for the team JSON both Grok team-finders return.
-function parseTeamJSON(text: string | null, selfHandle: string | undefined, source: string): TeamMember[] {
+export function parseTeamJSON(text: string | null, selfHandle: string | undefined, source: string): TeamMember[] {
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -2642,7 +2729,7 @@ function parseTeamJSON(text: string | null, selfHandle: string | undefined, sour
     const arr: any[] = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
     const self = (selfHandle ?? "").replace(/^@/, "").toLowerCase();
     return arr
-      .filter((t) => t && typeof t.name === "string" && t.name.trim())
+      .filter((t) => t && typeof t.name === "string" && isPlausiblePersonRosterName(t.name))
       .map((t) => {
         const role = (t.role || "team").toString();
         const kind: "team" | "advisor" = (t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role)) ? "advisor" : "team";
@@ -2656,7 +2743,9 @@ function parseTeamJSON(text: string | null, selfHandle: string | undefined, sour
         return {
           name: t.name.trim(),
           handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : undefined,
-          role, kind, linkedin, evidence: typeof t.evidence === "string" ? t.evidence : undefined, source,
+          role,
+          biography: typeof t.biography === "string" && t.biography.trim() ? t.biography.trim() : undefined,
+          kind, linkedin, evidence: typeof t.evidence === "string" ? t.evidence : undefined, source,
           projects: projects && projects.length ? projects : undefined,
         };
       })
@@ -2717,18 +2806,19 @@ export async function searchAdverseSignals(
   kind: "person" | "project",
   context: AdverseSearchContext,
   ticker?: string,
+  contractAddress?: string,
 ): Promise<AdverseSweepResult> {
   const h = handle.replace(/^@/, "");
   const targetEntityKey = `@${h.toLowerCase()}`;
   const subject = kind === "project"
-    ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}`
+    ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}${contractAddress ? ` (verified contract ${contractAddress})` : ""}`
     : `the person behind X account @${h}`;
   const system =
     "You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, stolen technology or intellectual property, insider dumping, unpaid obligations, misleading partnerships, or material community complaints/FUD. " +
     "Search X, Reddit, Trustpilot and other review sites, scam-report sites, technical forums, and news. Run exact-handle, display-name, domain, and token-ticker variants with terms such as scam, rug, fraud, stolen, copied, exploit, drain, dump, complaint, lawsuit, warning, and beware. Search both quoted and unquoted variants. " +
     "Prefer the original post, complaint, filing, or article over a social mirror or search-result page. Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. " +
     "Reply with ONLY compact JSON: {\"signals\":[{\"category\":\"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud\",\"claim\":\"\",\"source\":\"\",\"source_url\":\"\"}]}. Never use em dashes.";
-  const text = await generalWebSearch(system, `Subject: ${subject}. Surface direct source URLs that may contain complaints or accusations involving rug, slow rug, liquidity pull, wallet drains, exit scam, stolen technology, insider dumping, misleading claims, or other material misconduct. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}:v2` });
+  const text = await generalWebSearch(system, `Subject: ${subject}. Surface direct source URLs that may contain complaints or accusations involving rug, slow rug, liquidity pull, wallet drains, exit scam, stolen technology, insider dumping, misleading claims, or other material misconduct. Search the exact verified contract when supplied. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}:v3` });
   // No answer, and an answer we cannot read, are both screens that did not run.
   if (!text) return ADVERSE_NOT_ANSWERED;
   const m = text.match(/\{[\s\S]*\}/);
@@ -2900,6 +2990,25 @@ export const xAdapter: Adapter = {
       ctx.emit({ phase: "P0 · Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days. A project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
     }
 
+    // 1b. AUDIENCE SHAPE over the follower profiles this scan reads. A farmed or
+    //     purchased audience has a distinctive distribution, and it is only
+    //     visible in the profile rows themselves. Report the distribution and
+    //     stop: the tone stays neutral because a shape is not a verdict, and
+    //     followerAudience declines to measure at all rather than project a
+    //     truncated read onto the account's real follower total.
+    {
+      // Parse the profile's follower count ("12.4K"/"1.2M"); an unknown count
+      // means no bounded read exists, so the lane says nothing.
+      const fcm = (ctx.evidence.profile.followers ?? "").match(/([\d.]+)\s*([KMB]?)/i);
+      const followerCount = fcm
+        ? Number(fcm[1]) * (/m/i.test(fcm[2]) ? 1e6 : /b/i.test(fcm[2]) ? 1e9 : /k/i.test(fcm[2]) ? 1e3 : 1)
+        : undefined;
+      const audience = await followerAudience(ctx.handle, { followerCount });
+      if (audience) {
+        ctx.emit({ phase: "P0 · Intake", label: "Audience shape", detail: describeAudienceSample(audience), source: "twitterapi.io", tone: "neutral" });
+      }
+    }
+
     // 2. corroborate each claimed testimonial / advisory / advisor relationship.
     //    Run concurrently and cap the count: each does a follow-graph check plus a
     //    Grok acknowledgment, and a sequential loop over many claims (advisors add
@@ -2924,12 +3033,13 @@ export const xAdapter: Adapter = {
           if (!follows) nonFollowingRelationships += 1;
         }
         if (ack?.source_url) {
-          // Grok supplied the URL, so this is still a model lead: it has not
+          // X search supplied the URL, so this is still a discovery lead: it has not
           // been independently fetched and checked for author/text/relationship.
           // Keep it visible for follow-up without letting it self-corroborate or
           // self-contradict the claim that generated the search.
           const lead = `Model-search acknowledgment lead: ${ack.ack}, ${ack.sentiment} (${ack.source_url}); independent artifact verification required`;
           t.notes = [t.notes, lead].filter(Boolean).join(" · ");
+          t.acknowledgment_source_url = ack.source_url;
         }
         t.corroboration_verdict = classifyTestimonial(t);
         if (t.corroboration_verdict === TestimonialVerdict.CONTRADICTED) {

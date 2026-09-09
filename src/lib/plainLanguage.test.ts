@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   formatRoleLabel,
   plainLanguageSummary,
-  publicConcernTitle,
   publicCheckLabel,
   publicCheckNote,
   publicCheckStatus,
@@ -30,6 +29,15 @@ describe("plainLanguageSummary", () => {
     );
   });
 
+  it("translates the exact Bandos analyst shorthand into plain English", () => {
+    expect(plainLanguageSummary(
+      "Emerging Solana cash-out service with verified live token and product but null backing and limited operator transparency.",
+    )).toBe(
+      "Emerging Solana cash-out service with verified live token and product but no verified financial backing and limited operator transparency.",
+    );
+    expect(plainLanguageSummary("Project and token continuity.")).toBe("Earlier names and token history.");
+  });
+
   it("replaces internal axis ids with their labels", () => {
     expect(plainLanguageSummary(
       "Investigation incomplete: substantive evidence is missing for I2_portfolio_quality.",
@@ -45,20 +53,6 @@ describe("plainLanguageSummary", () => {
 });
 
 describe("public report labels", () => {
-  it("keeps promotional source copy out of public concern titles", () => {
-    expect(publicConcernTitle({
-      axis: "P2_product_substance",
-      axisLabel: "Product and execution",
-      gap: "One of our biggest releases. SuperDeepseek-V4-Flash is now live 💪",
-    })).toBe("A live product could not be independently verified.");
-
-    expect(publicConcernTitle({
-      axis: "P2_product_substance",
-      axisLabel: "Product and execution",
-      gap: "The official site still presents an early-access page",
-    })).toBe("The official site still presents an early-access page.");
-  });
-
   it("turns check IDs into stable reader labels", () => {
     expect(publicCheckLabel("deployer-trail-evm")).toBe("Who created the token");
     expect(publicCheckLabel("trust-graph-reconciliation")).toBe("Known connections");
@@ -74,6 +68,8 @@ describe("public report labels", () => {
     expect(publicCheckNote("supergemma.ai serves a verified coming-soon page"))
       .toBe("The project website is not live yet. It still shows a coming-soon or early-access page.");
     expect(publicCheckNote("SiteNotLive")).toContain("not live yet");
+    expect(publicCheckNote("1 graph connection could not be qualified because the linked immutable report is not the active case projection, or is stale, partial, or incompletely attested."))
+      .toBe("1 saved relationship is excluded from this comparison because the linked case is older, incomplete, or no longer the active version. It has not been treated as evidence about this subject and does not affect the score or verdict.");
     expect(publicOfficialSiteSentence({ website: "https://earnonhood.com", status: "live" }))
       .toBe("The official site is live.");
     expect(publicOfficialSiteSentence({ website: "https://earnonhood.com", status: "access_blocked" }))

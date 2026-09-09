@@ -39,6 +39,7 @@ const INVESTMENT_FIRM_GATES = [
 
 const OPERATING_COMPANY_GATES = [
   "project-token-identity",
+  "entity-continuity",
   "project-product-substance",
   "project-team-identity",
   "project-backing-partners",

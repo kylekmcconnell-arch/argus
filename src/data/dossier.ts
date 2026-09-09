@@ -30,6 +30,8 @@ import type { ReportPersistenceContext, ReportVersionContext } from "../lib/repo
 import type { MaterialReportDelta } from "../lib/reportDelta";
 import type { ScanCheck } from "../lib/scanChecklist";
 import type { ResearchPlan } from "../lib/researchDirector";
+import { isPlausiblePersonRosterIdentity } from "../lib/personName";
+import { teamCandidateSourceMatchesIdentity } from "../lib/teamCandidateIdentity";
 import { portfolioRelationshipBinding } from "../lib/portfolioRelationshipBinding";
 import { buildPointInTimeIntelligence } from "../intelligence/buildPointInTimeIntelligence";
 import { buildEntityPointInTimeIntelligence } from "../intelligence/buildEntityPointInTimeIntelligence";
@@ -205,6 +207,8 @@ export interface Dossier {
   contradictions: Contradiction[];
   /** Independently collected team records that may ground identity context. */
   webTeam: WebTeamMember[];
+  /** Source-backed funds, incubators, advisers, backers, and other linked organizations. */
+  organizationRelationships?: WebTeamMember[];
   /**
    * Whether each named founder / C-level leader still lists this project as a
    * current role. A paid, bounded lookup: without this field the answer was
@@ -248,6 +252,10 @@ export interface Dossier {
   companyEnrichment?: CollectedEvidence["companyEnrichment"];
   /** Frozen registration observation for the canonical official domain. */
   domainRegistration?: CollectedEvidence["domainRegistration"];
+  /** Frozen predecessor, rebrand, migration and contract lineage evidence. */
+  entityContinuity?: CollectedEvidence["entityContinuity"];
+  /** Frozen pre-scoring token applicability decision. */
+  tokenApplicability?: CollectedEvidence["tokenApplicability"];
   /**
    * Deterministic, score-neutral decision intelligence built from this exact
    * evidence capture. Older reports omit it and must not reconstruct it from
@@ -284,6 +292,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   const a = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
   const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
   a.setIdentity(ev.profile.identity_confidence);
+  a.setTokenApplicability(ev.tokenApplicability);
   graphAudit.setIdentity(ev.profile.identity_confidence);
 
   const governingEligible = (row: { evidence_origin?: string; artifact_verified?: boolean }) =>
@@ -300,8 +309,18 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     const compact = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
     return Boolean(row.handle) && compact(name) === compact((row.handle ?? "").replace(/^@/, ""));
   };
+  // The subject's own follow / amplification / post edge binding a handle makes
+  // that handle the unique id, so the row survives a pseudonymous screen name.
+  const rosterIdentityIsPerson = (row: WebTeamMember) => isPlausiblePersonRosterIdentity({
+    name: row.name,
+    handle: row.handle,
+    handleBoundBySubject: row.handleProvenance === "subject_first_party"
+      && row.identity_link_evidence_origin === "deterministic",
+  });
   const identityGrounded = (row: WebTeamMember) =>
-    meaningfulTeamValue(row.name)
+    row.kind !== "org"
+    && meaningfulTeamValue(row.name)
+    && rosterIdentityIsPerson(row)
     && meaningfulTeamValue(row.role)
     && row.evidence_origin !== "model_lead"
     && row.artifact_verified === true
@@ -320,8 +339,17 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
         : {}),
       ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
     }));
+  const organizationRelationships = (ev.webTeam ?? [])
+    .filter((member) => member.kind === "org"
+      && meaningfulTeamValue(member.name)
+      && meaningfulTeamValue(member.role)
+      && member.evidence_origin !== "model_lead"
+      && member.artifact_verified === true)
+    .map((member) => ({ ...member }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
-    if (!meaningfulTeamValue(member.name) || !meaningfulTeamValue(member.role)) return [];
+    if (member.kind === "org") return [];
+    if (!meaningfulTeamValue(member.name) || !rosterIdentityIsPerson(member) || !meaningfulTeamValue(member.role)) return [];
+    if (!teamCandidateSourceMatchesIdentity(member)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     // Only an unproven identity LINK makes a verified person a candidate
     // again. Model-found projects alone are stripped from the verified row
@@ -343,7 +371,19 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   ev.wallets.forEach((w) => { a.addWallet(w); if (governingEligible(w)) graphAudit.addWallet(w); });
   ev.promotions.forEach((p) => { a.addPromotion(p); if (governingEligible(p)) graphAudit.addPromotion(p); });
   ev.clientEngagements.forEach((c) => { a.addClientEngagement(c); if (governingEligible(c)) graphAudit.addClientEngagement(c); });
-  ev.associates.forEach((as) => { a.addAssociate(as); if (governingEligible(as)) graphAudit.addAssociate(as); });
+  const organizationHandles = new Set(organizationRelationships
+    .map((member) => (member.handle ?? "").replace(/^@/, "").toLowerCase())
+    .filter(Boolean));
+  ev.associates.forEach((associate) => {
+    const normalizedHandle = associate.associate_handle.replace(/^@/, "").toLowerCase();
+    const typedAssociate = associate.kind
+      ? associate
+      : organizationHandles.has(normalizedHandle)
+        ? { ...associate, kind: "org" as const }
+        : associate;
+    a.addAssociate(typedAssociate);
+    if (governingEligible(typedAssociate)) graphAudit.addAssociate(typedAssociate);
+  });
   ev.findings.forEach((f) => { a.addFinding(f); if (governingEligible(f)) graphAudit.addFinding(f); });
   ev.axes.forEach((ax) => {
     try {
@@ -535,6 +575,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
     webTeam: groundedWebTeam,
+    ...(organizationRelationships.length ? { organizationRelationships } : {}),
     ...(webTeamLeads.length ? { webTeamLeads } : {}),
     ...(ev.leaderDepartures?.length
       ? { leaderDepartures: ev.leaderDepartures.map((row) => ({ ...row })) }
@@ -613,6 +654,8 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       },
     } : {}),
     ...(ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {}),
+    ...(ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {}),
+    ...(ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),
