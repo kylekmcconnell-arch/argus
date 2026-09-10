@@ -3,7 +3,7 @@ export interface LaunchObservation {
   status: string; result?: unknown; responseHash?: string; httpStatus?: number;
 }
 export interface LaunchResearch {
-  schemaVersion: 1; toolVersion: string; status: 'partial' | 'unavailable';
+  schemaVersion: 2; toolVersion: string; status: 'partial' | 'unavailable';
   target: { chain: 'robinhood'; chainId: 4663; address: string; block: string | null; blockHash: string | null };
   startedAt: string; completedAt: string;
   findings: Array<{ label: string; detail: string; strength: 'measured' | 'source_attributed'; evidence: string[] }>;
