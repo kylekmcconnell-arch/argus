@@ -41,6 +41,7 @@ import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 import { TokenSnapshotVisuals } from "./TokenSnapshotVisuals";
 import { LpCustody } from "./LpCustody";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
+import { DeepLaunchPanel } from "./DeepLaunchPanel";
 import { marketSizeBand } from "../lib/marketPosition";
 import { UsageVisuals } from "./UsageVisuals";
 import { EntityContinuityTimeline } from "./EntityContinuityTimeline";
@@ -2476,6 +2477,7 @@ export function InvestigationReport({
           </div>
         </div>
 
+        {!shareView && <DeepLaunchPanel chain={token.chain} reportVersionId={frozenReportVersionId} />}
         {/* on-chain forensic suite — the same cluster the token report uses:
             market intel, holders, clustering, operator trace, EVM deployer +
             bytecode, and the OFAC sanctions screen, in one canonical order. */}

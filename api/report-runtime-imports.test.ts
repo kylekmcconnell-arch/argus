@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // Vite resolves extensionless imports that native Node ESM rejects. Inspect
 // emitted runtime edges recursively, including shared helpers outside api/.
 describe("report API native ESM dependency graph", () => {
-  it.each(["report", "share", "gap-investigation", "x-authenticity", "v1/token"])(
+  it.each(["report", "share", "gap-investigation", "x-authenticity", "v1/token", "deep-launch"])(
     "%s has deployable transitive runtime imports",
     (route) => {
       const seen = new Set<string>();
@@ -26,7 +26,7 @@ describe("report API native ESM dependency graph", () => {
               ? node.arguments[0] : undefined;
           if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith(".")) {
             const ref = specifier.text;
-            if (!ref.endsWith(".js")) failures.push(`${file}: ${ref} needs a .js suffix`);
+            if (!/\.m?js$/.test(ref)) failures.push(`${file}: ${ref} needs a .js or .mjs suffix`);
             const jsFile = resolve(dirname(file), ref);
             const tsFile = jsFile.replace(/\.js$/, ".ts");
             const next = existsSync(tsFile) ? tsFile : jsFile;

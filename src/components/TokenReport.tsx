@@ -1,4 +1,5 @@
 import { tokenSubjectIdentity } from "../lib/tokenIdentity";
+import { DeepLaunchPanel } from "./DeepLaunchPanel";
 import { tokenCompositionRow, tokenMarketPresentation } from "../lib/tokenPresentation";
 import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
@@ -561,6 +562,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
         )}
 
+        {!shareView && <DeepLaunchPanel chain={d.chain} reportVersionId={versionContext?.reportVersionId ?? (livePersistence?.state === 'persisted' ? livePersistence.reportVersionId ?? undefined : undefined)} />}
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
         {showCurrentIntelligence && panelCostToken && (
           <div className="mt-4">

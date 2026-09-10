@@ -19,6 +19,7 @@ const VIEWER_MUTATION_PATHS = new Set(["/api/account-growth", "/api/feedback"]);
 // or does not match. The handler re-checks the same secret (defense in depth).
 const CRON_API_PATHS = new Set(["/api/threat-recheck"]);
 const VIEWER_GET_PATHS = new Set([
+  "/api/deep-launch",
   "/api/session",
   "/api/report",
   "/api/case-brief",
@@ -240,7 +241,7 @@ export default async function middleware(request: Request): Promise<Response> {
     // Invalid/used scope cannot bypass the ordinary daily allowance.
   }
 
-  if (SUPPLEMENTAL_PATHS.has(pathname) || (pathname === "/api/augment" && request.method === "POST")) {
+  if (SUPPLEMENTAL_PATHS.has(pathname) || (["/api/augment", "/api/deep-launch"].includes(pathname) && request.method === "POST")) {
     const configuredLimit = Number(process.env.ARGUS_SUPPLEMENTAL_DAILY_LIMIT ?? 100);
     if (!Number.isInteger(configuredLimit) || configuredLimit < 1 || configuredLimit > 100000) {
       return Response.json({ error: "supplemental_budget_not_configured" }, { status: 503 });
