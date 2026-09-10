@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { auth, research } = vi.hoisted(() => ({ auth: vi.fn(), research: vi.fn() }));
 vi.mock('./_auth.js', () => ({ requireArgusAuth: auth, serviceCredentials: () => ({ url: 'https://db.example', key: 'test' }), serviceHeaders: () => ({}) }));
-vi.mock('../skills/robinhood-chain-research-analyst/scripts/research.mjs', () => ({ researchLaunch: research, validateResearch: (r: unknown) => r, VERSION: 'robinhood-launch-v1' }));
+vi.mock('../skills/robinhood-chain-research-analyst/scripts/research.mjs', () => ({ researchLaunch: research, validateResearch: (r: unknown) => r, VERSION: 'robinhood-launch-v2' }));
 import handler from './deep-launch';
 const version = '00000000-0000-4000-8000-000000000123';
 const org = '00000000-0000-4000-8000-000000000124';
@@ -34,6 +34,12 @@ describe('deep launch version authorization and deduplication', () => {
   it('does not duplicate an already claimed run', async () => {
     database({ claim: null }); const res = response(); await handler({ method: 'POST', body: { reportVersionId: version } } as never,res as never);
     expect(research).not.toHaveBeenCalled(); expect(res.status).toHaveBeenCalledWith(202);
+  });
+  it('requests a new bounded attempt only when retrying saved gaps', async () => {
+    const fetcher = database(), res = response();
+    await handler({ method: 'POST', body: { reportVersionId: version, retryMissing: true } } as never,res as never);
+    const body = JSON.parse(String(fetcher.mock.calls.find(([u]) => u.includes('/rpc/'))?.[1]?.body));
+    expect(body).toMatchObject({ p_tool: 'robinhood-launch-v2', p_retry: true });
   });
   it.each([{ absent: true }, { chain: 'base' }, { archived: true }])('rejects invalid report scope %j', async options => {
     database(options); const res = response(); await handler({ method: 'POST', body: { reportVersionId: version } } as never,res as never);

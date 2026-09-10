@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'POST' && cases[0].status !== 'open') { res.status(409).json({ error: 'case_archived' }); return; }
     const latest = () => db(`deep_launch_runs?select=run_id,state,result,started_at,finished_at&${filter}&tool_version=eq.${VERSION}&order=started_at.desc&limit=1`);
     if (req.method === 'GET') { res.status(200).json({ run: (await latest())[0] ?? null }); return; }
-    runId = await db('rpc/claim_deep_launch', { method: 'POST', body: JSON.stringify({ p_org: auth.organizationId, p_version: version, p_user: auth.userId, p_tool: VERSION }) });
+    runId = await db('rpc/claim_deep_launch', { method: 'POST', body: JSON.stringify({ p_org: auth.organizationId, p_version: version, p_user: auth.userId, p_tool: VERSION, p_retry: req.body?.retryMissing === true }) });
     if (!runId) {
       const run = (await latest())[0] ?? null;
       res.status(run?.state === 'running' ? 202 : 200).json({ run }); return;

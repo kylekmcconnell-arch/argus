@@ -27,4 +27,18 @@ describe('deep launch explicit action', () => {
     expect(container.textContent).toContain('after this report is saved'); expect(fetcher).not.toHaveBeenCalled();
     await act(async () => root.unmount());
   });
+  it('offers an explicit missing-evidence retry for a completed partial result', async () => {
+    const run = { run_id: 'r', state: 'completed', started_at: new Date(0).toISOString(), finished_at: new Date().toISOString(), result: {
+      schemaVersion: 2, toolVersion: 'robinhood-launch-v2', status: 'partial', target: { chain: 'robinhood', chainId: 4663, address: `0x${'1'.repeat(40)}`, block: '0x1', blockHash: `0x${'2'.repeat(64)}` },
+      startedAt: new Date(0).toISOString(), completedAt: new Date().toISOString(), findings: [], gaps: [{ area: 'trace', reason: 'unavailable' }], observations: [],
+      usage: { requests: 1, maxRequests: 32, elapsedMs: 1, costUsd: null, note: '' },
+    } };
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ run })); vi.stubGlobal('fetch', fetcher);
+    const container = document.createElement('div'); const root = createRoot(container);
+    await act(async () => { root.render(<DeepLaunchPanel chain="robinhood" reportVersionId="version-two" />); });
+    const button = [...container.querySelectorAll('button')].find(b => b.textContent === 'Retry missing launch evidence');
+    await act(async () => { button!.click(); });
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({ reportVersionId: 'version-two', retryMissing: true });
+    await act(async () => root.unmount());
+  });
 });

@@ -1,6 +1,6 @@
 ---
 name: robinhood-chain-research-analyst
-description: Collect reproducible Robinhood Chain token creation evidence, pinned contract state and bounded internal-call traces for launch due diligence.
+description: Collect reproducible Robinhood Chain token creation evidence, pinned contract state, PONS lifecycle and liquidity evidence, sell-route evidence, and bounded internal-call traces for launch due diligence.
 ---
 
 Use the executable runner for an exact Robinhood mainnet token address. For names or tickers, establish the exact address from official sources before running. Never substitute a same-address asset on another chain.
@@ -9,6 +9,6 @@ Run `node scripts/run.mjs --address 0x… --output /absolute/new-result.json` fr
 
 Read [evidence.md](references/evidence.md) before interpreting findings. Keep source-attributed creation discovery separate from receipt/trace corroboration. Report the saved block/hash, timestamps, request count and gaps. Only cite findings supported by the retained observation IDs. Do not turn coincident transfers into proven coordinated buyers, or an owner getter into a full permissions audit.
 
-This initial executable covers contract code, owner getter, supply, EIP-1967 implementation slot, explorer creation discovery, receipt transfers and optional call traces. It does **not** implement full PONS lifecycle analysis, v4 liquidity custody, fee-recipient attribution, sell simulation, complete holder reconstruction or tokenized-equity rights analysis. Broader investigations require separately verified evidence. Never present this package as the completed capabilities advertised by the original prompt.
+The executable covers contract code, owner getter, supply, EIP-1967 implementation slot, explorer creation discovery, receipt transfers, optional call traces, exact PONS v1/v2 factory attribution, v2 curve state, deterministic curve sell quotes, bounded settled-sell evidence, graduated locker evidence, and exact-address market liquidity/activity. A quote is not a wallet execution guarantee; indexed activity is source-attributed; locked custody does not establish current market depth. It does **not** implement arbitrary-wallet state-override simulation, complete holder reconstruction, complete fee-recipient flow tracing, every Robinhood launchpad, or tokenized-equity rights analysis. Broader investigations require separately verified evidence. Never present this package as the completed capabilities advertised by the original prompt.
 
 ARGUS runs this same module through its authenticated Deep launch analysis action, saves results separately against an immutable report version, and does not change the score. Run only on explicit request; reuse saved output instead of repeating requests without a reason.

@@ -25,12 +25,12 @@ function SavedLaunchPanel({ reportVersionId }: { reportVersionId: string }) {
       .finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
   }, [reportVersionId, reload]);
-  async function start() {
+  async function start(retryMissing = false) {
     if (busy || !loaded) return;
     setBusy(true); setError('');
     try {
       const response = await fetch('/api/deep-launch', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ reportVersionId }), signal: AbortSignal.timeout(60_000) });
+        body: JSON.stringify({ reportVersionId, ...(retryMissing ? { retryMissing: true } : {}) }), signal: AbortSignal.timeout(60_000) });
       const data = await response.json();
       if (!response.ok) throw new Error(response.status === 429 ? 'The workspace daily supplemental limit has been reached.'
         : response.status === 403 ? 'An analyst or owner can run this analysis.'
@@ -44,8 +44,8 @@ function SavedLaunchPanel({ reportVersionId }: { reportVersionId: string }) {
   const canRun = role === 'owner' || role === 'analyst';
   return <section className="panel mt-4 px-5 py-5" aria-label="Deep launch analysis">
     <h3 className="text-base font-semibold">Deep launch analysis</h3>
-    <p className="mt-2 text-sm text-ink-dim">Robinhood Chain creation evidence, initial transfers and available internal-call traces. Saved separately; the ARGUS score stays unchanged.</p>
-    <p className="mt-1 text-xs text-ink-faint">Up to 20 provider requests, usually under a minute. A run uses one request from the workspace’s daily supplemental allowance. Provider charges depend on configured access.</p>
+    <p className="mt-2 text-sm text-ink-dim">Robinhood Chain creation, PONS lifecycle, sell-route and liquidity-custody evidence. Saved separately; the ARGUS score stays unchanged.</p>
+    <p className="mt-1 text-xs text-ink-faint">Up to 32 provider requests, usually under a minute. A run uses one request from the workspace’s daily supplemental allowance. Provider charges depend on configured access.</p>
     {error && <p role="alert" className="mt-3 text-sm">{error}</p>}
     {busy && <p role="status" className="mt-3 text-sm">{loaded ? 'Collecting and saving launch evidence…' : 'Loading saved analysis…'}</p>}
     {run?.state === 'running' && !busy && <p role="status" className="mt-3 text-sm">An analysis is running. Check saved analysis shortly; no second collection will start while it is active.</p>}
@@ -54,6 +54,8 @@ function SavedLaunchPanel({ reportVersionId }: { reportVersionId: string }) {
       <button className="btn-chip" onClick={() => setReload(n => n + 1)}>Check saved analysis</button>
       {canRun && loaded && (!run || run.state === 'failed' || (run.state === 'running' && Date.now() - Date.parse(run.started_at) > 120_000)) &&
         <button className="btn-chip tint-signal" onClick={() => void start()}>{run ? 'Retry deep launch analysis' : 'Run deep launch analysis'}</button>}
+      {canRun && loaded && run?.state === 'completed' && result?.gaps.length ?
+        <button className="btn-chip tint-signal" onClick={() => void start(true)}>Retry missing launch evidence</button> : null}
     </div>}
     {result && <div className="mt-4">
       <p className="text-sm">Collected {new Date(result.completedAt).toLocaleString()} · {result.usage.requests} requests · {result.findings.length} evidence-backed observations</p>
