@@ -28,8 +28,8 @@ describe("resolveTokenSubject", () => {
     await expect(resolveTokenSubject(input)).resolves.toMatchObject({
       state: "resolved",
       candidate: {
-        canonicalRef: SOLANA,
-        input: { kind: "token", ref: SOLANA, via: "solana" },
+        canonicalRef: `solana:${SOLANA}`,
+        input: { kind: "token", ref: SOLANA, chain: "solana", via: "solana" },
       },
     });
   });
@@ -60,7 +60,7 @@ describe("resolveTokenSubject", () => {
     expect(result.state).toBe("ambiguous");
     if (result.state !== "ambiguous") return;
     expect(result.candidates).toHaveLength(2);
-    expect(result.candidates.map((candidate) => candidate.canonicalRef)).toEqual([SOLANA, OTHER_SOLANA]);
+    expect(result.candidates.map((candidate) => candidate.canonicalRef)).toEqual([`solana:${SOLANA}`, `solana:${OTHER_SOLANA}`]);
     expect(result.candidates[0].pairAddress).toBe("pair-high");
   });
 
@@ -86,7 +86,7 @@ describe("resolveTokenSubject", () => {
       .resolves.toMatchObject({
         state: "resolved",
         candidate: {
-          canonicalRef: checksum.toLowerCase(),
+          canonicalRef: `ethereum:${checksum.toLowerCase()}`,
           input: { ref: checksum.toLowerCase(), via: "evm" },
         },
       });

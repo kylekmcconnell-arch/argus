@@ -31654,8 +31654,8 @@ var SOLANA_ADDRESS5 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 function normalizeSubjectRef(value) {
   const clean4 = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
   const qualified = clean4.match(/^([a-z0-9_-]+):(.+)$/i);
-  if (qualified && (EVM_ADDRESS4.test(qualified[2]) || SOLANA_ADDRESS5.test(qualified[2]))) {
-    return `${qualified[1].toLowerCase()}:${normalizeSubjectRef(qualified[2])}`;
+  if (qualified && (EVM_ADDRESS4.test(qualified[2]) || SOLANA_ADDRESS5.test(qualified[2]) || !/^https?$/i.test(qualified[1]) && /^[A-Za-z0-9._-]{10,128}$/.test(qualified[2]))) {
+    return `${qualified[1].toLowerCase()}:${EVM_ADDRESS4.test(qualified[2]) ? qualified[2].toLowerCase() : qualified[2]}`;
   }
   if (SOLANA_ADDRESS5.test(clean4)) return clean4;
   if (EVM_ADDRESS4.test(clean4)) return clean4.toLowerCase();
@@ -31670,8 +31670,10 @@ function tokenSubjectIdentity(chain, address) {
   const network = aliases[rawChain] ?? rawChain;
   const clean4 = address.trim();
   if (!/^[a-z0-9_-]{1,40}$/.test(network)) return null;
-  if (network === "solana" ? !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(clean4) : !/^0x[0-9a-f]{40}$/i.test(clean4)) return null;
-  const normalized4 = normalizeSubjectRef(clean4);
+  const evm = /^0x[0-9a-f]{40}$/i.test(clean4);
+  const evmNetwork = /^(ethereum|base|arbitrum|optimism|polygon|bsc|avalanche|fantom|cronos|linea|scroll|mantle|zksync|blast|celo|gnosis|sonic|abstract|pulsechain|berachain|unichain|opbnb|polygonzkevm)$/.test(network);
+  if (network === "solana" ? !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(clean4) : evmNetwork ? !evm : !/^[A-Za-z0-9._-]{10,128}$/.test(clean4)) return null;
+  const normalized4 = evm ? normalizeSubjectRef(clean4) : clean4;
   return { chain: network, address: normalized4, ref: `${network}:${normalized4}` };
 }
 function payloadTokenIdentity(kind, payload) {
@@ -34380,7 +34382,8 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   }
   await enrichFirstPartyTeamAvatars(ctx);
   if (webTeam.length) {
-    const groundedTeam = webTeam.filter((member) => member.kind !== "org" && member.artifact_verified === true && member.evidence_origin !== "model_lead");
+    const peopleCandidates = webTeam.filter((member) => member.kind !== "org");
+    const groundedTeam = peopleCandidates.filter((member) => member.kind !== "org" && member.artifact_verified === true && member.evidence_origin !== "model_lead");
     ctx.emit(groundedTeam.length ? {
       phase: "P1 \xB7 Team",
       label: "People with source-backed identity records",
@@ -34390,7 +34393,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     } : {
       phase: "P1 \xB7 Team",
       label: "Team candidates withheld",
-      detail: `${webTeam.length} search candidate${webTeam.length === 1 ? "" : "s"} did not pass source verification and will not be presented as people behind the project.`,
+      detail: peopleCandidates.length ? `${peopleCandidates.length} person candidate${peopleCandidates.length === 1 ? "" : "s"} did not pass source verification and will not be presented as people behind the project.` : "Organization references were found, but no individual identities were verified. Organization links are not team members.",
       source: "team-search",
       tone: "warn"
     });
@@ -38677,7 +38680,7 @@ function resolveInput(raw) {
   const s = raw.trim();
   const qualified = s.match(/^([a-z0-9_-]+):(.+)$/i);
   const identity = qualified ? tokenSubjectIdentity(qualified[1], qualified[2]) : null;
-  if (identity) return { kind: "token", ref: identity.address, chain: identity.chain, via: identity.chain === "solana" ? "solana" : "evm" };
+  if (identity) return { kind: "token", ref: identity.address, chain: identity.chain, via: identity.chain === "solana" ? "solana" : /^0x[0-9a-f]{40}$/i.test(identity.address) ? "evm" : "address-candidate" };
   const parsedUrl = inputUrl(s);
   const hostname2 = parsedUrl?.hostname.toLowerCase() ?? "";
   const isDexUrl = !!parsedUrl && approvedHost(hostname2, "dexscreener.com");

@@ -30,7 +30,7 @@ export interface ProjectVerdict {
 const VANITY_NOUN = "robots|users|nodes|proofs?|transactions|holders|members|clients|launches|receipts|policies|validators|devices|agents|wallets|downloads";
 const METRIC = new RegExp(`\\b\\d{1,3}(?:,\\d{3})+\\b\\s*(?:${VANITY_NOUN})|\\b\\d{1,2}\\.\\d{1,2}\\s?%\\s*(?:uptime|accuracy|success)|\\b\\d+(?:\\.\\d+)?[mMbB]\\s+(?:${VANITY_NOUN})`, "gi");
 const TAM = /\$\s?\d{2,4}\s?(?:b|billion|t|trillion)\b[^.\n]{0,28}(?:market|tam|opportunity|industry|economy)/i;
-const GUARANTEED = /\bguaranteed\b|\brisk[-\s]?free\b|\bpassive income\b|\b\d{2,4}x\s+returns?\b|\bguaranteed\s+(?:returns?|profit|engagement|volume)\b/gi;
+const GUARANTEED = /\bguaranteed(?:\s+\w+){0,2}\s+(?:returns?|profits?|income|yield)\b|\b(?:returns?|profits?|income|yield)(?:\s+\w+){0,2}\s+guaranteed\b|\brisk[-\s]?free\b/gi;
 const BUZZ = /\b(revolutionary|next[-\s]?gen|world'?s first|paradigm|cutting[-\s]?edge|game[-\s]?chang\w+|unprecedented|disrupt\w*|unparalleled|seamless)\b/gi;
 
 function uniq(a: string[]): string[] { return [...new Set(a.map((s) => s.trim()))]; }

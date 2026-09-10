@@ -65,7 +65,7 @@ export function resolveInput(raw: string): ResolvedInput {
   const s = raw.trim();
   const qualified = s.match(/^([a-z0-9_-]+):(.+)$/i);
   const identity = qualified ? tokenSubjectIdentity(qualified[1], qualified[2]) : null;
-  if (identity) return { kind: "token", ref: identity.address, chain: identity.chain, via: identity.chain === "solana" ? "solana" : "evm" };
+  if (identity) return { kind: "token", ref: identity.address, chain: identity.chain, via: identity.chain === "solana" ? "solana" : /^0x[0-9a-f]{40}$/i.test(identity.address) ? "evm" : "address-candidate" };
   const parsedUrl = inputUrl(s);
   const hostname = parsedUrl?.hostname.toLowerCase() ?? "";
   const isDexUrl = !!parsedUrl && approvedHost(hostname, "dexscreener.com");

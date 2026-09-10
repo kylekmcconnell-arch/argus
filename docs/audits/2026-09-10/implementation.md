@@ -26,3 +26,13 @@ Before promotion, run the exact migration fixture, database guard suite, TypeScr
 Rollback application code to the prior immutable deployment while leaving the additive migration in place: the database wrapper accepts both old address-only callers and new qualified references. Do not drop the identity index or restore the old wrapper while new chain-qualified cases exist. Any database rollback must reconcile those cases explicitly.
 
 Validation results and the final deployment status are recorded in the PR. Original diagnostic fixtures in this directory describe the pre-repair baseline and are not CI tests; desired-behavior regressions now live under src/server.
+
+## Local validation
+
+- 418 application test files: 4,397 passed, one expected failure.
+- Fresh isolated Supabase database built from repository migrations: 90 assertions passed (70 existing guards, 10 existing threat migration checks, 10 report identity migration checks).
+- Typecheck and production build passed.
+- Truth contract passed; calibration 20/20 without verdict drift; offline canary 7/7 with zero unexpected URLs.
+- Production read-only preflight found 31 token/investigation cases, with no missing or mixed chain histories. This is a migration preflight, not a claim that every report has complete evidence.
+
+The shared developer database was left on its original migration history; validation used a separate temporary Supabase project. The organization-bonus change increments the person methodology identifier so old and new results are not silently treated as equivalent.

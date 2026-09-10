@@ -18,9 +18,10 @@ begin
   if network is null or network !~ '^[a-z0-9_-]{1,40}$' or addr is null then return null; end if;
   if network = 'solana' then
     if addr !~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$' then return null; end if;
-  else
-    if addr !~* '^0x[0-9a-f]{40}$' then return null; end if;
+  elsif addr ~* '^0x[0-9a-f]{40}$' then
     addr := lower(addr);
+  elsif network ~ '^(ethereum|base|arbitrum|optimism|polygon|bsc|avalanche|fantom|cronos|linea|scroll|mantle|zksync|blast|celo|gnosis|sonic|abstract|pulsechain|berachain|unichain|opbnb|polygonzkevm)$' or addr !~ '^[A-Za-z0-9._-]{10,128}$' then
+    return null;
   end if;
   return network || ':' || addr;
 end $$;
@@ -84,11 +85,11 @@ language sql stable security invoker set search_path = '' as $$
  select c.id,c.kind,c.canonical_ref,c.display_query,c.status,c.updated_at
  from public.cases c
  where c.organization_id=p_organization_id and c.subject_identity is not null
-   and (c.subject_identity = case when split_part(p_input,':',1) = 'solana' then p_input else lower(p_input) end
+   and (c.subject_identity = case when split_part(p_input,':',2) ~* '^0x[0-9a-f]{40}$' then lower(p_input) else lower(split_part(p_input,':',1)) || ':' || split_part(p_input,':',2) end
      or split_part(c.subject_identity,':',2) = case when p_input ~* '^0x[0-9a-f]{40}$' then lower(p_input) else p_input end)
  union
  select * from public.resolve_case_subject_before_token_identity(p_organization_id,p_input) legacy
- where legacy.subject_kind not in ('token','investigation') or p_input !~* '^[a-z0-9_-]+:(0x[0-9a-f]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$';
+ where legacy.subject_kind not in ('token','investigation') or p_input !~* '^[a-z0-9_-]+:[A-Za-z0-9._-]{10,128}$';
 $$;
 revoke all on function public.resolve_case_subject(uuid,text) from public,anon,authenticated;
 grant execute on function public.resolve_case_subject(uuid,text) to service_role;

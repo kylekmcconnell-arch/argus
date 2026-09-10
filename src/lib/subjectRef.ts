@@ -13,8 +13,8 @@ export function normalizeSubjectRef(value?: string): string {
     .replace(/^[@$]+/, "")
     .replace(/\/$/, "");
   const qualified = clean.match(/^([a-z0-9_-]+):(.+)$/i);
-  if (qualified && (EVM_ADDRESS.test(qualified[2]) || SOLANA_ADDRESS.test(qualified[2]))) {
-    return `${qualified[1].toLowerCase()}:${normalizeSubjectRef(qualified[2])}`;
+  if (qualified && (EVM_ADDRESS.test(qualified[2]) || SOLANA_ADDRESS.test(qualified[2]) || (!/^https?$/i.test(qualified[1]) && /^[A-Za-z0-9._-]{10,128}$/.test(qualified[2])))) {
+    return `${qualified[1].toLowerCase()}:${EVM_ADDRESS.test(qualified[2]) ? qualified[2].toLowerCase() : qualified[2]}`;
   }
   if (SOLANA_ADDRESS.test(clean)) return clean;
   if (EVM_ADDRESS.test(clean)) return clean.toLowerCase();

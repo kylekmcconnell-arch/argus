@@ -1,3 +1,5 @@
+import { investigationFacets } from "../src/lib/investigationFacets.js";
+import type { Investigation } from "../src/lib/investigation.js";
 // Explicitly authorized evidence-gap follow-up. This is intentionally separate
 // from /api/ask: conversation remains frozen-report reasoning, while this route
 // may spend a bounded research budget and can create only an inactive proposal.
@@ -409,6 +411,7 @@ async function authorizeAndExecute(
     const checks = supportedKind === "person"
       ? personDossier?.checkRuns ?? []
       : reportChecks(supportedKind, proposed);
+    if (supportedKind === "investigation") proposed.facets = investigationFacets(proposed as unknown as Investigation, checks);
     const requestedCompleteness = supportedKind === "person"
       ? personDossier?.completeness_state === "complete" ? "complete" : "partial"
       : reportCompleteness(supportedKind, proposed, checks);

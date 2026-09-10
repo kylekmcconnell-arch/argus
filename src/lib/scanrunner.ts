@@ -65,7 +65,7 @@ export function cancelScanRun(kind: ScanKind, ref: string, priv = false) {
   if (run?.status === "running") {
     run.status = "error";
     run.error = "cancelled";
-    void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: run.ref.includes(":") ? run.ref.split(":")[1] : run.ref,
+    void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref,
       displayQuery: run.input, privateRun: run.priv, startedAt: run.startedAt,
       status: "failed", failureCode: "cancelled", failureDetail: "Scan cancelled by the user." });
   }
@@ -91,7 +91,7 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
     try {
       await reserveInvestigationCredit(run.creditKey, "token", input.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
       if (cancelled) {
-        void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: run.ref.includes(":") ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
+        void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
           privateRun: run.priv, startedAt: run.startedAt, status: "failed", failureCode: "cancelled", failureDetail: "Scan cancelled." });
         return;
       }
@@ -107,7 +107,7 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
         run.error = "not_found";
         emit();
         void finishScanReceipt({
-          runKey: run.creditKey, kind: "token", canonicalRef: run.ref.includes(":") ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
+          runKey: run.creditKey, kind: "token", canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
           privateRun: run.priv, startedAt: run.startedAt, status: "failed",
           failureCode: "not_found", failureDetail: "No DEX pair was found for this contract.",
         });
@@ -119,7 +119,7 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
         run.error = String(e);
         emit();
         void finishScanReceipt({
-          runKey: run.creditKey, kind: "token", canonicalRef: run.ref.includes(":") ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
+          runKey: run.creditKey, kind: "token", canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
           privateRun: run.priv, startedAt: run.startedAt, status: "failed",
           failureCode: "collection_failed", failureDetail: run.error,
         });
@@ -156,7 +156,7 @@ export function startInvestigationScan(
     try {
       await reserveInvestigationCredit(run.creditKey, "investigation", input.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
       if (cancelled) {
-        void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: run.ref.includes(":") ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
+        void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
           privateRun: run.priv, startedAt: run.startedAt, status: "failed", failureCode: "cancelled", failureDetail: "Scan cancelled." });
         return;
       }
@@ -172,7 +172,7 @@ export function startInvestigationScan(
           aborts.delete(key);
           emit();
           void finishScanReceipt({
-            runKey: run.creditKey, kind: "investigation", canonicalRef: run.ref.includes(":") ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
+            runKey: run.creditKey, kind: "investigation", canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
             privateRun: run.priv, startedAt: run.startedAt, status: "failed",
             failureCode: "collection_failed", failureDetail: error,
           });
@@ -186,7 +186,7 @@ export function startInvestigationScan(
         aborts.delete(key);
         emit();
         void finishScanReceipt({
-          runKey: run.creditKey, kind: "investigation", canonicalRef: run.ref.includes(":") ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
+          runKey: run.creditKey, kind: "investigation", canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
           privateRun: run.priv, startedAt: run.startedAt, status: "failed",
           failureCode: "collection_failed", failureDetail: run.error,
         });

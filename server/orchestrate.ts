@@ -1691,7 +1691,8 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // than a gate on evidence_origin.
   await enrichFirstPartyTeamAvatars(ctx);
   if (webTeam.length) {
-    const groundedTeam = webTeam.filter((member) =>
+    const peopleCandidates = webTeam.filter(member => member.kind !== "org");
+    const groundedTeam = peopleCandidates.filter((member) =>
       member.kind !== "org" && member.artifact_verified === true && member.evidence_origin !== "model_lead");
     ctx.emit(groundedTeam.length
       ? {
@@ -1704,7 +1705,9 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       : {
           phase: "P1 · Team",
           label: "Team candidates withheld",
-          detail: `${webTeam.length} search candidate${webTeam.length === 1 ? "" : "s"} did not pass source verification and will not be presented as people behind the project.`,
+          detail: peopleCandidates.length
+            ? `${peopleCandidates.length} person candidate${peopleCandidates.length === 1 ? "" : "s"} did not pass source verification and will not be presented as people behind the project.`
+            : "Organization references were found, but no individual identities were verified. Organization links are not team members.",
           source: "team-search",
           tone: "warn",
         });

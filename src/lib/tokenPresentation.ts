@@ -1,5 +1,5 @@
 import type { TokenAxis } from "../token/audit";
-import type { CompositionRow } from "../components/ScoreComposition";
+import type { CompositionRow } from "./scoreComposition";
 import { plainAxisLabel } from "./dimensionChapters";
 
 export { tokenMarketPresentation } from "./tokenMarketPresentation";

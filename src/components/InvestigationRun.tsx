@@ -1,3 +1,4 @@
+import { tokenSubjectIdentity } from "../lib/tokenIdentity";
 import { useEffect, useRef, useState } from "react";
 import { AuditConsole } from "./AuditConsole";
 import { subscribeScanRuns, getScanRun } from "../lib/scanrunner";
@@ -29,7 +30,7 @@ export function InvestigationRun({
     return unsub; // detach the view only — the run continues in the background
   }, [input]);
 
-  const run = getScanRun("investigation", input.ref, privateRun);
+  const run = getScanRun("investigation", tokenSubjectIdentity(input.chain, input.ref)?.ref ?? input.ref, privateRun);
   const attached = expectedRunId ? (run?.id === expectedRunId ? run : undefined) : run;
 
   useEffect(() => {

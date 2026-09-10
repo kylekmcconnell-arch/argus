@@ -2250,8 +2250,8 @@ var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 function normalizeSubjectRef(value) {
   const clean = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
   const qualified = clean.match(/^([a-z0-9_-]+):(.+)$/i);
-  if (qualified && (EVM_ADDRESS4.test(qualified[2]) || SOLANA_ADDRESS3.test(qualified[2]))) {
-    return `${qualified[1].toLowerCase()}:${normalizeSubjectRef(qualified[2])}`;
+  if (qualified && (EVM_ADDRESS4.test(qualified[2]) || SOLANA_ADDRESS3.test(qualified[2]) || !/^https?$/i.test(qualified[1]) && /^[A-Za-z0-9._-]{10,128}$/.test(qualified[2]))) {
+    return `${qualified[1].toLowerCase()}:${EVM_ADDRESS4.test(qualified[2]) ? qualified[2].toLowerCase() : qualified[2]}`;
   }
   if (SOLANA_ADDRESS3.test(clean)) return clean;
   if (EVM_ADDRESS4.test(clean)) return clean.toLowerCase();
