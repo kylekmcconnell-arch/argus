@@ -1,3 +1,4 @@
+import { tokenSubjectIdentity } from "./tokenIdentity";
 // Client-side watchlist (localStorage). Saves audited subjects/tokens with a
 // baseline snapshot so re-checking surfaces drift: verdict downgrades, liquidity
 // pulls, score drops. Keyless "alerts" without a backend; true push alerts would
@@ -29,7 +30,8 @@ const KEY = "argus.watchlist.v1";
 
 export function getWatchlist(): WatchItem[] {
   try {
-    return JSON.parse(localStorage.getItem(KEY) || "[]");
+    const rows: WatchItem[] = JSON.parse(localStorage.getItem(KEY) || "[]");
+    return rows.map(row => row.kind === "token" && row.chain ? { ...row, id: tokenSubjectIdentity(row.chain, row.id.includes(":") ? row.id.split(":")[1] : row.id)?.ref ?? row.id } : row);
   } catch {
     return [];
   }
@@ -44,6 +46,7 @@ export function isWatched(id: string): boolean {
 }
 
 export function addWatch(item: WatchItem) {
+  if (item.kind === "token") item = { ...item, id: tokenSubjectIdentity(item.chain, item.id.includes(":") ? item.id.split(":")[1] : item.id)?.ref ?? item.id };
   const itemRef = normalizeSubjectRef(item.id);
   const items = getWatchlist().filter((w) => normalizeSubjectRef(w.id) !== itemRef);
   items.unshift(item);

@@ -1,3 +1,4 @@
+import { tokenSubjectIdentity } from "./lib/tokenIdentity";
 import { lazy, Suspense, useState, useCallback, useEffect, useRef } from "react";
 import { AppShell } from "./components/AppShell";
 import { ArgusMark } from "./components/ArgusMark";
@@ -150,9 +151,30 @@ type Cached =
 type CachedKind = Cached["kind"];
 
 const cacheKey = (ref: string, kind?: CachedKind) => `${kind ?? "latest"}:${normalizeSubjectRef(ref)}`;
+const cachedSubjectRef = (ref: string, result: Cached) => {
+  const token = result.kind === "token" ? result.dossier : result.kind === "investigation" ? result.inv.token : null;
+  return token ? tokenSubjectIdentity(token.chain, token.address)?.ref ?? ref : ref;
+};
 const cacheResult = (cache: Map<string, Cached>, ref: string, result: Cached, updateLatest = true) => {
+  ref = cachedSubjectRef(ref, result);
   cache.set(cacheKey(ref, result.kind), result);
   if (updateLatest) cache.set(cacheKey(ref), result);
+};
+// Address-only navigation may reuse a session result only when exactly one
+// chain is represented. Never let a stale durable lookup overwrite that run.
+const cachedForRef = (cache: Map<string, Cached>, ref: string, kind?: CachedKind): Cached | undefined => {
+  if (!ref.includes(":") && /^(?:0x[0-9a-f]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/i.test(ref)) {
+    const candidates = new Map<string, Cached>();
+    for (const [key, value] of cache) {
+      if (kind && value.kind !== kind) continue;
+      const identity = cachedSubjectRef(ref, value);
+      if (!identity.includes(":") || !key.endsWith(`:${identity}`)) continue;
+      if (normalizeSubjectRef(identity.slice(identity.indexOf(":") + 1)) === normalizeSubjectRef(ref)) candidates.set(identity, value);
+    }
+    if (candidates.size > 1) return undefined;
+    if (candidates.size === 1) return [...candidates.values()][0];
+  }
+  return cache.get(cacheKey(ref, kind));
 };
 const cachedPersistence = (result: Cached | undefined): ReportPersistenceContext | undefined => {
   if (result?.kind === "person" || result?.kind === "token") return result.dossier.persistence;
@@ -165,6 +187,7 @@ const settleCachedScan = (
   scanId: string,
   result: Cached,
 ): boolean => {
+  ref = cachedSubjectRef(ref, result);
   const typedKey = cacheKey(ref, result.kind);
   const current = cache.get(typedKey);
   const latestKey = cacheKey(ref);
@@ -561,7 +584,7 @@ export default function App() {
     if (!investigation) return;
     urlBootConsumedRef.current = true;
     safeAuditRequestRef.current += 1;
-    const resolved = resolveInvestigationRescanInput(investigation.token.address);
+    const resolved = resolveInvestigationRescanInput(tokenSubjectIdentity(investigation.token.chain, investigation.token.address)?.ref ?? investigation.token.address);
     if (!resolved.ok) {
       setInvestigationRescanError(formatInvestigationRescanError(resolved.address, resolved.reason));
       return;
@@ -844,14 +867,14 @@ export default function App() {
   // VIEW-side completion (only when this view is mounted on the finished run) —
   // the runner already logged/persisted, so these just move the current view.
   const onInvestigationDone = useCallback((inv: Investigation, priv: boolean, scanId: string) => {
-    const cached = priv ? null : resultCache.current.get(cacheKey(inv.token.address, "investigation"));
+    const cached = priv ? null : resultCache.current.get(cacheKey(tokenSubjectIdentity(inv.token.chain, inv.token.address)?.ref ?? inv.token.address, "investigation"));
     setInvestigation(cached?.kind === "investigation" && cached.inv.persistence?.scanId === scanId
       ? cached.inv
       : { ...inv, persistence: { state: priv ? "private" : "pending", scanId } });
     setPhase("investigation-report");
   }, [setInvestigation, setPhase]);
   const onTokenDone = useCallback((d: TokenDossier, priv: boolean, scanId: string) => {
-    const cached = priv ? null : resultCache.current.get(cacheKey(d.address, "token"));
+    const cached = priv ? null : resultCache.current.get(cacheKey(tokenSubjectIdentity(d.chain, d.address)?.ref ?? d.address, "token"));
     setTokenDossier(cached?.kind === "token" && cached.dossier.persistence?.scanId === scanId
       ? cached.dossier
       : { ...d, persistence: { state: priv ? "private" : "pending", scanId } });
@@ -1145,9 +1168,7 @@ export default function App() {
     // The durable lookup is asynchronous. Read the session cache only after it
     // returns so a scan that completed while that request was in flight wins
     // over the older durable projection the request may have captured.
-    const sessionCached = cachedKind
-      ? resultCache.current.get(cacheKey(ref, cachedKind))
-      : resultCache.current.get(cacheKey(ref));
+    const sessionCached = cachedForRef(resultCache.current, ref, cachedKind);
     const sessionPersistence = cachedPersistence(sessionCached);
     if (lookup.status === "open" && !lookup.report) {
       if (sessionCached && (sessionPersistence?.state === "pending" || sessionPersistence?.state === "failed")) {
@@ -1784,7 +1805,7 @@ export default function App() {
         <TokenRun privateRun={privateMode} input={tokenInput} onDone={onTokenDone} onError={onTokenError} />
       )}
 
-      {phase === "token-report" && tokenDossier && <TokenReport key={`token:${tokenDossier.versionContext?.reportVersionId ?? tokenDossier.viewVersionContext?.reportVersionId ?? tokenDossier.persistence?.scanId ?? tokenDossier.viewPersistence?.scanId ?? tokenDossier.address}`} dossier={tokenDossier} onReset={reset} onAudit={tokenReportPrivate ? onPrivateAudit : onSafeAudit} onRescan={() => onAudit(tokenDossier.address, tokenReportPrivate, true)} onOpenBrief={!evidenceReviewVersionId && !privateMode && tokenBriefTarget ? () => setCaseBriefTarget(tokenBriefTarget) : undefined} />}
+      {phase === "token-report" && tokenDossier && <TokenReport key={`token:${tokenDossier.versionContext?.reportVersionId ?? tokenDossier.viewVersionContext?.reportVersionId ?? tokenDossier.persistence?.scanId ?? tokenDossier.viewPersistence?.scanId ?? tokenDossier.address}`} dossier={tokenDossier} onReset={reset} onAudit={tokenReportPrivate ? onPrivateAudit : onSafeAudit} onRescan={() => onAudit(tokenSubjectIdentity(tokenDossier.chain, tokenDossier.address)?.ref ?? tokenDossier.address, tokenReportPrivate, true)} onOpenBrief={!evidenceReviewVersionId && !privateMode && tokenBriefTarget ? () => setCaseBriefTarget(tokenBriefTarget) : undefined} />}
 
       {phase === "threat" && (walletScanAddr
         ? <WalletScanPage key={walletScanAddr} address={walletScanAddr} />

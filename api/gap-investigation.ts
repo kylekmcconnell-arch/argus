@@ -37,9 +37,9 @@ import type { TokenDossier } from "../src/token/audit.js";
 export const config = { maxDuration: 600 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const METHODOLOGY_VERSION = "argus-person-v5-project-strength-bands";
+const METHODOLOGY_VERSION = "argus-person-v6-entity-aware-identity";
 const TOKEN_METHODOLOGY_VERSION = "argus-token-v3-assessed-evidence";
-const INVESTIGATION_METHODOLOGY_VERSION = "argus-investigation-v2-terminal-outcomes";
+const INVESTIGATION_METHODOLOGY_VERSION = "argus-investigation-v3-explicit-facets";
 type JsonRecord = Record<string, unknown>;
 type SupportedGapReportKind = "person" | "token" | "investigation";
 

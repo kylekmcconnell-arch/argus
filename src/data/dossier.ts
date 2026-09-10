@@ -1,3 +1,4 @@
+import { isOrganizationAccount } from "../lib/investorSubject";
 // Dossier — the rendered report payload. Both the local fixture path and the
 // live server path produce a Dossier, so <Report> renders identically for each.
 
@@ -171,6 +172,7 @@ export interface Dossier {
     completeness: string | null;
     capturedAt: string | null;
     delta: string;
+    comparisonNote?: string;
   };
   /** Highest-priority source-backed change from the exact prior report. */
   reportDelta?: MaterialReportDelta;
@@ -268,6 +270,7 @@ export interface Dossier {
   basicFactLeads?: DossierBasicFactLead[];
   /** Frozen role-aware research questions, verified answers, and explicit gaps. */
   basicFactQuestionLedger?: DossierBasicFactQuestion[];
+  evidenceAttempts?: import("../lib/evidenceRetry").EvidenceAttempt[];
   /** What the investigation director asked, delegated, and could not finish. */
   researchPlan?: ResearchPlan;
   report: AuditReport;
@@ -289,8 +292,8 @@ export interface Dossier {
 // Builds the Audit from a (fixture- or live-) collected evidence bag, runs the
 // real engine, and packages the rendered dossier.
 export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
-  const a = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
-  const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
+  const a = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name, organizationSubject: isOrganizationAccount(ev) });
+  const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name, organizationSubject: isOrganizationAccount(ev) });
   a.setIdentity(ev.profile.identity_confidence);
   a.setTokenApplicability(ev.tokenApplicability);
   graphAudit.setIdentity(ev.profile.identity_confidence);
@@ -733,6 +736,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
         ...(lead.candidateUrls ? { candidateUrls: [...lead.candidateUrls] } : {}),
       })),
     } : {}),
+    ...(ev.evidenceAttempts ? { evidenceAttempts: ev.evidenceAttempts } : {}),
     ...(ev.basicFactQuestionLedger?.length ? {
       basicFactQuestionLedger: ev.basicFactQuestionLedger.map((entry) => ({
         ...entry,

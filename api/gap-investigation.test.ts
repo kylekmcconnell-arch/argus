@@ -388,7 +388,7 @@ describe("gap investigation API", () => {
         verdict: "CAUTION",
         score: 61,
         attestationState: "analyst_submitted",
-        methodologyVersion: "argus-investigation-v2-terminal-outcomes",
+        methodologyVersion: "argus-investigation-v3-explicit-facets",
         payload: expect.objectContaining({
           token: investigationPayload.token,
           projectAccount: expect.objectContaining({ display_name: "Alice Example" }),

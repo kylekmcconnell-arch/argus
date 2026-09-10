@@ -1,0 +1,21 @@
+import { scoreComparisonNote } from "./scoreComparison";
+import { describe,it,expect } from "vitest";
+import { tokenMarketPresentation,tokenCompositionRow } from "./tokenPresentation";
+import { tokenSubjectIdentity } from "./tokenIdentity";
+import { resolveInput } from "./resolveInput";
+import { investigationFacets } from "./investigationFacets";
+import { TOKEN_REQUIRED_CHECK_IDS } from "./reportCheckContract";
+import { evidenceRetryPlan } from "./evidenceRetry";
+import { scoreProject } from "../collect/projectverdict";
+import { analyzeContent } from "../collect/recon";
+import type { TokenDossier } from "../token/audit";
+import type { Investigation } from "./investigation";
+describe("report repair contracts",()=>{
+ it("explains changed methodology and governing coverage",()=>{expect(scoreComparisonNote({report:{governing_role:"FOUNDER",score_coverage:{assessedWeight:50,totalWeight:100}}},{report:{governing_role:"INVESTOR",score_coverage:{assessedWeight:100,totalWeight:100}}},"v5","v6")).toMatch(/methodology changed; the governing role changed; assessed scoring coverage changed/);});
+ it("retains affirmative return-promise penalties",()=>{const r=scoreProject(analyzeContent({url:"https://example.com",status:"rendered",content:"We offer guaranteed returns on your investment.",title:"Example",stages:[],coverageNote:"Retrieved"}));expect(r.capApplied).toBe("manipulation_language");});
+ it("keeps FDV distinct and unknown market fields null",()=>{expect(tokenMarketPresentation({mcap:100,fdv:100,liquidityUsd:0,marketEvidence:{mcap:false,fdv:true,liquidityUsd:false,vol24:false,ageDays:false}} as TokenDossier)).toEqual({marketCap:null,fullyDilutedValuation:100,liquidityUsd:null,volume24h:null,ageDays:null});});
+ it("passes assessment and recorded measurements through the common composition",()=>{expect(tokenCompositionRow({key:"T2",label:"Safety",score:0,weight:0,rationale:"Unknown",assessed:false,evidenceRefs:[]})).toMatchObject({applicability:"unassessed",supportCount:0});expect(tokenCompositionRow({key:"T1",label:"Liquidity",score:20,weight:24,rationale:"Measured",evidenceRefs:["marketEvidence.liquidityUsd"]}).supportCount).toBe(1);});
+ it("preserves the token result without claiming project completion",()=>{const inv={token:{assessment:{provisional:false}},projectAccount:null,projectAccountAudit:{state:"unavailable",note:"Project identity unresolved"}} as Investigation;const facets=investigationFacets(inv,[...TOKEN_REQUIRED_CHECK_IDS].map(checkId=>({checkId,label:checkId,status:"confirmed" as const})));expect(facets[0].state).toBe("complete");expect(facets[1].state).toBe("unavailable");});
+ it("distinguishes chains and routes qualified rescans to the exact chain",()=>{const address="0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";expect(tokenSubjectIdentity("base",address)?.ref).not.toBe(tokenSubjectIdentity("ethereum",address)?.ref);expect(resolveInput(`base:${address}`)).toMatchObject({kind:"token",chain:"base",ref:address});});
+ it("retries retrieval failures but seeks another source for semantic rejections",()=>{expect(evidenceRetryPlan([{questionId:"founder",predicate:"founder",sourceUrl:"https://example.com",outcome:"fetch_failed",reason:"timeout"}])[0].action).toBe("retry_retrieval");expect(evidenceRetryPlan([{questionId:"founder",predicate:"founder",sourceUrl:"https://example.com",outcome:"rejected",reason:"subject_binding_failed"}])[0].action).toBe("find_alternate_source");});
+});

@@ -1,3 +1,4 @@
+import { officialDomainBinding } from "../server/accountTokenBinding.js";
 // Token authenticity via the project's X bio. GET /api/x-authenticity?handle=&address=&chain=
 //
 // Enigma's rule: the OFFICIAL token's contract address lives in the project's X
@@ -14,7 +15,7 @@
 // (X_API_BEARER), then best-effort keyless, then honest "unreadable".
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-export const config = { maxDuration: 15 };
+export const config = { maxDuration: 30 };
 
 const HANDLE = /^[A-Za-z0-9_]{1,20}$/;
 const EVM_CA = /0x[0-9a-fA-F]{40}/g;
@@ -119,7 +120,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const otherCa = casFiltered.find((c) => c !== want) ?? null;
 
   let status = matched ? "verified" : otherCa ? "mismatch" : "absent";
-  let via: "bio" | "linked-page" = "bio";
+  let via: "bio" | "linked-page" | "official-domain" = "bio";
   let note = status === "verified"
     ? `The scanned contract is in @${handle}'s X bio - confirmed the official token.`
     : status === "mismatch"
@@ -144,5 +145,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
   }
-  res.status(200).json({ available: true, handle, status, bioReadable: true, otherCa, via, note });
+  let proof: Awaited<ReturnType<typeof officialDomainBinding>> = null;
+  // Never override a conflicting bio or linked-page contract with a fallback.
+  if (status === "absent" && !note.includes("lists a different contract")) {
+    proof = await officialDomainBinding(bio, handle, address, chain);
+    if (proof) {
+      status = "verified";
+      via = "official-domain";
+      note = `The account-linked official site reciprocally links @${handle} and publishes the exact ${chain} contract explorer link.`;
+    }
+  }
+  res.status(200).json({ available: true, handle, status, bioReadable: true, otherCa, via, note, ...(proof ? { proof } : {}) });
 }

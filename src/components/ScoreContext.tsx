@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { normalizeSubjectRef } from "../lib/subjectRef";
 import { getLog, type AuditKind } from "../lib/auditlog";
 import type { Dossier } from "../data/dossier";
 
@@ -28,9 +29,10 @@ export function OutcomeDeltaStrip({
   if (scoreDelta == null && !verdictChanged && !coverageChanged) return null;
   return (
     <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint" aria-label="Changes since the previous scan">
+      <span className="text-ink-faint">{prior.comparisonNote ?? "Recorded results; changes may reflect evidence coverage or methodology."}</span>
       <span className="eyebrow">since v{prior.version}{when ? ` · ${when}` : ""}</span>
       {scoreDelta != null && (
-        <span className={`chip tabular normal-case tracking-normal ${scoreDelta > 0 ? "tint-pass" : scoreDelta < 0 ? "tint-caution" : ""}`}>
+        <span className={`chip tabular normal-case tracking-normal `}>
           {scoreDelta === 0
             ? `score steady at ${score}`
             : `score ${prior.score} → ${score} (${scoreDelta > 0 ? "+" : ""}${scoreDelta})`}
@@ -59,7 +61,7 @@ export function ScoreContextStrip({
   peerKind?: AuditKind;
   align?: "center" | "start";
 }) {
-  const norm = (value?: string) => (value ?? "").trim().toLowerCase().replace(/^@/, "");
+  const norm = normalizeSubjectRef;
   const key = norm(subjectRef);
   if (!key || score == null) return null;
   const entries = getLog().filter((entry) => typeof entry.score === "number");
@@ -95,7 +97,7 @@ export function ScoreContextStrip({
             <circle cx={last.x} cy={last.y} r="2" fill="currentColor" />
           </svg>
           {delta != null && (
-            <span className="text-ink-dim">{delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : "steady"} vs last scan</span>
+            <span className="text-ink-dim">{delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : "steady"} vs last scan · evidence and methodology may differ</span>
           )}
         </div>
       )}

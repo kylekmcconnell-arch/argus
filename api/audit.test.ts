@@ -617,7 +617,7 @@ describe("person audit input guard", () => {
 
     expect(persistReportVersionBundle).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ methodologyVersion: "argus-person-v5-project-strength-bands" }),
+      expect.objectContaining({ methodologyVersion: "argus-person-v6-entity-aware-identity" }),
     );
 
     expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledWith(

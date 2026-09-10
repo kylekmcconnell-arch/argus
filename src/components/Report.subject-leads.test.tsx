@@ -212,7 +212,9 @@ describe("favorable person report with adverse leads about the subject", () => {
 
     expect(concernsText()).not.toContain("No adverse findings");
     expect(concernsText()).toContain("1 unverified adverse lead");
-    expect(concernsText()).toContain("drained pool");
+    expect(concernsText()).not.toContain("drained pool");
+    expect(container.querySelector("#subject-leads")?.textContent).toContain("drained pool");
+    expect(container.querySelector(".kyle-executive-thesis")?.textContent ?? "").not.toContain("drained pool");
   });
 
   it("keeps the subject lead out of the zero-warning-signs support line", () => {

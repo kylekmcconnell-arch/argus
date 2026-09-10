@@ -1,3 +1,4 @@
+import { scoreComparisonNote } from "../src/lib/scoreComparison";
 import { withProviderDeadline } from "./providerDeadline.js";
 import { withWallClockBox } from "./boundedProvider";
 // The collector orchestrator: @handle -> populated evidence -> verdict.
@@ -1691,12 +1692,12 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   await enrichFirstPartyTeamAvatars(ctx);
   if (webTeam.length) {
     const groundedTeam = webTeam.filter((member) =>
-      member.artifact_verified === true && member.evidence_origin !== "model_lead");
+      member.kind !== "org" && member.artifact_verified === true && member.evidence_origin !== "model_lead");
     ctx.emit(groundedTeam.length
       ? {
           phase: "P1 · Team",
-          label: "Team evidence verified",
-          detail: `${groundedTeam.length} project team identit${groundedTeam.length === 1 ? "y" : "ies"} passed first-party or deterministic verification: ${groundedTeam.slice(0, 6).map((member) => member.name + (member.handle ? ` ${member.handle}` : "")).join(", ")}.`,
+          label: "People with source-backed identity records",
+          detail: `${groundedTeam.length} person identit${groundedTeam.length === 1 ? "y" : "ies"} have first-party or deterministic source records; affiliations retain their individual verification status: ${groundedTeam.slice(0, 6).map((member) => member.name + (member.handle ? ` ${member.handle}` : "")).join(", ")}.`,
           source: "team-search",
           tone: "good",
         }
@@ -5513,6 +5514,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           verdict: prior.verdict,
           completeness: prior.completeness,
           capturedAt: prior.capturedAt,
+          comparisonNote: scoreComparisonNote(prior.payload, dossier, prior.methodologyVersion, "argus-person-v6-entity-aware-identity"),
           delta,
         };
         checkTracker.provider("prior-outcome", "Since last scan", "executed", delta);

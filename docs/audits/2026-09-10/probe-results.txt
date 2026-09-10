@@ -1,0 +1,11 @@
+
+ RUN  v4.1.8 /Users/kyle/argus-reliability-20260908
+
+(node:97879) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  7 passed (7)
+      Tests  83 passed (83)
+   Start at  04:04:14
+   Duration  2.66s (transform 1.81s, setup 0ms, import 4.33s, tests 383ms, environment 403ms)
+

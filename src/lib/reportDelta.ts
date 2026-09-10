@@ -1,3 +1,4 @@
+import { payloadTokenIdentity } from "./tokenIdentity";
 import type { BasicFact } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
 import type { Investigation } from "./investigation";
@@ -218,6 +219,9 @@ export function buildMaterialReportDelta(
 ): MaterialReportDelta | null {
   if (!prior.reportVersionId || prior.version < 1 || !prior.payload || !currentPayload) return null;
   if (kind === "token" || kind === "investigation") {
+    const before = payloadTokenIdentity(kind, prior.payload);
+    const after = payloadTokenIdentity(kind, currentPayload);
+    if (before && after && before.ref !== after.ref) return null;
     return contractDelta(kind, prior.payload, currentPayload, prior)
       ?? liquidityDelta(kind, prior.payload, currentPayload, prior)
       ?? holderDelta(kind, prior.payload, currentPayload, prior)

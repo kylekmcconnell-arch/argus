@@ -42,6 +42,24 @@ var providerFallbacksEnabled = () => {
 };
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
+// src/lib/scoreComparison.ts
+var object = (v) => v && typeof v === "object" ? v : {};
+function scoreComparisonNote(previous, current, previousMethodology, currentMethodology) {
+  const before = object(object(previous).report);
+  const after = object(object(current).report);
+  const changes = [];
+  if (!previousMethodology || !currentMethodology) changes.push("methodology comparability was not recorded");
+  else if (previousMethodology !== currentMethodology) changes.push("the scoring methodology changed");
+  if (before.governing_role !== after.governing_role) changes.push("the governing role changed");
+  const coverage = (r) => {
+    const roles = Array.isArray(r.role_reports) ? r.role_reports.map(object) : [];
+    return object(roles.find((role) => role.role === r.governing_role)?.score_coverage ?? r.score_coverage);
+  };
+  const b = coverage(before), a = coverage(after);
+  if (b.assessedWeight !== a.assessedWeight || b.totalWeight !== a.totalWeight) changes.push("assessed scoring coverage changed");
+  return changes.length ? `Compare with care: ${changes.join("; ")}. Source availability may also differ.` : "Same recorded methodology, governing role and scoring coverage. Source measurements may still differ; the score change alone does not establish improvement or deterioration.";
+}
+
 // server/providerDeadline.ts
 import { AsyncLocalStorage } from "node:async_hooks";
 var context = new AsyncLocalStorage();
@@ -672,6 +690,7 @@ var Audit = class {
   axisScores = {};
   identity = null;
   display_name;
+  organizationSubject = false;
   tokenApplicability;
   ventures = [];
   testimonials = [];
@@ -689,6 +708,7 @@ var Audit = class {
     else this.roles = [];
     this.subject_class = this.roles[0] ?? null;
     this.display_name = opts.display_name;
+    this.organizationSubject = opts.organizationSubject === true;
     this.audit_id = makeAuditId(this.handle);
   }
   setIdentity(confidence) {
@@ -912,7 +932,7 @@ var Audit = class {
     const identityBonus = identity ? DOX_BONUS[identity] ?? 0 : 0;
     const roleReports = [];
     for (const role of this.roles) {
-      const doxBonus = role === "PROJECT" /* PROJECT */ ? 0 : identityBonus;
+      const doxBonus = role === "PROJECT" /* PROJECT */ || this.organizationSubject ? 0 : identityBonus;
       const axes = {};
       for (const [ax, a] of Object.entries(this.axisScores)) {
         if (classForAxis(ax) === role) axes[ax] = a;
@@ -1148,6 +1168,29 @@ function canonicalEntityKey(opts) {
   const d = (opts.domain ?? "").replace(/^https?:\/\//i, "").replace(/^www\./, "").replace(/\/.*$/, "").trim().toLowerCase();
   if (d && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return d;
   return (opts.name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+// src/lib/investorSubject.ts
+var INSTITUTION_LANGUAGE = /\b(?:venture(?:s)?|venture capital|capital partners?|investment (?:firm|fund|manager)|fund management|portfolio|accelerator|family office)\b/i;
+var FIRST_PERSON_ORGANIZATION = /\b(?:we|our|us)\s+(?:back|fund|invest|partner|support|manage|help)\b/i;
+var ORGANIZATION_NAME = /\b(?:ventures?|capital|partners?|holdings?|management|foundation|fund|labs?|group)\b/i;
+function isInstitutionalInvestorAccount(evidence) {
+  if (!evidence.roles.some((role) => String(role) === "INVESTOR")) return false;
+  if (evidence.profile.resolved_name?.trim()) return false;
+  const display = evidence.profile.display_name.trim();
+  const bio = evidence.profile.bio.trim();
+  const handle = evidence.profile.handle.replace(/^@/, "").toLowerCase();
+  return FIRST_PERSON_ORGANIZATION.test(bio) || INSTITUTION_LANGUAGE.test(`${display} ${bio}`) || ORGANIZATION_NAME.test(display) || /(?:vc|ventures|capital|fund|partners)$/.test(handle);
+}
+function isOrganizationAccount(evidence) {
+  if (evidence.roles.some((role) => String(role) === "PROJECT")) return true;
+  if (isInstitutionalInvestorAccount(evidence)) return true;
+  if (!evidence.roles.some((role) => String(role) === "AGENCY")) return false;
+  if (evidence.profile.resolved_name?.trim()) return false;
+  const display = evidence.profile.display_name.trim();
+  const bio = evidence.profile.bio.trim();
+  const handle = evidence.profile.handle.replace(/^@/, "").toLowerCase();
+  return /\b(?:we|our|us)\s+(?:build|provide|offer|help|serve|work|grow|market|design|develop|manage)\b/i.test(bio) || /\b(?:agency|studio|company|services?|consulting|marketing|development|group|labs?)\b/i.test(`${display} ${bio}`) || ORGANIZATION_NAME.test(display) || /(?:agency|studio|labs|group|services)$/.test(handle);
 }
 
 // src/lib/personName.ts
@@ -1464,10 +1507,10 @@ var profileBioHasCurrentAffiliation = (profile, value) => {
   if (!bio) return false;
   const entity = normalizedWords(value.investorEntityName ?? value.fundName);
   const handle = canonicalHandle(value.investorEntityHandle);
-  const aliases = [entity, handle].filter((alias, index, all) => Boolean(alias) && all.indexOf(alias) === index);
+  const aliases2 = [entity, handle].filter((alias, index, all) => Boolean(alias) && all.indexOf(alias) === index);
   const role = `(?:${AFFILIATION_ROLE})`;
   const affiliationLink = "(?:(?:at|with)\\s+|@\\s*)";
-  return aliases.some((alias) => {
+  return aliases2.some((alias) => {
     const escaped = normalizedWords(alias).split(/\s+/).filter(Boolean).map(regexEscape).join("[^a-z0-9@_]+");
     if (!escaped) return false;
     const patterns = [
@@ -1732,29 +1775,6 @@ function isStrictFundScaleArtifact(value, peers = [], context2 = {}) {
     if (excerpt) prose.add(excerpt);
   }
   return domains.size >= 2 && hashes.size >= 2 && prose.size >= 2;
-}
-
-// src/lib/investorSubject.ts
-var INSTITUTION_LANGUAGE = /\b(?:venture(?:s)?|venture capital|capital partners?|investment (?:firm|fund|manager)|fund management|portfolio|accelerator|family office)\b/i;
-var FIRST_PERSON_ORGANIZATION = /\b(?:we|our|us)\s+(?:back|fund|invest|partner|support|manage|help)\b/i;
-var ORGANIZATION_NAME = /\b(?:ventures?|capital|partners?|holdings?|management|foundation|fund|labs?|group)\b/i;
-function isInstitutionalInvestorAccount(evidence) {
-  if (!evidence.roles.some((role) => String(role) === "INVESTOR")) return false;
-  if (evidence.profile.resolved_name?.trim()) return false;
-  const display = evidence.profile.display_name.trim();
-  const bio = evidence.profile.bio.trim();
-  const handle = evidence.profile.handle.replace(/^@/, "").toLowerCase();
-  return FIRST_PERSON_ORGANIZATION.test(bio) || INSTITUTION_LANGUAGE.test(`${display} ${bio}`) || ORGANIZATION_NAME.test(display) || /(?:vc|ventures|capital|fund|partners)$/.test(handle);
-}
-function isOrganizationAccount(evidence) {
-  if (evidence.roles.some((role) => String(role) === "PROJECT")) return true;
-  if (isInstitutionalInvestorAccount(evidence)) return true;
-  if (!evidence.roles.some((role) => String(role) === "AGENCY")) return false;
-  if (evidence.profile.resolved_name?.trim()) return false;
-  const display = evidence.profile.display_name.trim();
-  const bio = evidence.profile.bio.trim();
-  const handle = evidence.profile.handle.replace(/^@/, "").toLowerCase();
-  return /\b(?:we|our|us)\s+(?:build|provide|offer|help|serve|work|grow|market|design|develop|manage)\b/i.test(bio) || /\b(?:agency|studio|company|services?|consulting|marketing|development|group|labs?)\b/i.test(`${display} ${bio}`) || ORGANIZATION_NAME.test(display) || /(?:agency|studio|labs|group|services)$/.test(handle);
 }
 
 // src/lib/portfolioRelationshipBinding.ts
@@ -7015,8 +7035,8 @@ function cloneEvmControlRealitySnapshot(snapshot) {
 
 // src/data/dossier.ts
 function assembleDossier(ev, live) {
-  const a = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
-  const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
+  const a = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name, organizationSubject: isOrganizationAccount(ev) });
+  const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name, organizationSubject: isOrganizationAccount(ev) });
   a.setIdentity(ev.profile.identity_confidence);
   a.setTokenApplicability(ev.tokenApplicability);
   graphAudit.setIdentity(ev.profile.identity_confidence);
@@ -7387,6 +7407,7 @@ function assembleDossier(ev, live) {
         ...lead.candidateUrls ? { candidateUrls: [...lead.candidateUrls] } : {}
       }))
     } : {},
+    ...ev.evidenceAttempts ? { evidenceAttempts: ev.evidenceAttempts } : {},
     ...ev.basicFactQuestionLedger?.length ? {
       basicFactQuestionLedger: ev.basicFactQuestionLedger.map((entry) => ({
         ...entry,
@@ -10865,7 +10886,7 @@ async function analyzeSubject(handle, roles, axisCatalog2, evidenceJson, options
   const substantiveAliasesForAxis = (axis) => citationAliases.filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && isSubstantiveArtifact(artifact)).map(({ alias }) => alias);
   const verifiedScoreLimitingAliasesForAxis = (axis) => citationAliases.filter(({ artifact }) => isVerifiedCounterArtifact(artifact, axis)).map(({ alias }) => alias);
   const preferredCoverageAliasesForAxis = (axis) => citationAliases.filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && !isSubstantiveArtifact(artifact)).sort((a, b) => Number(b.artifact.verification === "unavailable") - Number(a.artifact.verification === "unavailable")).slice(0, 4).map(({ alias }) => alias);
-  const formatAliases = (aliases) => aliases.length > 0 ? aliases.join(", ") : "(none)";
+  const formatAliases = (aliases2) => aliases2.length > 0 ? aliases2.join(", ") : "(none)";
   const citationAliasTable = citationAliases.map(({ alias, artifact }) => `${alias} = ${artifact.artifactId}`).join("\n");
   const citationEligibilityTable = axisCatalog2.map(({ axis }) => `${axis} | substantive aliases (choose 1 primary; do not exhaustively copy): ${formatAliases(substantiveAliasesForAxis(axis))} | verified score-limiting aliases (the only counterEvidenceRefs that can justify a PROJECT score below its evidence-strength band): ${formatAliases(verifiedScoreLimitingAliasesForAxis(axis))} | coverageRefs preferred return set (optional; return 0-4 total, never the whole coverage catalog): ${formatAliases(preferredCoverageAliasesForAxis(axis))}`).join("\n");
   const system = "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject on a fixed set of axes from collected evidence only. Be skeptical: a strong story never papers over a disqualifying fact. Score conservatively when evidence is thin, and score at the TOP of the justified band when verification is overwhelming: several independent verified sources, institutional corroboration, top-tier verified scale, or a multi-year verified operating record. Skepticism gates what counts as verified evidence; it never discounts evidence that has been verified. Understating fully verified strength is as much a scoring error as overstating thin evidence. Each axis score must be between 0 and its weight. Write one tight rationale per axis citing the evidence. Never use em dashes.";
@@ -16025,8 +16046,8 @@ function buildEntityContinuityQueries(subject, ticker) {
     `${subject}${token} migration contract exchange support`
   ];
 }
-function buildEntityContinuityRecoveryQueries(subject, aliases, ticker) {
-  const names = [...new Set([subject, ...aliases].map((value) => value.trim()).filter(Boolean))];
+function buildEntityContinuityRecoveryQueries(subject, aliases2, ticker) {
+  const names = [...new Set([subject, ...aliases2].map((value) => value.trim()).filter(Boolean))];
   const currentTicker = ticker?.trim().replace(/^\$/, "") || null;
   const predecessorTerms = names.filter((name) => name.toLowerCase() !== subject.toLowerCase()).slice(0, 2);
   const pair = [...predecessorTerms, currentTicker].filter(Boolean).join(" ");
@@ -21661,20 +21682,20 @@ function officialIdentityBootstrapLeads(ctx) {
 function subjectAliases(ctx) {
   const personSubject = researchAudience(ctx) !== "project" && !isOrganizationAccount(ctx.evidence);
   if (personSubject) {
-    const aliases2 = [ctx.handle, ctx.handle.replace(/^@/, "")];
+    const aliases3 = [ctx.handle, ctx.handle.replace(/^@/, "")];
     if (ctx.evidence.profile.identity_binding) {
-      aliases2.push(ctx.evidence.profile.resolved_name?.trim() ?? "");
+      aliases3.push(ctx.evidence.profile.resolved_name?.trim() ?? "");
     }
-    return [...new Set(aliases2.filter(Boolean))];
+    return [...new Set(aliases3.filter(Boolean))];
   }
-  const aliases = [
+  const aliases2 = [
     subjectName(ctx),
     ctx.evidence.profile.display_name,
     ctx.evidence.profile.resolved_name,
     ctx.handle,
     ctx.handle.replace(/^@/, "")
   ].filter((value) => Boolean(value?.trim()));
-  return [...new Set(aliases.map((value) => value.trim()))];
+  return [...new Set(aliases2.map((value) => value.trim()))];
 }
 var OFFICIAL_SITE_HANDLE_SUFFIXES = /* @__PURE__ */ new Set([
   "app",
@@ -22458,9 +22479,9 @@ function attributionClauses(value) {
     /\s+and\s+(?=(?:founded|co[- ]?founded|serves?|served|works?|worked|reported|announced|settled|went|became|launched|built|created|led|leads)\b)/i
   )).map(normalize2).filter(Boolean));
 }
-function hasSubjectAlias(value, aliases) {
-  if (aliases.some((alias) => looseContainsPhrase(value, alias))) return true;
-  return aliases.some((alias) => {
+function hasSubjectAlias(value, aliases2) {
+  if (aliases2.some((alias) => looseContainsPhrase(value, alias))) return true;
+  return aliases2.some((alias) => {
     const tokens = looseTokens(alias);
     if (tokens.length < 2) return false;
     const surname = tokens[tokens.length - 1];
@@ -22551,9 +22572,9 @@ function roleMatches(tokens) {
   }
   return matches;
 }
-function subjectTokenSpans(tokens, aliases) {
+function subjectTokenSpans(tokens, aliases2) {
   const spans = [];
-  for (const alias of aliases) {
+  for (const alias of aliases2) {
     const aliasTokens = looseTokens(alias);
     for (const start of phraseTokenStarts(tokens, alias)) {
       spans.push({ start, end: start + aliasTokens.length - 1 });
@@ -22604,17 +22625,17 @@ function executivePersonAliases(lead, projectAliases) {
   const personTokens = looseTokens(lead.value).filter((token) => !excluded.has(token));
   return personTokens.length ? [personTokens.join(" ")] : [];
 }
-function roleAttributionIsSupported(clause, lead, aliases) {
+function roleAttributionIsSupported(clause, lead, aliases2) {
   if (!["current_role", "prior_role", "executive"].includes(lead.predicate)) return true;
   const requestedRoles = [...new Set(roleMatches(sourceTokens(lead.value)).map((role) => role.role))];
   if (!requestedRoles.length) return false;
   const tokens = sourceTokens(clause);
-  const targetAliases = lead.predicate === "executive" ? executivePersonAliases(lead, aliases) : aliases;
+  const targetAliases = lead.predicate === "executive" ? executivePersonAliases(lead, aliases2) : aliases2;
   const subjectSpans = subjectTokenSpans(tokens, targetAliases);
   if (!subjectSpans.length) return false;
   const excludedEntityTokens = /* @__PURE__ */ new Set([
     ...valueAnchorTokens(lead),
-    ...lead.predicate === "executive" ? aliases.flatMap(looseTokens) : []
+    ...lead.predicate === "executive" ? aliases2.flatMap(looseTokens) : []
   ]);
   const allPeople = [...subjectSpans.map((span) => ({ ...span, subject: true })), ...probablePersonSpans(tokens, excludedEntityTokens).filter((person) => !subjectSpans.some((subject) => person.start === subject.start && person.end === subject.end)).map((span) => ({ ...span, subject: false }))];
   const roles = roleMatches(tokens);
@@ -22722,10 +22743,10 @@ function founderValueHasExactEntityBoundary(clause, value) {
     return !new RegExp("^\\p{Lu}[\\p{L}\\p{M}'\u2019-]+$", "u").test(next.raw);
   });
 }
-function founderAttributionIsSupported(passage, lead, aliases) {
+function founderAttributionIsSupported(passage, lead, aliases2) {
   const value = loosePhrasePattern(lead.value);
   if (!value) return false;
-  const aliasPatterns = aliases.map(loosePhrasePattern).filter(Boolean);
+  const aliasPatterns = aliases2.map(loosePhrasePattern).filter(Boolean);
   const founded = "(?:co[-\\s]?founded|founded)";
   const founder = "(?:co[-\\s]?founder|founder)";
   const founderExecutiveTitle = "(?:\\s*,?\\s*(?:and|&)\\s*(?:the\\s+)?(?:chief\\s+executive\\s+officer|ceo))?";
@@ -22733,7 +22754,7 @@ function founderAttributionIsSupported(passage, lead, aliases) {
   const generic = "(?:the|this|our)\\s+(?:business|company|exchange|organization|platform|product|project|protocol|service|venture)";
   return attributionClauses(passage).some((clause) => {
     if (!founderValueHasExactEntityBoundary(clause, lead.value)) return false;
-    const hasProjectContext = aliases.some((alias) => looseContainsPhrase(passage, alias));
+    const hasProjectContext = aliases2.some((alias) => looseContainsPhrase(passage, alias));
     if (hasProjectContext && [
       new RegExp(`\\b${generic}\\b[^.!?;]{0,40}\\b${founded}\\s+by\\s+${value}\\b`, "i"),
       new RegExp(`\\b${value}\\b[^.!?;]{0,25}\\b${founded}\\s+(?:the\\s+)?${generic}\\b`, "i"),
@@ -22886,11 +22907,11 @@ function subjectComparisonIsDisqualified(clause, subject) {
     new RegExp(`\\b${pattern}\\b\\s+(?:and|with)\\s+[A-Z][A-Za-z0-9.'\u2019-]+\\s+(?:reported|raised|is|was|has|had|uses|launched|completed|published|deployed|runs|settled|listed)\\b`, "i")
   ].some((candidate) => candidate.test(clause));
 }
-function directClaimClause(clauses, lead, aliases, trustedContextTokens) {
-  const direct = clauses.find((clause) => hasSubjectAlias(clause, aliases) && aliases.every((alias) => !looseContainsPhrase(clause, alias) || !subjectComparisonIsDisqualified(clause, alias)) && (DIRECT_RELATION_PREDICATES.has(lead.predicate) || aliases.some((alias) => subjectAliasAvoidsTransfer(clause, lead, alias))) && sentenceValueIsSupported(clause, lead, trustedContextTokens) && predicateIsSupported(clause, lead.predicate) && !claimTailTransfersOwnership(clause, lead) && roleAttributionIsSupported(clause, lead, aliases));
+function directClaimClause(clauses, lead, aliases2, trustedContextTokens) {
+  const direct = clauses.find((clause) => hasSubjectAlias(clause, aliases2) && aliases2.every((alias) => !looseContainsPhrase(clause, alias) || !subjectComparisonIsDisqualified(clause, alias)) && (DIRECT_RELATION_PREDICATES.has(lead.predicate) || aliases2.some((alias) => subjectAliasAvoidsTransfer(clause, lead, alias))) && sentenceValueIsSupported(clause, lead, trustedContextTokens) && predicateIsSupported(clause, lead.predicate) && !claimTailTransfersOwnership(clause, lead) && roleAttributionIsSupported(clause, lead, aliases2));
   if (direct) return direct;
   if (!trustedContextTokens.size) return null;
-  return clauses.find((clause) => OFFICIAL_SELF_REFERENCE.test(clause) && !/\b(?:competitor|rival|unlike|versus|vs\.)\b/i.test(clause) && aliases.every((alias) => !looseContainsPhrase(clause, alias) || subjectAliasAvoidsTransfer(clause, lead, alias)) && !segmentIntroducesNamedActor(clause.slice(OFFICIAL_SELF_REFERENCE.exec(clause)?.index ?? 0), lead) && !claimTailTransfersOwnership(clause, lead) && sentenceValueIsSupported(clause, lead, trustedContextTokens) && predicateIsSupported(clause, lead.predicate)) ?? null;
+  return clauses.find((clause) => OFFICIAL_SELF_REFERENCE.test(clause) && !/\b(?:competitor|rival|unlike|versus|vs\.)\b/i.test(clause) && aliases2.every((alias) => !looseContainsPhrase(clause, alias) || subjectAliasAvoidsTransfer(clause, lead, alias)) && !segmentIntroducesNamedActor(clause.slice(OFFICIAL_SELF_REFERENCE.exec(clause)?.index ?? 0), lead) && !claimTailTransfersOwnership(clause, lead) && sentenceValueIsSupported(clause, lead, trustedContextTokens) && predicateIsSupported(clause, lead.predicate)) ?? null;
 }
 function anchorGovernsClaimClause(clause, lead, anchor) {
   if (subjectComparisonIsDisqualified(clause, anchor) || !sentenceValueIsSupported(clause, lead, EMPTY_CONTEXT_TOKENS) || !predicateIsSupported(clause, lead.predicate)) return false;
@@ -22957,75 +22978,75 @@ function legalEntityGovernsClaim(clause, lead) {
   const between = sanitized.slice(valueMatch.index + valueMatch[0].length, entityMatch.index);
   return /\b(?:against|charged|charging|named|sued|suing|with)\b/i.test(between) || /\b(?:charged|indicted|sued)\s*$/i.test(sanitized.slice(Math.max(0, entityMatch.index - 45), entityMatch.index));
 }
-function legalClaimClause(clauses, lead, aliases) {
+function legalClaimClause(clauses, lead, aliases2) {
   if (!lead.attributedEntity || !lead.eventStatus) return null;
-  const directEntity = aliases.some((alias) => exactEntityKey(alias) === exactEntityKey(lead.attributedEntity));
+  const directEntity = aliases2.some((alias) => exactEntityKey(alias) === exactEntityKey(lead.attributedEntity));
   for (let index = 0; index < clauses.length; index += 1) {
     const clause = clauses[index];
-    if (!legalEntityGovernsClaim(clause, lead) || directEntity && !hasSubjectAlias(clause, aliases)) continue;
+    if (!legalEntityGovernsClaim(clause, lead) || directEntity && !hasSubjectAlias(clause, aliases2)) continue;
     if (looseContainsPhrase(clause, lead.eventStatus)) return clause;
     const continuation = clauses[index + 1];
     if (continuation && looseContainsPhrase(continuation, lead.eventStatus) && /\b(?:it|the (?:action|case|matter|proceeding)|this (?:action|case|matter|proceeding))\b/i.test(continuation) && probablePersonSpans(sourceTokens(continuation)).length === 0) return clause;
   }
   return null;
 }
-function governingClaimClause(passage, lead, aliases, trustedContextTokens) {
+function governingClaimClause(passage, lead, aliases2, trustedContextTokens) {
   const clauses = attributionClauses(passage);
   if (lead.predicate === "founder") {
-    if (!founderAttributionIsSupported(passage, lead, aliases)) return null;
+    if (!founderAttributionIsSupported(passage, lead, aliases2)) return null;
     return clauses.find((clause) => looseContainsPhrase(clause, lead.value) && predicateIsSupported(clause, lead.predicate)) ?? null;
   }
   if (lead.predicate === "legal_regulatory_event") {
-    const legalClause = legalClaimClause(clauses, lead, aliases);
+    const legalClause = legalClaimClause(clauses, lead, aliases2);
     if (!legalClause || !lead.attributedEntity) return null;
-    const directEntity = aliases.some((alias) => exactEntityKey(alias) === exactEntityKey(lead.attributedEntity));
+    const directEntity = aliases2.some((alias) => exactEntityKey(alias) === exactEntityKey(lead.attributedEntity));
     if (directEntity) return legalClause;
-    const relationshipBound = clauses.some((clause) => hasSubjectAlias(clause, aliases) && looseContainsPhrase(clause, lead.attributedEntity) && RELATION_LANGUAGE.test(clause));
+    const relationshipBound = clauses.some((clause) => hasSubjectAlias(clause, aliases2) && looseContainsPhrase(clause, lead.attributedEntity) && RELATION_LANGUAGE.test(clause));
     return relationshipBound ? legalClause : null;
   }
   if (lead.predicate === "official_identity") {
-    const direct2 = directClaimClause(clauses, lead, aliases, trustedContextTokens);
+    const direct2 = directClaimClause(clauses, lead, aliases2, trustedContextTokens);
     const personIdentityQuestion = /^(?:person|investor)\.official_identity$/.test(lead.questionId ?? "");
     if (direct2 && (!personIdentityQuestion || titleBindsOfficialIdentity(direct2, lead) || explicitPersonIdentityIsBound(direct2, lead))) return direct2;
-    return clauses.find((clause) => hasSubjectAlias(clause, aliases) && looseContainsPhrase(clause, lead.value) && predicateIsSupported(clause, lead.predicate) && (titleBindsOfficialIdentity(clause, lead) || personIdentityQuestion && explicitPersonIdentityIsBound(clause, lead))) ?? null;
+    return clauses.find((clause) => hasSubjectAlias(clause, aliases2) && looseContainsPhrase(clause, lead.value) && predicateIsSupported(clause, lead.predicate) && (titleBindsOfficialIdentity(clause, lead) || personIdentityQuestion && explicitPersonIdentityIsBound(clause, lead))) ?? null;
   }
   if (DIRECT_RELATION_PREDICATES.has(lead.predicate)) {
-    return directClaimClause(clauses, lead, aliases, trustedContextTokens);
+    return directClaimClause(clauses, lead, aliases2, trustedContextTokens);
   }
   if (!RELATION_CHAIN_PREDICATES.has(lead.predicate)) {
-    return directClaimClause(clauses, lead, aliases, trustedContextTokens);
+    return directClaimClause(clauses, lead, aliases2, trustedContextTokens);
   }
   const anchors = valueAnchorTokens(lead);
   if (!anchors.length) return null;
-  const direct = directClaimClause(clauses, lead, aliases, trustedContextTokens);
+  const direct = directClaimClause(clauses, lead, aliases2, trustedContextTokens);
   if (direct && anchors.some((anchor) => anchorGovernsClaimClause(direct, lead, anchor) || safeHostContextForSentence(direct, trustedContextTokens).has(anchor))) return direct;
   const relationEstablished = clauses.some((clause) => {
     const context2 = safeHostContextForSentence(clause, trustedContextTokens);
-    return hasSubjectAlias(clause, aliases) && RELATION_LANGUAGE.test(clause) && anchors.some((anchor) => looseContainsPhrase(clause, anchor) && !subjectComparisonIsDisqualified(clause, anchor) || context2.has(anchor));
+    return hasSubjectAlias(clause, aliases2) && RELATION_LANGUAGE.test(clause) && anchors.some((anchor) => looseContainsPhrase(clause, anchor) && !subjectComparisonIsDisqualified(clause, anchor) || context2.has(anchor));
   });
   if (!relationEstablished) return null;
   return clauses.find((clause) => anchors.some((anchor) => anchorGovernsClaimClause(clause, lead, anchor))) ?? null;
 }
-function predicateAttributionIsSupported(passage, lead, aliases, trustedContextTokens) {
-  return governingClaimClause(passage, lead, aliases, trustedContextTokens) !== null;
+function predicateAttributionIsSupported(passage, lead, aliases2, trustedContextTokens) {
+  return governingClaimClause(passage, lead, aliases2, trustedContextTokens) !== null;
 }
-function passageSupportsLead(passage, lead, aliases, trustedContextTokens = /* @__PURE__ */ new Set()) {
-  const baseSupported = aliases.some((alias) => looseContainsPhrase(passage, alias)) && (looseContainsPhrase(passage, lead.value) || structuredValueIsSupported(passage, lead, trustedContextTokens));
-  return baseSupported && predicateAttributionIsSupported(passage, lead, aliases, trustedContextTokens);
+function passageSupportsLead(passage, lead, aliases2, trustedContextTokens = /* @__PURE__ */ new Set()) {
+  const baseSupported = aliases2.some((alias) => looseContainsPhrase(passage, alias)) && (looseContainsPhrase(passage, lead.value) || structuredValueIsSupported(passage, lead, trustedContextTokens));
+  return baseSupported && predicateAttributionIsSupported(passage, lead, aliases2, trustedContextTokens);
 }
 function overlapScore(left, right) {
   const leftTokens = new Set(looseTokens(left));
   const rightTokens = looseTokens(right);
   return rightTokens.length ? rightTokens.filter((token) => leftTokens.has(token)).length / rightTokens.length : 0;
 }
-function supportingSourcePassage(page, lead, aliases, trustedContextTokens = /* @__PURE__ */ new Set()) {
+function supportingSourcePassage(page, lead, aliases2, trustedContextTokens = /* @__PURE__ */ new Set()) {
   const excerpt = normalize2(decodeHtmlEntities(lead.excerpt));
   const exact = page.includes(excerpt) ? excerpt : exactTokenPassage(page, excerpt);
-  if (exact && passageSupportsLead(exact, lead, aliases, trustedContextTokens)) return exact;
+  if (exact && passageSupportsLead(exact, lead, aliases2, trustedContextTokens)) return exact;
   const candidates = [.../* @__PURE__ */ new Set([
     ...sourceSentencePassages(page),
     ...sourceAnchorPassages(page, lead.value)
-  ])].filter((passage) => passageSupportsLead(passage, lead, aliases, trustedContextTokens));
+  ])].filter((passage) => passageSupportsLead(passage, lead, aliases2, trustedContextTokens));
   if (!candidates.length) return null;
   return candidates.sort((left, right) => overlapScore(right, excerpt) - overlapScore(left, excerpt) || left.length - right.length)[0];
 }
@@ -23138,11 +23159,11 @@ var REGULATORY_HOSTS = [
 ];
 var regulatorySourceSupports = (host2, predicate) => ["legal_regulatory_event", "public_security", "legal_entity"].includes(predicate) && sameOfficialDomain(host2, REGULATORY_HOSTS);
 var exactEntityKey = (value) => looseTokens(value).join(" ");
-var attributionScopeFor = (attributedEntity, aliases) => {
+var attributionScopeFor = (attributedEntity, aliases2) => {
   const attributedKey = exactEntityKey(attributedEntity);
-  return attributedKey && aliases.some((alias) => exactEntityKey(alias) === attributedKey) ? "direct_subject" : "related_entity";
+  return attributedKey && aliases2.some((alias) => exactEntityKey(alias) === attributedKey) ? "direct_subject" : "related_entity";
 };
-function directPersonLegalIdentityIsBound(passage, aliases, officialCounterpartyHosts) {
+function directPersonLegalIdentityIsBound(passage, aliases2, officialCounterpartyHosts) {
   const knownOrganizationTokens = new Set(officialCounterpartyHosts.flatMap((scope) => {
     try {
       const url = new URL(scope.includes("://") ? scope : `https://${scope}`);
@@ -23152,7 +23173,7 @@ function directPersonLegalIdentityIsBound(passage, aliases, officialCounterparty
     }
   }));
   if (!knownOrganizationTokens.size) return false;
-  return attributionClauses(passage).some((clause) => hasSubjectAlias(clause, aliases) && RELATION_LANGUAGE.test(clause) && [...knownOrganizationTokens].some((token) => looseContainsPhrase(clause, token)));
+  return attributionClauses(passage).some((clause) => hasSubjectAlias(clause, aliases2) && RELATION_LANGUAGE.test(clause) && [...knownOrganizationTokens].some((token) => looseContainsPhrase(clause, token)));
 }
 function factId(subjectKey, predicate, value, legalIdentity = "") {
   const normalizedValue = canonicalBasicFactComparisonValue(predicate, searchable(value));
@@ -23347,10 +23368,14 @@ function officialVentureAssetPagePassage(document, page, lead, relationships) {
   }
   return null;
 }
-function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject, officialHosts2 = [], officialCounterpartyHosts = [], ventureAssetRelationships = []) {
+function verifyBasicFactLead(lead, document, aliases2, subjectKey = lead.subject, officialHosts2 = [], officialCounterpartyHosts = [], ventureAssetRelationships = [], onReject) {
+  const reject = (reason) => {
+    onReject?.(reason);
+    return null;
+  };
   const page = documentText(document);
-  if (!isAtomicValue(lead.predicate, lead.value)) return null;
-  if (lead.predicate === "legal_regulatory_event" && (!lead.eventStatus || !lead.attributedEntity)) return null;
+  if (!isAtomicValue(lead.predicate, lead.value)) return reject("non_atomic_claim");
+  if (lead.predicate === "legal_regulatory_event" && (!lead.eventStatus || !lead.attributedEntity)) return reject("missing_event_attribution");
   const official = sameOfficialScope(document, officialHosts2);
   const publicSecurityRegulator = lead.predicate === "public_security" && regulatorySourceSupports(document.host, lead.predicate);
   const ventureAssetPredicate = lead.predicate === "public_security" || lead.predicate === "official_token";
@@ -23363,7 +23388,7 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
     return ventureNamedByLead && (ventureOfficial || publicSecurityRegulator);
   }) : [];
   const verificationAliases = [
-    ...aliases,
+    ...aliases2,
     ...authoritativeAssetRelationships.map((relationship) => relationship.name)
   ];
   const counterpartyPredicate = (/* @__PURE__ */ new Set([
@@ -23391,9 +23416,9 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
   const personOrInvestorAsset = /^(?:person|investor)\./.test(lead.questionId ?? "");
   const officialAssetPageEvidence = lead.predicate === "official_token" && personOrInvestorAsset && officialCounterparty && authoritativeAssetRelationships.length ? officialVentureAssetPagePassage(document, page, lead, authoritativeAssetRelationships) : null;
   const excerpt = officialAssetPageEvidence ?? supportingSourcePassage(page, lead, verificationAliases, contextTokens);
-  if (!excerpt) return null;
+  if (!excerpt) return reject("no_supporting_passage");
   const claimClause = officialAssetPageEvidence ?? governingClaimClause(excerpt, lead, verificationAliases, contextTokens);
-  if (!claimClause) return null;
+  if (!claimClause) return reject("no_governing_claim");
   const projectCollisionPredicate = (/* @__PURE__ */ new Set([
     "founder",
     "executive",
@@ -23403,7 +23428,7 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
     "public_security"
   ])).has(lead.predicate);
   if (/^project\./.test(lead.questionId ?? "") && projectCollisionPredicate) {
-    const displayName = aliases.find((alias) => alias.trim() && !alias.trim().startsWith("@")) ?? lead.subject;
+    const displayName = aliases2.find((alias) => alias.trim() && !alias.trim().startsWith("@")) ?? lead.subject;
     if (!projectLeadIsRelevant({
       handle: subjectKey,
       display_name: displayName,
@@ -23415,9 +23440,9 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
       sourceUrl: document.url,
       sourceTitle: lead.sourceTitle,
       excerpt: claimClause
-    })) return null;
+    })) return reject("subject_binding_failed");
   }
-  if (lead.predicate === "partnership" && PARTNERSHIP_UNCERTAINTY.test(claimClause)) return null;
+  if (lead.predicate === "partnership" && PARTNERSHIP_UNCERTAINTY.test(claimClause)) return reject("uncertain_relationship");
   if (lead.predicate === "official_token" && authoritativeAssetRelationships.length) {
     const explicitTokenLanguage = Boolean(officialAssetPageEvidence) || EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) || EXPLICIT_WRAPPED_OR_ERC_TOKEN.test(claimClause);
     const affirmativeVentureLink = relationshipBoundTokenHasAffirmativeVentureLink(
@@ -23425,19 +23450,19 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
       lead,
       authoritativeAssetRelationships
     ) || Boolean(officialAssetPageEvidence);
-    if (personOrInvestorAsset && (!explicitTokenLanguage || !affirmativeVentureLink)) return null;
-    if (!personOrInvestorAsset && !EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) && !affirmativeVentureLink) return null;
+    if (personOrInvestorAsset && (!explicitTokenLanguage || !affirmativeVentureLink)) return reject("venture_token_binding_failed");
+    if (!personOrInvestorAsset && !EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) && !affirmativeVentureLink) return reject("token_language_missing");
   }
   const verifiedValue = lead.predicate === "public_security" ? verifiedPublicSecurityValue(lead.value, claimClause) : lead.predicate === "funding" ? verifiedFundingValue(lead.value, claimClause) : lead.value;
-  if (!verifiedValue) return null;
+  if (!verifiedValue) return reject("value_not_supported");
   const regulatory = !official && !officialCounterparty && regulatorySourceSupports(document.host, lead.predicate);
   const supportedQualifier = lead.qualifier && looseContainsPhrase(claimClause, lead.qualifier) ? lead.qualifier : void 0;
   const supportedEventStatus = lead.eventStatus && looseContainsPhrase(excerpt, lead.eventStatus) ? lead.eventStatus : void 0;
   const supportedAttributedEntity = lead.attributedEntity && looseContainsPhrase(excerpt, lead.attributedEntity) ? lead.attributedEntity : void 0;
-  if (lead.predicate === "legal_regulatory_event" && (!supportedEventStatus || !supportedAttributedEntity)) return null;
-  const rawAttributionScope = supportedAttributedEntity ? attributionScopeFor(supportedAttributedEntity, aliases) : void 0;
+  if (lead.predicate === "legal_regulatory_event" && (!supportedEventStatus || !supportedAttributedEntity)) return reject("event_attribution_not_supported");
+  const rawAttributionScope = supportedAttributedEntity ? attributionScopeFor(supportedAttributedEntity, aliases2) : void 0;
   const personOrInvestorLegalQuestion = lead.predicate === "legal_regulatory_event" && /^(?:person|investor)\./.test(lead.questionId ?? "");
-  const attributionScope = rawAttributionScope === "direct_subject" && personOrInvestorLegalQuestion && !official && !officialCounterparty && !directPersonLegalIdentityIsBound(excerpt, aliases, officialCounterpartyHosts) ? "identity_unresolved" : rawAttributionScope;
+  const attributionScope = rawAttributionScope === "direct_subject" && personOrInvestorLegalQuestion && !official && !officialCounterparty && !directPersonLegalIdentityIsBound(excerpt, aliases2, officialCounterpartyHosts) ? "identity_unresolved" : rawAttributionScope;
   const legalIdentity = lead.predicate === "legal_regulatory_event" ? `${searchable(supportedAttributedEntity)}::${searchable(supportedEventStatus)}` : "";
   const retrievalProvider = "retrievalProvider" in document && document.retrievalProvider === "jina-reader" ? "jina-reader" : "public-web";
   return {
@@ -23921,7 +23946,7 @@ function sourceBackedFounderRelationshipLeads(ctx, facts) {
     return name ? [{ name, discoveryProvider: fact.discoveryProvider }] : [];
   });
   if (!identities.length || !relationships.length) return [];
-  const aliases = [.../* @__PURE__ */ new Set([...subjectAliases(ctx), ...identities.map((identity) => identity.value)])];
+  const aliases2 = [.../* @__PURE__ */ new Set([...subjectAliases(ctx), ...identities.map((identity) => identity.value)])];
   const seen = /* @__PURE__ */ new Set();
   return identities.flatMap((identity) => relationships.flatMap((relationship) => facts.flatMap((fact) => fact.sources.flatMap((source2) => {
     if (source2.artifactVerified !== true || source2.sourceClass !== "official_subject" && source2.sourceClass !== "official_counterparty" || !looseContainsPhrase(source2.excerpt, identity.value) || !looseContainsPhrase(source2.excerpt, relationship.name) || !predicateIsSupported(source2.excerpt, "founder")) return [];
@@ -23937,7 +23962,7 @@ function sourceBackedFounderRelationshipLeads(ctx, facts) {
       artifact_verified: false,
       provider: identity.discoveryProvider ?? relationship.discoveryProvider ?? "claude-web-search"
     };
-    if (!founderAttributionIsSupported(source2.excerpt, lead, aliases)) return [];
+    if (!founderAttributionIsSupported(source2.excerpt, lead, aliases2)) return [];
     const key = `${searchable(relationship.name)}::${source2.url}`;
     if (seen.has(key)) return [];
     seen.add(key);
@@ -23990,13 +24015,13 @@ function verifiedOrganizationScope(scope, name) {
   return `${url.protocol}//${registrableHost2}/`;
 }
 function verifiedFactAssetRelationships(ctx, facts) {
-  const aliases = subjectAliases(ctx);
+  const aliases2 = subjectAliases(ctx);
   return facts.flatMap((fact) => {
     if (fact.predicate !== "current_role" || fact.artifact_verified !== true || fact.status !== "verified" && fact.status !== "corroborated") return [];
     const relationship = currentRoleRelationshipParts(fact.value);
     if (!relationship) return [];
     const scopes = fact.sources.flatMap((source2) => {
-      if (source2.artifactVerified !== true || source2.relation !== "supports" || source2.sourceClass !== "official_subject" && source2.sourceClass !== "official_counterparty" || !hasSubjectAlias(source2.excerpt, aliases) || !CURRENT_CONTROL_ROLE.test(source2.excerpt) || !PREDICATE_PATTERNS.current_role.test(source2.excerpt)) return [];
+      if (source2.artifactVerified !== true || source2.relation !== "supports" || source2.sourceClass !== "official_subject" && source2.sourceClass !== "official_counterparty" || !hasSubjectAlias(source2.excerpt, aliases2) || !CURRENT_CONTROL_ROLE.test(source2.excerpt) || !PREDICATE_PATTERNS.current_role.test(source2.excerpt)) return [];
       const scope = verifiedOrganizationScope(source2.url, relationship.name);
       return scope ? [scope] : [];
     });
@@ -24377,7 +24402,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     ...primary.leads
   ]);
   ctx.evidence.basicFacts = [];
-  let aliases = subjectAliases(ctx);
+  let aliases2 = subjectAliases(ctx);
   let officialHosts2 = [ctx.evidence.profile.website].filter((value) => Boolean(value)).flatMap((value) => {
     try {
       return [new URL(value).toString()];
@@ -24446,7 +24471,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
       if (!boundDocument || !boundIdentity) continue;
       const officialScope = `${candidate.origin}/`;
       officialHosts2 = [.../* @__PURE__ */ new Set([...officialHosts2, officialScope])];
-      aliases = [.../* @__PURE__ */ new Set([...aliases, boundIdentity])];
+      aliases2 = [.../* @__PURE__ */ new Set([...aliases2, boundIdentity])];
       ctx.evidence.profile.website = officialScope;
       ctx.evidence.profile.display_name = boundIdentity;
       ctx.evidence.profile.identity_confidence = "Confirmed";
@@ -24481,6 +24506,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   const primaryBindingLeads = await recoverOfficialSiteBindings(primaryLeads);
   const primaryVerificationLeads = mergeLeads(primaryLeads, primaryBindingLeads);
   ctx.evidence.basicFactLeads = primaryVerificationLeads.map((lead) => ({ ...lead }));
+  const evidenceAttempts = [];
   const verifyLeads = async (leads, sourceLimit, assetRelationships = ventureAssetRelationships) => {
     const variants = verificationLeadVariants(ctx, leads, officialHosts2, officialCounterpartyHosts);
     const primarySources = leads.flatMap((lead) => {
@@ -24491,17 +24517,32 @@ async function collectBasicFacts(ctx, dependencies = {}) {
       ...primarySources,
       ...variants.map(({ lead }) => lead.sourceUrl)
     ])].slice(0, sourceLimit));
+    for (const { lead } of variants.filter(({ lead: lead2 }) => !allowedSources.has(lead2.sourceUrl))) {
+      evidenceAttempts.push({ questionId: lead.questionId ?? lead.predicate, predicate: lead.predicate, sourceUrl: lead.sourceUrl, outcome: "budget_deferred", reason: "source_budget" });
+    }
     return (await Promise.all(variants.filter(({ lead }) => allowedSources.has(lead.sourceUrl)).map(async ({ lead }) => {
       const result = await fetchOnce(lead.sourceUrl);
-      return result.status === "ok" ? verifyBasicFactLead(
+      let reason = result.status === "ok" ? "source_supported" : result.reason;
+      const fact = result.status === "ok" ? verifyBasicFactLead(
         lead,
         result,
-        aliases,
+        aliases2,
         ctx.handle,
         officialHosts2,
         officialCounterpartyHosts,
-        assetRelationships
+        assetRelationships,
+        (rejection) => {
+          reason = rejection;
+        }
       ) : null;
+      evidenceAttempts.push({
+        questionId: lead.questionId ?? lead.predicate,
+        predicate: lead.predicate,
+        sourceUrl: lead.sourceUrl,
+        outcome: fact?.status === "verified" ? "accepted" : fact ? "source_supported" : result.status === "ok" ? "rejected" : "fetch_failed",
+        reason: fact?.status === "verified" ? "verified_source" : reason
+      });
+      return fact;
     }))).filter((fact) => fact !== null);
   };
   const expandVerificationContext = (facts) => {
@@ -24516,9 +24557,9 @@ async function collectBasicFacts(ctx, dependencies = {}) {
       changed = true;
     }
     if (applyVerifiedPersonIdentity(ctx, facts)) changed = true;
-    const nextAliases = [.../* @__PURE__ */ new Set([...aliases, ...subjectAliases(ctx)])];
-    if (nextAliases.length !== aliases.length) {
-      aliases = nextAliases;
+    const nextAliases = [.../* @__PURE__ */ new Set([...aliases2, ...subjectAliases(ctx)])];
+    if (nextAliases.length !== aliases2.length) {
+      aliases2 = nextAliases;
       changed = true;
     }
     return changed;
@@ -24624,6 +24665,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     ...recoveredFounderVerified,
     ...relationshipBoundAssets
   ];
+  ctx.evidence.evidenceAttempts = evidenceAttempts.slice(0, 500);
   ctx.evidence.basicFactLeads = allLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = resolveBasicFactCandidates(verified);
   const repairQuestionIds = new Set(repairQuestions.map((question) => question.id));
@@ -24962,9 +25004,9 @@ function parseOfacPersonNames(csv) {
   for (let index = 1; index < lines.length; index += 1) {
     const line = lines[index];
     if (!line || !line.includes('"Person"')) continue;
-    const [, schema, name, aliases] = firstCsvFields(line, 4);
+    const [, schema, name, aliases2] = firstCsvFields(line, 4);
     if (schema !== "Person") continue;
-    for (const raw of [name, ...aliases ? aliases.split(";") : []]) {
+    for (const raw of [name, ...aliases2 ? aliases2.split(";") : []]) {
       const normalized4 = normalizeSanctionsName(raw || "");
       if (normalized4 && normalized4.includes(" ")) names.add(normalized4);
     }
@@ -24983,9 +25025,9 @@ function parseOfacEntityNames(csv) {
   for (let index = 1; index < lines.length; index += 1) {
     const line = lines[index];
     if (!line) continue;
-    const [, schema, name, aliases] = firstCsvFields(line, 4);
+    const [, schema, name, aliases2] = firstCsvFields(line, 4);
     if (!OFAC_ENTITY_SCHEMAS.has(schema)) continue;
-    for (const raw of [name, ...aliases ? aliases.split(";") : []]) {
+    for (const raw of [name, ...aliases2 ? aliases2.split(";") : []]) {
       const normalized4 = normalizeSanctionsName(raw || "");
       if (normalized4) names.add(normalized4);
     }
@@ -26212,8 +26254,8 @@ function parseGraphRows(rows) {
     if (subjects.length !== 1) {
       throw new Error("authoritative graph row must contain exactly one subject node");
     }
-    const aliases = raw.aliases.map((value) => text(value, 300));
-    if (aliases.some((alias) => !alias)) {
+    const aliases2 = raw.aliases.map((value) => text(value, 300));
+    if (aliases2.some((alias) => !alias)) {
       throw new Error("authoritative graph row contained a malformed alias");
     }
     totalNodes += nodes.length;
@@ -26224,7 +26266,7 @@ function parseGraphRows(rows) {
     return {
       handle,
       reportVersionId: reportVersionId.toLowerCase(),
-      aliases,
+      aliases: aliases2,
       nodes,
       edges
     };
@@ -27114,9 +27156,9 @@ function entityNamesMatch(leftRaw, rightRaw) {
   return shorter.length >= 5 && (longer.startsWith(`${shorter} `) || longer.endsWith(` ${shorter}`));
 }
 function bioHasCurrentAffiliation(bio, entity, handle) {
-  const aliases = [entity, handle?.replace(/^@/, "")].filter((value) => Boolean(value));
+  const aliases2 = [entity, handle?.replace(/^@/, "")].filter((value) => Boolean(value));
   const role = `(?:${AFFILIATION_ROLE2})`;
-  for (const alias of aliases) {
+  for (const alias of aliases2) {
     for (const span of entitySpans(bio, alias)) {
       const before = bio.slice(Math.max(0, span.start - 100), span.start);
       const after = bio.slice(span.end, Math.min(bio.length, span.end + 70));
@@ -27966,7 +28008,7 @@ async function collectFundScale(ctx, dependencies = {}) {
     const officialInvestorDomain = domainFromWebsite(resolvedDomain);
     const investorDomainProof = typeof resolvedInvestorDomain === "object" && officialInvestorDomain === resolvedInvestorDomain.domain ? { ...resolvedInvestorDomain, domain: officialInvestorDomain } : void 0;
     const officialInvestorDomainScope = investorDomainProof?.profileWebsite ?? entity.domainScope;
-    const aliases = [
+    const aliases2 = [
       ...entity.aliases,
       entity.handle && (entity.handleTrusted || officialInvestorDomain) ? entity.handle.replace(/^@/, "") : void 0
     ].filter((value) => Boolean(value?.trim()));
@@ -27976,7 +28018,7 @@ async function collectFundScale(ctx, dependencies = {}) {
         return { lead, entity, source: source2, officialInvestorDomain, investorDomainProof, matches: [], failed: true };
       }
       const classification = sourceClass3(result, officialInvestorDomain, officialInvestorDomainScope, entity.attribution);
-      const matches = supportsFundScaleClaim({ document: result, sourceClass: classification, subjectAliases: aliases, now });
+      const matches = supportsFundScaleClaim({ document: result, sourceClass: classification, subjectAliases: aliases2, now });
       return { lead, entity, source: source2, document: result, sourceClass: classification, officialInvestorDomain, investorDomainProof, matches, failed: false };
     }));
   }))).flat();
@@ -30047,11 +30089,11 @@ var MATERIAL_AUTHORITY_ROLES = [
   { claimed: /\bhead\b/i, supportedPattern: "head" },
   { claimed: /\blead\b/i, supportedPattern: "lead" }
 ];
-function passageBindsSpecificAuthorityRole(passage, aliases, venture, rolePattern) {
+function passageBindsSpecificAuthorityRole(passage, aliases2, venture, rolePattern) {
   const venturePattern = escapePattern(venture.project_name.trim()).replace(/\s+/g, "\\s+");
   const anyAuthorityRole = "(?:co[- ]?founder|founder|creator|chief\\s+executive\\s+officer|ceo|chair(?:man|woman|person)?|president|owner|managing\\s+partner|general\\s+partner|director|head|lead)";
   const roleConnector = `(?:(?:${anyAuthorityRole})\\s*(?:,|&|and)\\s*|(?:has\\s+served|serves?|served|serving)\\s+(?:as\\s+)?(?:(?:the|a|an|our)\\s+)?)`;
-  return aliases.some((alias) => {
+  return aliases2.some((alias) => {
     const aliasPattern = escapePattern(alias).replace(/\s+/g, "\\s+");
     const subjectFirst = new RegExp(
       `\\b${aliasPattern}\\b\\s*(?:,\\s*)?(?:(?:is|was|remains|became|serves?|served|serving|has\\s+served|currently\\s+serves?)\\s+(?:as\\s+)?(?:(?:the|a|an|our)\\s+)?)?(?:${venturePattern}\\s+)?(?:${roleConnector}){0,4}\\b${rolePattern}\\b`,
@@ -30065,16 +30107,16 @@ function passageBindsSpecificAuthorityRole(passage, aliases, venture, rolePatter
     return subjectFirst.test(passage) || titleFirst.test(passage) || foundedBy;
   });
 }
-function currentRoleIsFullySupported(sources, venture, aliases) {
+function currentRoleIsFullySupported(sources, venture, aliases2) {
   const claimedRoles = MATERIAL_AUTHORITY_ROLES.filter(({ claimed }) => claimed.test(venture.role));
   if (!claimedRoles.length) return false;
   return claimedRoles.every(({ supportedPattern }) => sources.some((candidate) => {
     const sourceScopeMatches = sourceMatchesVenture(candidate, venture);
-    return boundedSourcePassages(candidate.excerpt).some((passage) => passageBindsSpecificAuthorityRole(passage, aliases, venture, supportedPattern) && (containsPhrase(passage, venture.project_name) || sourceScopeMatches));
+    return boundedSourcePassages(candidate.excerpt).some((passage) => passageBindsSpecificAuthorityRole(passage, aliases2, venture, supportedPattern) && (containsPhrase(passage, venture.project_name) || sourceScopeMatches));
   }));
 }
-function sourceMentionsSubject(candidate, aliases) {
-  return aliases.some((alias) => containsPhrase(candidate.excerpt, alias));
+function sourceMentionsSubject(candidate, aliases2) {
+  return aliases2.some((alias) => containsPhrase(candidate.excerpt, alias));
 }
 function escapePattern(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -30082,9 +30124,9 @@ function escapePattern(value) {
 function boundedSourcePassages(value) {
   return value.split(/(?<=[.!?;])\s+|[\n|]+/).map((passage) => passage.trim()).filter(Boolean);
 }
-function passageBindsSubjectRole(passage, aliases, venture, predicate) {
+function passageBindsSubjectRole(passage, aliases2, venture, predicate) {
   const venturePattern = escapePattern(venture.project_name.trim()).replace(/\s+/g, "\\s+");
-  return aliases.some((alias) => {
+  return aliases2.some((alias) => {
     const aliasPattern = escapePattern(alias).replace(/\s+/g, "\\s+");
     if (predicate === "founder") {
       const founderRole = "(?:co[- ]?founder|founder|creator)";
@@ -30100,10 +30142,10 @@ function passageBindsSubjectRole(passage, aliases, venture, predicate) {
     ).test(passage);
   });
 }
-function sourceSupportsRelationship(candidate, venture, aliases, predicate) {
-  if (!sourceMentionsSubject(candidate, aliases)) return false;
+function sourceSupportsRelationship(candidate, venture, aliases2, predicate) {
+  if (!sourceMentionsSubject(candidate, aliases2)) return false;
   const sourceScopeMatches = sourceMatchesVenture(candidate, venture);
-  return boundedSourcePassages(candidate.excerpt).some((passage) => passageBindsSubjectRole(passage, aliases, venture, predicate) && (containsPhrase(passage, venture.project_name) || sourceScopeMatches));
+  return boundedSourcePassages(candidate.excerpt).some((passage) => passageBindsSubjectRole(passage, aliases2, venture, predicate) && (containsPhrase(passage, venture.project_name) || sourceScopeMatches));
 }
 function source(input) {
   return {
@@ -30182,9 +30224,9 @@ function pdlIdentitySource(evidence, capturedAt) {
     sourceClass: "other_public"
   });
 }
-function pdlSourceSupportsCurrentVenture(candidate, venture, aliases) {
+function pdlSourceSupportsCurrentVenture(candidate, venture, aliases2) {
   if (!candidate || candidate.provider !== "peopledatalabs") return false;
-  return aliases.some((alias) => containsPhrase(candidate.excerpt, alias)) && containsPhrase(candidate.excerpt, venture.project_name) && containsPhrase(candidate.excerpt, venture.role);
+  return aliases2.some((alias) => containsPhrase(candidate.excerpt, alias)) && containsPhrase(candidate.excerpt, venture.project_name) && containsPhrase(candidate.excerpt, venture.role);
 }
 function profileSupportsVenture(evidence, venture, predicate) {
   const clauses = evidence.profile.bio.split(/[.;|\n]+/).filter((clause) => containsPhrase(clause, venture.project_name) || Boolean(venture.x_handle && containsPhrase(clause, venture.x_handle)));
@@ -30358,12 +30400,12 @@ function projectProviderBackedBasicFacts(evidence) {
   }
   if (officialProfileSource && !evidence.roles.includes("PROJECT" /* PROJECT */) && !organizationAccount && Boolean(evidence.profile.identity_binding) && evidence.profile.identity_confidence !== "SuspectedImpersonation") {
     const existingVerifiedSources = (evidence.basicFacts ?? []).filter((fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")).flatMap((fact) => fact.sources).filter((candidate) => candidate.relation === "supports" && candidate.provider !== "twitterapi" && candidate.url !== officialProfileSource.url);
-    const aliases = [...new Set([
+    const aliases2 = [...new Set([
       evidence.profile.display_name.trim(),
       evidence.profile.resolved_name?.trim() ?? ""
     ].filter(Boolean))];
     const pdlSource = pdlIdentitySource(evidence, capturedAt);
-    const namedFrozenSource = existingVerifiedSources.find((candidate) => sourceMentionsSubject(candidate, aliases));
+    const namedFrozenSource = existingVerifiedSources.find((candidate) => sourceMentionsSubject(candidate, aliases2));
     const githubSource = githubIdentitySource(evidence, capturedAt);
     const identityAnchor = namedFrozenSource ?? githubSource ?? pdlSource;
     if (identityAnchor) {
@@ -30377,7 +30419,7 @@ function projectProviderBackedBasicFacts(evidence) {
     }
     const personVentures = evidence.ventures.filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead" && venture.project_name.trim() && venture.role.trim());
     for (const venture of personVentures) {
-      const founderSources = existingVerifiedSources.filter((candidate) => sourceSupportsRelationship(candidate, venture, aliases, "founder"));
+      const founderSources = existingVerifiedSources.filter((candidate) => sourceSupportsRelationship(candidate, venture, aliases2, "founder"));
       if (FOUNDER_ROLE.test(venture.role) && founderSources.length) {
         const sources = [...founderSources];
         if (officialProfileSource && profileSupportsVenture(evidence, venture, "founder")) sources.push(officialProfileSource);
@@ -30388,9 +30430,9 @@ function projectProviderBackedBasicFacts(evidence) {
           [...new Map(sources.map((candidate) => [candidate.url, candidate])).values()]
         ));
       }
-      const currentSources = existingVerifiedSources.filter((candidate) => sourceSupportsRelationship(candidate, venture, aliases, "current_role"));
-      if (pdlSourceSupportsCurrentVenture(pdlSource, venture, aliases)) currentSources.push(pdlSource);
-      if (CURRENT_AUTHORITY_ROLE.test(venture.role) && currentSources.length && currentRoleIsFullySupported(currentSources, venture, aliases)) {
+      const currentSources = existingVerifiedSources.filter((candidate) => sourceSupportsRelationship(candidate, venture, aliases2, "current_role"));
+      if (pdlSourceSupportsCurrentVenture(pdlSource, venture, aliases2)) currentSources.push(pdlSource);
+      if (CURRENT_AUTHORITY_ROLE.test(venture.role) && currentSources.length && currentRoleIsFullySupported(currentSources, venture, aliases2)) {
         const sources = [...currentSources];
         if (officialProfileSource && profileSupportsVenture(evidence, venture, "current_role")) sources.push(officialProfileSource);
         projected.push(makeFact(
@@ -31568,7 +31610,7 @@ async function readPriorOutcome(organizationId, handle) {
     const projectionRows = await projectionRes.json();
     const reportVersionId = projectionRows?.[0]?.report_version_id;
     if (!reportVersionId) return null;
-    const versionUrl = `${c.url}/rest/v1/report_versions?id=eq.${encodeURIComponent(reportVersionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=id,version,score,verdict,completeness_state,created_at,payload&limit=1`;
+    const versionUrl = `${c.url}/rest/v1/report_versions?id=eq.${encodeURIComponent(reportVersionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=id,version,score,verdict,completeness_state,created_at,payload,methodology_version&limit=1`;
     const versionRes = await deadlineFetch(versionUrl, { headers: authHeaders2(c.key), signal: AbortSignal.timeout(5e3) });
     if (!versionRes.ok) return null;
     const rows = await versionRes.json();
@@ -31582,7 +31624,8 @@ async function readPriorOutcome(organizationId, handle) {
       verdict: typeof row.verdict === "string" && row.verdict ? row.verdict : null,
       completeness: typeof row.completeness_state === "string" ? row.completeness_state : null,
       capturedAt: typeof row.created_at === "string" ? row.created_at : null,
-      payload: row.payload
+      payload: row.payload,
+      methodologyVersion: row.methodology_version ?? null
     };
   } catch {
     return null;
@@ -31603,6 +31646,41 @@ function describeOutcomeDelta(prior, current) {
   if (!parts.length) return null;
   const when = prior.capturedAt ? ` (v${prior.version}, ${prior.capturedAt.slice(0, 10)})` : ` (v${prior.version})`;
   return `Since last scan${when}: ${parts.join(" \xB7 ")}`;
+}
+
+// src/lib/subjectRef.ts
+var EVM_ADDRESS4 = /^0x[0-9a-f]{40}$/i;
+var SOLANA_ADDRESS5 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function normalizeSubjectRef(value) {
+  const clean4 = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
+  const qualified = clean4.match(/^([a-z0-9_-]+):(.+)$/i);
+  if (qualified && (EVM_ADDRESS4.test(qualified[2]) || SOLANA_ADDRESS5.test(qualified[2]))) {
+    return `${qualified[1].toLowerCase()}:${normalizeSubjectRef(qualified[2])}`;
+  }
+  if (SOLANA_ADDRESS5.test(clean4)) return clean4;
+  if (EVM_ADDRESS4.test(clean4)) return clean4.toLowerCase();
+  return clean4.toLowerCase();
+}
+
+// src/lib/tokenIdentity.ts
+var aliases = { eth: "ethereum", "1": "ethereum", "8453": "base", "42161": "arbitrum", "10": "optimism", "137": "polygon", "56": "bsc", "43114": "avalanche" };
+function tokenSubjectIdentity(chain, address) {
+  if (typeof chain !== "string" || typeof address !== "string") return null;
+  const rawChain = chain.trim().toLowerCase();
+  const network = aliases[rawChain] ?? rawChain;
+  const clean4 = address.trim();
+  if (!/^[a-z0-9_-]{1,40}$/.test(network)) return null;
+  if (network === "solana" ? !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(clean4) : !/^0x[0-9a-f]{40}$/i.test(clean4)) return null;
+  const normalized4 = normalizeSubjectRef(clean4);
+  return { chain: network, address: normalized4, ref: `${network}:${normalized4}` };
+}
+function payloadTokenIdentity(kind, payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload;
+  const token = kind === "investigation" ? root.token : kind === "token" ? root : null;
+  if (!token || typeof token !== "object") return null;
+  const row = token;
+  return tokenSubjectIdentity(row.chain, row.address);
 }
 
 // src/lib/reportDelta.ts
@@ -31736,6 +31814,9 @@ function verifiedFactDelta(kind, previousPayload, currentPayload, prior) {
 function buildMaterialReportDelta(kind, prior, currentPayload) {
   if (!prior.reportVersionId || prior.version < 1 || !prior.payload || !currentPayload) return null;
   if (kind === "token" || kind === "investigation") {
+    const before = payloadTokenIdentity(kind, prior.payload);
+    const after = payloadTokenIdentity(kind, currentPayload);
+    if (before && after && before.ref !== after.ref) return null;
     return contractDelta(kind, prior.payload, currentPayload, prior) ?? liquidityDelta(kind, prior.payload, currentPayload, prior) ?? holderDelta(kind, prior.payload, currentPayload, prior) ?? verifiedFactDelta(kind, prior.payload, currentPayload, prior);
   }
   return verifiedFactDelta(kind, prior.payload, currentPayload, prior);
@@ -32189,7 +32270,7 @@ async function launchForOperatorHandle(handle) {
   return best;
 }
 var LAUNCH_CLAIM = /\b(?:is\s+(?:now\s+)?live|now\s+live|going\s+live|just\s+(?:launched|shipped|deployed)|i\s+(?:just\s+)?launched|we\s+(?:just\s+)?launched|i\s+(?:just\s+)?built|we\s+(?:just\s+)?built|my\s+(?:project|token|coin)|introducing|launching)\b/i;
-var SOLANA_ADDRESS5 = /\b[1-9A-HJ-NP-Za-km-z]{43,44}\b/g;
+var SOLANA_ADDRESS6 = /\b[1-9A-HJ-NP-Za-km-z]{43,44}\b/g;
 var TICKER_CLAIM = /\$([A-Za-z][A-Za-z0-9]{1,9})\b/g;
 var HANDLE_CLAIM = /@([A-Za-z0-9_]{2,30})\b/g;
 var BARE_NAME_CLAIM = /(?:^|[.!?\n]\s*)([A-Za-z][A-Za-z0-9]{2,20})\s+is\s+(?:now\s+)?live\b/g;
@@ -32246,7 +32327,7 @@ async function operatorLaunchAnnouncements(handle) {
     const post = asRecord5(row);
     const text2 = post && typeof post.text === "string" ? post.text : "";
     if (!text2 || !LAUNCH_CLAIM.test(text2)) continue;
-    const mints = [...new Set(text2.match(SOLANA_ADDRESS5) ?? [])];
+    const mints = [...new Set(text2.match(SOLANA_ADDRESS6) ?? [])];
     const tickers = [...new Set([...text2.matchAll(TICKER_CLAIM)].map((match) => match[1].toUpperCase()))];
     const handles = [...new Set([...text2.matchAll(HANDLE_CLAIM)].map((match) => match[1].toLowerCase()))];
     const names = [...new Set([...text2.matchAll(BARE_NAME_CLAIM)].map((match) => match[1]).filter((name) => !NOT_A_PROJECT.has(name.toLowerCase())))];
@@ -34299,11 +34380,11 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   }
   await enrichFirstPartyTeamAvatars(ctx);
   if (webTeam.length) {
-    const groundedTeam = webTeam.filter((member) => member.artifact_verified === true && member.evidence_origin !== "model_lead");
+    const groundedTeam = webTeam.filter((member) => member.kind !== "org" && member.artifact_verified === true && member.evidence_origin !== "model_lead");
     ctx.emit(groundedTeam.length ? {
       phase: "P1 \xB7 Team",
-      label: "Team evidence verified",
-      detail: `${groundedTeam.length} project team identit${groundedTeam.length === 1 ? "y" : "ies"} passed first-party or deterministic verification: ${groundedTeam.slice(0, 6).map((member) => member.name + (member.handle ? ` ${member.handle}` : "")).join(", ")}.`,
+      label: "People with source-backed identity records",
+      detail: `${groundedTeam.length} person identit${groundedTeam.length === 1 ? "y" : "ies"} have first-party or deterministic source records; affiliations retain their individual verification status: ${groundedTeam.slice(0, 6).map((member) => member.name + (member.handle ? ` ${member.handle}` : "")).join(", ")}.`,
       source: "team-search",
       tone: "good"
     } : {
@@ -36976,6 +37057,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
           verdict: prior.verdict,
           completeness: prior.completeness,
           capturedAt: prior.capturedAt,
+          comparisonNote: scoreComparisonNote(prior.payload, dossier, prior.methodologyVersion, "argus-person-v6-entity-aware-identity"),
           delta: delta2
         };
         checkTracker.provider("prior-outcome", "Since last scan", "executed", delta2);
@@ -37328,14 +37410,14 @@ var DEFAULT_LOOKUP_LIMIT = 8;
 var LOOKUP_CONCURRENCY = 4;
 var SEARCH_TIMEOUT_MS = 8e3;
 var LOOKUP_TIMEOUT_MS = 9e3;
-var EVM_ADDRESS4 = /^0x[0-9a-f]{40}$/i;
+var EVM_ADDRESS5 = /^0x[0-9a-f]{40}$/i;
 var INVISIBLE = new RegExp("[\\u200B-\\u200F\\u2060\\uFEFF]|\\p{Cc}", "gu");
 function normalizeTicker(symbol) {
   if (!symbol || typeof symbol !== "string") return "";
   return symbol.normalize("NFKC").replace(INVISIBLE, "").replace(/\s+/g, " ").trim().toUpperCase();
 }
 function mintKey(chain, address) {
-  return `${chain}:${EVM_ADDRESS4.test(address) ? address.toLowerCase() : address}`;
+  return `${chain}:${EVM_ADDRESS5.test(address) ? address.toLowerCase() : address}`;
 }
 async function rugcheckFirstSeen(mint, chain, fetchImpl = fetch) {
   if (chain !== "solana") return null;
@@ -37588,9 +37670,9 @@ function deployerRoleLabel(attribution, form = "title") {
   const base = proven ? "Deployer" : "Creator or authority";
   return form === "wallet" ? `${base} wallet` : base;
 }
-var EVM_ADDRESS5 = /^0x[0-9a-fA-F]{40}$/;
+var EVM_ADDRESS6 = /^0x[0-9a-fA-F]{40}$/;
 function sameWalletAddress(a, b) {
-  if (EVM_ADDRESS5.test(a) && EVM_ADDRESS5.test(b)) return a.toLowerCase() === b.toLowerCase();
+  if (EVM_ADDRESS6.test(a) && EVM_ADDRESS6.test(b)) return a.toLowerCase() === b.toLowerCase();
   return a === b;
 }
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
@@ -37904,7 +37986,7 @@ async function runTokenAudit(input, emit, opts) {
     const resolved = await dexByTokenResult(input.ref, fetcher);
     if (!resolved.ok) throw new Error("token_market_unavailable");
     allPairs = resolved.pairs.filter((p) => input.via === "solana" ? p.chainId === "solana" : p.chainId !== "solana");
-    if (opts?.chain) allPairs = allPairs.filter((p) => p.chainId === opts.chain);
+    if (opts?.chain ?? input.chain) allPairs = allPairs.filter((p) => p.chainId === (opts?.chain ?? input.chain));
     pair = pickPair(allPairs, input.ref);
   }
   if (!pair && input.via === "solana" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(input.ref)) {
@@ -38293,6 +38375,15 @@ async function runTokenAudit(input, emit, opts) {
   for (const [index, axis] of axes.entries()) {
     axis.nominalWeight = axis.weight;
     axis.assessed = assessed[index];
+    const measurementPaths = [
+      ["marketEvidence.liquidityUsd"],
+      ["safety.contractPropertiesAssessed"],
+      ["safety.taxesAssessed"],
+      ["safety.holderCountAssessed", "topHolders"],
+      ["marketEvidence.vol24", "marketEvidence.liquidityUsd", "priceChange"],
+      ["marketEvidence.ageDays"]
+    ];
+    axis.evidenceRefs = axis.assessed ? measurementPaths[index] : [];
     if (!axis.assessed) {
       axis.weight = 0;
       axis.score = 0;
@@ -38545,13 +38636,13 @@ async function auditToken2(...args) {
 }
 
 // src/polymarket/trader.ts
-var EVM_ADDRESS6 = /^0x[0-9a-f]{40}$/i;
+var EVM_ADDRESS7 = /^0x[0-9a-f]{40}$/i;
 var PROFILE_PATH = /^\/profile\/(0x[0-9a-f]{40})\/?$/i;
 var HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 function normalizeWalletInput(input) {
   const raw = (input ?? "").trim();
   if (!raw) return null;
-  if (EVM_ADDRESS6.test(raw)) return raw.toLowerCase();
+  if (EVM_ADDRESS7.test(raw)) return raw.toLowerCase();
   let url;
   try {
     url = new URL(HAS_SCHEME.test(raw) ? raw : `https://${raw}`);
@@ -38584,6 +38675,9 @@ function inputUrl(value) {
 }
 function resolveInput(raw) {
   const s = raw.trim();
+  const qualified = s.match(/^([a-z0-9_-]+):(.+)$/i);
+  const identity = qualified ? tokenSubjectIdentity(qualified[1], qualified[2]) : null;
+  if (identity) return { kind: "token", ref: identity.address, chain: identity.chain, via: identity.chain === "solana" ? "solana" : "evm" };
   const parsedUrl = inputUrl(s);
   const hostname2 = parsedUrl?.hostname.toLowerCase() ?? "";
   const isDexUrl = !!parsedUrl && approvedHost(hostname2, "dexscreener.com");

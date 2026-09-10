@@ -363,6 +363,7 @@ export class Audit {
   axisScores: Record<string, AxisScore> = {};
   identity: IdentityConfidence | null = null;
   display_name?: string;
+  organizationSubject = false;
   tokenApplicability?: TokenApplicabilitySnapshot;
 
   private ventures: Venture[] = [];
@@ -377,7 +378,7 @@ export class Audit {
 
   constructor(
     handle: string,
-    opts: { subject_class?: SubjectClass; roles?: SubjectClass[]; display_name?: string } = {},
+    opts: { subject_class?: SubjectClass; roles?: SubjectClass[]; display_name?: string; organizationSubject?: boolean } = {},
   ) {
     this.handle = normalizeHandle(handle);
     if (opts.roles) this.roles = opts.roles.map(asClass);
@@ -385,6 +386,7 @@ export class Audit {
     else this.roles = [];
     this.subject_class = this.roles[0] ?? null;
     this.display_name = opts.display_name;
+    this.organizationSubject = opts.organizationSubject === true;
     this.audit_id = makeAuditId(this.handle);
   }
 
@@ -714,7 +716,7 @@ export class Audit {
       // directly in P1. Applying the person-level disclosure bonus again would
       // double-count identity and can move a weak raw project score across a
       // verdict boundary without any change in project fundamentals.
-      const doxBonus = role === SubjectClass.PROJECT ? 0 : identityBonus;
+      const doxBonus = role === SubjectClass.PROJECT || this.organizationSubject ? 0 : identityBonus;
       const axes: Record<string, AxisScore> = {};
       for (const [ax, a] of Object.entries(this.axisScores)) {
         if (classForAxis(ax) === role) axes[ax] = a;

@@ -1,0 +1,39 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions, pg_catalog;
+select plan(10);
+-- CI starts fully migrated. Reconstruct the pre-migration contract inside this
+-- rolled-back fixture before testing the exact migration against legacy rows.
+do $$ begin
+ if exists(select 1 from information_schema.columns where table_schema='public' and table_name='cases' and column_name='subject_identity') then
+   drop function public.resolve_case_subject(uuid,text);
+   alter function public.resolve_case_subject_before_token_identity(uuid,text) rename to resolve_case_subject;
+   drop function public.persist_report_version(uuid,text,text,text,uuid,jsonb,text,text,text,numeric,text,text,jsonb,jsonb);
+   alter function public.persist_report_version_before_subject_identity(uuid,text,text,text,uuid,jsonb,text,text,text,numeric,text,text,jsonb,jsonb) rename to persist_report_version;
+   drop index public.cases_subject_identity_unique;
+   alter table public.cases drop column subject_identity, drop column identity_state;
+   drop function public.argus_token_identity(text,jsonb);
+ end if;
+end $$;
+insert into organizations(id,slug,name) values ('00000000-0000-4000-8000-000000009501','report-identity-test','Report identity test');
+create function pg_temp.save_token(chain text, ref text, run text) returns table(case_id uuid,report_version_id uuid,version integer) language sql as $$
+ select * from public.persist_report_version('00000000-0000-4000-8000-000000009501','token',ref,'Synthetic token',null,jsonb_build_object('chain',chain,'address','0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'),run);
+$$;
+create temporary table original as select * from pg_temp.save_token('base','0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','original');
+create temporary table mixed as select * from pg_temp.save_token('ethereum','mixed-legacy','mixed-one');
+select * from pg_temp.save_token('base','mixed-legacy','mixed-two');
+-- MIGRATION
+select is((select subject_identity from cases where id=(select case_id from original)),'base:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','unambiguous history gets chain identity');
+select is((select identity_state from cases where id=(select case_id from mixed)),'legacy_ambiguous','mixed history quarantined');
+create temporary table same_asset as select * from pg_temp.save_token('base','base:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','same-asset');
+select is((select case_id from same_asset),(select case_id from original),'API and browser identity reuse the historical case');
+select is((select version from same_asset),2,'same case history advances');
+create temporary table other_asset as select * from pg_temp.save_token('ethereum','0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','other-asset');
+select isnt((select case_id from other_asset),(select case_id from original),'same address on another chain is a separate case');
+select is((select count(*)::int from report_versions where case_id=(select case_id from mixed)),2,'ambiguous history preserved');
+select is(public.argus_token_identity('token','{"chain":"solana","address":"So11111111111111111111111111111111111111112"}'),'solana:So11111111111111111111111111111111111111112','Solana case preserved');
+select is((select count(*)::int from resolve_case_subject('00000000-0000-4000-8000-000000009501','0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')),2,'bare-address lookup exposes chain ambiguity');
+select is((select case_id from resolve_case_subject('00000000-0000-4000-8000-000000009501','base:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')),(select case_id from original),'qualified lookup resolves legacy alias');
+select ok(not has_function_privilege('anon','public.persist_report_version(uuid,text,text,text,uuid,jsonb,text,text,text,numeric,text,text,jsonb,jsonb)','EXECUTE'),'persistence remains service-only');
+select * from finish();
+rollback;

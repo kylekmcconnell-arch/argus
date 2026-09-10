@@ -1,3 +1,4 @@
+import { evidenceRetryPlan } from "../src/lib/evidenceRetry";
 import { readAllCorpusRows } from "../src/lib/corpusPagination";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -100,7 +101,7 @@ const rescanCandidates = results.filter((result) => {
   const version = latestByCase.get(result.caseId);
   return result.errorCount > 0 || version?.score == null || (version?.methodology_version !== "argus-token-v3-assessed-evidence" && result.kind === "token");
 }).sort((a, b) => Number(latestByCase.get(b.caseId)?.score == null) - Number(latestByCase.get(a.caseId)?.score == null));
-console.log(JSON.stringify({ snapshotAt, boundedRescanPlan: rescanCandidates.slice(0, 12).map((r) => ({ caseId: r.caseId, reportVersionId: r.reportVersionId, kind: r.kind, reason: latestByCase.get(r.caseId)?.score == null ? "historical_missing_score" : "methodology_changed", estimatedCostUsd: null })), rescanCandidates: rescanCandidates.length, cases: cases.length, versionsRead: versions.length, assessedLatest: results.length, missingVersions, cohorts: Object.fromEntries(cohorts) }));
+console.log(JSON.stringify({ snapshotAt, boundedRescanPlan: rescanCandidates.slice(0, 12).map((r) => ({ caseId: r.caseId, reportVersionId: r.reportVersionId, kind: r.kind, failedInvariants: r.findings.filter(f => f.severity === "error").map(f => f.code), targetedRetries: evidenceRetryPlan((latestByCase.get(r.caseId)?.payload as { evidenceAttempts?: import("../src/lib/evidenceRetry").EvidenceAttempt[] })?.evidenceAttempts ?? []), reason: latestByCase.get(r.caseId)?.score == null ? "historical_missing_score" : r.errorCount > 0 ? "quality_invariant_failed" : "methodology_changed", estimatedCostUsd: null })), rescanCandidates: rescanCandidates.length, cases: cases.length, versionsRead: versions.length, assessedLatest: results.length, missingVersions, cohorts: Object.fromEntries(cohorts) }));
 const errorCount = results.reduce((sum, result) => sum + result.errorCount, 0);
 const warningCount = results.reduce((sum, result) => sum + result.warningCount, 0);
 

@@ -12,6 +12,10 @@ export function normalizeSubjectRef(value?: string): string {
     .replace(/^https?:\/\//i, "")
     .replace(/^[@$]+/, "")
     .replace(/\/$/, "");
+  const qualified = clean.match(/^([a-z0-9_-]+):(.+)$/i);
+  if (qualified && (EVM_ADDRESS.test(qualified[2]) || SOLANA_ADDRESS.test(qualified[2]))) {
+    return `${qualified[1].toLowerCase()}:${normalizeSubjectRef(qualified[2])}`;
+  }
   if (SOLANA_ADDRESS.test(clean)) return clean;
   if (EVM_ADDRESS.test(clean)) return clean.toLowerCase();
   return clean.toLowerCase();

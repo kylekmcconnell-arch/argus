@@ -1139,6 +1139,7 @@ export interface CollectedEvidence {
   basicFacts?: BasicFact[];
   /** Search-model suggestions retained separately until source verification succeeds. */
   basicFactLeads?: BasicFactLead[];
+  evidenceAttempts?: import("../lib/evidenceRetry").EvidenceAttempt[];
   /** Role-specific questions and their verified answer/gap state for this scan. */
   basicFactQuestionLedger?: BasicFactQuestionLedgerEntry[];
   /** Evidence-aware delegation plan frozen with the scan for auditability. */

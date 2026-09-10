@@ -1,3 +1,4 @@
+import { evidenceRetryPlan, evidenceRetryReason } from "../lib/evidenceRetry";
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
@@ -2270,6 +2271,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   // TLDR copy) instead of writing it to the clipboard directly. Null on any
   // failure so callers can fall back to the app URL.
   const mintShareUrl = async (): Promise<string | null> => {
+    if (!canShare) return null;
     try {
       const response = await fetch("/api/share", {
         method: "POST",
@@ -2690,18 +2692,9 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         ? `No source ARGUS could check corroborated ${oneSubjectLead ? "it" : "them"}, so ${oneSubjectLead ? "it is" : "they are"} not recorded as ${oneSubjectLead ? "a finding" : "findings"} and ${oneSubjectLead ? "does" : "do"} not change the score.`
         : `${oneSubjectLead ? "It is" : "They are"} not recorded as ${oneSubjectLead ? "a finding" : "findings"} about ${report.handle} and ${oneSubjectLead ? "does" : "do"} not change the score.`
     }`;
-  const subjectLeadNarrative: ReportCanvasNarrativeItem[] = subjectAdverseLeads.slice(0, 4).map((lead, index) => ({
-    id: `subject-lead-${index}`,
-    title: plainLanguageSummary(lead.claim),
-    detail: leadArtifactConfirmed(lead)
-      ? `The artifact is confirmed about the entity it names, but it is not recorded as a finding about ${report.handle}.`
-      : "No source ARGUS could check corroborated this lead.",
-    provenance: "Unverified lead · not scored",
-    href: "#subject-leads" as `#${string}`,
-  }));
   const verdictNarrative = favorableVerdict ? supportNarrative : adverseVerdictNarrative;
   const countervailingNarrative = favorableVerdict
-    ? [...confidenceLimits, ...subjectLeadNarrative]
+    ? confidenceLimits
     : supportNarrative;
   const caseArgument = deriveVerdictArgument({
     verdict: presentedVerdict,
@@ -2738,7 +2731,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     }));
   const decisionCanvasSupports = toDecisionCanvasItems(supportNarrative);
   const decisionCanvasConcerns = toDecisionCanvasItems(
-    [...confidenceLimits, ...subjectLeadNarrative]
+    confidenceLimits
       .filter((item, index, items) => {
         const key = item.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ");
         return items.findIndex((candidate) =>
@@ -3213,7 +3206,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
             </div>
             <CopyTldrButton
               base={tldrBase}
-              {...(!shareView ? { mint: mintShareUrl } : {})}
+              {...(canShare ? { mint: mintShareUrl } : {})}
               className="mb-0.5 ml-auto"
             />
           </div>
@@ -3302,7 +3295,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 subjectRef={f.handle || f.display_name}
                 score={presentation.primaryScore ? report.governing_score : null}
               />
-              {!shareView && <CopyTldrButton base={tldrBase} mint={mintShareUrl} />}
+              {!shareView && <CopyTldrButton base={tldrBase} {...(canShare ? { mint: mintShareUrl } : {})} />}
             </div>
             <div className="min-w-0 flex-1 max-sm:order-1">
               <div className="eyebrow mb-1.5">{plainReportStatusLabel(presentation.resultLabel)}</div>
@@ -3468,6 +3461,9 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
             ) : (
               <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
             )}
+            {governingRoleReport?.score_coverage && <p className="mt-2 text-sm text-ink-dim">
+              Governing role coverage: {governingRoleReport.score_coverage.assessedAxes}/{governingRoleReport.score_coverage.totalAxes} areas · {governingRoleReport.score_coverage.assessedWeight}/{governingRoleReport.score_coverage.totalWeight} scoring weight assessed.
+            </p>}
             <ProofChipStrip chips={heroProofChips} />
             {f.priorOutcome && (
               <OutcomeDeltaStrip
@@ -4975,6 +4971,13 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           {/* transparent scan methodology — what ARGUS checked on this person */}
           {(diligenceChecks.length > 0 || providerGaps.length > 0) && (
             <div className="min-w-0 lg:col-span-2">
+              {f.evidenceAttempts?.length ? <details className="panel mb-2 p-3">
+                <summary className="cursor-pointer font-medium">Evidence gaps and targeted next checks</summary>
+                <p className="mt-2 text-sm">{f.evidenceAttempts.filter(a => a.outcome === "accepted").length} source verification attempts accepted out of {f.evidenceAttempts.length} recorded attempts. These are attempts, not unique facts.</p>
+                <ul className="mt-2 space-y-2">{evidenceRetryPlan(f.evidenceAttempts).map(item => <li key={item.questionId} className="text-sm">
+                  <strong>{item.questionId.replace(/[._]/g, " ")}</strong>: {item.action.replace(/_/g, " ")}. {item.reasons.map(evidenceRetryReason).join("; ")}.
+                </li>)}</ul>
+              </details> : null}
               {diligenceChecks.length > 0 && <MethodologyChecklist id="scan-methodology" checks={diligenceChecks} />}
               {providerGaps.length > 0 && (
                 <details id={diligenceChecks.length > 0 ? "provider-data-coverage" : "scan-methodology"} className="panel mt-2 px-4 py-3">

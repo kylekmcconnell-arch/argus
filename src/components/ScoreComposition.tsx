@@ -20,6 +20,7 @@ export interface CompositionRow {
   /** Investor-worded reason the dimension scored where it did. */
   rationale: string;
   supportCount?: number;
+  evidenceStrength?: "verified" | "measured" | "attributed" | "self_reported";
   counterCount?: number;
   questionCount?: number;
   /** Where "Read the evidence" lands; defaults to #decision-basis-<axis>;

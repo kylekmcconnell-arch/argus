@@ -94,7 +94,7 @@ export async function runSweep(organizationId: string): Promise<{ checked: numbe
     // ── on-chain drift (tokens only) ──
     if (w.kind === "token" && openCases.has(normalizeSubjectRef(w.id)) && tokenChecks < MAX_TOKEN_CHECKS) {
       tokenChecks++;
-      const input: RunnableTokenInput = { kind: "token", ref: w.id, via: w.via ?? "evm" };
+      const input: RunnableTokenInput = { kind: "token", ref: w.id.includes(":") ? w.id.split(":")[1] : w.id, chain: w.chain, via: w.via ?? "evm" };
       const d = await auditToken(input, undefined, { skipSim: true }).catch(() => null);
       if (d && w.snapshot) {
         const s = w.snapshot;

@@ -377,6 +377,7 @@ describe("investigation exact sharing", () => {
         ...token(),
         symbol: "VVV",
         name: "Venice Token",
+        marketEvidence: {mcap:true,fdv:true,liquidityUsd:false,vol24:false,ageDays:false},
         mcap: 582_760_000,
         fdv: 990_280_000,
       },
@@ -1123,7 +1124,7 @@ describe("investigation exact sharing", () => {
 
   it("separates project-attributed roles from independent team support and unrelated people leads", () => {
     render(investigation({
-      token: { ...token(), mcap: 20_000_000 },
+      token: { ...token(), mcap: 20_000_000, marketEvidence: {mcap:true,fdv:false,liquidityUsd:false,vol24:false,ageDays:false} },
       recon: {
         retrieval: {
           url: "https://argus.test",

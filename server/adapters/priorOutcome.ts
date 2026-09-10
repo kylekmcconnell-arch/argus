@@ -25,6 +25,7 @@ export interface PriorOutcome {
   completeness: string | null;
   capturedAt: string | null;
   payload?: unknown;
+  methodologyVersion?: string | null;
 }
 
 /** Latest persisted outcome for this org+handle, or null. Never throws. */
@@ -56,14 +57,14 @@ export async function readPriorOutcome(
     const versionUrl = `${c.url}/rest/v1/report_versions`
       + `?id=eq.${encodeURIComponent(reportVersionId)}`
       + `&organization_id=eq.${encodeURIComponent(organizationId)}`
-      + "&select=id,version,score,verdict,completeness_state,created_at,payload"
+      + "&select=id,version,score,verdict,completeness_state,created_at,payload,methodology_version"
       + "&limit=1";
     const versionRes = await deadlineFetch(versionUrl, { headers: authHeaders(c.key), signal: AbortSignal.timeout(5_000) });
     if (!versionRes.ok) return null;
     const rows = (await versionRes.json()) as Array<{
       id?: string; version?: number; score?: number | string | null; verdict?: string | null;
       completeness_state?: string | null; created_at?: string | null;
-      payload?: unknown;
+      payload?: unknown; methodology_version?: string | null;
     }>;
     const row = rows?.[0];
     if (!row || typeof row.id !== "string" || typeof row.version !== "number") return null;
@@ -76,6 +77,7 @@ export async function readPriorOutcome(
       completeness: typeof row.completeness_state === "string" ? row.completeness_state : null,
       capturedAt: typeof row.created_at === "string" ? row.created_at : null,
       payload: row.payload,
+      methodologyVersion: row.methodology_version ?? null,
     };
   } catch {
     return null;
