@@ -1,4 +1,4 @@
-import { payloadTokenIdentity } from "./tokenIdentity";
+import { payloadTokenIdentity } from "./tokenIdentity.js";
 import type { BasicFact } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
 import type { Investigation } from "./investigation";

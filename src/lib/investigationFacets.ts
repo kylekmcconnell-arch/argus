@@ -1,6 +1,6 @@
 import type { Investigation } from "./investigation";
 import type { ScanCheck } from "./scanChecklist";
-import { TOKEN_REQUIRED_CHECK_IDS } from "./reportCheckContract";
+import { TOKEN_REQUIRED_CHECK_IDS } from "./reportCheckContract.js";
 
 export interface InvestigationFacet {
   key: "token" | "project" | "supplemental";

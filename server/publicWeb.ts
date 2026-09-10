@@ -5,7 +5,7 @@ import { request as httpRequest, type RequestOptions } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { Readable } from "node:stream";
-import { attachEvalNativeRequest } from "./evalTransport";
+import { attachEvalNativeRequest } from "./evalTransport.js";
 
 const MAX_TEXT_BYTES = 1_500_000;
 const MAX_REDIRECTS = 3;
