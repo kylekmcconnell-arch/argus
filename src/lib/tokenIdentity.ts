@@ -1,4 +1,4 @@
-import { normalizeSubjectRef } from "./subjectRef";
+import { normalizeSubjectRef } from "./subjectRef.js";
 export interface TokenSubjectIdentity { chain: string; address: string; ref: string }
 const aliases: Record<string, string> = { eth: "ethereum", "1": "ethereum", "8453": "base", "42161": "arbitrum", "10": "optimism", "137": "polygon", "56": "bsc", "43114": "avalanche" };
 export function tokenSubjectIdentity(chain: unknown, address: unknown): TokenSubjectIdentity | null {

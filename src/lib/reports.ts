@@ -1,5 +1,5 @@
-import { payloadTokenIdentity } from "./tokenIdentity";
-import { investigationFacets } from "./investigationFacets";
+import { payloadTokenIdentity } from "./tokenIdentity.js";
+import { investigationFacets } from "./investigationFacets.js";
 // Persistent reports: push the full rendered audit up on completion, pull it back
 // down when a recent audit is re-opened — so a click shows the real report even
 // after a reload or from another analyst, instead of re-running. No-op when no
@@ -8,10 +8,10 @@ import type { Dossier } from "../data/dossier";
 import type { Recon } from "../collect/recon";
 import type { Investigation } from "./investigation";
 import type { TokenDossier } from "../token/audit";
-import { clearanceCoverage, personChecks, reconcileInvestigationChecks, tokenChecks, type ScanCheck } from "./scanChecklist";
+import { clearanceCoverage, personChecks, reconcileInvestigationChecks, tokenChecks, type ScanCheck } from "./scanChecklist.js";
 import type { ResearchPlan } from "./researchDirector";
-import { normalizeSubjectRef } from "./subjectRef";
-import { applyReportCheckContract, hasExplicitReportCheckContract } from "./reportCheckContract";
+import { normalizeSubjectRef } from "./subjectRef.js";
+import { applyReportCheckContract, hasExplicitReportCheckContract } from "./reportCheckContract.js";
 import type {
   ReportAttestationState,
   ReportCompletenessState,
