@@ -1603,7 +1603,7 @@ async function runTokenAudit(input, emit, opts) {
     const resolved = await dexByTokenResult(input.ref, fetcher);
     if (!resolved.ok) throw new Error("token_market_unavailable");
     allPairs = resolved.pairs.filter((p) => input.via === "solana" ? p.chainId === "solana" : p.chainId !== "solana");
-    if (opts?.chain) allPairs = allPairs.filter((p) => p.chainId === opts.chain);
+    if (opts?.chain ?? input.chain) allPairs = allPairs.filter((p) => p.chainId === (opts?.chain ?? input.chain));
     pair = pickPair(allPairs, input.ref);
   }
   if (!pair && input.via === "solana" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(input.ref)) {
@@ -1992,6 +1992,15 @@ async function runTokenAudit(input, emit, opts) {
   for (const [index, axis] of axes.entries()) {
     axis.nominalWeight = axis.weight;
     axis.assessed = assessed[index];
+    const measurementPaths = [
+      ["marketEvidence.liquidityUsd"],
+      ["safety.contractPropertiesAssessed"],
+      ["safety.taxesAssessed"],
+      ["safety.holderCountAssessed", "topHolders"],
+      ["marketEvidence.vol24", "marketEvidence.liquidityUsd", "priceChange"],
+      ["marketEvidence.ageDays"]
+    ];
+    axis.evidenceRefs = axis.assessed ? measurementPaths[index] : [];
     if (!axis.assessed) {
       axis.weight = 0;
       axis.score = 0;
@@ -2240,9 +2249,101 @@ var EVM_ADDRESS4 = /^0x[0-9a-f]{40}$/i;
 var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 function normalizeSubjectRef(value) {
   const clean = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
+  const qualified = clean.match(/^([a-z0-9_-]+):(.+)$/i);
+  if (qualified && (EVM_ADDRESS4.test(qualified[2]) || SOLANA_ADDRESS3.test(qualified[2]) || !/^https?$/i.test(qualified[1]) && /^[A-Za-z0-9._-]{10,128}$/.test(qualified[2]))) {
+    return `${qualified[1].toLowerCase()}:${EVM_ADDRESS4.test(qualified[2]) ? qualified[2].toLowerCase() : qualified[2]}`;
+  }
   if (SOLANA_ADDRESS3.test(clean)) return clean;
   if (EVM_ADDRESS4.test(clean)) return clean.toLowerCase();
   return clean.toLowerCase();
+}
+
+// src/lib/reportCheckContract.ts
+var TOKEN_REQUIRED_CHECK_IDS = /* @__PURE__ */ new Set([
+  "contract-safety",
+  "buy-sell-simulation",
+  "holder-distribution",
+  "wallet-clustering",
+  "market-intelligence",
+  "ofac-sanctions-address"
+]);
+var INVESTIGATION_REQUIRED_CHECK_IDS = /* @__PURE__ */ new Set([
+  ...TOKEN_REQUIRED_CHECK_IDS,
+  "trust-graph-connections"
+]);
+var TOKEN_REQUIRED_CHECK_LABELS = Object.freeze({
+  "contract-safety": "Contract safety",
+  "buy-sell-simulation": "Tradeability check",
+  "holder-distribution": "Holder distribution",
+  "wallet-clustering": "Wallet clustering",
+  "market-intelligence": "Market intelligence",
+  "ofac-sanctions-address": "OFAC sanctions screen",
+  "trust-graph-connections": "Trust-graph reconciliation"
+});
+var TOKEN_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
+  "operator-funding-trace",
+  "deployer-trail-evm",
+  "bytecode-fingerprint-evm",
+  "documents-audits",
+  "news-press",
+  "github-forensics",
+  "trust-graph-connections"
+]);
+var PERSON_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "news-press",
+  "project-leadership-currency",
+  "founder-repeat-backing",
+  "investor-fund-scale"
+]);
+function isUnboundInvestigationGraphRow(check, checkId) {
+  return checkId === "trust-graph-connections" && check.provider === "project-account-audit" && check.retryable === false;
+}
+function applyReportCheckContract(kind, checks) {
+  const requiredIds = kind === "investigation" ? INVESTIGATION_REQUIRED_CHECK_IDS : TOKEN_REQUIRED_CHECK_IDS;
+  const normalized = checks.map((check) => {
+    const checkId = check.checkId?.trim() ?? "";
+    if (kind === "token" || kind === "investigation") {
+      if (kind === "investigation" && isUnboundInvestigationGraphRow(check, checkId)) {
+        return { ...check, decisionCritical: false };
+      }
+      if (checkId && requiredIds.has(checkId)) {
+        return { ...check, decisionCritical: true };
+      }
+      if (checkId && TOKEN_SUPPLEMENTAL_CHECK_IDS.has(checkId)) {
+        return { ...check, decisionCritical: false };
+      }
+      return {
+        ...check,
+        ...check.decisionCritical === void 0 ? {} : { decisionCritical: check.decisionCritical }
+      };
+    }
+    if (check.decisionCritical !== void 0) return { ...check };
+    return {
+      ...check,
+      decisionCritical: !checkId || !PERSON_SUPPLEMENTAL_CHECK_IDS.has(checkId)
+    };
+  });
+  if (kind === "person") return normalized;
+  const present = new Set(normalized.map((check) => check.checkId).filter(Boolean));
+  const missingRequired = [...requiredIds].filter((checkId) => !present.has(checkId)).map((checkId) => ({
+    checkId,
+    label: TOKEN_REQUIRED_CHECK_LABELS[checkId] ?? checkId,
+    status: "unknown",
+    decisionCritical: true,
+    note: "required completion outcome was not saved"
+  }));
+  return [...normalized, ...missingRequired];
+}
+function hasExplicitReportCheckContract(kind, checks) {
+  if (kind === "token" || kind === "investigation") {
+    const ids = new Set(checks.map((check) => check.checkId).filter(Boolean));
+    const requiredIds = kind === "investigation" ? INVESTIGATION_REQUIRED_CHECK_IDS : TOKEN_REQUIRED_CHECK_IDS;
+    return [...requiredIds].every((checkId) => ids.has(checkId));
+  }
+  return checks.length > 0 && checks.every((check) => typeof check.decisionCritical === "boolean") && checks.some((check) => check.decisionCritical === true);
 }
 
 // src/lib/scanChecklist.ts
@@ -2563,94 +2664,6 @@ function personChecks(opts) {
   return checks;
 }
 
-// src/lib/reportCheckContract.ts
-var TOKEN_REQUIRED_CHECK_IDS = /* @__PURE__ */ new Set([
-  "contract-safety",
-  "buy-sell-simulation",
-  "holder-distribution",
-  "wallet-clustering",
-  "market-intelligence",
-  "ofac-sanctions-address"
-]);
-var INVESTIGATION_REQUIRED_CHECK_IDS = /* @__PURE__ */ new Set([
-  ...TOKEN_REQUIRED_CHECK_IDS,
-  "trust-graph-connections"
-]);
-var TOKEN_REQUIRED_CHECK_LABELS = Object.freeze({
-  "contract-safety": "Contract safety",
-  "buy-sell-simulation": "Tradeability check",
-  "holder-distribution": "Holder distribution",
-  "wallet-clustering": "Wallet clustering",
-  "market-intelligence": "Market intelligence",
-  "ofac-sanctions-address": "OFAC sanctions screen",
-  "trust-graph-connections": "Trust-graph reconciliation"
-});
-var TOKEN_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
-  "operator-funding-trace",
-  "deployer-trail-evm",
-  "bytecode-fingerprint-evm",
-  "documents-audits",
-  "news-press",
-  "github-forensics",
-  "trust-graph-connections"
-]);
-var PERSON_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
-  "profile-photo-authenticity",
-  "code-footprint-github",
-  "identity-continuity",
-  "news-press",
-  "project-leadership-currency",
-  "founder-repeat-backing",
-  "investor-fund-scale"
-]);
-function isUnboundInvestigationGraphRow(check, checkId) {
-  return checkId === "trust-graph-connections" && check.provider === "project-account-audit" && check.retryable === false;
-}
-function applyReportCheckContract(kind, checks) {
-  const requiredIds = kind === "investigation" ? INVESTIGATION_REQUIRED_CHECK_IDS : TOKEN_REQUIRED_CHECK_IDS;
-  const normalized = checks.map((check) => {
-    const checkId = check.checkId?.trim() ?? "";
-    if (kind === "token" || kind === "investigation") {
-      if (kind === "investigation" && isUnboundInvestigationGraphRow(check, checkId)) {
-        return { ...check, decisionCritical: false };
-      }
-      if (checkId && requiredIds.has(checkId)) {
-        return { ...check, decisionCritical: true };
-      }
-      if (checkId && TOKEN_SUPPLEMENTAL_CHECK_IDS.has(checkId)) {
-        return { ...check, decisionCritical: false };
-      }
-      return {
-        ...check,
-        ...check.decisionCritical === void 0 ? {} : { decisionCritical: check.decisionCritical }
-      };
-    }
-    if (check.decisionCritical !== void 0) return { ...check };
-    return {
-      ...check,
-      decisionCritical: !checkId || !PERSON_SUPPLEMENTAL_CHECK_IDS.has(checkId)
-    };
-  });
-  if (kind === "person") return normalized;
-  const present = new Set(normalized.map((check) => check.checkId).filter(Boolean));
-  const missingRequired = [...requiredIds].filter((checkId) => !present.has(checkId)).map((checkId) => ({
-    checkId,
-    label: TOKEN_REQUIRED_CHECK_LABELS[checkId] ?? checkId,
-    status: "unknown",
-    decisionCritical: true,
-    note: "required completion outcome was not saved"
-  }));
-  return [...normalized, ...missingRequired];
-}
-function hasExplicitReportCheckContract(kind, checks) {
-  if (kind === "token" || kind === "investigation") {
-    const ids = new Set(checks.map((check) => check.checkId).filter(Boolean));
-    const requiredIds = kind === "investigation" ? INVESTIGATION_REQUIRED_CHECK_IDS : TOKEN_REQUIRED_CHECK_IDS;
-    return [...requiredIds].every((checkId) => ids.has(checkId));
-  }
-  return checks.length > 0 && checks.every((check) => typeof check.decisionCritical === "boolean") && checks.some((check) => check.decisionCritical === true);
-}
-
 // src/lib/reports.ts
 function reportChecks(kind, payload) {
   if (kind === "token") {
@@ -2750,7 +2763,7 @@ async function runSweep(organizationId) {
   for (const w of watches) {
     if (w.kind === "token" && openCases.has(normalizeSubjectRef(w.id)) && tokenChecks2 < MAX_TOKEN_CHECKS) {
       tokenChecks2++;
-      const input = { kind: "token", ref: w.id, via: w.via ?? "evm" };
+      const input = { kind: "token", ref: w.id.includes(":") ? w.id.split(":")[1] : w.id, chain: w.chain, via: w.via ?? "evm" };
       const d = await auditToken(input, void 0, { skipSim: true }).catch(() => null);
       if (d && w.snapshot) {
         const s = w.snapshot;

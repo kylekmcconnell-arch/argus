@@ -29,7 +29,7 @@ interface ServerDossier extends Dossier {
   providers?: unknown;
 }
 
-const LINEAGE_METHODOLOGY_VERSION = "argus-person-v5-project-strength-bands";
+const LINEAGE_METHODOLOGY_VERSION = "argus-person-v6-entity-aware-identity";
 const FINAL_GRAPH_VERDICTS = new Set(["PASS", "CAUTION", "FAIL", "AVOID", "UNVERIFIABLE_IDENTITY"]);
 const RESEARCH_INTENTS = new Set<ResearchIntent>([
   "investment_due_diligence",

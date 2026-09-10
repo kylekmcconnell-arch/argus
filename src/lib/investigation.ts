@@ -128,12 +128,14 @@ export interface ProjectAccountAuditOutcome {
 export interface ProjectAccountBinding {
   handle: string;
   status: "verified" | "mismatch" | "absent" | "unreadable";
-  via?: "bio" | "linked-page";
+  via?: "bio" | "linked-page" | "official-domain";
+  proof?: { sourceUrl: string; contractUrl: string; contentHash: string; capturedAt: string };
   note: string;
   checkedAt: string;
 }
 
 export interface Investigation {
+  facets?: import("./investigationFacets").InvestigationFacet[];
   rootRef: string;
   token: TokenDossier;
   projectX: string | null;
@@ -384,14 +386,15 @@ export function streamInvestigation(
           const bindingHandle = projectX.replace(/^@/, "");
           const r = await scanScopedFetch(opts?.creditKey)(
             `/api/x-authenticity?handle=${encodeURIComponent(bindingHandle)}&address=${encodeURIComponent(token.address)}&chain=${encodeURIComponent(token.chain)}`,
-            { signal: AbortSignal.timeout(12000) },
+            { signal: AbortSignal.timeout(25000) },
           );
-          const d = r.ok ? await r.json() as { available?: boolean; status?: string; via?: string; note?: string } : null;
+          const d = r.ok ? await r.json() as { available?: boolean; status?: string; via?: string; note?: string; proof?: ProjectAccountBinding["proof"] } : null;
           if (d?.available && d.status) {
             projectAccountBinding = {
               handle: bindingHandle,
               status: d.status as ProjectAccountBinding["status"],
-              ...(d.via === "bio" || d.via === "linked-page" ? { via: d.via } : {}),
+              ...(d.via === "bio" || d.via === "linked-page" || d.via === "official-domain" ? { via: d.via } : {}),
+              ...(d.proof ? { proof: d.proof } : {}),
               note: d.note ?? "",
               checkedAt: new Date().toISOString(),
             };

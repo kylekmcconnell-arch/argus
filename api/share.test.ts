@@ -130,24 +130,13 @@ describe("exact immutable report sharing", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps resolving the current projection when no version is requested", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse([{ report_version_id: HISTORICAL_VERSION_ID }]))
-      .mockResolvedValueOnce(jsonResponse([{ id: HISTORICAL_VERSION_ID, case_id: CASE_ID }]))
-      .mockResolvedValueOnce(jsonResponse([{ kind: "person", canonical_ref: "alice" }]))
-      .mockResolvedValueOnce(jsonResponse(null, 201));
+  it("rejects a missing version without looking up a mutable projection", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const { res, captured } = response();
-
     await handler(request({ kind: "person", ref: "@Alice" }), res);
-
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(String(fetchMock.mock.calls[0][0])).toContain("/rest/v1/reports?");
-    expect(String(fetchMock.mock.calls[0][0])).toContain("kind=eq.person");
-    expect(String(fetchMock.mock.calls[0][0])).toContain("ref=eq.alice");
-    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toMatchObject({
-      report_version_id: HISTORICAL_VERSION_ID,
-    });
-    expect(captured.statusCode).toBe(201);
+    expect(captured.statusCode).toBe(400);
+    expect(captured.body).toMatchObject({ error: "invalid_report_version" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

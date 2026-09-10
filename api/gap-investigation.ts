@@ -1,3 +1,5 @@
+import { investigationFacets } from "../src/lib/investigationFacets.js";
+import type { Investigation } from "../src/lib/investigation.js";
 // Explicitly authorized evidence-gap follow-up. This is intentionally separate
 // from /api/ask: conversation remains frozen-report reasoning, while this route
 // may spend a bounded research budget and can create only an inactive proposal.
@@ -37,9 +39,9 @@ import type { TokenDossier } from "../src/token/audit.js";
 export const config = { maxDuration: 600 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const METHODOLOGY_VERSION = "argus-person-v5-project-strength-bands";
+const METHODOLOGY_VERSION = "argus-person-v6-entity-aware-identity";
 const TOKEN_METHODOLOGY_VERSION = "argus-token-v3-assessed-evidence";
-const INVESTIGATION_METHODOLOGY_VERSION = "argus-investigation-v2-terminal-outcomes";
+const INVESTIGATION_METHODOLOGY_VERSION = "argus-investigation-v3-explicit-facets";
 type JsonRecord = Record<string, unknown>;
 type SupportedGapReportKind = "person" | "token" | "investigation";
 
@@ -409,6 +411,7 @@ async function authorizeAndExecute(
     const checks = supportedKind === "person"
       ? personDossier?.checkRuns ?? []
       : reportChecks(supportedKind, proposed);
+    if (supportedKind === "investigation") proposed.facets = investigationFacets(proposed as unknown as Investigation, checks);
     const requestedCompleteness = supportedKind === "person"
       ? personDossier?.completeness_state === "complete" ? "complete" : "partial"
       : reportCompleteness(supportedKind, proposed, checks);

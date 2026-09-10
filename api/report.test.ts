@@ -224,6 +224,7 @@ describe("report case lifecycle API", () => {
       freezable: false,
     });
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse([{
         payload: { address, safety: safety(true) },
         report_version_id: previousVersionId,
@@ -253,8 +254,8 @@ describe("report case lifecycle API", () => {
       },
     }), res);
 
-    expect(fetchMock.mock.calls[0][0]).toContain("kind=eq.token");
-    expect(fetchMock.mock.calls[1][0]).toContain(previousVersionId);
+    expect(fetchMock.mock.calls[1][0]).toContain("kind=eq.token");
+    expect(fetchMock.mock.calls[2][0]).toContain(previousVersionId);
     expect(persistReportVersionBundle).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({

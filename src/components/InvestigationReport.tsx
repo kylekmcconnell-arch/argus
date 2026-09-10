@@ -1,3 +1,6 @@
+import { tokenSubjectIdentity } from "../lib/tokenIdentity";
+import { tokenCompositionRow, tokenMarketPresentation } from "../lib/tokenPresentation";
+import { investigationFacets } from "../lib/investigationFacets";
 import { useRef, useState } from "react";
 import { verdictMeta, axisLabel } from "../lib/verdict";
 import { printReportPdf } from "../lib/printPdf";
@@ -749,7 +752,7 @@ export function InvestigationReport({
   const [spent, setSpent] = useState(0);
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("general_diligence");
   const reportStyle = reportLane.definition.presentationStyle;
-  const [watched, setWatched] = useState(() => isWatched(inv.token.address));
+  const [watched, setWatched] = useState(() => isWatched(tokenSubjectIdentity(inv.token.chain, inv.token.address)?.ref ?? inv.token.address));
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const versionContext = inv.versionContext;
   const caseLabel = publicCaseLabel(versionContext?.caseId);
@@ -810,14 +813,7 @@ export function InvestigationReport({
     questionCount: value.gaps?.length,
     evidenceHref: "#investigation-evidence" as const,
   }));
-  const tokenCompositionRows = orderByPlainAxis((token.axes ?? []).map((a) => ({
-    axis: a.key,
-    label: plainAxisLabel(a.key, a.label),
-    score: a.score,
-    weight: a.weight,
-    rationale: a.rationale,
-    evidenceHref: `#dimension-${a.key}` as const,
-  })));
+  const tokenCompositionRows = orderByPlainAxis((token.axes ?? []).map(tokenCompositionRow))
   // The deployer wallet's age, said in the unit that carries it and stamped with
   // what it was measured to. Null when the trail never measured one: a wallet
   // whose first activity sits outside the pagination window is not a new wallet
@@ -875,6 +871,7 @@ export function InvestigationReport({
     inv.projectAccountAudit,
     inv.projectAccountBinding,
   ));
+  const facets = investigationFacets(inv, diligenceChecks);
   const readiness = deriveDecisionReadiness(diligenceChecks);
   const clearance = clearanceCoverage(diligenceChecks);
   const observedTokenMeta = verdictMeta(token.verdict);
@@ -942,10 +939,9 @@ export function InvestigationReport({
         ...(projectAccount.projectToken ? { projectToken: projectAccount.projectToken } : {}),
       })
     : token.cg?.description;
-  const marketCap = token.mcap ?? token.cg?.mcapUsd ?? undefined;
-  const fullyDilutedValue = token.fdv
-    ?? projectAccount?.projectToken?.fdvUsd
-    ?? undefined;
+  const market = tokenMarketPresentation(token);
+  const marketCap = market.marketCap ?? undefined;
+  const fullyDilutedValue = market.fullyDilutedValuation ?? undefined;
   const projectSourceBackedVentures = (projectAccount?.evidence.ventures ?? [])
     .filter((venture) => venture.evidence_origin !== "model_lead" && venture.artifact_verified === true);
   const projectUnverifiedVentureCount = (projectAccount?.evidence.ventures ?? [])
@@ -1267,7 +1263,7 @@ export function InvestigationReport({
   const watch = () => {
     if (!canMutateWorkspace) return;
     setWatched(toggleWatch({
-      id: token.address,
+      id: tokenSubjectIdentity(token.chain, token.address)?.ref ?? token.address,
       kind: "token",
       label: `$${token.symbol}`,
       chain: token.chain,
@@ -1658,6 +1654,12 @@ export function InvestigationReport({
             } : undefined}
           />
 
+          <section aria-label="Investigation coverage by area" className="mt-4 grid gap-3 md:grid-cols-3">
+            {facets.map(facet => <div key={facet.key} className="panel p-3">
+              <p className="font-medium">{facet.label} · {facet.state}</p>
+              <p className="mt-1 text-sm text-ink-dim">{facet.note}</p>
+            </div>)}
+          </section>
           {LEGACY_REPORT_HERO_ENABLED && <div className={`investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 ${readiness.status === "ready" ? "" : "xl:grid-cols-3"}`}>
             {readiness.status !== "ready" && (
             <section
@@ -1798,7 +1800,7 @@ export function InvestigationReport({
                 </div>
                 <div>
                   <dt className="stat-label">Liquidity</dt>
-                  <dd className="stat-value mt-1">{money(token.liquidityUsd)}</dd>
+                  <dd className="stat-value mt-1">{money(market.liquidityUsd ?? undefined)}</dd>
                 </div>
                 <div>
                   <dt className="stat-label">Holders</dt>
@@ -2110,8 +2112,8 @@ export function InvestigationReport({
                 .replace(/owned, tradeable, with real depth/gi, "tradeable with meaningful liquidity")}
             </p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
-              <span>Liquidity <span className="mono text-ink-dim">{money(token.liquidityUsd)}</span></span>
-              <span>Market cap <span className="mono text-ink-dim">{money(token.mcap)}</span></span>
+              <span>Liquidity <span className="mono text-ink-dim">{money(market.liquidityUsd ?? undefined)}</span></span>
+              <span>Market cap <span className="mono text-ink-dim">{money(market.marketCap ?? undefined)}</span></span>
               <span>Network <span className="mono text-ink-dim capitalize">{token.chain}</span></span>
             </div>
             {/* CEX listings — real centralized-exchange listings are a strong legitimacy signal */}

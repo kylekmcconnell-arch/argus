@@ -55,7 +55,7 @@ vi.mock("../lib/runner", () => ({
 }));
 
 vi.mock("../lib/scanrunner", () => ({
-  getScanRun: (kind: "token" | "investigation") => harness.scanRuns[kind],
+  getScanRun: (kind: "token" | "investigation", ref: string) => harness.scanRuns[kind]?.requiredRef && harness.scanRuns[kind]?.requiredRef !== ref ? null : harness.scanRuns[kind],
   subscribeScanRuns: (listener: () => void) => {
     harness.scanListener = listener;
     return () => {
@@ -106,6 +106,13 @@ afterEach(async () => {
 });
 
 describe("run view console state", () => {
+  it("attaches the token console to its exact chain-qualified run", async () => {
+    harness.scanRuns.token = { id:"base-run",requiredRef:`base:${ADDRESS}`,status:"done",priv:false,result:{address:ADDRESS,chain:"base"},steps:[] };
+    const done = vi.fn();
+    await render(<TokenRun input={{...input,chain:"base"}} onDone={done} onError={vi.fn()} />);
+    expect(done).toHaveBeenCalledWith(expect.objectContaining({chain:"base"}),false,"base-run");
+    expect(latestConsole("token").working).toBe(false);
+  });
   it("portrays an initial person-run attachment as active without numeric progress", async () => {
     await render(<LiveRun handle="alice" onDone={vi.fn()} onError={vi.fn()} />);
 

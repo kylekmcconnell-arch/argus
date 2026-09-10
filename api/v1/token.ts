@@ -1,3 +1,4 @@
+import { tokenMarketPresentation } from "../../src/lib/tokenMarketPresentation.js";
 import { recordProviderUsageBatch } from "../_cache.js";
 import { persistReportVersionBundle } from "../_provenance.js";
 import { tokenChecks, clearanceCoverage } from "../../src/lib/scanChecklist.js";
@@ -138,7 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       preliminary_model_signal: presentation.final ? null : { verdict: d.verdict, score: d.score, headline: d.headline },
       cap_applied: d.capApplied,
       headline: presentation.final ? d.headline : presentation.note,
-      market: { priceUsd: d.priceUsd, marketCap: d.marketEvidence?.mcap ? d.mcap : null, fullyDilutedValuation: d.marketEvidence?.fdv ? d.fdv : null, liquidityUsd: d.marketEvidence?.liquidityUsd ? d.liquidityUsd : null, volume24h: d.marketEvidence?.vol24 ? d.vol24 : null, evidence: d.marketEvidence ?? null, ageDays: d.ageDays, priceChange: d.priceChange },
+      market: { priceUsd: d.priceUsd, ...tokenMarketPresentation(d), evidence: d.marketEvidence ?? null, priceChange: d.priceChange },
       safety: { ...d.safety, buyTax: d.safety.taxesAssessed ? d.safety.buyTax : null, sellTax: d.safety.taxesAssessed ? d.safety.sellTax : null },
       sanctions: d.sanctionsScreen
         ? { screened: d.sanctionsScreen.checked, listSize: d.sanctionsScreen.listSize, sanctioned: d.sanctionsScreen.sanctioned, available: d.sanctionsScreen.available }

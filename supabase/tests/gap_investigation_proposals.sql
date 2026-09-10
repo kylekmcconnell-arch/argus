@@ -226,7 +226,7 @@ begin
     '$GAP',
     '00000000-0000-4000-8000-000000000106',
     '{
-      "token":{"address":"0x0000000000000000000000000000000000000105","symbol":"GAP","verdict":"CAUTION","score":61},
+      "token":{"chain":"base","address":"0x0000000000000000000000000000000000000105","symbol":"GAP","verdict":"CAUTION","score":61},
       "projectX":"@gap_project",
       "projectAccount":{
         "handle":"gap_project",
@@ -298,6 +298,7 @@ begin
     '$SOLO',
     '00000000-0000-4000-8000-000000000106',
     '{
+      "chain":"base",
       "address":"0x0000000000000000000000000000000000000106",
       "researchPlan":{
         "schemaVersion":1,

@@ -1,3 +1,5 @@
+import { payloadTokenIdentity } from "./tokenIdentity";
+import { investigationFacets } from "./investigationFacets";
 // Persistent reports: push the full rendered audit up on completion, pull it back
 // down when a recent audit is re-opened — so a click shows the real report even
 // after a reload or from another analyst, instead of re-running. No-op when no
@@ -275,7 +277,7 @@ export async function syncReport(
   const checkRuns = reportChecks(kind, payload);
   const persistedPayload = kind === "token"
     ? withTokenGapInvestigationPlan(payload as TokenDossier, checkRuns)
-    : payload;
+    : kind === "investigation" ? { ...(payload as Investigation), facets: investigationFacets(payload as Investigation, checkRuns) } : payload;
   const completenessState = reportCompleteness(kind, persistedPayload, checkRuns);
   // The server binds this id to the immutable version. Every retry below sends
   // the same value, so a response lost after a successful commit cannot create
@@ -284,7 +286,7 @@ export async function syncReport(
   const priorCaseId = payloadCaseId(payload);
   const requestBody = JSON.stringify({
     kind,
-    ref,
+    ref: payloadTokenIdentity(kind, persistedPayload)?.ref ?? ref,
     query,
     payload: persistedPayload,
     verdict,

@@ -661,6 +661,15 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(r.score_total).toBe(r.role_reports[0].raw_total! + 5);
   });
 
+  it("does not pay a person disclosure bonus to an organization account", () => {
+    const a = new Audit("@sample_fund", { subject_class: SubjectClass.INVESTOR, organizationSubject: true });
+    a.setIdentity("Confirmed");
+    for (const [axis, points] of [["I1_identity_legitimacy",12],["I2_portfolio_quality",16],["I3_fund_scale_tier",9],["I4_testimonial_corroboration",12],["I5_reputation_fud",14]] as [string,number][]) a.setAxis(axis,points);
+    const result = a.finalize();
+    expect(result.role_reports[0].dox_bonus).toBe(0);
+    expect(result.score_total).toBe(result.role_reports[0].raw_total);
+  });
+
   it("does not double-count identity as a project disclosure bonus", () => {
     const a = new Audit("@named_protocol", { subject_class: SubjectClass.PROJECT });
     a.setIdentity("Confirmed");

@@ -1,3 +1,4 @@
+import { tokenSubjectIdentity } from "../lib/tokenIdentity";
 import { useEffect, useRef, useState } from "react";
 import { AuditConsole } from "./AuditConsole";
 import { subscribeScanRuns, getScanRun } from "../lib/scanrunner";
@@ -26,7 +27,7 @@ export function TokenRun({
     return unsub; // detach the view only — the run continues in the background
   }, [input]);
 
-  const run = getScanRun("token", input.ref, privateRun);
+  const run = getScanRun("token", tokenSubjectIdentity(input.chain, input.ref)?.ref ?? input.ref, privateRun);
 
   useEffect(() => {
     if (!run) return;

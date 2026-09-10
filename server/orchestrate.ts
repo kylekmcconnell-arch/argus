@@ -1,3 +1,4 @@
+import { scoreComparisonNote } from "../src/lib/scoreComparison";
 import { withProviderDeadline } from "./providerDeadline.js";
 import { withWallClockBox } from "./boundedProvider";
 // The collector orchestrator: @handle -> populated evidence -> verdict.
@@ -1690,20 +1691,23 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // than a gate on evidence_origin.
   await enrichFirstPartyTeamAvatars(ctx);
   if (webTeam.length) {
-    const groundedTeam = webTeam.filter((member) =>
-      member.artifact_verified === true && member.evidence_origin !== "model_lead");
+    const peopleCandidates = webTeam.filter(member => member.kind !== "org");
+    const groundedTeam = peopleCandidates.filter((member) =>
+      member.kind !== "org" && member.artifact_verified === true && member.evidence_origin !== "model_lead");
     ctx.emit(groundedTeam.length
       ? {
           phase: "P1 · Team",
-          label: "Team evidence verified",
-          detail: `${groundedTeam.length} project team identit${groundedTeam.length === 1 ? "y" : "ies"} passed first-party or deterministic verification: ${groundedTeam.slice(0, 6).map((member) => member.name + (member.handle ? ` ${member.handle}` : "")).join(", ")}.`,
+          label: "People with source-backed identity records",
+          detail: `${groundedTeam.length} person identit${groundedTeam.length === 1 ? "y" : "ies"} have first-party or deterministic source records; affiliations retain their individual verification status: ${groundedTeam.slice(0, 6).map((member) => member.name + (member.handle ? ` ${member.handle}` : "")).join(", ")}.`,
           source: "team-search",
           tone: "good",
         }
       : {
           phase: "P1 · Team",
           label: "Team candidates withheld",
-          detail: `${webTeam.length} search candidate${webTeam.length === 1 ? "" : "s"} did not pass source verification and will not be presented as people behind the project.`,
+          detail: peopleCandidates.length
+            ? `${peopleCandidates.length} person candidate${peopleCandidates.length === 1 ? "" : "s"} did not pass source verification and will not be presented as people behind the project.`
+            : "Organization references were found, but no individual identities were verified. Organization links are not team members.",
           source: "team-search",
           tone: "warn",
         });
@@ -5513,6 +5517,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           verdict: prior.verdict,
           completeness: prior.completeness,
           capturedAt: prior.capturedAt,
+          comparisonNote: scoreComparisonNote(prior.payload, dossier, prior.methodologyVersion, "argus-person-v6-entity-aware-identity"),
           delta,
         };
         checkTracker.provider("prior-outcome", "Since last scan", "executed", delta);

@@ -1,3 +1,4 @@
+import { tokenSubjectIdentity } from "./tokenIdentity";
 // Classify whatever the user pasted: an X handle (person audit), a token
 // (contract address or DexScreener URL → token audit), a site, or a Polymarket
 // trader profile.
@@ -6,6 +7,7 @@ import { normalizeWalletInput } from "../polymarket/trader";
 
 export type TokenInput = {
   kind: "token";
+  chain?: string;
   ref: string;
   via: "evm" | "solana" | "dexscreener" | "ticker" | "address-candidate";
 };
@@ -61,6 +63,9 @@ function inputUrl(value: string): URL | null {
 
 export function resolveInput(raw: string): ResolvedInput {
   const s = raw.trim();
+  const qualified = s.match(/^([a-z0-9_-]+):(.+)$/i);
+  const identity = qualified ? tokenSubjectIdentity(qualified[1], qualified[2]) : null;
+  if (identity) return { kind: "token", ref: identity.address, chain: identity.chain, via: identity.chain === "solana" ? "solana" : /^0x[0-9a-f]{40}$/i.test(identity.address) ? "evm" : "address-candidate" };
   const parsedUrl = inputUrl(s);
   const hostname = parsedUrl?.hostname.toLowerCase() ?? "";
   const isDexUrl = !!parsedUrl && approvedHost(hostname, "dexscreener.com");

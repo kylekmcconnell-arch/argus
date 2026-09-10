@@ -1,3 +1,4 @@
+import { tokenSubjectIdentity } from "../lib/tokenIdentity";
 import type { RunnableTokenInput, TokenInput } from "../lib/resolveInput";
 import {
   dexByPairResult,
@@ -33,9 +34,9 @@ function candidateFromPair(pair: DexPair): TokenCandidate | null {
 
   let input: RunnableTokenInput;
   if (chain === "solana" && SOLANA_ADDRESS.test(address)) {
-    input = { kind: "token", ref: address, via: "solana" };
+    input = { kind: "token", ref: address, chain, via: "solana" };
   } else if (EVM_ADDRESS.test(address)) {
-    input = { kind: "token", ref: address.toLowerCase(), via: "evm" };
+    input = { kind: "token", ref: address.toLowerCase(), chain, via: "evm" };
   } else {
     // DexScreener can still audit non-EVM/non-Solana markets by exact pair. Do
     // not mislabel an arbitrary chain address as EVM.
@@ -48,7 +49,7 @@ function candidateFromPair(pair: DexPair): TokenCandidate | null {
 
   return {
     input,
-    canonicalRef: chain === "solana" ? address : EVM_ADDRESS.test(address) ? address.toLowerCase() : address,
+    canonicalRef: tokenSubjectIdentity(chain, address)?.ref ?? address,
     chain,
     symbol: String(pair.baseToken?.symbol ?? "").trim(),
     name: String(pair.baseToken?.name ?? "").trim(),
@@ -106,6 +107,7 @@ export async function resolveTokenSubject(input: TokenInput): Promise<TokenSubje
   const rawLower = raw.toLowerCase();
   return finish(uniqueCandidates(result.pairs, (pair) => {
     const address = String(pair.baseToken?.address ?? "").trim();
+    if (input.chain && pair.chainId !== input.chain) return false;
     if (input.via === "solana") return address === raw;
     if (input.via === "evm") return address.toLowerCase() === rawLower;
     // Only the explicit long-address candidate may recover historical Solana

@@ -1,3 +1,5 @@
+import { payloadTokenIdentity } from "../src/lib/tokenIdentity.js";
+import { normalizeSubjectRef } from "../src/lib/subjectRef.js";
 // Organization-scoped report projections plus immutable case versions.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
@@ -43,8 +45,8 @@ const STORED_KINDS = new Set([...CASE_KINDS, "watch"]);
 const CLIENT_METHODOLOGY_VERSION: Record<"person" | "token" | "investigation" | "site", string> = {
   person: "argus-person-client-v1",
   token: "argus-token-v3-assessed-evidence",
-  investigation: "argus-investigation-v2-terminal-outcomes",
-  site: "argus-site-v1",
+  investigation: "argus-investigation-v3-explicit-facets",
+  site: "argus-site-v2-claim-eligibility",
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 type JsonRecord = Record<string, unknown>;
@@ -80,14 +82,7 @@ interface ResolvedCaseSubject extends CaseSubject {
 const asRecord = (value: unknown): JsonRecord =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 
-const EVM_ADDRESS = /^0x[0-9a-f]{40}$/i;
-const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const normRef = (value: string) => {
-  const clean = value.trim().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
-  if (SOLANA_ADDRESS.test(clean)) return clean;
-  if (EVM_ADDRESS.test(clean)) return clean.toLowerCase();
-  return clean.toLowerCase();
-};
+const normRef = normalizeSubjectRef;
 
 async function previousActiveReport(
   credentials: ServiceCredentials,
@@ -96,6 +91,8 @@ async function previousActiveReport(
   ref: string,
 ): Promise<PriorReportSnapshot | null> {
   try {
+    const aliases = await resolveCaseSubjects(credentials, organizationId, ref);
+    ref = aliases.find(subject => subject.kind === kind)?.ref ?? ref;
     const response = await fetch(
       `${credentials.url}/rest/v1/${TABLE}?select=payload,report_version_id,ts&organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.${encodeURIComponent(kind)}&ref=eq.${encodeURIComponent(ref)}&order=ts.desc&limit=1`,
       { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
@@ -1014,7 +1011,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(413).json({ error: "report_too_large" });
         return;
       }
-      const ref = normRef(typeof body.ref === "string" ? body.ref : "");
+      let ref = normRef(typeof body.ref === "string" ? body.ref : "");
       const kind = typeof body.kind === "string" ? body.kind : "";
       if (!ref || !STORED_KINDS.has(kind) || body.payload == null) {
         res.status(400).json({ error: "ref_kind_payload_required" });
@@ -1109,10 +1106,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (CASE_KINDS.has(kind)) {
         const boundRef = payloadRef(kind, body.payload);
-        if (!boundRef || boundRef !== ref) {
+        const identity = payloadTokenIdentity(kind, body.payload);
+        if (!boundRef || (boundRef !== ref && identity?.ref !== ref)) {
           res.status(409).json({ error: "payload_subject_mismatch" });
           return;
         }
+        ref = identity?.ref ?? ref;
       }
 
       let materialDelta: MaterialReportDelta | null = null;

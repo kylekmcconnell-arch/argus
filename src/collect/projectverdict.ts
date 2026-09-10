@@ -10,7 +10,8 @@ import type { Recon } from "./recon";
 import { profileOf } from "./siteProfile";
 
 export interface HypeSignals {
-  fabricatedMetrics: string[]; // precise vanity stats from an unproven project
+  fabricatedMetrics: string[]; // reserved for independently contradicted claims
+  unverifiedMetrics?: string[];
   giantTam: string | null;     // "$500B market"
   guaranteed: string[];        // guaranteed-returns / manipulation language
   buzzwords: number;           // density of empty superlatives
@@ -29,16 +30,29 @@ export interface ProjectVerdict {
 const VANITY_NOUN = "robots|users|nodes|proofs?|transactions|holders|members|clients|launches|receipts|policies|validators|devices|agents|wallets|downloads";
 const METRIC = new RegExp(`\\b\\d{1,3}(?:,\\d{3})+\\b\\s*(?:${VANITY_NOUN})|\\b\\d{1,2}\\.\\d{1,2}\\s?%\\s*(?:uptime|accuracy|success)|\\b\\d+(?:\\.\\d+)?[mMbB]\\s+(?:${VANITY_NOUN})`, "gi");
 const TAM = /\$\s?\d{2,4}\s?(?:b|billion|t|trillion)\b[^.\n]{0,28}(?:market|tam|opportunity|industry|economy)/i;
-const GUARANTEED = /\bguaranteed\b|\brisk[-\s]?free\b|\bpassive income\b|\b\d{2,4}x\s+returns?\b|\bguaranteed\s+(?:returns?|profit|engagement|volume)\b/gi;
+const GUARANTEED = /\bguaranteed(?:\s+\w+){0,2}\s+(?:returns?|profits?|income|yield)\b|\b(?:returns?|profits?|income|yield)(?:\s+\w+){0,2}\s+guaranteed\b|\brisk[-\s]?free\b/gi;
 const BUZZ = /\b(revolutionary|next[-\s]?gen|world'?s first|paradigm|cutting[-\s]?edge|game[-\s]?chang\w+|unprecedented|disrupt\w*|unparalleled|seamless)\b/gi;
 
 function uniq(a: string[]): string[] { return [...new Set(a.map((s) => s.trim()))]; }
 
+// Limit automatic penalties to affirmative financial promises made by the
+// page. Negated, quoted, conditional and attributed examples need review.
+function affirmativePromises(content: string): string[] {
+  const hits: string[] = [];
+  for (const clause of content.split(/[.!?\n;]+/)) {
+    if (/\b(?:not|never|no|without|cannot|can.t|don.t|doesn.t|isn.t|aren.t|avoid|beware|scam|warning|if|example|claims?|says?|said|promises?)\b/i.test(clause) || /["“”]/.test(clause)) continue;
+    if (!/\b(?:returns?|profits?|invest\w*|income|earn\w*|money|yield)\b/i.test(clause)) continue;
+    hits.push(...(clause.match(GUARANTEED) ?? []));
+  }
+  return uniq(hits).slice(0, 6);
+}
+
 export function detectHype(content: string): HypeSignals {
   return {
-    fabricatedMetrics: uniq((content.match(METRIC) ?? [])).slice(0, 8),
+    fabricatedMetrics: [],
+    unverifiedMetrics: uniq((content.match(METRIC) ?? [])).slice(0, 8),
     giantTam: content.match(TAM)?.[0]?.trim() ?? null,
-    guaranteed: uniq((content.match(GUARANTEED) ?? [])).slice(0, 6),
+    guaranteed: affirmativePromises(content),
     buzzwords: (content.match(BUZZ) ?? []).length,
   };
 }
@@ -92,7 +106,7 @@ export function scoreProject(recon: Recon): ProjectVerdict {
 
   // ---- Claims hygiene (0-30) ----
   let claims = 30;
-  if (hype.fabricatedMetrics.length) { claims -= 9; reasons.push({ tone: "bad", text: `Grandiose, unverifiable metrics presented as fact: ${hype.fabricatedMetrics.slice(0, 3).join("; ")}.` }); }
+  if (hype.unverifiedMetrics?.length) reasons.push({ tone: "gap", text: `Numeric claims require corroboration: ${hype.unverifiedMetrics.slice(0, 3).join("; ")}. The page alone does not establish whether these figures are accurate.` });
   if (hype.giantTam) { claims -= 7; reasons.push({ tone: "warn", text: `Giant total-addressable-market framing: "${hype.giantTam}".` }); }
   if (hype.guaranteed.length) { claims -= 16; reasons.push({ tone: "bad", text: `Manipulation / guaranteed-return language: ${hype.guaranteed.slice(0, 3).join(", ")}.` }); }
   if (hype.buzzwords >= 4) { claims -= Math.min(8, hype.buzzwords); reasons.push({ tone: "warn", text: `Heavy on empty superlatives (${hype.buzzwords} buzzword hits) with thin substance.` }); }

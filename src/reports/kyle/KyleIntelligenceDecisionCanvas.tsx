@@ -161,7 +161,7 @@ function verdictHeadline(
   if (checksComplete && favorable && unresolvedCount === 0 && adverseCount === 0) return `${lead} No decision-critical gap is recorded.`;
   if (adverseCount > 0) return `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`;
   const unresolvedText = nextSteps.map((item) => `${item.label} ${item.detail ?? ""}`).join(" ").toLowerCase();
-  const unresolvedEvidence = /audit|security|governance|treasury|control/.test(unresolvedText)
+  const unresolvedEvidence = /security|governance|treasury|contract audit/.test(unresolvedText)
     ? "independent security and governance evidence"
     : /team|founder|leadership|identity|operator|advisor/.test(unresolvedText)
       ? "independent team and identity confirmation"
@@ -172,7 +172,7 @@ function verdictHeadline(
           : "some decision-critical evidence";
   if (strongest) {
     const strongestLabel = strongest.label.replace(/\s*&\s*/g, " and ");
-    return `${strongestLabel} is the strongest verified part of the case. The available public record still lacks ${unresolvedEvidence}.`;
+    return `${strongestLabel} has the most recorded supporting evidence. The available public record still lacks ${unresolvedEvidence}.`;
   }
   return `The available evidence establishes a starting position. The available public record still lacks ${unresolvedEvidence}.`;
 }
@@ -721,7 +721,7 @@ export function KyleIntelligenceDecisionCanvas({
       <section className="kyle-knowledge-state" aria-label="What ARGUS knows">
         <div className="kyle-knowledge-item kyle-tone-positive">
           <CheckCircle size={20} weight="duotone" aria-hidden="true" />
-          <span><strong>{sourceCount}</strong><small>source-backed score inputs</small></span>
+          <span><strong>{composition.length && composition.every((row) => row.supportCount != null) ? sourceCount : "Not recorded"}</strong><small>source-backed score inputs</small></span>
         </div>
         <div className={`kyle-knowledge-item kyle-tone-${adverseCount > 0 ? "negative" : "neutral"}`}>
           <WarningCircle size={20} weight="duotone" aria-hidden="true" />
@@ -783,7 +783,7 @@ export function KyleIntelligenceDecisionCanvas({
                   <ClaimLabel type={band === "Strong" || excluded ? "FACT" : "INFERENCE"} strength={band} />
                   <p>{sentence(row.rationale) || "No public rationale was saved for this dimension."}</p>
                   <div>
-                    <span className="mono">{row.supportCount ?? 0} supporting source{row.supportCount === 1 ? "" : "s"}</span>
+                    <span className="mono">{row.supportCount ?? "Unrecorded"} supporting source{row.supportCount === 1 ? "" : "s"}</span>
                     {(row.counterCount ?? 0) > 0 && <span className="mono kyle-text-negative">{row.counterCount} counter-signal{row.counterCount === 1 ? "" : "s"}</span>}
                     {(row.questionCount ?? 0) > 0 && <span className="mono kyle-text-unresolved">{row.questionCount} open question{row.questionCount === 1 ? "" : "s"}</span>}
                     {!excluded && <a href={row.evidenceHref ?? evidenceHref}>View evidence <ArrowRight size={13} weight="bold" /></a>}

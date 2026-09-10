@@ -1,3 +1,4 @@
+import { tokenSubjectIdentity } from "./tokenIdentity";
 // Background runner for TOKEN and INVESTIGATION scans — the analog of runner.ts
 // (person audits). The run executes at module scope, not inside the view, so
 // navigating away no longer aborts it: it keeps going, stays in the sidebar as
@@ -64,7 +65,7 @@ export function cancelScanRun(kind: ScanKind, ref: string, priv = false) {
   if (run?.status === "running") {
     run.status = "error";
     run.error = "cancelled";
-    void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: run.ref,
+    void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref,
       displayQuery: run.input, privateRun: run.priv, startedAt: run.startedAt,
       status: "failed", failureCode: "cancelled", failureDetail: "Scan cancelled by the user." });
   }
@@ -74,7 +75,7 @@ export function cancelScanRun(kind: ScanKind, ref: string, priv = false) {
 
 // Start (or re-attach to) a background token audit.
 export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: { force?: boolean }): ScanRun {
-  const ref = norm(input.ref);
+  const ref = tokenSubjectIdentity(input.chain, input.ref)?.ref ?? norm(input.ref);
   const key = `token:${priv ? "private" : "public"}:${ref}`;
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
@@ -88,9 +89,9 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
   aborts.set(key, () => { cancelled = true; controller.abort(); });
   (async () => {
     try {
-      await reserveInvestigationCredit(run.creditKey, "token", run.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
+      await reserveInvestigationCredit(run.creditKey, "token", input.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
       if (cancelled) {
-        void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: run.ref, displayQuery: run.input,
+        void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
           privateRun: run.priv, startedAt: run.startedAt, status: "failed", failureCode: "cancelled", failureDetail: "Scan cancelled." });
         return;
       }
@@ -106,7 +107,7 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
         run.error = "not_found";
         emit();
         void finishScanReceipt({
-          runKey: run.creditKey, kind: "token", canonicalRef: run.ref, displayQuery: run.input,
+          runKey: run.creditKey, kind: "token", canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
           privateRun: run.priv, startedAt: run.startedAt, status: "failed",
           failureCode: "not_found", failureDetail: "No DEX pair was found for this contract.",
         });
@@ -118,7 +119,7 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
         run.error = String(e);
         emit();
         void finishScanReceipt({
-          runKey: run.creditKey, kind: "token", canonicalRef: run.ref, displayQuery: run.input,
+          runKey: run.creditKey, kind: "token", canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
           privateRun: run.priv, startedAt: run.startedAt, status: "failed",
           failureCode: "collection_failed", failureDetail: run.error,
         });
@@ -135,7 +136,7 @@ export function startInvestigationScan(
   opts?: { force?: boolean; intent?: ResearchIntent },
 ): ScanRun {
   const rawInput = input.ref;
-  const ref = norm(input.ref);
+  const ref = tokenSubjectIdentity(input.chain, input.ref)?.ref ?? norm(input.ref);
   const key = `investigation:${priv ? "private" : "public"}:${ref}`;
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
@@ -153,9 +154,9 @@ export function startInvestigationScan(
   aborts.set(key, () => { cancelled = true; });
   void (async () => {
     try {
-      await reserveInvestigationCredit(run.creditKey, "investigation", run.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
+      await reserveInvestigationCredit(run.creditKey, "investigation", input.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
       if (cancelled) {
-        void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: run.ref, displayQuery: run.input,
+        void finishScanReceipt({ runKey: run.creditKey, kind: run.kind, canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
           privateRun: run.priv, startedAt: run.startedAt, status: "failed", failureCode: "cancelled", failureDetail: "Scan cancelled." });
         return;
       }
@@ -171,7 +172,7 @@ export function startInvestigationScan(
           aborts.delete(key);
           emit();
           void finishScanReceipt({
-            runKey: run.creditKey, kind: "investigation", canonicalRef: run.ref, displayQuery: run.input,
+            runKey: run.creditKey, kind: "investigation", canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
             privateRun: run.priv, startedAt: run.startedAt, status: "failed",
             failureCode: "collection_failed", failureDetail: error,
           });
@@ -185,7 +186,7 @@ export function startInvestigationScan(
         aborts.delete(key);
         emit();
         void finishScanReceipt({
-          runKey: run.creditKey, kind: "investigation", canonicalRef: run.ref, displayQuery: run.input,
+          runKey: run.creditKey, kind: "investigation", canonicalRef: /^([a-z0-9_-]+):([a-z0-9]+)$/i.test(run.ref) ? run.ref.split(":")[1] : run.ref, displayQuery: run.input,
           privateRun: run.priv, startedAt: run.startedAt, status: "failed",
           failureCode: "collection_failed", failureDetail: run.error,
         });

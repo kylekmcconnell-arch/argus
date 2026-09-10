@@ -3275,10 +3275,12 @@ export function verifyBasicFactLead(
   officialHosts: readonly string[] = [],
   officialCounterpartyHosts: readonly string[] = [],
   ventureAssetRelationships: readonly VerifiedVentureAssetRelationship[] = [],
+  onReject?: (reason: string) => void,
 ): BasicFact | null {
+  const reject = (reason: string): null => { onReject?.(reason); return null; };
   const page = documentText(document);
-  if (!isAtomicValue(lead.predicate, lead.value)) return null;
-  if (lead.predicate === "legal_regulatory_event" && (!lead.eventStatus || !lead.attributedEntity)) return null;
+  if (!isAtomicValue(lead.predicate, lead.value)) return reject("non_atomic_claim");
+  if (lead.predicate === "legal_regulatory_event" && (!lead.eventStatus || !lead.attributedEntity)) return reject("missing_event_attribution");
   const official = sameOfficialScope(document, officialHosts);
   const publicSecurityRegulator = lead.predicate === "public_security"
     && regulatorySourceSupports(document.host, lead.predicate);
@@ -3330,10 +3332,10 @@ export function verifyBasicFactLead(
     : null;
   const excerpt = officialAssetPageEvidence
     ?? supportingSourcePassage(page, lead, verificationAliases, contextTokens);
-  if (!excerpt) return null;
+  if (!excerpt) return reject("no_supporting_passage");
   const claimClause = officialAssetPageEvidence
     ?? governingClaimClause(excerpt, lead, verificationAliases, contextTokens);
-  if (!claimClause) return null;
+  if (!claimClause) return reject("no_governing_claim");
   // Project display names are weak identifiers. A fetched passage about a
   // real same-named company can satisfy literal subject/value/predicate checks
   // perfectly while still belonging to the wrong entity. Apply the shared
@@ -3356,9 +3358,9 @@ export function verifyBasicFactLead(
       sourceUrl: document.url,
       sourceTitle: lead.sourceTitle,
       excerpt: claimClause,
-    })) return null;
+    })) return reject("subject_binding_failed");
   }
-  if (lead.predicate === "partnership" && PARTNERSHIP_UNCERTAINTY.test(claimClause)) return null;
+  if (lead.predicate === "partnership" && PARTNERSHIP_UNCERTAINTY.test(claimClause)) return reject("uncertain_relationship");
   // A related venture's first-party page may stand in for the person's name,
   // but only explicit crypto-token language may do so. A stock ticker or
   // security symbol on that same site must remain public_security evidence.
@@ -3374,15 +3376,15 @@ export function verifyBasicFactLead(
     // Project canonical-token verification remains on its existing path. The
     // stricter ownership gate applies only when a venture relationship stands
     // in for an audited person or investor.
-    if (personOrInvestorAsset && (!explicitTokenLanguage || !affirmativeVentureLink)) return null;
-    if (!personOrInvestorAsset && !EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) && !affirmativeVentureLink) return null;
+    if (personOrInvestorAsset && (!explicitTokenLanguage || !affirmativeVentureLink)) return reject("venture_token_binding_failed");
+    if (!personOrInvestorAsset && !EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) && !affirmativeVentureLink) return reject("token_language_missing");
   }
   const verifiedValue = lead.predicate === "public_security"
     ? verifiedPublicSecurityValue(lead.value, claimClause)
     : lead.predicate === "funding"
       ? verifiedFundingValue(lead.value, claimClause)
       : lead.value;
-  if (!verifiedValue) return null;
+  if (!verifiedValue) return reject("value_not_supported");
   const regulatory = !official && !officialCounterparty
     && regulatorySourceSupports(document.host, lead.predicate);
   const supportedQualifier = lead.qualifier && looseContainsPhrase(claimClause, lead.qualifier)
@@ -3394,7 +3396,7 @@ export function verifyBasicFactLead(
   const supportedAttributedEntity = lead.attributedEntity && looseContainsPhrase(excerpt, lead.attributedEntity)
     ? lead.attributedEntity
     : undefined;
-  if (lead.predicate === "legal_regulatory_event" && (!supportedEventStatus || !supportedAttributedEntity)) return null;
+  if (lead.predicate === "legal_regulatory_event" && (!supportedEventStatus || !supportedAttributedEntity)) return reject("event_attribution_not_supported");
   const rawAttributionScope = supportedAttributedEntity
     ? attributionScopeFor(supportedAttributedEntity, aliases)
     : undefined;
@@ -4765,6 +4767,7 @@ export async function collectBasicFacts(
   const primaryVerificationLeads = mergeLeads(primaryLeads, primaryBindingLeads);
   ctx.evidence.basicFactLeads = primaryVerificationLeads.map((lead) => ({ ...lead }));
 
+  const evidenceAttempts: import("../../src/lib/evidenceRetry").EvidenceAttempt[] = [];
   const verifyLeads = async (
     leads: readonly BasicFactLead[],
     sourceLimit: number,
@@ -4782,21 +4785,21 @@ export async function collectBasicFacts(
       ...primarySources,
       ...variants.map(({ lead }) => lead.sourceUrl),
     ])].slice(0, sourceLimit));
+    for (const { lead } of variants.filter(({ lead }) => !allowedSources.has(lead.sourceUrl))) {
+      evidenceAttempts.push({ questionId: lead.questionId ?? lead.predicate, predicate: lead.predicate, sourceUrl: lead.sourceUrl, outcome: "budget_deferred", reason: "source_budget" });
+    }
     return (await Promise.all(variants
       .filter(({ lead }) => allowedSources.has(lead.sourceUrl))
       .map(async ({ lead }) => {
         const result = await fetchOnce(lead.sourceUrl);
-        return result.status === "ok"
-          ? verifyBasicFactLead(
-            lead,
-            result,
-            aliases,
-            ctx.handle,
-            officialHosts,
-            officialCounterpartyHosts,
-            assetRelationships,
-          )
-          : null;
+        let reason = result.status === "ok" ? "source_supported" : result.reason;
+        const fact = result.status === "ok" ? verifyBasicFactLead(
+          lead, result, aliases, ctx.handle, officialHosts, officialCounterpartyHosts,
+          assetRelationships, rejection => { reason = rejection; },
+        ) : null;
+        evidenceAttempts.push({ questionId: lead.questionId ?? lead.predicate, predicate: lead.predicate,
+          sourceUrl: lead.sourceUrl, outcome: fact?.status === "verified" ? "accepted" : fact ? "source_supported" : result.status === "ok" ? "rejected" : "fetch_failed", reason: fact?.status === "verified" ? "verified_source" : reason });
+        return fact;
       })))
       .filter((fact): fact is BasicFact => fact !== null);
   };
@@ -4978,6 +4981,7 @@ export async function collectBasicFacts(
     ...recoveredFounderVerified,
     ...relationshipBoundAssets,
   ];
+  ctx.evidence.evidenceAttempts = evidenceAttempts.slice(0, 500);
   ctx.evidence.basicFactLeads = allLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = resolveBasicFactCandidates(verified);
   const repairQuestionIds = new Set(repairQuestions.map((question) => question.id));

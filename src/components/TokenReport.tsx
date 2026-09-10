@@ -1,3 +1,5 @@
+import { tokenSubjectIdentity } from "../lib/tokenIdentity";
+import { tokenCompositionRow, tokenMarketPresentation } from "../lib/tokenPresentation";
 import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
@@ -58,7 +60,7 @@ import { ReportExperienceLayout, ReportStickyTableOfContents, type ReportCanvasN
 import { ScoreComposition } from "./ScoreComposition";
 import { ReportActionsRow } from "./ReportActionsRow";
 import { DimensionChapters } from "./DimensionChapters";
-import { compositionHeadline, orderByPlainAxis, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
+import { compositionHeadline, orderByPlainAxis, tokenDimensionChapters } from "../lib/dimensionChapters";
 import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
@@ -95,7 +97,7 @@ const TONE_RANK: Record<string, number> = { bad: 3, warn: 2, good: 1 };
 const TONE_GLYPH: Record<string, string> = { bad: "✗", warn: "⚠", good: "✓" };
 
 // A clean plain-text DD summary for pasting into a chat / channel.
-function tokenReportText(
+export function tokenReportText(
   d: TokenDossier,
   readiness: DecisionReadiness,
   presentation: PublicReportPresentation,
@@ -117,17 +119,18 @@ function tokenReportText(
       : evidence?.privateSession
         ? "· private ARGUS scan"
         : "· new ARGUS scan";
+  const market = tokenMarketPresentation(d);
   return [
     `$${d.symbol} · ${plainReportStatusLabel(presentation.resultLabel)}: ${presentation.displayVerdict} · ${d.chain}${d.capApplied ? ` (score limit: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
     plainReportStatusLabel(presentation.readinessLabel),
     `${readiness.successful}/${readiness.applicable} checks finished · ${readiness.unresolved} still open · ${readiness.coveragePercent}% complete`,
-    `Saved scoring result: ${d.verdict} ${d.score ?? "N/A"}/100`,
+    `Assessed score: ${d.score ?? "N/A"}/100`,
     presentation.note,
     plainLanguageSummary(d.headline),
     "",
     ...findings,
     "",
-    `Liquidity ${moneyShort(d.liquidityUsd)} · market cap ${moneyShort(d.mcap)} · token age ${age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} centralized exchanges` : ""}`,
+    `Liquidity ${moneyShort(market.liquidityUsd ?? undefined)} · market cap ${moneyShort(market.marketCap ?? undefined)} · FDV ${moneyShort(market.fullyDilutedValuation ?? undefined)} · token age ${market.ageDays == null ? "unknown" : age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} centralized exchanges` : ""}`,
     d.address,
     ...(exactLink ? [exactLink] : []),
     provenance,
@@ -233,15 +236,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId : null),
   );
   const controlPathDiscovery = buildPublicControlPathDiscovery([d.graph], "#token-relationships");
-  const compositionRows = orderByPlainAxis(d.axes.map((a) => ({
-    axis: a.key,
-    label: plainAxisLabel(a.key, a.label),
-    score: a.score,
-    weight: a.weight,
-    ...(a.assessed === false ? { applicability: "unassessed" as const } : {}),
-    rationale: a.rationale,
-    evidenceHref: `#dimension-${a.key}` as const,
-  })));
+  const compositionRows = orderByPlainAxis(d.axes.map(tokenCompositionRow))
+  const market = tokenMarketPresentation(d);
   const projectSite = d.socials.find((x) => x.label === "site" && /^https?:\/\//i.test(x.url))?.url;
   const projectDomain = projectSite ? projectSite.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase() : null;
   // The project's GitHub org (from its socials), for commit forensics — same
@@ -250,7 +246,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
     .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
   const otherLinks = d.socials.filter((x) => x.label !== "site" && !/x\.com|twitter\.com/i.test(x.url));
-  const [watched, setWatched] = useState(() => isWatched(d.address));
+  const [watched, setWatched] = useState(() => isWatched(tokenSubjectIdentity(d.chain, d.address)?.ref ?? d.address));
   const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
   const [copiedTxt, setCopiedTxt] = useState(false);
   const copyReport = () => {
@@ -295,7 +291,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     if (!canMutateWorkspace) return;
     setWatched(
       toggleWatch({
-        id: d.address, kind: "token", label: "$" + d.symbol, chain: d.chain,
+        id: tokenSubjectIdentity(d.chain, d.address)?.ref ?? d.address, kind: "token", label: "$" + d.symbol, chain: d.chain,
         via: isSol ? "solana" : "evm", addedAt: 0,
         snapshot: {
           verdict: presentedVerdict,
@@ -664,7 +660,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 value={(gp || s.lpAssessed === true) && s.lpAssessed !== false ? (s.lpBurnedPct >= 50 ? `burned ${s.lpBurnedPct.toFixed(0)}%` : s.lpLockedPct >= 50 ? `locked ${s.lpLockedPct.toFixed(0)}%` : s.lpTopUnlockedEoaPct >= 50 ? `1 wallet ${s.lpTopUnlockedEoaPct.toFixed(0)}%` : "not locked") : undefined}
                 na={(!gp && s.lpAssessed !== true) || s.lpAssessed === false}
               />
-              <Check label="Liquidity depth" ok={(d.liquidityUsd ?? 0) >= 50000} value={money(d.liquidityUsd)} />
+              <Check label="Liquidity depth" ok={(d.liquidityUsd ?? 0) >= 50000} na={market.liquidityUsd == null} value={money(market.liquidityUsd ?? undefined)} />
               <Check label="Creator holdings" ok={s.creatorPercent < 5} value={s.creatorPercentAssessed ? creatorPercentLabel : undefined} na={!s.creatorPercentAssessed} />
               <Check label="Holders" ok={Number(s.holderCount) >= 500} value={gp ? Number(s.holderCount).toLocaleString() : undefined} na={!gp} />
               <Check label="Top holder concentration" ok={s.topHolderPct == null || Number(s.topHolderPct) <= 25} value={s.topHolderPct != null ? `${Number(s.topHolderPct).toFixed(0)}%` : undefined} na={s.topHolderPct == null} />

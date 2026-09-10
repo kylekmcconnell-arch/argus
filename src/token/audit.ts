@@ -26,7 +26,7 @@ import {
   type ExplorerContractSource, type RugcheckReport,
 } from "./sources";
 
-export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string; assessed?: boolean; nominalWeight?: number }
+export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string; assessed?: boolean; nominalWeight?: number; evidenceRefs?: string[] }
 export interface Holder { address: string; percent: number; tag?: string; isContract?: boolean }
 
 export interface NormalizedSafety {
@@ -630,7 +630,7 @@ async function runTokenAudit(
     const resolved = await dexByTokenResult(input.ref, fetcher);
     if (!resolved.ok) throw new Error("token_market_unavailable");
     allPairs = resolved.pairs.filter((p) => input.via === "solana" ? p.chainId === "solana" : p.chainId !== "solana");
-    if (opts?.chain) allPairs = allPairs.filter((p) => p.chainId === opts.chain);
+    if (opts?.chain ?? input.chain) allPairs = allPairs.filter((p) => p.chainId === (opts?.chain ?? input.chain));
     pair = pickPair(allPairs, input.ref);
   }
   // A Solana mint has a known chain even when no DEX market exists. Preserve
@@ -1200,6 +1200,15 @@ async function runTokenAudit(
   for (const [index, axis] of axes.entries()) {
     axis.nominalWeight = axis.weight;
     axis.assessed = assessed[index];
+    // References resolve inside this immutable token payload, not to an inferred
+    // number of independent sources. Legacy snapshots have no such receipt.
+    const measurementPaths = [
+      ["marketEvidence.liquidityUsd"], ["safety.contractPropertiesAssessed"],
+      ["safety.taxesAssessed"], ["safety.holderCountAssessed", "topHolders"],
+      ["marketEvidence.vol24", "marketEvidence.liquidityUsd", "priceChange"],
+      ["marketEvidence.ageDays"],
+    ];
+    axis.evidenceRefs = axis.assessed ? measurementPaths[index] : [];
     if (!axis.assessed) {
       axis.weight = 0;
       axis.score = 0;

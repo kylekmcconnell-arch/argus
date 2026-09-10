@@ -15,6 +15,16 @@ vi.mock("./investigation", () => ({ streamInvestigation: mocks.streamInvestigati
 import { getScanRun, startInvestigationScan, startTokenScan } from "./scanrunner";
 
 describe("background scan credit gate", () => {
+  it("keeps simultaneous scans of the same address on different chains separate", async () => {
+    mocks.reserveInvestigationCredit.mockImplementation(() => new Promise(() => {}));
+    const ref = "0x0000000000000000000000000000000000000999";
+    const a = startTokenScan({kind:"token",via:"evm",ref,chain:"base"});
+    const b = startTokenScan({kind:"token",via:"evm",ref,chain:"ethereum"});
+    expect(a).not.toBe(b);
+    expect(getScanRun("token", `base:${ref}`)).toBe(a);
+    expect(getScanRun("token", `ethereum:${ref}`)).toBe(b);
+    mocks.reserveInvestigationCredit.mockReset();
+  });
   beforeEach(() => vi.clearAllMocks());
 
   it("starts no providers when the credit reservation is rejected", async () => {

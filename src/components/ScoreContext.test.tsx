@@ -32,7 +32,7 @@ const prior = (overrides: Partial<Parameters<typeof OutcomeDeltaStrip>[0]["prior
 });
 
 describe("OutcomeDeltaStrip", () => {
-  it("shows a rising score, verdict change, and coverage change as chips", () => {
+  it("shows a neutral score change with comparability context", () => {
     act(() => {
       root.render(<OutcomeDeltaStrip prior={prior()} score={90} verdict="PASS" coverage="complete" />);
     });
@@ -40,17 +40,18 @@ describe("OutcomeDeltaStrip", () => {
     expect(container.textContent).toContain("score 74 → 90 (+16)");
     expect(container.textContent).toContain("verdict CAUTION → PASS");
     expect(container.textContent).toContain("report status partial → complete");
-    expect(container.querySelector(".tint-pass")).not.toBeNull();
+    expect(container.querySelector(".tint-pass")).toBeNull();
   });
 
-  it("marks a falling score as caution and hides unchanged verdict and coverage", () => {
+  it("keeps falling scores neutral and hides unchanged verdict and coverage", () => {
     act(() => {
       root.render(<OutcomeDeltaStrip prior={prior({ score: 80, verdict: "PASS", completeness: "complete" })} score={75} verdict="PASS" coverage="complete" />);
     });
     expect(container.textContent).toContain("score 80 → 75 (-5)");
     expect(container.textContent).not.toContain("verdict");
-    expect(container.textContent).not.toContain("coverage");
-    expect(container.querySelector(".tint-caution")).not.toBeNull();
+    expect(container.textContent).not.toContain("report status");
+    expect(container.textContent).toContain("methodology");
+    expect(container.querySelector(".tint-caution")).toBeNull();
   });
 
   it("states a steady score plainly", () => {

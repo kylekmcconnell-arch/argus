@@ -1,3 +1,4 @@
+import { normalizeSubjectRef } from "../src/lib/subjectRef.js";
 // Create a capability-style public link for one immutable report version.
 // The opaque token is returned once; only its SHA-256 digest is persisted.
 import { createHash, randomBytes } from "node:crypto";
@@ -13,16 +14,8 @@ export const config = { maxDuration: 15 };
 
 const SHARE_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const SHAREABLE_KINDS = new Set(["person", "token", "investigation", "site"]);
-const EVM_ADDRESS = /^0x[0-9a-f]{40}$/i;
-const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-
-function normalizeRef(value: string): string {
-  const clean = value.trim().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
-  if (SOLANA_ADDRESS.test(clean)) return clean;
-  if (EVM_ADDRESS.test(clean)) return clean.toLowerCase();
-  return clean.toLowerCase();
-}
+const normalizeRef = normalizeSubjectRef;
 
 function safeParse(value: string): unknown {
   try { return JSON.parse(value); } catch { return null; }
@@ -43,21 +36,10 @@ async function resolveShareableVersion(
   ref: string,
   requestedReportVersionId?: string,
 ): Promise<string | null> {
-  let reportVersionId = requestedReportVersionId ?? "";
-  if (!reportVersionId) {
-    const reportsResponse = await fetch(
-      `${credentials.url}/rest/v1/reports?select=report_version_id&organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.${encodeURIComponent(kind)}&ref=eq.${encodeURIComponent(ref)}&report_version_id=not.is.null&order=ts.desc&limit=1`,
-      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
-    );
-    const reports = await jsonRows<{ report_version_id?: unknown }>(reportsResponse, "current report lookup");
-    reportVersionId = typeof reports[0]?.report_version_id === "string"
-      ? reports[0].report_version_id
-      : "";
-  }
+  const reportVersionId = requestedReportVersionId;
   if (!reportVersionId) return null;
 
-  // Whether selected explicitly or through the mutable projection, verify the
-  // immutable version and case against the exact workspace and subject.
+  // Validate the exact immutable version, tenant and subject.
   const versionsResponse = await fetch(
     `${credentials.url}/rest/v1/report_versions?select=id,case_id&id=eq.${encodeURIComponent(reportVersionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&limit=1`,
     { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
@@ -71,7 +53,12 @@ async function resolveShareableVersion(
     { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
   );
   const cases = await jsonRows<{ kind?: unknown; canonical_ref?: unknown }>(casesResponse, "case lookup");
-  if (cases[0]?.kind !== kind || cases[0]?.canonical_ref !== ref) return null;
+  const canonical = typeof cases[0]?.canonical_ref === "string" ? normalizeRef(cases[0].canonical_ref) : "";
+  // A pinned version may belong to a legacy address-only case. The immutable
+  // version, not a latest-address lookup, selects its chain.
+  const legacyAddressMatch = (kind === "token" || kind === "investigation") && !ref.includes(":")
+    && canonical.slice(canonical.indexOf(":") + 1) === ref;
+  if (cases[0]?.kind !== kind || (canonical !== ref && !legacyAddressMatch)) return null;
   return reportVersionId;
 }
 
@@ -126,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestedReportVersionId = hasRequestedVersion && typeof body.reportVersionId === "string"
     ? body.reportVersionId.trim().toLowerCase()
     : "";
-  if (hasRequestedVersion && !UUID.test(requestedReportVersionId)) {
+  if (!UUID.test(requestedReportVersionId)) {
     res.status(400).json({ error: "invalid_report_version", message: "A valid immutable report version is required." });
     return;
   }

@@ -22,7 +22,8 @@ describe("readPriorOutcome", () => {
       }
       return jsonResponse([{
         id: "11111111-1111-4111-8111-111111111111",
-        version: 6,
+        methodologyVersion: null,
+      version: 6,
         score: 75,
         verdict: "PASS",
         completeness_state: "complete",
@@ -34,6 +35,7 @@ describe("readPriorOutcome", () => {
     const prior = await readPriorOutcome("11111111-1111-1111-1111-111111111111", "@Uniswap");
     expect(prior).toEqual({
       reportVersionId: "11111111-1111-4111-8111-111111111111",
+      methodologyVersion: null,
       version: 6,
       score: 75,
       verdict: "PASS",

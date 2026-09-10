@@ -59,7 +59,7 @@ describe("Kyle intelligence report opening", () => {
     />));
 
     expect(container.textContent).toContain(
-      "Team and leadership is the strongest verified part of the case. The available public record still lacks independent security and governance evidence.",
+      "Team and leadership has the most recorded supporting evidence. The available public record still lacks independent security and governance evidence.",
     );
     expect(container.textContent).not.toContain("Independent evidence remains incomplete.");
   });
@@ -75,8 +75,8 @@ describe("Kyle intelligence report opening", () => {
       ]}
     />));
 
-    expect(container.textContent).toContain("Team and leadership is the strongest verified part of the case.");
-    expect(container.textContent).not.toContain("Product and execution is the strongest verified part of the case.");
+    expect(container.textContent).toContain("Team and leadership has the most recorded supporting evidence.");
+    expect(container.textContent).not.toContain("Product and execution has the most recorded supporting evidence.");
   });
 
   it("names the actual unresolved evidence area instead of hard-coding security and governance", async () => {
