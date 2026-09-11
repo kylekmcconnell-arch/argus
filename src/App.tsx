@@ -240,6 +240,44 @@ function briefTargetForPerson(dossier: Dossier): CaseBriefTarget | null {
   return null;
 }
 
+/**
+ * The immutable person version this client already holds for a handle.
+ *
+ * A live run that fails may recover only a version strictly newer than this.
+ * An absent baseline (no cached report for the handle) is version 0, so any
+ * stored version still counts as recovery — that is the original stream-drop
+ * case, where the client had nothing to confuse the result with.
+ */
+function personVersionBaseline(
+  cache: Map<string, Cached>,
+  handle: string,
+): { version: number; reportVersionId: string } {
+  const cached = cache.get(cacheKey(handle, "person"));
+  const context = cached?.kind === "person" ? cached.dossier.versionContext : undefined;
+  return {
+    version: typeof context?.version === "number" && Number.isFinite(context.version) ? context.version : 0,
+    reportVersionId: context?.reportVersionId ?? "",
+  };
+}
+
+/**
+ * Whether a stored report is newer than what the client held when the run began.
+ *
+ * Version numbers are monotonic per case, so this is an exact identity test
+ * with no dependence on client or server clocks. A stored report with no
+ * version context cannot be shown to post-date the baseline, so it only counts
+ * when the client had no baseline at all.
+ */
+function storedReportIsNewerThanBaseline(
+  report: StoredReport,
+  baseline: { version: number; reportVersionId: string } | null,
+): boolean {
+  const context = report.versionContext;
+  if (!baseline || (baseline.version === 0 && !baseline.reportVersionId)) return true;
+  if (!context) return false;
+  return context.version > baseline.version && context.reportVersionId !== baseline.reportVersionId;
+}
+
 function reconcileStoredPersonOutcome(ref: string, dossier: Dossier): void {
   if (!dossier?.report) return;
   reconcileAuditOutcome(ref, "person", {
@@ -396,11 +434,13 @@ export default function App() {
   // instead of the "no live dossier / demo" copy that implies nothing ever ran.
   const [liveError, setLiveError] = useState<string | null>(null);
   const [caseNotice, setCaseNotice] = useState<{
-    reason: "archived" | "missing" | "unavailable" | "search-unavailable" | "launch-failed" | "token-unresolved" | "case-ambiguous" | "privacy-conflict";
+    reason: "archived" | "missing" | "unavailable" | "search-unavailable" | "launch-failed" | "token-unresolved" | "case-ambiguous" | "privacy-conflict" | "rescan-failed";
     ref: string;
     kind?: ReportKind;
     mode?: TokenLaunchMode;
     reuseStored?: boolean;
+    /** A stored report exists for this subject, offered explicitly (rescan-failed only). */
+    storedAvailable?: boolean;
     /** The exact durable cases behind an ambiguous label, offered as a chooser (case-ambiguous only). */
     subjects?: StoredCaseSubject[];
   } | null>(null);
@@ -434,6 +474,11 @@ export default function App() {
   // Session cache of completed audits, so clicking a recent audit SHOWS the
   // result it already produced (with a Rescan button) instead of re-running it.
   const resultCache = useRef(new Map<string, Cached>());
+  // The immutable person version this client already held when the current live
+  // run started. A failed run may only "recover" a stored report that is newer
+  // than this: anything at or below it belongs to an earlier scan and would
+  // otherwise make a failed rescan look like it succeeded.
+  const personRunBaseline = useRef<{ ref: string; version: number; reportVersionId: string } | null>(null);
   const reportPersistenceQueues = useRef(new Map<string, Promise<void>>());
   const enqueueReportPersistence = useCallback((
     kind: "person" | "token" | "investigation",
@@ -544,6 +589,10 @@ export default function App() {
     const providers = await probeBackend();
     if (requestId !== safeAuditRequestRef.current) return;
     if (providers) {
+      // Freeze what this client already had for the handle before the run. On
+      // failure this is what separates a genuine stream-drop recovery (a NEWER
+      // stored version this run produced) from the previous report.
+      personRunBaseline.current = { ref: handle, ...personVersionBaseline(resultCache.current, handle) };
       // Start the background run NOW (before the view mounts) so it survives an
       // immediate navigation away — the runner owns the stream, not the view.
       const run = startPersonAudit(handle, priv, intent);
@@ -1083,33 +1132,46 @@ export default function App() {
       setPhase("notfound");
       return;
     }
-    const cached = resultCache.current.get(cacheKey(ref, "person"));
-    if (requestId !== safeAuditRequestRef.current) return;
-    if (cached) { showCached(ref, cached); return; }
+    // The session cache is NOT evidence about this run: it is filled by opening
+    // a stored report, and nothing clears it when a new audit starts. Reusing it
+    // here is what made a failed rescan silently show the previously opened
+    // report as if it had succeeded. Only the server can say whether this run
+    // actually produced anything.
+    const recorded = personRunBaseline.current;
+    const baseline = recorded && normalizeSubjectRef(recorded.ref) === normalizeSubjectRef(ref)
+      ? recorded
+      : null;
+    let storedFallback = false;
     for (let attempt = 0; attempt < 4; attempt++) {
       const rep = await fetchReport(ref, "person");
       if (requestId !== safeAuditRequestRef.current) return;
       if (rep?.payload && rep.kind === "person") {
         const c = { kind: "person" as const, dossier: storedPersonDossier(rep) };
-        cacheResult(resultCache.current, ref, c);
-        reconcileStoredPersonOutcome(ref, c.dossier);
-        showCached(ref, c);
-        // The ACTIVE stored version is the server truth for this case; fold its
-        // outcome back into the newest audit-log row so the Recent-cases chip
-        // stops contradicting the opened report (chip shows the last RUN, which
-        // may never have become the active projection). Same field mapping as
-        // the run-time logAudit above.
-        return;
+        if (!storedFallback) {
+          cacheResult(resultCache.current, ref, c);
+          // The ACTIVE stored version is the server truth for this case; fold its
+          // outcome back into the newest audit-log row so the Recent-cases chip
+          // stops contradicting the opened report (chip shows the last RUN, which
+          // may never have become the active projection). Same field mapping as
+          // the run-time logAudit above.
+          reconcileStoredPersonOutcome(ref, c.dossier);
+        }
+        // A newer immutable version means the run finished server-side and only
+        // our stream died — that is a real recovery. A version at or below the
+        // baseline is the report this run was meant to replace.
+        if (storedReportIsNewerThanBaseline(rep, baseline)) { showCached(ref, c); return; }
+        storedFallback = true;
       }
       await new Promise((r) => setTimeout(r, 1500));
       if (requestId !== safeAuditRequestRef.current) return;
     }
-    // Nothing was persisted — this is a real live failure. Surface WHY (timeout,
-    // stream drop, backend error) so the user can retry instead of being told the
-    // engine "ships with curated audits" as if it never tried.
+    // This run produced nothing. Surface WHY (timeout, stream drop, backend
+    // error) instead of presenting an older report as this run's result. The
+    // earlier report stays one explicit click away when one exists.
     setLiveError(getRun(ref)?.error ?? "The live audit didn't finish.");
+    setCaseNotice({ reason: "rescan-failed", ref, kind: "person", storedAvailable: storedFallback });
     setPhase("notfound");
-  }, [query, showCached]);
+  }, [query, setCaseNotice, showCached]);
 
 
   // Clicking a recent audit SHOWS the report already produced (with a Rescan
@@ -1906,6 +1968,8 @@ export default function App() {
                     ? "No stored case exists yet"
                     : caseNotice.reason === "launch-failed"
                       ? "Couldn't start the audit"
+                      : caseNotice.reason === "rescan-failed"
+                        ? "The scan didn't finish"
                       : caseNotice.reason === "privacy-conflict"
                         ? "A scan is already running in another privacy mode"
                         : caseNotice.reason === "token-unresolved"
@@ -1921,6 +1985,10 @@ export default function App() {
                     ? "This link does not point to an existing immutable report. ARGUS did not automatically start a collector or spend investigation quota."
                     : caseNotice.reason === "launch-failed"
                       ? "ARGUS hit an unexpected resolver or orchestration error and exited the launch flow instead of leaving it stuck. Retry once; any same-subject run already in flight will be reused rather than duplicated."
+                      : caseNotice.reason === "rescan-failed"
+                        ? caseNotice.storedAvailable
+                          ? "This scan produced no new report, so ARGUS is not showing one. The last saved report is unchanged and still available below. It is the earlier scan's result, not this one's."
+                          : "This scan produced no new report, and nothing was saved for this subject. ARGUS did not show an older result in its place."
                       : caseNotice.reason === "privacy-conflict"
                         ? "ARGUS will not attach a private view to a public run, or suppress persistence for a public request by reusing a private run. Let the current scan finish, then retry."
                         : caseNotice.reason === "token-unresolved"
@@ -1949,7 +2017,7 @@ export default function App() {
                   ))}
                 </div>
               ) : null}
-              {caseNotice.reason === "launch-failed" && liveError && (
+              {(caseNotice.reason === "launch-failed" || caseNotice.reason === "rescan-failed") && liveError && (
                 <div role="alert" className="mono panel-inset mt-3 max-w-md break-words px-3 py-2 text-left text-[12.5px] text-ink-dim">
                   {liveError}
                 </div>
@@ -1959,6 +2027,7 @@ export default function App() {
                   onClick={() => {
                     if (caseNotice.reason === "archived") setPhase("dossiers");
                     else if (caseNotice.reason === "missing") reset();
+                    else if (caseNotice.reason === "rescan-failed") void onAudit(caseNotice.ref, privRef.current);
                     else if (caseNotice.reason === "unavailable") void onOpenRecent(caseNotice.ref, caseNotice.kind);
                     else if (caseNotice.reason === "search-unavailable" || caseNotice.reason === "launch-failed") void onSafeAuditMode(
                       caseNotice.ref,
@@ -1978,6 +2047,8 @@ export default function App() {
                       ? "Back to home"
                     : caseNotice.reason === "privacy-conflict"
                       ? "Back to home"
+                      : caseNotice.reason === "rescan-failed"
+                        ? "Run the scan again"
                       : caseNotice.reason === "launch-failed"
                         ? "Retry audit"
                         : caseNotice.reason === "unavailable" || caseNotice.reason === "search-unavailable"
@@ -1997,6 +2068,21 @@ export default function App() {
                     className="rounded-lg border border-line px-5 py-2.5 text-[13.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
                   >
                     {caseNotice.reason === "archived" ? "Start fresh scan and reopen" : "Start a new scan"}
+                  </button>
+                )}
+                {/* The earlier report is still real evidence — it just is not
+                    this run's result. Offer it explicitly instead of showing it
+                    as though the scan had succeeded. */}
+                {caseNotice.reason === "rescan-failed" && caseNotice.storedAvailable && (
+                  <button
+                    onClick={() => {
+                      const failed = caseNotice;
+                      setCaseNotice(null);
+                      void onOpenRecent(failed.ref, "person");
+                    }}
+                    className="rounded-lg border border-line px-5 py-2.5 text-[13.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                  >
+                    Open last saved report
                   </button>
                 )}
               </div>

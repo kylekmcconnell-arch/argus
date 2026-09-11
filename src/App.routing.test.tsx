@@ -69,13 +69,16 @@ vi.mock("./components/Landing", () => ({
 }));
 
 vi.mock("./components/LiveRun", () => ({
-  LiveRun: ({ onDone }: { onDone: (dossier: Record<string, unknown>) => void }) => (
-    <button data-testid="finish-person-run" onClick={() => onDone({ handle: "@private_source", report: { audit_id: "private-person" } })}>Finish person run</button>
+  LiveRun: ({ onDone, onError }: { onDone: (dossier: Record<string, unknown>) => void; onError: () => void }) => (
+    <>
+      <button data-testid="finish-person-run" onClick={() => onDone({ handle: "@private_source", report: { audit_id: "private-person" } })}>Finish person run</button>
+      <button data-testid="fail-person-run" onClick={() => { void onError(); }}>Fail person run</button>
+    </>
   ),
 }));
 
 vi.mock("./components/Report", () => ({
-  Report: (props: { dossier: Record<string, unknown>; onAudit?: (q: string) => void; onOpenTokenReport?: (token: Record<string, unknown>) => void; onOpenProject?: (name: string) => void; onOpenBrief?: () => void }) => {
+  Report: (props: { dossier: Record<string, unknown>; onAudit?: (q: string) => void; onOpenTokenReport?: (token: Record<string, unknown>) => void; onOpenProject?: (name: string) => void; onOpenBrief?: () => void; onRescan?: () => void }) => {
     harness.personReports.push(props);
     return (
       <div data-testid="stored-person-report">
@@ -84,6 +87,7 @@ vi.mock("./components/Report", () => ({
         {props.onOpenTokenReport && (props.dossier.threat as { dossier?: Record<string, unknown> } | undefined)?.dossier && <button data-testid="open-included-token" onClick={() => props.onOpenTokenReport?.((props.dossier.threat as { dossier: Record<string, unknown> }).dossier)}>Open included token</button>}
         {props.onOpenProject && <button data-testid="project-pivot" onClick={() => props.onOpenProject?.("Private Project")}>Open project pivot</button>}
         {props.onOpenBrief && <button data-testid="person-case-brief" onClick={props.onOpenBrief}>Case brief</button>}
+        {props.onRescan && <button data-testid="person-rescan" onClick={props.onRescan}>Rescan</button>}
       </div>
     );
   },
@@ -1964,5 +1968,67 @@ describe("App routing safety", () => {
     expect(view.querySelector("[data-testid='stored-investigation-report']")).toBeNull();
     expect(view.textContent).toContain("You have no investigation credits left.");
     expect(view.textContent).toContain("Retry audit");
+  });
+
+  const storedPersonReport = (version: number) => ({
+    kind: "person",
+    ref: "persisted_person",
+    payload: personResult({ state: "persisted", reportVersionId: `version-${version}` }),
+    versionContext: { caseId: "case-person", reportVersionId: `version-${version}`, version },
+  });
+  /** Serve one immutable person version through both stored-report readers. */
+  const servePersonVersion = (version: number) => {
+    harness.fetchReportState.mockResolvedValue({ status: "open", report: storedPersonReport(version) });
+    harness.fetchReport.mockResolvedValue(storedPersonReport(version));
+  };
+
+  /** Run the recovery poll (4 attempts, 1.5s apart) without waiting in real time. */
+  async function failPersonRunAndSettle(view: HTMLDivElement): Promise<void> {
+    vi.useFakeTimers();
+    try {
+      await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='fail-person-run']")?.click());
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle();
+  }
+
+  it("keeps a failed person rescan visible instead of restoring the report it was meant to replace", async () => {
+    // The stored version never changes: the rescan produced nothing, so the
+    // server still serves version 4. Showing it would read as a successful scan.
+    servePersonVersion(4);
+    harness.getRun.mockReturnValue({ error: "The collector timed out before any evidence was saved." });
+
+    const view = await renderApp("/?s=persisted_person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='person-rescan']")?.click());
+    await settle();
+    await failPersonRunAndSettle(view);
+
+    expect(view.querySelector("[data-testid='stored-person-report']")).toBeNull();
+    expect(view.textContent).toContain("The scan didn't finish");
+    expect(view.textContent).toContain("The collector timed out before any evidence was saved.");
+    expect(view.textContent).toContain("Run the scan again");
+    // The earlier report stays reachable, but only behind an explicit action.
+    expect(view.textContent).toContain("Open last saved report");
+  });
+
+  it("still recovers a person report the failed run actually persisted", async () => {
+    // A dropped SSE stream over a completed server-side audit: the active
+    // version moved past the one the client held, so this is real recovery.
+    servePersonVersion(4);
+
+    const view = await renderApp("/?s=persisted_person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='person-rescan']")?.click());
+    await settle();
+    servePersonVersion(5);
+    await failPersonRunAndSettle(view);
+
+    expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull();
+    expect(view.textContent).not.toContain("The scan didn't finish");
   });
 });
