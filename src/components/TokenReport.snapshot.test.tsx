@@ -184,7 +184,7 @@ describe("token report supplemental evidence boundary", () => {
 
     expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
     expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
-    expect(container.textContent).toContain("The state of the house");
+    expect(container.textContent).toContain("what the evidence tells us");
   });
 
   it("ignores a legacy Style 1 deep link and keeps the canonical report", () => {
@@ -192,7 +192,7 @@ describe("token report supplemental evidence boundary", () => {
     render(dossier());
     expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
     expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
-    expect(container.textContent).toContain("The state of the house");
+    expect(container.textContent).toContain("what the evidence tells us");
   });
 
   it("keeps a complete six-check token report complete when project graph and creator follow-ups are open", () => {
@@ -227,7 +227,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain(`$${symbol}`);
-    expect(container.textContent).toContain("The state of the house");
+    expect(container.textContent).toContain("what the evidence tells us");
     expect(container.querySelector('a[href^="https://dexscreener.com/search?q="]')?.textContent).toBe("Dexscreener");
     const decisionCanvas = container.querySelector('[data-canonical-decision-brief="true"]');
     expect(decisionCanvas?.textContent).toContain("88");

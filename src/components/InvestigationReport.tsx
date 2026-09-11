@@ -78,6 +78,7 @@ import { ReportDisclaimer } from "./ReportDisclaimer";
 import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
 import { ReportExperienceLayout, ReportStickyTableOfContents, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
+import { ReportChallengeButton } from "./ReportChallengeButton";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
 import { VerdictHero } from "./VerdictHero";
@@ -355,11 +356,13 @@ function ReportSectionHeading({
   title,
   description,
   id,
+  challengeAnchorId,
 }: {
   index: string;
   title: string;
   description: string;
   id?: string;
+  challengeAnchorId?: string | null;
 }) {
   return (
     <header className="report-section-heading" id={id}>
@@ -367,6 +370,7 @@ function ReportSectionHeading({
         <p className="eyebrow text-signal-lift">{index}</p>
         <h2 className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">{title}</h2>
         <p className="story-chapter-description mt-2 max-w-2xl leading-relaxed text-ink-dim">{description}</p>
+        <ReportChallengeButton context={title} anchorId={challengeAnchorId} />
       </div>
     </header>
   );
@@ -1618,7 +1622,7 @@ export function InvestigationReport({
             verdictLabel={readiness.status === "ready" ? observedTokenMeta.label : readinessLabel}
             score={token.score}
             scoreLabel="Token safety score"
-            scoreContext="Contract, tradeability, liquidity, holders, market data and sanctions."
+            scoreContext="Can it be bought and sold? Who can change its rules, and how concentrated are its funds and ownership?"
             scoreIsProvisional={readiness.status !== "ready"}
             favorable={favorableVerdict}
             verdictTone={decisionCanvasTone}
@@ -1649,7 +1653,7 @@ export function InvestigationReport({
               label: "Project diligence score",
               score: typeof accountReport.governing_score === "number" ? accountReport.governing_score : null,
               verdictLabel: verdictMeta(accountReport.composite_verdict).label,
-              context: "Team, product, token conduct, backers, traction and transparency.",
+              context: "Who runs the project, what it has built, and what evidence supports its claims about backing and use.",
               composition: projectCompositionRows,
               unavailableCopy: "The linked project report did not publish a diligence score.",
             } : undefined}
@@ -1659,6 +1663,7 @@ export function InvestigationReport({
             {facets.map(facet => <div key={facet.key} className="panel p-3">
               <p className="font-medium">{facet.label} · {facet.state}</p>
               <p className="mt-1 text-sm text-ink-dim">{facet.note}</p>
+              <ReportChallengeButton context={`${facet.label} · ${facet.state} · ${facet.note}`} anchorId={shareView ? null : "investigation-challenge"} label="Challenge this assessment" />
             </div>)}
           </section>
           {LEGACY_REPORT_HERO_ENABLED && <div className={`investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 ${readiness.status === "ready" ? "" : "xl:grid-cols-3"}`}>
@@ -1999,6 +2004,7 @@ export function InvestigationReport({
           <ReportSectionHeading
             index="02 · Why"
             title="Why this report reached its result"
+            challengeAnchorId={shareView ? null : "investigation-challenge"}
             description={showProjectBasicFacts
               ? "Start with the facts we could confirm. Possible leads stay separate so they are not mistaken for proof."
               : "Start with the saved evidence behind the score. Anything we could not confirm remains clearly marked below."}
@@ -2023,6 +2029,7 @@ export function InvestigationReport({
           <ReportSectionHeading
             index="03 · Market"
             title="What the market tells us"
+            challengeAnchorId={shareView ? null : "investigation-challenge"}
             description={`Company funding and the $${token.symbol} token are separate. Then review price, liquidity, ownership, and usage.`}
           />
           <div className="mt-3 space-y-3">
@@ -2085,6 +2092,7 @@ export function InvestigationReport({
           <ReportSectionHeading
             index="04 · People"
             title="Who is behind this project"
+            challengeAnchorId={shareView ? null : "investigation-challenge"}
             description="Team identity is a core diligence question. Start with the people and roles supported by sources, then review the project account and token creator."
           />
           {accountLeads.subjectAdverseLeads.length > 0 && !socialActivity && (
@@ -2517,6 +2525,7 @@ export function InvestigationReport({
             <ReportSectionHeading
               index={chapterLabel(connectionsChapterNumber, "Connections")}
               title="How these people and wallets connect"
+              challengeAnchorId={shareView ? null : "investigation-challenge"}
               description="The graph shows recorded links. A link by itself does not mean wrongdoing."
             />
             <Card title="Connection map · select a person, wallet, or project to inspect it">
@@ -2593,6 +2602,7 @@ export function InvestigationReport({
           <ReportSectionHeading
             index={chapterLabel(scanDetailsChapterNumber, "Method")}
             title="What ARGUS checked"
+            challengeAnchorId={shareView ? null : "investigation-challenge"}
             description="See which checks finished, what remains open, and the saved sources behind the report."
           />
           <div className="mt-3 space-y-3">

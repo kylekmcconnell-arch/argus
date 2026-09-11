@@ -89,7 +89,7 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
               <span className="score-composition-value mono text-[12px] tabular text-ink-faint">
                 <span className="text-[15px] font-semibold" style={{ color }}>{Math.round(ratio * 100)}</span>
                 {" /100"}
-                <span className="ml-2">drove {row.score} pts</span>
+                <span className="ml-2">adds {row.score} of {row.weight} points</span>
               </span>
             )}
           </div>
@@ -106,16 +106,16 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
           className={`text-ink-faint transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`}
         />
       </button>
+      <p className="px-4 pb-3 text-[13.5px] leading-relaxed text-ink-dim">{row.rationale || "No explanation was saved for this area. Review its evidence before relying on the number."}</p>
       <div
         id={detailId}
+        hidden={!open}
         className="grid motion-safe:transition-[grid-template-rows] motion-safe:duration-300 motion-safe:ease-out"
         style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
       >
         <div className="overflow-hidden">
           <div className="score-composition-detail px-4 pb-3.5 pt-0.5">
-            {row.rationale && (
-              <p className="max-w-[68ch] text-[13.5px] leading-relaxed text-ink">{row.rationale}</p>
-            )}
+            {row.evidenceStrength && <p className="text-[12px] text-ink-dim">Evidence type: {({ verified: "independently confirmed", measured: "recorded measurements", attributed: "reported by a named source", self_reported: "reported by the subject; not independent confirmation" })[row.evidenceStrength]}.</p>}
             {row.countsLine ? (
               <p className="mono mt-2 text-[11px] text-ink-faint">{row.countsLine}</p>
             ) : (support > 0 || counter > 0 || questions > 0) && (
@@ -134,11 +134,11 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
                   Read the evidence ↓
                 </a>
               )}
-              {challengeAnchor && !excluded && (
+              {challengeAnchor && (
                 <button
                   type="button"
                   onClick={() => requestChallenge(
-                    `${row.label} · scored ${row.score}/${row.weight}`,
+                    excluded ? `${row.label} · ${applicabilityLabel} · not scored` : `${row.label} · scored ${row.score}/${row.weight}`,
                     challengeAnchor.replace(/^#/, ""),
                   )}
                   className="cursor-pointer text-[12.5px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
@@ -183,6 +183,7 @@ export function ScoreComposition({ rows, totalScore, capNote, challengeAnchor = 
           )
         )}
       </div>
+      <p className="px-4 pb-3 text-[13px] leading-relaxed text-ink-dim">Each area explains its result below. Open an area to see its evidence or challenge it. Unknown areas are not proof of a problem; they limit what this report can establish.</p>
       <div className="divide-y divide-line/60">
         {rows.map((row) => (
           <Row

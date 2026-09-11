@@ -7,6 +7,7 @@ import {
 } from "./ReportCanvasPrimitives";
 import { plainDecisionText } from "../lib/plainDecisionText";
 import { requestChallenge } from "../lib/challenge";
+import { ReportChallengeButton } from "./ReportChallengeButton";
 import { VerdictArgumentBlock } from "./InvestigatorBrief";
 import { HERO_SCORE_RING_SIZE, ScoreRing } from "./ScoreRing";
 import { compositionRowColor } from "./ScoreComposition";
@@ -40,7 +41,7 @@ function prefersReducedMotion(): boolean {
 }
 
 function DualScoreCard({ score }: { score: DecisionCanvasScore }) {
-  const rows = (score.composition ?? []).filter((row) => row.score > 0);
+  const rows = (score.composition ?? []).filter((row) => !row.applicability);
   const rowCount = rows.length;
   const [activeIndex, setActiveIndex] = useState(() => prefersReducedMotion() ? Math.max(0, rows.length - 1) : -1);
 
@@ -160,7 +161,7 @@ function DecisionBoundaryBlock({ boundary, evidenceHref }: {
    human deciding, not a machine parsing. Items in the pushable column carry
    "Question this finding", which opens the ask console seeded
    with that exact concern. */
-function CaseColumn({ id, title, tone, items, emptyCopy, pushNote, challengeAnchorId }: {
+function CaseColumn({ id, title, tone, items, emptyCopy, challengeAnchorId }: {
   id?: string;
   title: string;
   tone: ReportCanvasTone;
@@ -174,7 +175,7 @@ function CaseColumn({ id, title, tone, items, emptyCopy, pushNote, challengeAnch
       : tone === "avoid" ? "var(--color-avoid)"
         : tone === "signal" ? "var(--color-signal)"
           : "var(--color-ink-faint)";
-  const pushable = Boolean(pushNote && challengeAnchorId);
+  const pushable = Boolean(challengeAnchorId);
   const visibleItems = items.slice(0, 3);
   const additionalItems = items.slice(3);
 
@@ -373,10 +374,10 @@ export function InvestigationDecisionCanvas(props: InvestigationDecisionCanvasPr
     <section id="report-summary" data-canonical-decision-brief="true" className="story-chapter report-section mt-6 scroll-mt-28">
       <header className="report-section-heading decision-brief-heading">
         <div>
-          <p className="eyebrow text-signal-lift">{presentationStyle === 2 ? "01 · State of the house" : "01 · Decision brief"}</p>
+          <p className="eyebrow text-signal-lift">01 · Report summary</p>
           <h2 className="story-chapter-title decision-state-title mt-1 text-ink">
             {presentationStyle === 2
-              ? <>{cleanSubject && <span>{cleanSubject}. </span>}<span className="decision-state-accent">The state of the house.</span></>
+              ? <>{cleanSubject && <span>{cleanSubject}: </span>}<span className="decision-state-accent">what the evidence tells us.</span></>
               : "What this report means"}
           </h2>
           {presentationStyle === 2 ? (
@@ -386,7 +387,7 @@ export function InvestigationDecisionCanvas(props: InvestigationDecisionCanvasPr
               </p>
               {whyCopy && (
                 <p className="decision-why mt-5 max-w-3xl text-ink-dim">
-                  <strong className="font-semibold text-ink">Why {score ?? verdictLabel}:</strong> {whyCopy}
+                  <strong className="font-semibold text-ink">Why this report reached its result:</strong> {whyCopy}
                 </p>
               )}
             </>
@@ -443,6 +444,21 @@ export function InvestigationDecisionCanvas(props: InvestigationDecisionCanvasPr
           </div>
         )}
       </header>
+
+      <section className="panel mt-4 px-5 py-4" aria-label="How to read this score">
+        <h3 className="font-semibold text-ink">How to read this score</h3>
+        <p className="mt-2 text-[13.5px] leading-relaxed text-ink-dim">Higher scores mean a stronger result under ARGUS checks. A score is not a percentage chance of success or a prediction of returns. Read the warning alongside the number: a serious finding can control the result.</p>
+        {presentationStyle !== 2 && whyCopy && <p className="mt-2 text-[13.5px] leading-relaxed"><strong>Why this result:</strong> {whyCopy}</p>}
+        <p className="mt-2 text-[13.5px] leading-relaxed text-ink-dim">{scoreIsProvisional
+          ? "This score uses the areas assessed so far. Some checks remain open, so new evidence may change it."
+          : "The score and the number of finished checks answer different questions. A finished check can still find a risk."} Missing information is a limit on the assessment, not proof of wrongdoing.</p>
+        <p className="mt-2 text-[13.5px] leading-relaxed text-ink-dim"><strong>Where the data comes from:</strong> <a href={evidenceHref} className="text-signal-lift underline">Open this report’s saved evidence</a> for the sources behind its findings. A statement by the subject, a provider’s measurement and an independently confirmed fact are different kinds of evidence. Where a source was not saved, treat the claim as unverified.</p>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          {applicable > 0 && <a href={methodologyHref} className="text-[13px] text-signal-lift underline">See checks and data gaps</a>}
+          <ReportChallengeButton context={`${scoreLabel} · ${score == null ? "not measured" : `${score}/100`}`} anchorId={challengeAnchorId} label="Challenge this score" />
+          {showDualScores && <ReportChallengeButton context={`${secondaryScore!.label} · ${secondaryScore!.score == null ? "not measured" : `${secondaryScore!.score}/100`}`} anchorId={challengeAnchorId} label={`Challenge ${secondaryScore!.label.toLowerCase()}`} />}
+        </div>
+      </section>
 
       {showDecisionDetails && <div className="canonical-decision-detail-source panel mt-3 overflow-hidden">
         {discovery && (
@@ -556,6 +572,7 @@ export function InvestigationDecisionCanvas(props: InvestigationDecisionCanvasPr
                   ? "No check results were saved."
                   : `${successful} finished, ${Math.max(0, applicable - successful)} open.`}
               </p>
+              <ReportChallengeButton context={`${checkScopeLabel} · ${successful} finished, ${Math.max(0, applicable - successful)} open`} anchorId={challengeAnchorId} label="Challenge coverage" />
             </section>
 
             <div className="mt-4 border-t border-line/60 pt-4">

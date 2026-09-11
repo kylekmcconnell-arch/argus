@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KyleIntelligenceDecisionCanvas } from "./KyleIntelligenceDecisionCanvas";
+import { CHALLENGE_EVENT, type ChallengeDetail } from "../../lib/challenge";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -42,6 +43,40 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
+});
+
+it("explains scores immediately without turning a high score into verified evidence", () => {
+  act(() => root.render(<KyleIntelligenceDecisionCanvas {...props} />));
+  expect(container.querySelector('[aria-label="How to read this score"]')?.textContent).toContain("not a percentage chance of success");
+  const rows = [...container.querySelectorAll<HTMLDetailsElement>(".kyle-composition-row")];
+  expect(rows.every(row => row.open)).toBe(true);
+  expect(rows[0]?.textContent).toContain("Evidence type: not recorded");
+  expect(rows[0]?.textContent).not.toContain("FACT");
+  expect(container.querySelector('.kyle-composition-detail a')?.getAttribute("href")).toBe("#evidence-ledger");
+  expect(container.querySelector('button[aria-label^="Challenge"]')).toBeNull();
+});
+
+it("challenges positive findings and missing areas with their exact context, without submitting", () => {
+  const seen: string[] = [];
+  const listener = (event: Event) => seen.push((event as CustomEvent<ChallengeDetail>).detail.context);
+  window.addEventListener(CHALLENGE_EVENT, listener);
+  try {
+    act(() => root.render(<KyleIntelligenceDecisionCanvas {...props} challengeAnchorId="ask-report" composition={[
+      ...props.composition,
+      { axis: "missing", label: "Ownership", score: 0, weight: 20, rationale: "Owner not confirmed", applicability: "unassessed", evidenceHref: null },
+    ]} />));
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>("button")];
+    act(() => buttons.find(button => button.getAttribute("aria-label")?.includes("What looks credible · Leadership identity"))?.click());
+    act(() => buttons.find(button => button.getAttribute("aria-label")?.includes("Ownership · unassessed"))?.click());
+    expect(seen).toEqual([
+      "What looks credible · Leadership identity is source-backed",
+      "Ownership · unassessed · not scored · Owner not confirmed",
+    ]);
+    const missing = [...container.querySelectorAll(".kyle-composition-row")].find(row => row.textContent?.includes("Owner not confirmed"));
+    expect(missing?.querySelector("a")).toBeNull();
+  } finally {
+    window.removeEventListener(CHALLENGE_EVENT, listener);
+  }
 });
 
 afterEach(async () => {
@@ -103,7 +138,7 @@ describe("Kyle intelligence report opening", () => {
     expect(container.textContent).toContain("55");
     expect(container.textContent).toContain("scored counter-signals");
     expect(container.textContent).toContain("unresolved evidence questions");
-    expect(container.textContent).toContain("The verdict, constructed from evidence.");
+    expect(container.textContent).toContain("Why each area received its score.");
     expect(container.textContent).not.toContain("Which independent security audits");
     expect(container.textContent).not.toContain("Return each event");
   });
