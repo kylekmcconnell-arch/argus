@@ -7,18 +7,34 @@ const version = '00000000-0000-4000-8000-000000000123';
 const org = '00000000-0000-4000-8000-000000000124';
 const target = '0x' + '1'.repeat(40);
 function response() { const res = { setHeader: vi.fn(), status: vi.fn(), json: vi.fn() }; res.status.mockReturnValue(res); return res; }
-function database(options: { chain?: string; claim?: string | null; absent?: boolean; archived?: boolean } = {}) {
+function database(options: { chain?: string; claim?: string | null; absent?: boolean; archived?: boolean; latest?: unknown; previous?: unknown } = {}) {
   const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/report_versions?')) return Response.json(options.absent ? [] : [{ case_id: version, payload: { token: { chain: options.chain ?? 'robinhood', address: target } } }]);
     if (url.includes('/cases?')) return Response.json([{ kind: 'investigation', status: options.archived ? 'archived' : 'open' }]);
     if (url.includes('/rpc/')) return Response.json(options.claim === undefined ? version : options.claim);
     if (init?.method === 'PATCH') return Response.json([{ state: 'completed', result: JSON.parse(String(init.body)).result }]);
-    return Response.json([{ state: 'running', run_id: version }]);
+    if (url.includes('state=eq.completed')) return Response.json(options.previous ? [options.previous] : []);
+    return Response.json([options.latest ?? { state: 'running', run_id: version }]);
   });
   vi.stubGlobal('fetch', fetcher); return fetcher;
 }
 beforeEach(() => { vi.resetAllMocks(); auth.mockResolvedValue({ organizationId: org, userId: version, role: 'analyst' }); research.mockResolvedValue({ status: 'partial' }); });
 describe('deep launch version authorization and deduplication', () => {
+  it.each(['failed', 'running'])('retains a completed snapshot when the latest attempt is %s', async state => {
+    const previous = { state: 'completed', run_id: 'previous', result: { status: 'partial' } };
+    const latest = { state, run_id: 'latest', result: null };
+    const fetcher = database({ latest, previous }); const res = response();
+    await handler({ method: 'GET', query: { reportVersionId: version } } as never, res as never);
+    expect(res.json).toHaveBeenCalledWith({ run: latest, previousRun: previous });
+    expect(fetcher.mock.calls.at(-1)?.[0]).toContain(`report_version_id=eq.${version}`);
+    expect(research).not.toHaveBeenCalled();
+  });
+  it('reports reuse instead of claiming a cooldown refresh collected new evidence', async () => {
+    database({ claim: null, latest: { state: 'completed', run_id: version } }); const res = response();
+    await handler({ method: 'POST', body: { reportVersionId: version, retryMissing: true } } as never, res as never);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ reused: true }));
+    expect(research).not.toHaveBeenCalled();
+  });
   it('derives target from tenant-scoped saved payload, ignoring client identity and endpoints', async () => {
     const fetcher = database(), res = response();
     await handler({ method: 'POST', body: { reportVersionId: version, address: 'attacker', rpcUrl: 'https://evil.example' } } as never, res as never);

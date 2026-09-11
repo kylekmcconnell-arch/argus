@@ -163,14 +163,19 @@ function collectorHandle(kind: SupportedGapReportKind, report: JsonRecord, paylo
 }
 
 function tokenCollectorInput(report: JsonRecord): RunnableTokenInput {
-  const input = resolveInput(text(report.ref, 500));
+  const token = record(report.payload);
+  const chain = text(token.chain, 40);
+  const address = text(token.address, 128);
+  const input = resolveInput(address);
   if (
     input.kind !== "token"
-    || (input.via !== "evm" && input.via !== "solana" && input.via !== "dexscreener")
+    || (input.via !== "evm" && input.via !== "solana")
+    || !/^[a-z0-9_-]{1,40}$/.test(chain)
+    || (input.via === "solana") !== (chain === "solana")
   ) {
-    throw new Error("source report is not bound to an exact token contract or DexScreener URL");
+    throw new GapInvestigationAuthorizationError("research_task_not_allowed", "The saved token needs an exact contract and chain before follow-up can run.");
   }
-  return input as RunnableTokenInput;
+  return { ...input, chain } as RunnableTokenInput;
 }
 
 function assertTokenCollectorScope(scope: AuthorizedResearchScope): void {
@@ -289,7 +294,10 @@ async function authorizeAndExecute(
       timeBudgetSeconds,
       acceptedCostCeilingUsd,
     });
-    if (supportedKind === "token") assertTokenCollectorScope(scope);
+    if (supportedKind === "token") {
+      assertTokenCollectorScope(scope);
+      tokenCollectorInput(report);
+    }
   } catch (error) {
     if (error instanceof GapInvestigationAuthorizationError) {
       res.status(409).json({ error: error.code, note: error.message });
@@ -389,6 +397,16 @@ async function authorizeAndExecute(
       });
     }
     if (!dossier) throw new Error("bounded collector returned no dossier");
+    if (supportedKind === "token") {
+      const original = record(payload);
+      const refreshed = dossier as TokenDossier;
+      const sameAddress = original.chain === "solana"
+        ? refreshed.address === original.address
+        : refreshed.address?.toLowerCase() === text(original.address, 128).toLowerCase();
+      if (refreshed.chain !== original.chain || !sameAddress) {
+        throw new Error("token follow-up returned a different contract or chain");
+      }
+    }
 
     const personDossier = supportedKind === "token" ? null : dossier as Dossier;
     const costRecord = record(dossier.cost);

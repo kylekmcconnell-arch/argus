@@ -3993,7 +3993,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 {onRescan && (
                   <button type="button" onClick={onRescan} className="btn-chip tint-signal min-h-11 shrink-0 gap-1.5 font-medium">
                     <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
-                    Retry missing checks
+                    Run a fresh assessment
                   </button>
                 )}
               </div>

@@ -32,11 +32,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (target?.chain !== 'robinhood') { res.status(422).json({ error: 'robinhood_report_required' }); return; }
     if (req.method === 'POST' && cases[0].status !== 'open') { res.status(409).json({ error: 'case_archived' }); return; }
     const latest = () => db(`deep_launch_runs?select=run_id,state,result,started_at,finished_at&${filter}&tool_version=eq.${VERSION}&order=started_at.desc&limit=1`);
-    if (req.method === 'GET') { res.status(200).json({ run: (await latest())[0] ?? null }); return; }
+    const savedAnalysis = async () => {
+      const run = (await latest())[0] ?? null;
+      // Keep the latest attempt visible, but do not let an outage erase the
+      // previous usable snapshot. It remains separately dated evidence.
+      const previousRun = run && run.state !== 'completed'
+        ? (await db(`deep_launch_runs?select=run_id,state,result,started_at,finished_at&${filter}&tool_version=eq.${VERSION}&state=eq.completed&order=started_at.desc&limit=1`))[0] ?? null
+        : null;
+      return { run, previousRun };
+    };
+    if (req.method === 'GET') { res.status(200).json(await savedAnalysis()); return; }
     runId = await db('rpc/claim_deep_launch', { method: 'POST', body: JSON.stringify({ p_org: auth.organizationId, p_version: version, p_user: auth.userId, p_tool: VERSION, p_retry: req.body?.retryMissing === true }) });
     if (!runId) {
-      const run = (await latest())[0] ?? null;
-      res.status(run?.state === 'running' ? 202 : 200).json({ run }); return;
+      const saved = await savedAnalysis();
+      res.status(saved.run?.state === 'running' ? 202 : 200).json({ ...saved, reused: true }); return;
     }
     // The browser can select only an authenticated saved version. Endpoints and
     // target identity are server-derived, never accepted from request fields.

@@ -18,6 +18,7 @@ import {
 } from "./reports";
 import type { TokenDossier } from "../token/audit";
 import type { ReportVersionContext } from "./reportVersion";
+import { authorizeGapInvestigation } from "./gapInvestigation";
 
 const legacyDossier = {
   report: { identity_confidence: "Confirmed", roles: ["FOUNDER"] },
@@ -79,6 +80,16 @@ describe("token gap investigation plan", () => {
     address: "0x1111111111111111111111111111111111111111",
   } as unknown as TokenDossier;
 
+  it.each(["unknown", "stale", "unavailable"] as const)("authorizes a saved %s token gap", (status) => {
+    const payload = withTokenGapInvestigationPlan(token, [{
+      checkId: "contract-safety", label: "Contract safety", status, retryable: true,
+    }]);
+    expect(authorizeGapInvestigation({
+      payload, gapId: "token-gap:contract-safety", requestedTaskIds: ["token-evidence-refresh"],
+      timeBudgetSeconds: 300, acceptedCostCeilingUsd: 1.5,
+    }).taskIds).toEqual(["token-evidence-refresh"]);
+  });
+
   it("freezes one integrated task for retryable checks the token audit can run", () => {
     const planned = withTokenGapInvestigationPlan(token, [
       {
@@ -114,7 +125,11 @@ describe("token gap investigation plan", () => {
     expect(planned.intelligence.questions).toEqual([{
       id: "token-gap:contract-safety",
       prompt: "Can a fresh token scan complete the contract safety check?",
+      domain: "security",
       state: "unavailable",
+      basis: "The saved token check did not produce current evidence.",
+      answerRefs: [],
+      sourceRefs: [],
       materiality: "critical",
     }]);
   });

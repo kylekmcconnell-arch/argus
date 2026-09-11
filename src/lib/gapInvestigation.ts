@@ -12,6 +12,8 @@ const OPEN_QUESTION_STATES = new Set([
   "unresolved",
   "unavailable",
   "not_collected",
+  "unknown",
+  "stale",
 ]);
 const OPEN_TASK_STATES = new Set(["planned", "partial", "unavailable"]);
 const REQUIRED_GATE_CAPABILITIES = new Set<ResearchCapability>([
