@@ -5,12 +5,12 @@ import {
   CheckCircle,
   ClockCounterClockwise,
   Eye,
-  MagnifyingGlassPlus,
   Question,
   ShieldCheck,
   WarningCircle,
 } from "@phosphor-icons/react";
 import { compositionRowColor, type CompositionRow } from "../../components/ScoreComposition";
+import { ReportChallengeButton } from "../../components/ReportChallengeButton";
 import { HERO_SCORE_RING_SIZE, ScoreRing } from "../../components/ScoreRing";
 import { plainDecisionText } from "../../lib/plainDecisionText";
 import type { DecisionLensId } from "../../intelligence/types";
@@ -189,6 +189,7 @@ function BriefColumn({
   tone,
   empty,
   href,
+  challengeAnchorId,
 }: {
   id?: string;
   title: string;
@@ -197,6 +198,7 @@ function BriefColumn({
   tone: "positive" | "caution" | "unresolved";
   empty: string;
   href: `#${string}`;
+  challengeAnchorId?: string | null;
 }) {
   return (
     <section id={id} className={`kyle-brief-column kyle-tone-${tone} scroll-mt-28`}>
@@ -213,6 +215,7 @@ function BriefColumn({
                   {item.detail && <small>{plainDecisionText(item.detail)}</small>}
                 </span>
               </a>
+              <ReportChallengeButton context={`${title} · ${item.label}`} anchorId={challengeAnchorId} label="Challenge this finding" />
             </li>
           ))}
         </ul>
@@ -655,9 +658,9 @@ export function KyleIntelligenceDecisionCanvas({
     >
       <header className="kyle-verdict-hero report-section-heading">
         <div className="kyle-verdict-copy">
-          <p className="kyle-overline eyebrow mono">01 · State of the house</p>
+          <p className="kyle-overline eyebrow mono">01 · Report summary</p>
           <p className="kyle-investigation-meta mono">VERDICT · {scoreLabel} {capturedAt ? `· SAVED ${capturedAt}` : "· CURRENT REPORT"}</p>
-          <h2>{name}<span className="kyle-state-accent">. The state of the house.</span></h2>
+          <h2>{name}<span className="kyle-state-accent">: what the evidence tells us.</span></h2>
           <p className="kyle-verdict-headline">{headline}</p>
           <p className="kyle-verdict-thesis">{thesis}</p>
           <div className="kyle-verdict-facts">
@@ -718,6 +721,19 @@ export function KyleIntelligenceDecisionCanvas({
         </div>
       </header>
 
+      <section className="panel my-4 px-5 py-4" aria-label="How to read this score">
+        <h3 className="font-semibold">How to read this score</h3>
+        <p className="mt-2 text-[13.5px] leading-relaxed">Higher scores mean a stronger result under ARGUS checks. The number is not a percentage chance of success or a prediction of returns. A serious finding can still control the verdict.</p>
+        <p className="mt-2 text-[13.5px] leading-relaxed">{scoreIsProvisional ? "The score uses the areas assessed so far; open checks may change it." : "A finished check can still find a risk."} Missing information limits the assessment; it is not proof of wrongdoing.</p>
+        <p className="mt-2 text-[13.5px] leading-relaxed"><strong>Where the data comes from:</strong> <a href={evidenceHref} className="text-signal-lift underline">Review the saved sources</a> behind this report. Measurements, statements by the subject and independently confirmed facts are different kinds of evidence. If a source was not saved, its verification cannot be established from this report.</p>
+        <div className="flex flex-wrap items-center gap-3">
+          {applicable > 0 ? <a href={methodologyHref} className="text-signal-lift underline">See finished checks and data gaps</a> : <span>No check results were saved for this score.</span>}
+          <ReportChallengeButton context={`${scoreLabel} · ${score == null ? "not measured" : `${score}/100`}`} anchorId={challengeAnchorId} label="Challenge this score" />
+          {dualScore && <ReportChallengeButton context={`${dualScore.label} · ${dualScore.score == null ? "not measured" : `${dualScore.score}/100`}`} anchorId={challengeAnchorId} label={`Challenge ${dualScore.label.toLowerCase()}`} />}
+          <ReportChallengeButton context={`${checkScopeLabel} · ${successful} of ${applicable} finished`} anchorId={challengeAnchorId} label="Challenge coverage" />
+        </div>
+      </section>
+
       <section className="kyle-knowledge-state" aria-label="What ARGUS knows">
         <div className="kyle-knowledge-item kyle-tone-positive">
           <CheckCircle size={20} weight="duotone" aria-hidden="true" />
@@ -755,38 +771,39 @@ export function KyleIntelligenceDecisionCanvas({
       <section id="composition" className="kyle-score-explanation scroll-mt-28" aria-labelledby="kyle-score-explanation-title">
         <div className="kyle-section-intro">
           <p className="kyle-overline mono">02 · WHY {score ?? verdictLabel}</p>
-          <h2 id="kyle-score-explanation-title">The verdict, constructed from evidence.</h2>
-          <p>Each dimension shows what it contributed, what remained available, and how strong the supporting record is.</p>
+          <h2 id="kyle-score-explanation-title">Why each area received its score.</h2>
+          <p>Read the saved reason for each area below. Points show its contribution before any final safety limit or adjustment. Open the sources to check the explanation.</p>
         </div>
         <div className="kyle-composition-ledger">
           <div className="kyle-composition-summary mono">
-            <span>{score == null ? "Score withheld" : `${score} points earned`}</span>
-            <span>{totalPossible || 100} possible</span>
+            <span>{score == null ? "Score withheld" : `Saved score: ${score}/100`}</span>
+            <span>{totalPossible} points available across the recorded areas</span>
           </div>
           {sortedComposition.length ? sortedComposition.map((row) => {
             const band = evidenceBand(row);
             const excluded = row.applicability !== undefined;
             const open = Math.max(0, row.weight - row.score);
             return (
-              <details key={row.axis} className="kyle-composition-row">
+              <details key={row.axis} open className="kyle-composition-row">
                 <summary>
                   <span className={`kyle-evidence-dot kyle-tone-${evidenceTone(band)}`} />
                   <span className="kyle-composition-name">
                     <strong>{row.label}</strong>
-                    <small>{band} evidence</small>
+                    <small>{excluded ? "Not included in the score" : "Saved assessment"}</small>
                   </span>
                   <span className="kyle-composition-points mono">{excluded ? <strong>{row.applicability === "unassessed" ? "Unknown" : "N/A"}</strong> : <><strong>{Math.round(row.score)}</strong> / {row.weight}</>}</span>
                   <span className="kyle-composition-open mono">{excluded ? "not scored" : open > 0 ? `${Math.round(open)} ${Math.round(open) === 1 ? "pt" : "pts"} not earned` : "fully earned"}</span>
                   <ArrowDown size={15} weight="bold" aria-hidden="true" />
                 </summary>
                 <div className="kyle-composition-detail">
-                  <ClaimLabel type={band === "Strong" || excluded ? "FACT" : "INFERENCE"} strength={band} />
+                  <p className="mono">Evidence type: {row.evidenceStrength ? ({ verified: "independently confirmed", measured: "recorded measurements", attributed: "reported by a named source", self_reported: "reported by the subject; not independent confirmation" })[row.evidenceStrength] : "not recorded in this score breakdown"}</p>
                   <p>{sentence(row.rationale) || "No public rationale was saved for this dimension."}</p>
                   <div>
                     <span className="mono">{row.supportCount ?? "Unrecorded"} supporting source{row.supportCount === 1 ? "" : "s"}</span>
                     {(row.counterCount ?? 0) > 0 && <span className="mono kyle-text-negative">{row.counterCount} counter-signal{row.counterCount === 1 ? "" : "s"}</span>}
                     {(row.questionCount ?? 0) > 0 && <span className="mono kyle-text-unresolved">{row.questionCount} open question{row.questionCount === 1 ? "" : "s"}</span>}
-                    {!excluded && <a href={row.evidenceHref ?? evidenceHref}>View evidence <ArrowRight size={13} weight="bold" /></a>}
+                    {row.evidenceHref !== null && <a href={row.evidenceHref ?? evidenceHref}>View evidence <ArrowRight size={13} weight="bold" /></a>}
+                    <ReportChallengeButton context={`${row.label} · ${excluded ? `${row.applicability} · not scored` : `${row.score}/${row.weight}`} · ${row.rationale}`} anchorId={challengeAnchorId} label="Challenge this area" />
                   </div>
                 </div>
               </details>
@@ -813,6 +830,7 @@ export function KyleIntelligenceDecisionCanvas({
               ? "No sourced support is recorded yet. Read the open questions before using this result."
               : "No verified adverse finding was recorded. Lower-scoring areas reflect limited demonstrated evidence or maturity; review the score breakdown and Verify next."}
             href={evidenceHref}
+            challengeAnchorId={challengeAnchorId}
           />
           <BriefColumn
             id="report-risks"
@@ -824,6 +842,7 @@ export function KyleIntelligenceDecisionCanvas({
               ? "No risk or major unanswered question is recorded in this saved report."
               : "ARGUS did not confirm a positive finding in this saved report."}
             href={evidenceHref}
+            challengeAnchorId={challengeAnchorId}
           />
         </div>
         <VerifyNextStrip items={nextSteps} rows={sortedComposition} href={methodologyHref} />
@@ -872,6 +891,7 @@ export function KyleIntelligenceDecisionCanvas({
           <div className="kyle-beneath-headlines-body">
             <ClaimLabel type="SIGNAL" strength="Moderate" />
             <h3>{plainDecisionText(discovery.headline)}</h3>
+            <ReportChallengeButton context={`ARGUS finding · ${discovery.headline}`} anchorId={challengeAnchorId} label="Challenge this finding" />
             <p>{plainDecisionText(discovery.consequence)}</p>
             {discovery.path && discovery.path.length > 1 && (
               <p className="kyle-discovery-path mono" aria-label={`Source-backed path: ${discovery.path.join(" to ")}`}>
@@ -909,6 +929,7 @@ export function KyleIntelligenceDecisionCanvas({
             <p className="kyle-overline mono">Decision lock</p>
             <h2 id="kyle-decision-lock-title">What controls this result.</h2>
             <p>{sentence(decisionBoundary.controllingFact)}</p>
+            <ReportChallengeButton context={`What controls this result · ${decisionBoundary.controllingFact}`} anchorId={challengeAnchorId} />
           </div>
           <dl>
             <div><dt>Current boundary</dt><dd>{sentence(decisionBoundary.boundary)}</dd></div>
@@ -929,7 +950,7 @@ export function KyleIntelligenceDecisionCanvas({
             <div><dt>Why it has not changed the verdict</dt><dd>{sentence(favorable ? argument?.againstLine : argument?.forLine) || "Its evidentiary weight is already reflected in the score."}</dd></div>
             <div><dt>What would make it material</dt><dd>{sentence(argument?.moveLine) || sentence(topNextStep?.label) || "New source-backed evidence would be required."}</dd></div>
           </dl>
-          {challengeAnchorId && <a href={`#${challengeAnchorId}`}>Challenge the thesis <MagnifyingGlassPlus size={15} weight="bold" /></a>}
+          <ReportChallengeButton context={`Report conclusion · ${thesis}`} anchorId={challengeAnchorId} label="Challenge the thesis" />
         </div>
       </section>
 

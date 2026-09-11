@@ -3496,8 +3496,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           scoreContext={roles.includes(SubjectClass.PROJECT)
             ? tokenAxisExcluded
               ? `Token conduct is ${tokenAxisApplicability.axisTreatment === "deferred" ? "deferred until launch" : "not applicable"}; the score is normalized across team, product, backers, traction and transparency.`
-              : "Team, product, token conduct, backers, traction and transparency."
-            : "Identity, operating record, relationships and attributable risk."}
+              : "Who runs the project, what it has built, and what evidence supports its claims about backing and use."
+            : "Who this person is, what they have done, and which relationships and concerns can be supported by evidence."}
           scoreIsProvisional={!presentation.final}
           favorable={favorableVerdict}
           verdictTone={decisionNarrativeTone}

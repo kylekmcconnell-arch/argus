@@ -100,7 +100,7 @@ describe("run cost line in the methodology footer", () => {
 
     expect(container.textContent).toContain("This investigation cost about $0.65.");
     expect(container.textContent).not.toContain("of it.");
-    expect(container.textContent).not.toContain("across");
+    expect(container.textContent).not.toMatch(/investigation cost[^.]*across/);
   });
 
   it("renders nothing for keyless or pre-ledger reports", () => {

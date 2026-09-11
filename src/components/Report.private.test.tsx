@@ -389,7 +389,7 @@ describe("private person report evidence boundary", () => {
     expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain("SuperGemma");
-    expect(container.textContent).toContain("The state of the house");
+    expect(container.textContent).toContain("what the evidence tells us");
     expect(container.querySelector('a[href="https://supergemma.example"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://x.com/0xsupergemma"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Report result and check status"]')?.classList.contains("hidden")).toBe(true);
@@ -664,7 +664,7 @@ describe("private person report evidence boundary", () => {
     expect(result?.className).toBe("hidden");
     expect(result?.getAttribute("aria-hidden")).toBe("true");
     const decisionCanvas = container.querySelector("#report-summary");
-    expect(decisionCanvas?.textContent).toContain("The state of the house");
+    expect(decisionCanvas?.textContent).toContain("what the evidence tells us");
     expect(decisionCanvas?.textContent).toContain("Required report checks");
 
     const toolbar = container.querySelector("header.sticky");
@@ -2287,7 +2287,7 @@ describe("decision-safe person report presentation", () => {
     expect(decisionResult?.getAttribute("aria-hidden")).toBe("true");
     const decisionCanvas = container.querySelector("#report-summary");
     expect(decisionCanvas?.textContent).toContain("INCOMPLETE");
-    expect(decisionCanvas?.textContent).toContain("The state of the house");
+    expect(decisionCanvas?.textContent).toContain("what the evidence tells us");
     expect(decisionCanvas?.textContent).not.toContain("EARLY SCORE");
     const preliminarySignal = [...container.querySelectorAll<HTMLElement>(".chip")]
       .find((chip) => chip.textContent?.includes("EARLY SCORE"));

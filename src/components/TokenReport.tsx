@@ -59,6 +59,7 @@ import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
 import { ReportExperienceLayout, ReportStickyTableOfContents, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
+import { ReportChallengeButton } from "./ReportChallengeButton";
 import { ReportActionsRow } from "./ReportActionsRow";
 import { DimensionChapters } from "./DimensionChapters";
 import { compositionHeadline, orderByPlainAxis, tokenDimensionChapters } from "../lib/dimensionChapters";
@@ -495,7 +496,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           verdictLabel={presentationMeta.label}
           score={d.score}
           scoreLabel="Token safety score"
-          scoreContext="Contract, tradeability, liquidity, holders, market data and sanctions."
+          scoreContext="Can it be bought and sold? Who can change its rules, and how concentrated are its funds and ownership?"
           scoreIsProvisional={d.assessment?.provisional === true || readiness.status !== "ready"}
           favorable={favorableVerdict}
           verdictTone={decisionCanvasTone}
@@ -538,6 +539,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
 
         <div id="token-market" className="mt-4 scroll-mt-28">
+          <ReportChallengeButton context="Market data: price, trading volume and liquidity" anchorId={shareView ? null : "token-challenge"} />
           <MarketPerformancePanel
             token={d}
             showCurrentIntelligence={showCurrentIntelligence}
@@ -618,6 +620,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         {/* panels */}
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           <Card title="Contract safety">
+            <ReportChallengeButton context="Contract safety" anchorId={shareView ? null : "token-challenge"} />
             <div className="divide-y divide-line/60">
               <Check label="Not a honeypot" ok={!s.honeypot} na={!gp} value={s.simChecked && !s.honeypot ? "simulated ✓" : undefined} />
               <Check label={isSol ? "Mint authority revoked" : "Supply not mintable"} ok={!s.mintable} na={!gp} />
@@ -649,6 +652,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </Card>
 
           <Card title="Liquidity & holders">
+            <ReportChallengeButton context="Liquidity and token holders" anchorId={shareView ? null : "token-challenge"} />
             <div className="divide-y divide-line/60">
               {/* On Solana the lock can be measured by RugCheck while GoPlus is
                   down, in which case GoPlus availability is the wrong gate: it
@@ -690,6 +694,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         {/* team & provenance + unified graph */}
         <div id="token-relationships" className="scroll-mt-28 mt-3 grid gap-3 lg:grid-cols-2">
           <Card title="Team and sources">
+            <ReportChallengeButton context="Team identity and sources" anchorId={shareView ? null : "token-challenge"} />
             <div className="mb-1 text-[11px] leading-snug text-ink-faint">Vet the people behind it. These run a full audit of the project's account and site.</div>
             {d.projectX ? (
               <div className="flex items-center justify-between gap-2 py-1.5">
@@ -756,6 +761,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             )}
           </Card>
           <Card title="Known connections">
+            <ReportChallengeButton context="Known connections" anchorId={shareView ? null : "token-challenge"} />
             <TrustGraph nodes={d.graph.nodes} edges={d.graph.edges} />
           </Card>
         </div>

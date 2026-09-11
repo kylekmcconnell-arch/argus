@@ -160,7 +160,7 @@ describe("investigation exact sharing", () => {
 
     expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
     expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
-    expect(container.textContent).toContain("The state of the house");
+    expect(container.textContent).toContain("what the evidence tells us");
   });
 
   it("ignores a legacy Style 1 deep link and keeps the canonical investigation", () => {
@@ -168,7 +168,7 @@ describe("investigation exact sharing", () => {
     render(investigation());
     expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
     expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
-    expect(container.textContent).toContain("The state of the house");
+    expect(container.textContent).toContain("what the evidence tells us");
   });
 
   it("keeps the header case label stable across saved versions of the same case", () => {
@@ -806,7 +806,7 @@ describe("investigation exact sharing", () => {
     const chapterLabels = [...container.querySelectorAll<HTMLElement>(".story-chapter .report-section-heading > div > .eyebrow")]
       .map((label) => label.textContent);
     expect(chapterLabels).toEqual([
-      "01 · State of the house",
+      "01 · Report summary",
       "02 · Why",
       "03 · Market",
       "04 · People",
