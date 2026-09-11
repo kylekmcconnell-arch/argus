@@ -138,6 +138,7 @@ const tokenDelegates = [
   "coingecko", "geckoterminal", "ofac-sdn", "arkham", "clone-check", "social-activity",
 ];
 const tokenGapPayload = {
+  chain: "ethereum",
   address: "0x0000000000000000000000000000000000000105",
   researchPlan: {
     schemaVersion: 1,
@@ -425,7 +426,7 @@ describe("gap investigation API", () => {
       taskIds: ["token-evidence-refresh"],
     });
     expect(auditToken).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "token", ref: tokenGapPayload.address, via: "evm" }),
+      expect.objectContaining({ kind: "token", ref: tokenGapPayload.address, via: "evm", chain: "ethereum" }),
       expect.any(Function),
       expect.objectContaining({ force: true, collectSocialActivity }),
     );
@@ -445,6 +446,34 @@ describe("gap investigation API", () => {
       }),
     );
     expect(runAudit).not.toHaveBeenCalled();
+  });
+
+  it.each(["base", "wrong-address"])("rejects a token refresh returning %s before saving a proposal", async (mismatch) => {
+    loadExactVersionReport.mockResolvedValueOnce({ caseStatus: "open", report: {
+      kind: "token", ref: tokenGapPayload.address, payload: tokenGapPayload,
+    } });
+    auditToken.mockResolvedValueOnce({ ...tokenGapPayload,
+      chain: mismatch === "base" ? "base" : "ethereum",
+      address: mismatch === "wrong-address" ? `0x${"f".repeat(40)}` : tokenGapPayload.address,
+    });
+    const { res } = response();
+    await handler(request("POST", { sourceReportVersionId: SOURCE_ID, gapId: "token-gap:contract-safety",
+      taskIds: ["token-evidence-refresh"], timeBudgetSeconds: 300, acceptedCostCeilingUsd: 3.5,
+    }) as never, res as never);
+    expect(persistGapInvestigationProposalBundle).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing saved chain before charging quota or collecting", async () => {
+    loadExactVersionReport.mockResolvedValueOnce({ caseStatus: "open", report: {
+      kind: "token", ref: tokenGapPayload.address, payload: { ...tokenGapPayload, chain: undefined },
+    } });
+    const { res, captured } = response();
+    await handler(request("POST", { sourceReportVersionId: SOURCE_ID, gapId: "token-gap:contract-safety",
+      taskIds: ["token-evidence-refresh"], timeBudgetSeconds: 300, acceptedCostCeilingUsd: 3.5,
+    }) as never, res as never);
+    expect(captured.status).toBe(409);
+    expect(consumeInvestigationQuota).not.toHaveBeenCalled();
+    expect(auditToken).not.toHaveBeenCalled();
   });
 
   it("fails closed for standalone token reports without a saved bounded plan", async () => {

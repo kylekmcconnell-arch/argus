@@ -12,6 +12,8 @@ export function DeepLaunchPanel({ chain, reportVersionId }: { chain: string; rep
 function SavedLaunchPanel({ reportVersionId }: { reportVersionId: string }) {
   const { role } = useArgusAuth();
   const [run, setRun] = useState<LaunchResearchRun | null>(null);
+  const [previousRun, setPreviousRun] = useState<LaunchResearchRun | null>(null);
+  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(false);
@@ -21,14 +23,14 @@ function SavedLaunchPanel({ reportVersionId }: { reportVersionId: string }) {
     setBusy(true); setError('');
     fetch(`/api/deep-launch?reportVersionId=${encodeURIComponent(reportVersionId)}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)]) })
       .then(async response => { if (!response.ok) throw new Error('Saved analysis could not be loaded.'); return response.json(); })
-      .then(data => { if (!controller.signal.aborted) { setRun(data.run); setLoaded(true); } })
+      .then(data => { if (!controller.signal.aborted) { setRun(data.run); setPreviousRun(data.previousRun ?? null); setLoaded(true); setNotice(''); } })
       .catch(() => { if (!controller.signal.aborted) { setLoaded(false); setError('Saved analysis could not be loaded. Retry before starting a new run.'); } })
       .finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
   }, [reportVersionId, reload]);
   async function start(retryMissing = false) {
     if (busy || !loaded) return;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       const response = await fetch('/api/deep-launch', { method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ reportVersionId, ...(retryMissing ? { retryMissing: true } : {}) }), signal: AbortSignal.timeout(60_000) });
@@ -37,17 +39,24 @@ function SavedLaunchPanel({ reportVersionId }: { reportVersionId: string }) {
         : response.status === 403 ? 'An analyst or owner can run this analysis.'
         : response.status === 409 ? 'This case is archived. Restore it before running new research.'
         : 'Analysis could not finish or save. Check saved analysis before retrying.');
+      setPreviousRun(data.previousRun ?? (run?.state === 'completed' ? run : previousRun));
       setRun(data.run);
+      if (data.reused) setNotice(data.run?.state === 'running'
+        ? 'An existing analysis is still running. No new collection started.'
+        : 'No new collection started. The saved analysis was reused during the refresh cooldown. Try again after two minutes.');
     } catch (e) { setError(e instanceof Error ? e.message : 'Analysis could not finish.'); setLoaded(false); }
     finally { setBusy(false); }
   }
-  const result = run?.result;
+  const showingPrevious = run?.state !== 'completed' && Boolean(previousRun?.result);
+  const result = showingPrevious ? previousRun?.result : run?.result;
   const canRun = role === 'owner' || role === 'analyst';
   return <section className="panel mt-4 px-5 py-5" aria-label="Deep launch analysis">
     <h3 className="text-base font-semibold">Deep launch analysis</h3>
     <p className="mt-2 text-sm text-ink-dim">How this token launched, evidence of trading, and who holds its liquidity position. This is supplemental research; it does not change the ARGUS score.</p>
     <p className="mt-1 text-xs text-ink-faint">Up to 32 provider requests, usually under a minute. A run uses one request from the workspace’s daily supplemental allowance. Provider charges depend on configured access.</p>
     {error && <p role="alert" className="mt-3 text-sm">{error}</p>}
+    {notice && <p role="status" className="mt-3 text-sm">{notice}</p>}
+    {showingPrevious && <p className="mt-3 text-sm text-ink-dim">Showing the last successful analysis below. The latest attempt has not replaced it; its collection date still applies.</p>}
     {busy && <p role="status" className="mt-3 text-sm">{loaded ? 'Collecting and saving launch evidence…' : 'Loading saved analysis…'}</p>}
     {run?.state === 'running' && !busy && <p role="status" className="mt-3 text-sm">An analysis is running. Check saved analysis shortly; no second collection will start while it is active.</p>}
     {run?.state === 'failed' && <p className="mt-3 text-sm">The previous attempt could not establish usable results. Available observations remain below.</p>}

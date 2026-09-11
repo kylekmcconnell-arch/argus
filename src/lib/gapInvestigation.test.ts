@@ -145,6 +145,15 @@ describe("gap investigation authorization", () => {
     expect(savedOpenGapQuestions(payload).map((question) => question.id)).toEqual(["gap.track-record"]);
   });
 
+  it.each(["unknown", "stale"])("keeps legacy %s gaps eligible for saved follow-up", (state) => {
+    const legacy = { ...payload, intelligence: { questions: [{
+      ...payload.intelligence.questions[0], state,
+    }] } };
+    expect(authorizeGapInvestigation({ payload: legacy, gapId: "gap.track-record",
+      requestedTaskIds: ["portfolio"], timeBudgetSeconds: 300, acceptedCostCeilingUsd: 3.5,
+    }).gap.state).toBe(state);
+  });
+
   it("keeps a fresh plan inside the authorized capability set", () => {
     const restricted = restrictResearchPlan(plan, ["identity_resolution", "portfolio_and_outcomes"]);
     expect(restricted.tasks.map((task) => task.id)).toEqual(["identity", "portfolio"]);

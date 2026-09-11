@@ -216,7 +216,11 @@ export function withTokenGapInvestigationPlan(
   const questions = open.map((check) => ({
     id: `token-gap:${check.checkId}`,
     prompt: `Can a fresh token scan complete the ${check.label.toLowerCase()} check?`,
-    state: check.status,
+    domain: "security",
+    state: check.status === "unavailable" ? "unavailable" : "unresolved",
+    basis: check.note || "The saved token check did not produce current evidence.",
+    answerRefs: [],
+    sourceRefs: [],
     materiality: check.decisionCritical === false ? "important" : "critical",
   }));
   const taskId = TOKEN_GAP_TASK_ID;
