@@ -105,7 +105,7 @@ describe("Kyle intelligence report opening", () => {
     />));
 
     expect(container.textContent).toContain(
-      "Team and leadership has the most recorded supporting evidence. The available public record still lacks independent security and governance evidence.",
+      "Team and leadership has the most recorded supporting evidence. Next to check: Establish a complete independent security history.",
     );
     expect(container.textContent).not.toContain("Independent evidence remains incomplete.");
   });
@@ -137,7 +137,8 @@ describe("Kyle intelligence report opening", () => {
       ]}
     />));
 
-    expect(container.textContent).toContain("The available public record still lacks independent usage and market evidence.");
+    expect(container.textContent).toContain("Next to check: Verify current customer adoption and recurring usage.");
+    expect(container.textContent).not.toContain("still lacks independent usage and market evidence");
     expect(container.textContent).not.toContain("still lacks independent security and governance evidence");
   });
 

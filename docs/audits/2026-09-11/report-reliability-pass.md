@@ -12,6 +12,7 @@ Scope: shared person, project and token report opening, score breakdown, source 
 | Unassessed, deferred and irrelevant areas counted toward displayed maximum | Exclude them from the denominator and score-ring normalization. Saved score stays unchanged. |
 | Finished count could coexist with “No check has finished yet” | Distinguish missing summaries from missing completed checks. |
 | Missing explanation claimed a counter-signal was already weighted | Say the saved report does not explain its effect. Empty concern summaries no longer imply a clean investigation. |
+| Headline inferred a whole category of absent independent evidence from keywords in an open question | Show the actual saved next check instead; do not extrapolate beyond that question. |
 | Duplicate composition IDs confused evidence navigation | Give the opening its own score-explanation ID. The investigation source overview points to the full breakdown, with a methodology fallback if absent. |
 | Supplemental retry implied only gaps were rerun | Label it Refresh launch analysis and disclose the full bounded rerun and supplemental request. |
 | All attributed launch findings called registry evidence | Label provider-reported evidence and list the providers attached to retained observation IDs. |

@@ -140,37 +140,21 @@ function cleanName(value: string | undefined): string {
 
 function verdictHeadline(
   rows: CompositionRow[],
-  favorable: boolean,
   adverseCount: number,
-  unresolvedCount: number,
   nextSteps: KyleDecisionItem[],
   checksComplete: boolean,
 ): string {
   const strongest = [...rows]
-    .filter((row) => row.weight > 0 && (row.supportCount ?? 0) > 0)
+    .filter((row) => row.applicability === undefined && row.weight > 0 && (row.supportCount ?? 0) > 0)
     .sort((left, right) => {
       const supportDifference = (right.supportCount ?? 0) - (left.supportCount ?? 0);
       if (supportDifference !== 0) return supportDifference;
       return (right.score / right.weight) - (left.score / left.weight);
     })[0];
-  const lead = strongest ? `${strongest.label} leads the evidence.` : "The available evidence establishes a starting position.";
-  if (checksComplete && favorable && unresolvedCount === 0 && adverseCount === 0) return `${lead} No decision-critical gap is recorded.`;
+  const lead = strongest ? `${strongest.label.replace(/\s*&\s*/g, " and ")} has the most recorded supporting evidence.` : "Read the saved findings alongside the score.";
   if (adverseCount > 0) return `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`;
-  const unresolvedText = nextSteps.map((item) => `${item.label} ${item.detail ?? ""}`).join(" ").toLowerCase();
-  const unresolvedEvidence = /security|governance|treasury|contract audit/.test(unresolvedText)
-    ? "independent security and governance evidence"
-    : /team|founder|leadership|identity|operator|advisor/.test(unresolvedText)
-      ? "independent team and identity confirmation"
-      : /product|service|roadmap|build|execution/.test(unresolvedText)
-        ? "independent product evidence"
-        : /usage|customer|activity|revenue|traction|adoption|market/.test(unresolvedText)
-          ? "independent usage and market evidence"
-          : "some decision-critical evidence";
-  if (strongest) {
-    const strongestLabel = strongest.label.replace(/\s*&\s*/g, " and ");
-    return `${strongestLabel} has the most recorded supporting evidence. The available public record still lacks ${unresolvedEvidence}.`;
-  }
-  return `The available evidence establishes a starting position. The available public record still lacks ${unresolvedEvidence}.`;
+  if (nextSteps[0]) return `${lead} Next to check: ${sentence(nextSteps[0].label)}`;
+  return `${lead} ${checksComplete ? "Required checks finished; this does not mean they all passed." : "Review the check register for work that remains open."}`;
 }
 
 function ClaimLabel({ type, strength }: { type: "FACT" | "SIGNAL" | "INFERENCE"; strength: string }) {
@@ -624,7 +608,7 @@ export function KyleIntelligenceDecisionCanvas({
     composition.reduce((sum, row) => sum + (row.questionCount ?? 0), 0),
     nextSteps.length,
   );
-  const adverseCount = composition.reduce((sum, row) => sum + (row.counterCount ?? 0), 0);
+  const adverseCount = composition.filter(row => row.applicability === undefined).reduce((sum, row) => sum + (row.counterCount ?? 0), 0);
   const mainConcern = concerns[0];
   const strongestSupport = supports[0] ?? verified[0];
   const topNextStep = nextSteps[0];
@@ -632,7 +616,7 @@ export function KyleIntelligenceDecisionCanvas({
   const summary = sentence(neutralizeProductCopy(subjectSummary ?? ""));
   const checksComplete = applicable > 0 && successful >= applicable;
   const nextCheckFallback = checksComplete ? "No required check remains open." : "Review the check ledger for evidence gaps; a specific next step was not recorded.";
-  const headline = verdictHeadline(composition, favorable, adverseCount, unresolvedCount, nextSteps, checksComplete);
+  const headline = verdictHeadline(composition, adverseCount, nextSteps, checksComplete);
 
   const sortedComposition = useMemo(() => [...composition].sort((left, right) => right.weight - left.weight), [composition]);
   const totalPossible = assessedPoints(composition);
