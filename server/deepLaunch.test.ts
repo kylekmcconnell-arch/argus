@@ -46,7 +46,7 @@ function ponsTransport(phase = 0, exactRecord = true, generation: 'v1' | 'v2' = 
     else if (body.method === 'eth_getStorageAt') result = word('0');
     else if (body.method === 'eth_getTransactionReceipt') result = { transactionHash: tx, status: '0x1', blockNumber: '0x10', blockHash, contractAddress: token, logs: [transfer] };
     else if (body.method === 'debug_traceTransaction') result = { type: 'CREATE', from: wallet, to: token, value: '0x0', calls: [] };
-    else if (body.method === 'eth_getLogs') result = [{ transactionHash: tx, blockNumber: '0x20' }];
+    else if (body.method === 'eth_getLogs') result = [{ address: curve, topics: ['0x8113d738abdcb6b38357e9d53a54a7157861a09031b453651f0fe7fe151f59df'], transactionHash: tx, blockNumber: '0x4ffff', removed: false }];
     else if (body.method === 'eth_call') {
       const data = body.params[0].data;
       result = data === '0x8da5cb5b' ? word(wallet) : data === '0x18160ddd' ? word('1000000')
@@ -124,6 +124,40 @@ describe('bounded launch research', () => {
     result.findings[0].evidence = ['invented'];
     expect(() => validateResearch(result)).toThrow('Finding lacks retained evidence');
   });
+  it('rejects a parity creation under a reverted ancestor even when the ancestor appears later', async () => {
+    const result = await researchLaunch({ chain: 'robinhood', address: token }, { fetcher: transport({
+      debug_traceTransaction: new Response('', { status: 503 }),
+      trace_transaction: [
+        { type: 'create', traceAddress: [0, 1], action: { from: wallet }, result: { address: token } },
+        { type: 'call', traceAddress: [0], error: 'Reverted', action: { from: wallet, to: curve } },
+      ],
+    }) });
+    expect(result.findings.some(f => f.label === 'Internal creation call')).toBe(false);
+    expect(result.gaps.some(g => g.area === 'trace' && g.reason.includes('No successful creation'))).toBe(true);
+  });
+  it('keeps a successful parity sibling separate from a reverted branch', async () => {
+    const result = await researchLaunch({ chain: 'robinhood', address: token }, { fetcher: transport({
+      debug_traceTransaction: new Response('', { status: 503 }),
+      trace_transaction: [
+        { type: 'create', traceAddress: [1], action: { from: wallet }, result: { address: token } },
+        { type: 'call', traceAddress: [0], error: 'Reverted', action: { from: wallet } },
+      ],
+    }) });
+    expect(result.findings.some(f => f.label === 'Internal creation call')).toBe(true);
+  });
+  it('does not corroborate indexed trades when the receipt block disagrees', async () => {
+    const base = ponsTransport();
+    const fetcher: typeof fetch = async (url, init) => {
+      const response = await base(url, init);
+      if (String(url).includes('geckoterminal')) {
+        const data = await response.json() as { data: Array<{ attributes: { block_number: number } }> }; data.data[0].attributes.block_number = 15;
+        return Response.json(data);
+      }
+      return response;
+    };
+    const result = await researchLaunch({ chain: 'robinhood', address: token }, { fetcher });
+    expect(result.findings.some(f => f.label === 'Recent settled pool exit')).toBe(false);
+  });
   it('does not claim block consistency after a reorganization', async () => {
     const base = transport(); let reads = 0;
     const fetcher: typeof fetch = async (url, init) => {
@@ -137,10 +171,36 @@ describe('bounded launch research', () => {
   it('corroborates a PONS v2 curve, computes a pinned sell quote, and retains settled sells', async () => {
     const result = validateResearch(await researchLaunch({ chain: 'robinhood', address: token }, { fetcher: ponsTransport() }));
     expect(result.schemaVersion).toBe(2);
+    // Gross output 99; protocol and creator fees round down separately (2 and 0).
+    expect(result.findings.find(f => f.label === 'Pinned sell quote')?.detail).toContain('500 raw token units map to 97 raw quote units');
+    expect(result.findings.find(f => f.label === 'Recent settled pool exit')?.detail).toContain('Only that transaction is corroborated');
     expect(result.findings.map(f => f.label)).toEqual(expect.arrayContaining([
       'Launch protocol verified', 'PONS launch lifecycle', 'Pinned sell quote', 'Settled curve sells', 'Indexed market liquidity', 'Indexed recent sells', 'Recent settled pool exit',
     ]));
     expect(result.findings.find(f => f.label === 'Pinned sell quote')?.detail).toContain('not a wallet execution guarantee');
+  });
+  it('does not count removed, wrong-contract or future logs as settled sells', async () => {
+    const base = ponsTransport();
+    const fetcher: typeof fetch = async (url, init) => {
+      const response = await base(url, init);
+      if (init?.body && JSON.parse(String(init.body)).method === 'eth_getLogs') {
+        const data = await response.json() as { result: Array<Record<string, unknown>> };
+        data.result = [ { ...data.result[0], removed: true }, { ...data.result[0], address: wallet }, { ...data.result[0], blockNumber: '0x60000' } ];
+        return Response.json(data);
+      }
+      return response;
+    };
+    const result = await researchLaunch({ chain: 'robinhood', address: token }, { fetcher });
+    expect(result.findings.some(f => f.label === 'Settled curve sells')).toBe(false);
+  });
+  it('does not describe future launch restrictions as already ended', async () => {
+    const base = ponsTransport(0, true, 'v1');
+    const fetcher: typeof fetch = async (url, init) => {
+      if (init?.body && JSON.parse(String(init.body)).params?.[0]?.data === '0x0861ac61') return Response.json({ result: word('60000') });
+      return base(url, init);
+    };
+    const result = await researchLaunch({ chain: 'robinhood', address: token }, { fetcher });
+    expect(result.findings.find(f => f.label === 'PONS v1 pool')?.detail).toContain('are scheduled to end');
   });
   it('corroborates graduated PONS v2 liquidity only through the factory-selected locker', async () => {
     const result = validateResearch(await researchLaunch({ chain: 'robinhood', address: token }, { fetcher: ponsTransport(2) }));

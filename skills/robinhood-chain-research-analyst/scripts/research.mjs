@@ -197,9 +197,15 @@ export async function researchLaunch(input, options = {}) {
             if (!trace.ok) {
               const parity = await rpc('trace_transaction', [creationHash], true);
               if (parity.ok && Array.isArray(parity.value)) {
+                const validPath = path => Array.isArray(path) && path.every(n => Number.isSafeInteger(n) && n >= 0);
+                // Inspect the full bounded response before slicing retained frames:
+                // an ancestor can appear after its child in provider output.
+                const failedPaths = parity.value.filter(item => item?.error && validPath(item.traceAddress)).map(item => item.traceAddress);
+                const malformedFailure = parity.value.some(item => item?.error && !validPath(item.traceAddress));
                 const frames = parity.value.slice(0, 120).map(item => ({
                   type: String(item?.type ?? '').toUpperCase().slice(0, 20), from: address(item?.action?.from),
-                  to: address(item?.result?.address ?? item?.action?.to), reverted: Boolean(item?.error),
+                  to: address(item?.result?.address ?? item?.action?.to), reverted: Boolean(item?.error) || malformedFailure || !validPath(item?.traceAddress)
+                    || failedPaths.some(path => path.length <= item.traceAddress.length && path.every((part, index) => item.traceAddress[index] === part)),
                   depth: Array.isArray(item?.traceAddress) ? item.traceAddress.length : 0,
                   value: QUANTITY.test(item?.action?.value ?? '') ? item.action.value : null,
                   selector: /^0x[0-9a-f]{8}/i.test(item?.action?.input ?? '') ? item.action.input.slice(0, 10) : null,
@@ -207,6 +213,7 @@ export async function researchLaunch(input, options = {}) {
                 save(parity, { frames, bounded: true });
                 const creates = frames.filter(f => f.type === 'CREATE' && f.to === target && !f.reverted);
                 if (creates.length) finding('Internal creation call', `A non-reverted creation frame targets the token; immediate creator ${creates[0].from ?? 'unavailable'}.`, [parity.id, receipt.id]);
+                else gap('trace', 'No successful creation frame for this token was established in the bounded trace.');
                 finding('Creation call trace', `${frames.length} parity-style call frames retained (limit 120). Selectors and value transfers are follow-up evidence.`, [parity.id]);
                 trace = { ok: false, id: parity.id };
               }
@@ -232,7 +239,7 @@ export async function researchLaunch(input, options = {}) {
       } else gap('creation', 'Creation block could not be corroborated against the receipt.');
     } else { if (receipt.ok) invalid(receipt, 'creation'); }
   } else { if (discovery.ok) invalid(discovery, 'creation'); }
-  // Resolve PONS generation from token-owned immutable references, then check
+  // Resolve PONS generation from token-reported factory references, then check
   // the corresponding factory record. A factory address by itself is never a
   // sufficient launch attribution.
   const launchFactoryRead = await rpc('eth_call', [{ to: target, data: SELECTOR.launchFactory }, block]);
@@ -249,7 +256,7 @@ export async function researchLaunch(input, options = {}) {
     const recordExists = rw && uintWord(rw[generation === 'v2' ? 14 : 11]) === 1n;
     if (record.ok && recordToken === target && recordExists && (generation === 'v1' || recordCurve === curve)) {
       save(record, { generation, token: recordToken, ...(recordCurve ? { curve: recordCurve } : {}), factory: launchFactory });
-      finding('Launch protocol verified', `The token's immutable reference and the factory's exact launch record agree on PONS ${generation}.`, [launchFactoryRead.id, record.id]);
+      finding('Launch protocol verified', `The token's reported factory address and the factory's exact launch record agree on PONS ${generation} at the saved block. This does not establish that the token reference can never change.`, [launchFactoryRead.id, record.id]);
       if (generation === 'v2') {
         const reads = await Promise.all([
           rpc('eth_call', [{ to: curve, data: SELECTOR.token }, block]), rpc('eth_call', [{ to: curve, data: SELECTOR.factory }, block]),
@@ -273,18 +280,21 @@ export async function researchLaunch(input, options = {}) {
             : rawText([realQuote,reserved,sellable,feeBps,taxBps,graduated][i - 3])));
           const phase = Number(uintWord(rw[10]));
           finding('PONS launch lifecycle', `Factory phase ${['curve trading','reserves swept','graduated pool created','rescued'][phase] ?? phase}; curve graduated flag ${graduated === 1n ? 'true' : 'false'}. Real quote reserve ${realQuote}; sellable allocation ${sellable} raw units.`, [record.id, ...reads.map(r => r.id)]);
-          if (graduated === 0n && sellable > 0n && quoteReserve > 0n && tokenReserve > 0n) {
+          if (graduated === 0n && sellable > 0n && quoteReserve > 0n && tokenReserve > 0n && feeBps + taxBps <= 10_000n) {
             const sample = tokenReserve / 10_000n || 1n;
             const gross = sample * quoteReserve / (tokenReserve + sample);
-            const net = gross * (10_000n - feeBps - taxBps) / 10_000n;
+            const net = gross - gross * feeBps / 10_000n - gross * taxBps / 10_000n;
             finding('Pinned sell quote', `${sample} raw token units map to ${net} raw quote units after ${feeBps + taxBps} bps combined curve fees at the pinned reserves. This is deterministic protocol math, not a wallet execution guarantee.`, [reads[2].id, reads[6].id, reads[7].id]);
             if (creationBlockNumber) {
               const from = `0x${(BigInt(block) - BigInt(creationBlockNumber) > 250_000n ? BigInt(block) - 250_000n : BigInt(creationBlockNumber)).toString(16)}`;
               const sells = await rpc('eth_getLogs', [{ address: curve, fromBlock: from, toBlock: block, topics: [CURVE_SELL] }]);
               if (sells.ok && Array.isArray(sells.value)) {
-                const selected = sells.value.slice(-20).map(log => ({ transactionHash: HASH.test(log?.transactionHash ?? '') ? log.transactionHash.toLowerCase() : null, blockNumber: QUANTITY.test(log?.blockNumber ?? '') ? log.blockNumber : null }));
-                save(sells, { count: sells.value.length, selected, bounded: true, fromBlock: from, toBlock: block });
-                if (sells.value.length) finding('Settled curve sells', `${sells.value.length} CurveSell events were returned in the bounded on-chain window. This establishes successful sells for those transactions, not every wallet or future block.`, [sells.id]);
+                const valid = sells.value.filter(log => address(log?.address) === curve && typeof log?.topics?.[0] === 'string' && log.topics[0].toLowerCase() === CURVE_SELL
+                  && !log.removed && HASH.test(log?.transactionHash ?? '') && QUANTITY.test(log?.blockNumber ?? '')
+                  && BigInt(log.blockNumber) >= BigInt(from) && BigInt(log.blockNumber) <= BigInt(block));
+                const selected = valid.slice(-20).map(log => ({ transactionHash: log.transactionHash.toLowerCase(), blockNumber: log.blockNumber }));
+                save(sells, { count: valid.length, selected, bounded: true, fromBlock: from, toBlock: block });
+                if (valid.length) finding('Settled curve sells', `${valid.length} matching CurveSell logs were returned in the bounded on-chain window; ${selected.length} transaction references were retained. These are contract-emitted sell records, not an execution guarantee for every wallet or future block.`, [sells.id]);
                 else gap('sellability', 'A current deterministic sell quote exists, but no settled CurveSell event was found in the bounded log window.');
               }
             }
@@ -312,7 +322,7 @@ export async function researchLaunch(input, options = {}) {
         const restrictionEnd = restriction.ok ? uintWord(words(restriction.value)?.[0]) : null;
         if (poolAddress && restrictionEnd !== null) {
           save(pool, poolAddress); save(restriction, restrictionEnd.toString());
-          finding('PONS v1 pool', `Canonical token getter resolves pool ${poolAddress}; launch restrictions ended at block ${restrictionEnd}.`, [record.id, pool.id, restriction.id]);
+          finding('PONS v1 pool', `Token getter resolves pool ${poolAddress}; launch restrictions ${restrictionEnd <= BigInt(block) ? 'ended' : 'are scheduled to end'} at block ${restrictionEnd}.`, [record.id, pool.id, restriction.id]);
           const positionManager = wordAddress(`0x${rw[3]}`), positionId = uintWord(rw[4]);
           const lockerRead = await rpc('eth_call', [{ to: launchFactory, data: SELECTOR.locker }, block]);
           const lockerAddress = lockerRead.ok ? wordAddress(lockerRead.value) : null;
@@ -351,7 +361,7 @@ export async function researchLaunch(input, options = {}) {
         `https://api.geckoterminal.com/api/v2/networks/robinhood/pools/${liquid.pairAddress}/trades?page=1`);
       if (trades.ok && Array.isArray(trades.value?.data)) {
         const exits = trades.value.data.map(row => row?.attributes).filter(a => address(a?.from_token_address) === target
-          && HASH.test(a?.tx_hash ?? '') && Number.isInteger(a?.block_number) && BigInt(a.block_number) <= BigInt(block)).slice(0, 20).map(a => ({
+          && HASH.test(a?.tx_hash ?? '') && Number.isSafeInteger(a?.block_number) && a.block_number >= 0 && BigInt(a.block_number) <= BigInt(block)).slice(0, 20).map(a => ({
             transactionHash: a.tx_hash.toLowerCase(), blockNumber: a.block_number,
             blockTimestamp: typeof a.block_timestamp === 'string' ? a.block_timestamp : null,
             rawTokenAmount: typeof a.from_token_amount === 'string' ? a.from_token_amount.slice(0, 80) : null,
@@ -362,9 +372,10 @@ export async function researchLaunch(input, options = {}) {
           const settled = await rpc('eth_getTransactionReceipt', [exits[0].transactionHash]);
           if (settled.ok && settled.value?.transactionHash?.toLowerCase() === exits[0].transactionHash
             && settled.value?.status === '0x1' && QUANTITY.test(settled.value?.blockNumber ?? '')
+            && BigInt(settled.value.blockNumber) === BigInt(exits[0].blockNumber)
             && BigInt(settled.value.blockNumber) <= BigInt(block)) {
             save(settled, { transactionHash: exits[0].transactionHash, blockNumber: settled.value.blockNumber, status: settled.value.status });
-            finding('Recent settled pool exit', `GeckoTerminal identifies ${exits.length} recent trades where this token was the input asset; the latest retained transaction has a successful on-chain receipt. This proves those observed exits settled, not that every wallet or future trade will succeed.`, [trades.id, settled.id], 'source_attributed');
+            finding('Recent settled pool exit', `GeckoTerminal identifies ${exits.length} recent trades where this token was the input asset. One retained transaction has a successful receipt matching the indexed block. Only that transaction is corroborated on-chain; its trade details and the remaining trades are still indexer-reported. This is not a guarantee that another wallet or future trade will succeed.`, [trades.id, settled.id], 'source_attributed');
           } else gap('sellability', 'Recent target-input trades were indexed, but their latest on-chain receipt was not corroborated at the pinned block.');
         } else gap('sellability', 'No exact-address target-input trade was found in the bounded pool history.');
       } else if (trades.ok) invalid(trades, 'sellability');

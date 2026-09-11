@@ -36,7 +36,8 @@ describe('deep launch explicit action', () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ run })); vi.stubGlobal('fetch', fetcher);
     const container = document.createElement('div'); const root = createRoot(container);
     await act(async () => { root.render(<DeepLaunchPanel chain="robinhood" reportVersionId="version-two" />); });
-    const button = [...container.querySelectorAll('button')].find(b => b.textContent === 'Retry missing launch evidence');
+    const button = [...container.querySelectorAll('button')].find(b => b.textContent === 'Refresh launch analysis');
+    expect(container.textContent).toContain('reruns the full bounded launch analysis');
     await act(async () => { button!.click(); });
     expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({ reportVersionId: 'version-two', retryMissing: true });
     await act(async () => root.unmount());

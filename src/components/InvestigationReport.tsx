@@ -1646,6 +1646,7 @@ export function InvestigationReport({
             checkScopeLabel="Token safety checks"
             capturedAt={capturedAt}
             evidenceHref="#investigation-evidence"
+            sourceOverviewHref={token.axes?.length ? "#composition" : "#investigation-methodology"}
             methodologyHref="#investigation-methodology"
             challengeAnchorId={shareView ? null : "investigation-challenge"}
             composition={tokenCompositionRows.length > 0 ? tokenCompositionRows : undefined}

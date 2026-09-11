@@ -56,6 +56,17 @@ it("explains scores immediately without turning a high score into verified evide
   expect(container.querySelector('button[aria-label^="Challenge"]')).toBeNull();
 });
 
+it("keeps completion separate from evidence quality and missing summaries", () => {
+  act(() => root.render(<KyleIntelligenceDecisionCanvas {...props} coveragePercent={100} verified={[]} sourceOverviewHref="#all-sources" />));
+  expect(container.querySelector('.kyle-knowledge-state')?.textContent).toContain('required checks finished · not evidence strength');
+  expect(container.querySelector('.kyle-knowledge-state')?.textContent).not.toContain('Strong');
+  expect(container.textContent).toContain('Checks finished, but their individual summaries were not saved here.');
+  expect(container.textContent).not.toContain('No check has finished yet.');
+  expect(container.querySelector('[aria-label="How to read this score"] a')?.getAttribute('href')).toBe('#all-sources');
+  expect(container.querySelector('#score-explanation')).not.toBeNull();
+  expect(container.querySelector('#composition')).toBeNull();
+});
+
 it("challenges positive findings and missing areas with their exact context, without submitting", () => {
   const seen: string[] = [];
   const listener = (event: Event) => seen.push((event as CustomEvent<ChallengeDetail>).detail.context);
@@ -94,7 +105,7 @@ describe("Kyle intelligence report opening", () => {
     />));
 
     expect(container.textContent).toContain(
-      "Team and leadership has the most recorded supporting evidence. The available public record still lacks independent security and governance evidence.",
+      "Team and leadership has the most recorded supporting evidence. Next to check: Establish a complete independent security history.",
     );
     expect(container.textContent).not.toContain("Independent evidence remains incomplete.");
   });
@@ -126,7 +137,8 @@ describe("Kyle intelligence report opening", () => {
       ]}
     />));
 
-    expect(container.textContent).toContain("The available public record still lacks independent usage and market evidence.");
+    expect(container.textContent).toContain("Next to check: Verify current customer adoption and recurring usage.");
+    expect(container.textContent).not.toContain("still lacks independent usage and market evidence");
     expect(container.textContent).not.toContain("still lacks independent security and governance evidence");
   });
 
@@ -136,7 +148,7 @@ describe("Kyle intelligence report opening", () => {
     expect(container.textContent).toContain("VERDICT");
     expect(container.textContent).toContain("Fedi");
     expect(container.textContent).toContain("55");
-    expect(container.textContent).toContain("scored counter-signals");
+    expect(container.textContent).toContain("recorded concerns in scoring areas");
     expect(container.textContent).toContain("unresolved evidence questions");
     expect(container.textContent).toContain("Why each area received its score.");
     expect(container.textContent).not.toContain("Which independent security audits");
@@ -199,7 +211,7 @@ describe("Kyle intelligence report opening", () => {
       reportSummary="Emerging service with null backing."
     />));
 
-    expect(container.textContent).toContain("No material concern was identified in the evidence reviewed.");
+    expect(container.textContent).toContain("No leading concern was saved.");
     expect(container.textContent).toContain("no verified financial backing");
     expect(container.textContent).not.toContain("No governing limitation was recorded");
     expect(container.textContent).not.toContain("null backing");

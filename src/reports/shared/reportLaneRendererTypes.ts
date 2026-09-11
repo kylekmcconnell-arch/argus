@@ -74,6 +74,7 @@ export interface InvestigationDecisionCanvasProps {
   applicable: number;
   capturedAt?: string | undefined;
   evidenceHref?: `#${string}`;
+  sourceOverviewHref?: `#${string}`;
   methodologyHref?: `#${string}`;
   challengeAnchorId?: string | null;
   checkScopeLabel?: string;
