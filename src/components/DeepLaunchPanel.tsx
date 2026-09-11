@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useArgusAuth } from '../auth-context';
 import type { LaunchResearchRun } from '../lib/deepLaunch';
+import { launchFindingDetail, launchFindingSources } from '../lib/launchEvidencePresentation';
 
 export function DeepLaunchPanel({ chain, reportVersionId }: { chain: string; reportVersionId?: string }) {
   if (chain !== 'robinhood') return null;
@@ -44,7 +45,7 @@ function SavedLaunchPanel({ reportVersionId }: { reportVersionId: string }) {
   const canRun = role === 'owner' || role === 'analyst';
   return <section className="panel mt-4 px-5 py-5" aria-label="Deep launch analysis">
     <h3 className="text-base font-semibold">Deep launch analysis</h3>
-    <p className="mt-2 text-sm text-ink-dim">Robinhood Chain creation, PONS lifecycle, sell-route and liquidity-custody evidence. Saved separately; the ARGUS score stays unchanged.</p>
+    <p className="mt-2 text-sm text-ink-dim">How this token launched, evidence of trading, and who holds its liquidity position. This is supplemental research; it does not change the ARGUS score.</p>
     <p className="mt-1 text-xs text-ink-faint">Up to 32 provider requests, usually under a minute. A run uses one request from the workspace’s daily supplemental allowance. Provider charges depend on configured access.</p>
     {error && <p role="alert" className="mt-3 text-sm">{error}</p>}
     {busy && <p role="status" className="mt-3 text-sm">{loaded ? 'Collecting and saving launch evidence…' : 'Loading saved analysis…'}</p>}
@@ -55,15 +56,16 @@ function SavedLaunchPanel({ reportVersionId }: { reportVersionId: string }) {
       {canRun && loaded && (!run || run.state === 'failed' || (run.state === 'running' && Date.now() - Date.parse(run.started_at) > 120_000)) &&
         <button className="btn-chip tint-signal" onClick={() => void start()}>{run ? 'Retry deep launch analysis' : 'Run deep launch analysis'}</button>}
       {canRun && loaded && run?.state === 'completed' && result?.gaps.length ?
-        <button className="btn-chip tint-signal" onClick={() => void start(true)}>Retry missing launch evidence</button> : null}
+        <button className="btn-chip tint-signal" onClick={() => void start(true)}>Refresh launch analysis</button> : null}
     </div>}
+    {run?.state === 'completed' && Boolean(result?.gaps.length) && <p className="mt-2 text-xs text-ink-dim">Refresh reruns the full bounded launch analysis, not just missing checks, and uses another supplemental request. Provider limitations may remain.</p>}
     {result && <div className="mt-4">
       <p className="text-sm">Collected {new Date(result.completedAt).toLocaleString()} · {result.usage.requests} requests · {result.findings.length} evidence-backed observations</p>
       <p className="mt-1 break-all font-mono text-xs text-ink-faint">Chain {result.target.chainId} · {result.target.address}{result.target.block ? ` · block ${BigInt(result.target.block).toString()}` : ''}</p>
       {result.status === 'unavailable' && <p className="mt-2 text-sm">The run did not establish consistent chain evidence. Do not treat these observations as a completed analysis.</p>}
       <ul className="mt-3 space-y-3">{result.findings.map((f, i) => <li key={i}>
-        <strong className="text-sm">{f.label}</strong><span className="ml-2 text-xs text-ink-faint">{f.strength === 'measured' ? 'On-chain observation' : 'Registry attribution'}</span>
-        <p className="mt-1 break-words text-sm text-ink-dim">{f.detail}</p><p className="text-xs text-ink-faint">Evidence: {f.evidence.join(', ')}</p>
+        <strong className="text-sm">{f.label}</strong><span className="ml-2 text-xs text-ink-faint">{f.strength === 'measured' ? 'On-chain observation' : 'Provider-reported evidence'}</span>
+        <p className="mt-1 break-words text-sm text-ink-dim">{launchFindingDetail(f.detail)}</p><p className="text-xs text-ink-faint">Sources: {launchFindingSources(result, f.evidence)} · Evidence: {f.evidence.join(', ')}</p>
       </li>)}</ul>
       <details className="mt-4"><summary className="cursor-pointer text-sm">Coverage gaps ({result.gaps.length})</summary>
         <ul className="mt-2 space-y-2 text-sm text-ink-dim">{result.gaps.map((g, i) => <li key={i}><strong>{g.area}:</strong> {g.reason}</li>)}</ul>

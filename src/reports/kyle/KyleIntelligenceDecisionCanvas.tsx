@@ -11,6 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import { compositionRowColor, type CompositionRow } from "../../components/ScoreComposition";
 import { ReportChallengeButton } from "../../components/ReportChallengeButton";
+import { assessedPoints, recordedCount } from "../../lib/reportEvidenceSummary";
 import { HERO_SCORE_RING_SIZE, ScoreRing } from "../../components/ScoreRing";
 import { plainDecisionText } from "../../lib/plainDecisionText";
 import type { DecisionLensId } from "../../intelligence/types";
@@ -70,6 +71,7 @@ export interface KyleIntelligenceDecisionCanvasProps {
   applicable: number;
   capturedAt?: string | undefined;
   evidenceHref: `#${string}`;
+  sourceOverviewHref?: `#${string}`;
   methodologyHref: `#${string}`;
   challengeAnchorId?: string | null;
   checkScopeLabel: string;
@@ -130,12 +132,6 @@ function scoreTone(score: number | null): "positive" | "caution" | "negative" | 
   if (score >= 70) return "positive";
   if (score >= 40) return "caution";
   return "negative";
-}
-
-function coverageLabel(value: number): string {
-  if (value >= 85) return "Strong";
-  if (value >= 60) return "Moderate";
-  return "Limited";
 }
 
 function cleanName(value: string | undefined): string {
@@ -304,7 +300,7 @@ function CheckRegisterRail({
         {capturedAt && <p className="kyle-check-saved mono">Saved {capturedAt}.</p>}
       </section>
       {ledger(openItemsLabel, nextSteps, methodologyHref, applicable === 0 ? "No required check results were saved." : openCount > 0 ? `${openCount} checks still lack evidence; specific next steps were not recorded.` : "No checks remain open.")}
-      {ledger("Finished checks", verified, evidenceHref, "No check has finished yet.")}
+      {ledger("Finished checks", verified, evidenceHref, successful > 0 ? "Checks finished, but their individual summaries were not saved here." : "No finished check is recorded here.")}
     </aside>
   );
 }
@@ -411,8 +407,8 @@ function AnimatedVerdictScore({
   context?: string | undefined;
   size: number;
 }) {
-  const buildRows = rows.filter((row) => row.score > 0);
-  const applicableWeight = rows.reduce((sum, row) => sum + Math.max(0, row.weight), 0) || 100;
+  const buildRows = rows.filter((row) => row.applicability === undefined && row.score > 0);
+  const applicableWeight = assessedPoints(rows) || 100;
   const hasExcludedAxis = rows.some((row) => row.applicability !== undefined);
   const ringRows = hasExcludedAxis && applicableWeight < 100
     ? buildRows.map((row) => ({
@@ -618,6 +614,7 @@ export function KyleIntelligenceDecisionCanvas({
   evidenceHref,
   methodologyHref,
   challengeAnchorId,
+  sourceOverviewHref,
   checkScopeLabel,
   composition = [],
   secondaryScore,
@@ -628,7 +625,6 @@ export function KyleIntelligenceDecisionCanvas({
     nextSteps.length,
   );
   const adverseCount = composition.reduce((sum, row) => sum + (row.counterCount ?? 0), 0);
-  const sourceCount = composition.reduce((sum, row) => sum + (row.supportCount ?? 0), 0);
   const mainConcern = concerns[0];
   const strongestSupport = supports[0] ?? verified[0];
   const topNextStep = nextSteps[0];
@@ -637,10 +633,9 @@ export function KyleIntelligenceDecisionCanvas({
   const checksComplete = applicable > 0 && successful >= applicable;
   const nextCheckFallback = checksComplete ? "No required check remains open." : "Review the check ledger for evidence gaps; a specific next step was not recorded.";
   const headline = verdictHeadline(composition, favorable, adverseCount, unresolvedCount, nextSteps, checksComplete);
-  const coverage = coverageLabel(coveragePercent);
 
   const sortedComposition = useMemo(() => [...composition].sort((left, right) => right.weight - left.weight), [composition]);
-  const totalPossible = composition.reduce((sum, row) => sum + row.weight, 0);
+  const totalPossible = assessedPoints(composition);
   // Two labelled scores only in the dual presentation; Style 1 keeps the one
   // canonical score even when a linked score was saved.
   const dualScore = presentationStyle === 2 && secondaryScore ? secondaryScore : null;
@@ -670,7 +665,7 @@ export function KyleIntelligenceDecisionCanvas({
             </div>
             <div>
               <span className="mono">MAIN LIMITATION</span>
-              <strong>{sentence(mainConcern?.label) || "No material concern was identified in the evidence reviewed."}</strong>
+              <strong>{sentence(mainConcern?.label) || "No leading concern was saved. Check the evidence and coverage before relying on this result."}</strong>
             </div>
             <div>
               <span className="mono">HIGHEST-VALUE NEXT CHECK</span>
@@ -725,7 +720,7 @@ export function KyleIntelligenceDecisionCanvas({
         <h3 className="font-semibold">How to read this score</h3>
         <p className="mt-2 text-[13.5px] leading-relaxed">Higher scores mean a stronger result under ARGUS checks. The number is not a percentage chance of success or a prediction of returns. A serious finding can still control the verdict.</p>
         <p className="mt-2 text-[13.5px] leading-relaxed">{scoreIsProvisional ? "The score uses the areas assessed so far; open checks may change it." : "A finished check can still find a risk."} Missing information limits the assessment; it is not proof of wrongdoing.</p>
-        <p className="mt-2 text-[13.5px] leading-relaxed"><strong>Where the data comes from:</strong> <a href={evidenceHref} className="text-signal-lift underline">Review the saved sources</a> behind this report. Measurements, statements by the subject and independently confirmed facts are different kinds of evidence. If a source was not saved, its verification cannot be established from this report.</p>
+        <p className="mt-2 text-[13.5px] leading-relaxed"><strong>Where the data comes from:</strong> <a href={sourceOverviewHref ?? evidenceHref} className="text-signal-lift underline">Review the saved sources</a> behind this report. Measurements, statements by the subject and independently confirmed facts are different kinds of evidence. If a source was not saved, its verification cannot be established from this report.</p>
         <div className="flex flex-wrap items-center gap-3">
           {applicable > 0 ? <a href={methodologyHref} className="text-signal-lift underline">See finished checks and data gaps</a> : <span>No check results were saved for this score.</span>}
           <ReportChallengeButton context={`${scoreLabel} · ${score == null ? "not measured" : `${score}/100`}`} anchorId={challengeAnchorId} label="Challenge this score" />
@@ -737,11 +732,11 @@ export function KyleIntelligenceDecisionCanvas({
       <section className="kyle-knowledge-state" aria-label="What ARGUS knows">
         <div className="kyle-knowledge-item kyle-tone-positive">
           <CheckCircle size={20} weight="duotone" aria-hidden="true" />
-          <span><strong>{composition.length && composition.every((row) => row.supportCount != null) ? sourceCount : "Not recorded"}</strong><small>source-backed score inputs</small></span>
+          <span><strong>{recordedCount(composition, "supportCount")}</strong><small>saved supporting references · may repeat across areas</small></span>
         </div>
         <div className={`kyle-knowledge-item kyle-tone-${adverseCount > 0 ? "negative" : "neutral"}`}>
           <WarningCircle size={20} weight="duotone" aria-hidden="true" />
-          <span><strong>{adverseCount}</strong><small>{adverseCount === 1 ? "scored counter-signal" : "scored counter-signals"}</small></span>
+          <span><strong>{recordedCount(composition, "counterCount")}</strong><small>recorded concerns in scoring areas</small></span>
         </div>
         <div className="kyle-knowledge-item kyle-tone-unresolved">
           <Question size={20} weight="duotone" aria-hidden="true" />
@@ -749,7 +744,7 @@ export function KyleIntelligenceDecisionCanvas({
         </div>
         <div className="kyle-knowledge-item kyle-tone-neutral">
           <Eye size={20} weight="duotone" aria-hidden="true" />
-          <span><strong>{coverage}</strong><small>evidence coverage · {coveragePercent}%</small></span>
+          <span><strong>{applicable > 0 ? `${coveragePercent}%` : "Not recorded"}</strong><small>required checks finished · not evidence strength</small></span>
         </div>
       </section>
 
@@ -768,7 +763,7 @@ export function KyleIntelligenceDecisionCanvas({
         />
       )}
 
-      <section id="composition" className="kyle-score-explanation scroll-mt-28" aria-labelledby="kyle-score-explanation-title">
+      <section id="score-explanation" className="kyle-score-explanation scroll-mt-28" aria-labelledby="kyle-score-explanation-title">
         <div className="kyle-section-intro">
           <p className="kyle-overline mono">02 · WHY {score ?? verdictLabel}</p>
           <h2 id="kyle-score-explanation-title">Why each area received its score.</h2>
@@ -777,7 +772,7 @@ export function KyleIntelligenceDecisionCanvas({
         <div className="kyle-composition-ledger">
           <div className="kyle-composition-summary mono">
             <span>{score == null ? "Score withheld" : `Saved score: ${score}/100`}</span>
-            <span>{totalPossible} points available across the recorded areas</span>
+            <span>{totalPossible} points available in assessed areas before adjustment to 100</span>
           </div>
           {sortedComposition.length ? sortedComposition.map((row) => {
             const band = evidenceBand(row);
@@ -947,7 +942,7 @@ export function KyleIntelligenceDecisionCanvas({
           <h2 id="kyle-counter-thesis-title">The strongest case against the current thesis.</h2>
           <dl>
             <div><dt>Strongest counter-signal</dt><dd>{sentence(favorable ? mainConcern?.label : strongestSupport?.label) || "No counter-signal was recorded."}</dd></div>
-            <div><dt>Why it has not changed the verdict</dt><dd>{sentence(favorable ? argument?.againstLine : argument?.forLine) || "Its evidentiary weight is already reflected in the score."}</dd></div>
+            <div><dt>Why it has not changed the verdict</dt><dd>{sentence(favorable ? argument?.againstLine : argument?.forLine) || "The saved report does not explain how this affected the score."}</dd></div>
             <div><dt>What would make it material</dt><dd>{sentence(argument?.moveLine) || sentence(topNextStep?.label) || "New source-backed evidence would be required."}</dd></div>
           </dl>
           <ReportChallengeButton context={`Report conclusion · ${thesis}`} anchorId={challengeAnchorId} label="Challenge the thesis" />
