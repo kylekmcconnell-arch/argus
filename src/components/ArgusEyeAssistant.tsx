@@ -57,8 +57,104 @@ interface EyeAnswer {
     reviewPath?: string;
     observedCostUsd?: number;
     costOutcome?: string;
+    /** What the bounded re-run changed against the version it was authorized from. */
+    evidence?: {
+      promotable: boolean;
+      carriedDecisionCriticalCount: number;
+      promotionBlocks: Array<{ code: string; note: string }>;
+      areas: {
+        recovered: string[];
+        reconfirmed: string[];
+        stillOpen: string[];
+        carried: string[];
+        carriedStale: string[];
+        retryRegressed: string[];
+        notSelectedOpen: string[];
+        newlyMeasured: string[];
+      };
+    };
   };
   state: "loading" | "ready" | "error";
+}
+
+type FollowUpEvidence = NonNullable<NonNullable<EyeAnswer["followUp"]>["evidence"]>;
+
+const labelList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string").slice(0, 40) : [];
+
+/** Read the server's evidence comparison without trusting its shape. */
+function followUpEvidence(value: unknown): FollowUpEvidence | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const areas = source.areas !== null && typeof source.areas === "object"
+    ? source.areas as Record<string, unknown>
+    : {};
+  const blocks = Array.isArray(source.promotionBlocks) ? source.promotionBlocks : [];
+  return {
+    promotable: source.promotable === true,
+    carriedDecisionCriticalCount: typeof source.carriedDecisionCriticalCount === "number"
+      ? source.carriedDecisionCriticalCount
+      : 0,
+    promotionBlocks: blocks.flatMap((entry) => {
+      const block = entry !== null && typeof entry === "object" ? entry as Record<string, unknown> : {};
+      return typeof block.note === "string"
+        ? [{ code: typeof block.code === "string" ? block.code : "blocked", note: block.note }]
+        : [];
+    }),
+    areas: {
+      recovered: labelList(areas.recovered),
+      reconfirmed: labelList(areas.reconfirmed),
+      stillOpen: labelList(areas.stillOpen),
+      carried: labelList(areas.carried),
+      carriedStale: labelList(areas.carriedStale),
+      retryRegressed: labelList(areas.retryRegressed),
+      notSelectedOpen: labelList(areas.notSelectedOpen),
+      newlyMeasured: labelList(areas.newlyMeasured),
+    },
+  };
+}
+
+const EVIDENCE_GROUPS: Array<{
+  key: keyof FollowUpEvidence["areas"];
+  label: string;
+  tone: string;
+}> = [
+  { key: "recovered", label: "Closed by this follow-up", tone: "text-confirm" },
+  { key: "newlyMeasured", label: "Newly measured", tone: "text-confirm" },
+  { key: "reconfirmed", label: "Re-confirmed", tone: "text-ink-dim" },
+  { key: "carried", label: "Kept from the active report (not re-checked)", tone: "text-ink-dim" },
+  { key: "carriedStale", label: "Kept but outside its freshness window", tone: "text-caution" },
+  { key: "retryRegressed", label: "Kept because the retry did not reproduce it", tone: "text-caution" },
+  { key: "stillOpen", label: "Still open after the retry", tone: "text-caution" },
+  { key: "notSelectedOpen", label: "Still open and not part of this follow-up", tone: "text-ink-faint" },
+];
+
+/**
+ * Show exactly what a bounded follow-up changed before anyone promotes it:
+ * what it closed, what it kept from the active report without re-checking, and
+ * what is still open.
+ */
+function FollowUpEvidencePanel({ evidence }: { evidence: FollowUpEvidence }) {
+  const groups = EVIDENCE_GROUPS.filter((group) => evidence.areas[group.key].length > 0);
+  if (!groups.length && !evidence.promotionBlocks.length) return null;
+  return (
+    <div className="mt-2 rounded-lg border border-line bg-surface-sunken/40 px-2.5 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">
+        What changed against the active report
+      </p>
+      <ul className="mt-1.5 space-y-1">
+        {groups.map((group) => (
+          <li key={group.key} className="text-[10.5px] leading-relaxed">
+            <span className={`font-medium ${group.tone}`}>{group.label}:</span>{" "}
+            <span className="text-ink-dim">{evidence.areas[group.key].join(", ")}</span>
+          </li>
+        ))}
+      </ul>
+      {evidence.promotionBlocks.map((block) => (
+        <p key={block.code} className="mt-1.5 text-[10.5px] leading-relaxed text-caution">{block.note}</p>
+      ))}
+    </div>
+  );
 }
 
 function safeUrl(value: unknown): string | null {
@@ -352,6 +448,7 @@ export function ArgusEyeAssistant({
           reviewPath: typeof body.reviewPath === "string" ? body.reviewPath : undefined,
           observedCostUsd: typeof body.observedCostUsd === "number" ? body.observedCostUsd : undefined,
           costOutcome: typeof body.costOutcome === "string" ? body.costOutcome : undefined,
+          evidence: followUpEvidence(body.evidence),
         },
       } : turn));
     } catch {
@@ -591,6 +688,9 @@ export function ArgusEyeAssistant({
                                 : " · within ceiling"}
                             </p>
                           )}
+                          {answer.followUp.evidence && (
+                            <FollowUpEvidencePanel evidence={answer.followUp.evidence} />
+                          )}
                           {(answer.followUp.state === "proposed" || answer.followUp.state === "partial") && (
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               {answer.followUp.reviewPath && (
@@ -598,9 +698,15 @@ export function ArgusEyeAssistant({
                                   Review proposed report
                                 </a>
                               )}
-                              <button type="button" onClick={() => void mutateFollowUp(answer, "promote")} className="rounded-md bg-signal px-2 py-1 text-[10px] font-semibold text-on-signal">
-                                Promote after review
-                              </button>
+                              {answer.followUp.evidence?.promotable === false ? (
+                                <span className="rounded-md border border-line px-2 py-1 text-[10px] text-ink-faint">
+                                  Promotion unavailable
+                                </span>
+                              ) : (
+                                <button type="button" onClick={() => void mutateFollowUp(answer, "promote")} className="rounded-md bg-signal px-2 py-1 text-[10px] font-semibold text-on-signal">
+                                  Promote after review
+                                </button>
+                              )}
                               <button type="button" onClick={() => void mutateFollowUp(answer, "rollback")} className="rounded-md border border-line px-2 py-1 text-[10px] text-ink-dim">
                                 Roll back
                               </button>

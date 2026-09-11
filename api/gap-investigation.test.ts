@@ -375,11 +375,14 @@ describe("gap investigation API", () => {
     expect(runAudit).toHaveBeenCalledWith("gap_project", expect.any(Function), expect.objectContaining({
       authorizedResearchScope: expect.objectContaining({ taskIds: ["portfolio", "identity", "synthesis"] }),
     }));
+    // The checklist is derived from the merged report body before the proposal
+    // marker is attached, and the source version is read separately so its
+    // untouched evidence can be carried forward.
     expect(reportChecks).toHaveBeenCalledWith("investigation", expect.objectContaining({
       token: investigationPayload.token,
       projectAccount: expect.objectContaining({ display_name: "Alice Example" }),
-      gapInvestigation: expect.objectContaining({ publicationState: "proposed" }),
     }));
+    expect(reportChecks).toHaveBeenCalledWith("investigation", investigationPayload);
     expect(persistGapInvestigationProposalBundle).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -530,10 +533,149 @@ describe("gap investigation API", () => {
     expect(auditToken).not.toHaveBeenCalled();
   });
 
+  /**
+   * Answer the proposal lookup the promotion gate performs, then the promote
+   * RPC itself.
+   */
+  function stubPromotionFetch(): void {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((url: unknown) =>
+      Promise.resolve(String(url).includes("/gap_investigations?")
+        ? new Response(JSON.stringify([{ proposed_report_version_id: PROPOSAL_ID, status: "partial" }]), { status: 200 })
+        : new Response(JSON.stringify(PROPOSAL_ID), { status: 200 }))));
+  }
+
+  function proposalVersion(evidenceComparison: unknown): void {
+    loadExactVersionReport.mockResolvedValueOnce({
+      caseStatus: "open",
+      report: {
+        kind: "person",
+        ref: "alice",
+        query: "@alice",
+        payload: { handle: "alice", gapInvestigation: { schemaVersion: 1, evidenceComparison } },
+        verdict: null,
+        score: null,
+      },
+    });
+  }
+
+  const promotableComparison = {
+    schemaVersion: 1,
+    sourceReportVersionId: SOURCE_ID,
+    summary: {
+      recovered: 1, reconfirmed: 0, stillOpen: 0, retryRegressed: 0,
+      carriedForward: 0, carriedStale: 0, notSelectedOpen: 0, newlyMeasured: 0, notApplicable: 0,
+    },
+    scoreBasis: "fresh_covers_merged_evidence",
+    scoreFollowsFreshRun: true,
+    carriedDecisionCriticalCount: 0,
+    promotable: true,
+    promotionBlocks: [],
+    areas: {
+      recovered: ["Founder identity"], reconfirmed: [], stillOpen: [], carried: [],
+      carriedStale: [], retryRegressed: [], notSelectedOpen: [], newlyMeasured: [],
+    },
+  };
+
+  it("carries a narrow person follow-up's untouched evidence and withholds the scoped score", async () => {
+    // Reproduces the @matetokay follow-up: an identity-only retry came back with
+    // adverse-screen unavailable and two founder checks never run, because the
+    // collector was restricted to the authorized capabilities.
+    const sourceChecks = [
+      { label: "Adverse screen", status: "checked-empty", checkId: "adverse-screen", decisionCritical: true, completedAt: "2026-09-10T04:05:00.000Z", provider: "adverse-web", sourceCount: 4 },
+      { label: "Founder asset distinction", status: "confirmed", checkId: "founder-asset-distinction", decisionCritical: true, completedAt: "2026-09-10T04:05:00.000Z" },
+      { label: "Founder repeat backing", status: "reported", checkId: "founder-repeat-backing", decisionCritical: true, completedAt: "2026-09-10T04:05:00.000Z" },
+      { label: "Founder track record", status: "unavailable", checkId: "founder-track-record", decisionCritical: true },
+    ];
+    // Mirror the real reportChecks for a person payload: a live run freezes its
+    // own checkRuns, and that frozen list is the source checklist.
+    reportChecks.mockImplementation((_kind: string, candidate: { checkRuns?: unknown }) =>
+      Array.isArray(candidate?.checkRuns) ? candidate.checkRuns : []);
+    loadExactVersionReport.mockResolvedValue({
+      caseStatus: "open",
+      report: {
+        kind: "person",
+        ref: "alice",
+        query: "@alice",
+        ts: "2026-09-10T04:05:00.000Z",
+        payload: { ...payload, checkRuns: sourceChecks },
+      },
+    });
+    runAudit.mockResolvedValue({
+      ...payload,
+      live: true,
+      display_name: "Alice Example",
+      evidence: { profile: { handle: "alice" } },
+      report: {
+        audit_id: "audit-gap-2",
+        composite_verdict: "CAUTION",
+        governing_score: 27,
+        roles: [],
+        role_reports: [],
+      },
+      checkRuns: [
+        { label: "Adverse screen", status: "unavailable", checkId: "adverse-screen", decisionCritical: true, completedAt: "2026-09-11T10:00:00.000Z" },
+        { label: "Founder track record", status: "confirmed", checkId: "founder-track-record", decisionCritical: true, completedAt: "2026-09-11T10:00:00.000Z" },
+      ],
+      completeness_state: "partial",
+      cost: { schemaVersion: 1, usd: 0.45, calls: [] },
+      providerSnapshot: {},
+    });
+
+    const { res, captured } = response();
+    await handler(request("POST", {
+      sourceReportVersionId: SOURCE_ID,
+      gapId: "gap.track-record",
+      taskIds: ["portfolio"],
+      timeBudgetSeconds: 300,
+      acceptedCostCeilingUsd: 3.5,
+    }) as never, res as never);
+
+    expect(captured.status).toBe(201);
+    const persisted = persistGapInvestigationProposalBundle.mock.calls[0][1] as {
+      checks: Array<Record<string, unknown>>;
+      score: number | null;
+      verdict: string | null;
+      completenessState: string;
+      payload: Record<string, unknown>;
+    };
+    const byId = new Map(persisted.checks.map((check) => [check.checkId, check]));
+
+    // Completed work outside the authorized scope survives, with its original
+    // observation time and provider, explicitly marked as carried.
+    expect(byId.get("founder-asset-distinction")).toMatchObject({ status: "confirmed" });
+    expect(byId.get("founder-repeat-backing")).toMatchObject({ status: "reported" });
+    expect(byId.get("adverse-screen")).toMatchObject({
+      status: "checked-empty",
+      provider: "adverse-web",
+      completedAt: "2026-09-10T04:05:00.000Z",
+      carriedForward: { sourceReportVersionId: SOURCE_ID, reason: "not_selected" },
+    });
+    // The selected gap closed, and that row is genuinely new measurement.
+    expect(byId.get("founder-track-record")).toMatchObject({ status: "confirmed" });
+    expect(byId.get("founder-track-record")?.carriedForward).toBeUndefined();
+
+    // The re-run scored only what it assessed, so its number is not published
+    // as the proposal's score.
+    expect(persisted.score).toBeNull();
+    expect(persisted.verdict).toBeNull();
+    expect(persisted.completenessState).toBe("partial");
+    const marker = persisted.payload.gapInvestigation as Record<string, unknown>;
+    expect(marker.scopedRunScore).toBe(27);
+    expect(marker.evidenceComparison).toMatchObject({
+      promotable: false,
+      scoreBasis: "fresh_scope_only",
+      areas: { recovered: ["Founder track record"], carried: expect.arrayContaining(["Adverse screen"]) },
+    });
+    expect(captured.body).toMatchObject({
+      active: false,
+      scopedRunScore: 27,
+      evidence: { promotable: false, carriedDecisionCriticalCount: 3 },
+    });
+  });
+
   it("requires a second explicit request to promote a proposal", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(PROPOSAL_ID), { status: 200 }),
-    ));
+    stubPromotionFetch();
+    proposalVersion(promotableComparison);
     const { res, captured } = response();
     await handler(request("PATCH", {
       authorizationId: AUTHORIZATION_ID,
@@ -545,7 +687,69 @@ describe("gap investigation API", () => {
       status: "promoted",
       reportVersionId: PROPOSAL_ID,
     });
-    const fetchMock = vi.mocked(fetch);
-    expect(String(fetchMock.mock.calls[0][0])).toContain("/rpc/promote_gap_investigation_proposal");
+    const promoteCall = vi.mocked(fetch).mock.calls
+      .find((call) => String(call[0]).includes("/rpc/promote_gap_investigation_proposal"));
+    expect(promoteCall).toBeDefined();
+  });
+
+  it("refuses to promote a proposal whose frozen comparison reports a block", async () => {
+    stubPromotionFetch();
+    proposalVersion({
+      ...promotableComparison,
+      summary: { ...promotableComparison.summary, carriedForward: 3 },
+      scoreBasis: "fresh_scope_only",
+      carriedDecisionCriticalCount: 3,
+      promotable: false,
+      promotionBlocks: [{
+        code: "carried_evidence_not_rescored",
+        note: "The follow-up never saw the carried evidence.",
+      }],
+      areas: { ...promotableComparison.areas, carried: ["Adverse screen"] },
+    });
+    const { res, captured } = response();
+    await handler(request("PATCH", {
+      authorizationId: AUTHORIZATION_ID,
+      action: "promote",
+    }) as never, res as never);
+
+    expect(captured.status).toBe(409);
+    expect(captured.body).toMatchObject({
+      error: "promotion_blocked",
+      blocks: [{ code: "carried_evidence_not_rescored" }],
+    });
+    expect(vi.mocked(fetch).mock.calls
+      .some((call) => String(call[0]).includes("/rpc/promote_gap_investigation_proposal"))).toBe(false);
+  });
+
+  it("refuses to promote a proposal frozen before evidence carry-forward existed", async () => {
+    stubPromotionFetch();
+    loadExactVersionReport.mockResolvedValueOnce({
+      caseStatus: "open",
+      report: { kind: "person", ref: "alice", query: "@alice", payload: { handle: "alice" }, verdict: null, score: null },
+    });
+    const { res, captured } = response();
+    await handler(request("PATCH", {
+      authorizationId: AUTHORIZATION_ID,
+      action: "promote",
+    }) as never, res as never);
+
+    expect(captured.status).toBe(409);
+    expect(captured.body).toMatchObject({
+      error: "promotion_blocked",
+      blocks: [{ code: "evidence_comparison_missing" }],
+    });
+  });
+
+  it("still allows a rollback without the promotion gate", async () => {
+    stubPromotionFetch();
+    const { res, captured } = response();
+    await handler(request("PATCH", {
+      authorizationId: AUTHORIZATION_ID,
+      action: "rollback",
+    }) as never, res as never);
+
+    expect(captured.status).toBe(200);
+    expect(captured.body).toMatchObject({ status: "rolled_back" });
+    expect(loadExactVersionReport).not.toHaveBeenCalled();
   });
 });

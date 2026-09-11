@@ -134,6 +134,16 @@ export function MethodologyChecklist({
                       <span className="min-w-0 flex-1">
                         <span className="text-[12.5px] text-ink">{publicCheckLabel(check.label)}</span>
                         {check.note && <span className="ml-2 text-[11px] text-ink-faint">{publicCheckNote(check.note)}</span>}
+                        {/* A scoped follow-up kept this outcome instead of
+                            measuring it again. Say so on the row itself so it
+                            never reads as work this version performed. */}
+                        {check.carriedForward && (
+                          <span className="ml-2 text-[11px] text-ink-faint">
+                            Kept from the earlier report{check.carriedForward.observedAt
+                              ? ` (checked ${check.carriedForward.observedAt.slice(0, 10)})`
+                              : ""}; this follow-up did not re-run it.
+                          </span>
+                        )}
                       </span>
                       {provenance ? (
                         <ProvenanceTag state={provenance} label={meta.label} className="shrink-0" />
