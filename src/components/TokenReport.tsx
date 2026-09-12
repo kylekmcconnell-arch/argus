@@ -132,7 +132,7 @@ export function tokenReportText(
     "",
     ...findings,
     "",
-    `Liquidity ${moneyShort(market.liquidityUsd ?? undefined)} · market cap ${moneyShort(market.marketCap ?? undefined)} · FDV ${moneyShort(market.fullyDilutedValuation ?? undefined)} · token age ${market.ageDays == null ? "unknown" : age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} centralized exchanges` : ""}`,
+    `Selected-pool liquidity ${moneyShort(market.liquidityUsd ?? undefined)} · market cap ${moneyShort(market.marketCap ?? undefined)} · FDV ${moneyShort(market.fullyDilutedValuation ?? undefined)} · selected-pool age ${market.ageDays == null ? "unknown" : age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} centralized exchanges` : ""}`,
     d.address,
     ...(exactLink ? [exactLink] : []),
     provenance,

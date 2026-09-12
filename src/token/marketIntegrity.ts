@@ -52,7 +52,7 @@ export function poolIdentityTag(symbol: string | undefined, quote: string | unde
   const base = (symbol ?? "").trim();
   const quoteSymbol = (quote ?? "").trim();
   if (base && quoteSymbol) {
-    return venue === "this pool" ? ` (${base}/${quoteSymbol} pool)` : ` (${base}/${quoteSymbol} on ${venue})`;
+    return venue === "this pool" ? ` (${base}/${quoteSymbol})` : ` (${base}/${quoteSymbol} on ${venue})`;
   }
   if (venue && venue !== "this pool") return ` (${venue})`;
   return "";

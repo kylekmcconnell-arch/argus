@@ -70,7 +70,7 @@ describe("poolTapeUsable", () => {
 
 describe("poolIdentityTag", () => {
   it("names the pair without calling an address a venue", () => {
-    expect(poolIdentityTag("UNI", "WETH", "this pool")).toBe(" (UNI/WETH pool)");
+    expect(poolIdentityTag("UNI", "WETH", "this pool")).toBe(" (UNI/WETH)");
     expect(poolIdentityTag("UNI", "USDC", "Uniswap")).toBe(" (UNI/USDC on Uniswap)");
   });
 });

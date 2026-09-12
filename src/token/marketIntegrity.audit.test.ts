@@ -55,7 +55,7 @@ describe("UNI-shaped market integrity in the token audit", () => {
     expect(dossier?.findings.some((finding) => finding.claim.includes("not a usable USD value"))).toBe(true);
 
     const t1 = dossier!.axes.find((axis) => axis.key === "T1")!;
-    expect(t1.rationale).toContain("(UNI/USDC pool)");
+    expect(t1.rationale).toContain("(UNI/USDC)");
     const t5 = dossier!.axes.find((axis) => axis.key === "T5")!;
     expect(t5.rationale).toContain("Swap counts from this pool were incomplete");
     expect(t5.rationale).not.toMatch(/1 buys/);
@@ -64,6 +64,7 @@ describe("UNI-shaped market integrity in the token audit", () => {
     expect(rows.find((row) => row.axis === "T5")?.rationale).toContain("Swap counts from this feed were incomplete");
     expect(rows.find((row) => row.axis === "T3")?.label).toBe("Buy and sell tax");
     expect(rows.find((row) => row.axis === "T3")?.rationale).toContain("This is not total trading cost");
+    expect(rows.find((row) => row.axis === "T1")?.rationale).toContain("this pool only");
   });
 
   it("takes circulating cap from CoinGecko when the pair figure is unusable", async () => {
@@ -78,5 +79,6 @@ describe("UNI-shaped market integrity in the token audit", () => {
     expect(dossier?.fdv).toBe(5_650_000_000);
     expect(dossier?.marketEvidence?.mcap).toBe(true);
     expect(dossier?.findings.some((finding) => finding.claim.includes("taken from CoinGecko"))).toBe(true);
+    expect(dossier!.headline).not.toMatch(/Clears the forensic bar|authorities revoked|Team:/i);
   });
 });

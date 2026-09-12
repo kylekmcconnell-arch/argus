@@ -65,7 +65,7 @@ export function plainScoreRationale(value: string): string {
   const raw = plainLanguageSummary(value).replace(/\s+/g, " ").trim();
   const pooled = raw.match(/^\$([\d,.]+) pooled(?: \(([^)]+)\))?(?:,\s*(.+?))?\.?$/i);
   if (pooled) {
-    const where = pooled[2] ? ` in ${pooled[2]}` : "";
+    const location = pooled[2] ? ` (${pooled[2].replace(/^the /i, "")})` : "";
     const reassuring = /^LP (?:burned|locked)$/i.test(pooled[3] ?? "");
     const qualifier = pooled[3]
       ?.replace(/^LP mostly in one wallet$/i, "most liquidity-provider tokens are held in one wallet")
@@ -75,9 +75,11 @@ export function plainScoreRationale(value: string): string {
       .replace(/^liquidity protection unverified$/i, "liquidity protection is unverified")
       .replace(/^LP burned$/i, "the liquidity-provider tokens were burned")
       .replace(/^LP locked$/i, "the liquidity-provider tokens are locked");
+    const selected = `The selected pool holds $${pooled[1]}${location}`;
+    const scope = " That is this pool only, not all of the token's liquidity.";
     return qualifier
-      ? `The liquidity pool holds $${pooled[1]}${where}, ${reassuring ? "and" : "but"} ${lowerFirst(qualifier)}.`
-      : `The liquidity pool holds $${pooled[1]}${where}.`;
+      ? `${selected}, ${reassuring ? "and" : "but"} ${lowerFirst(qualifier)}.${scope}`
+      : `${selected}.${scope}`;
   }
 
   const contract = raw.match(/^(verified|unverified) source,\s*(ownership renounced|owner active)(.*)$/i);
@@ -107,24 +109,28 @@ export function plainScoreRationale(value: string): string {
     const top = holders[2];
     const extra = holders[3].replace(/^,\s*/, "").replace(/\.+$/, "").trim();
     const spread = top
-      ? `About ${count} wallets hold this token, and the largest holds about ${top}% of supply`
-      : `About ${count} wallets hold this token`;
-    return extra ? `${spread}. ${ensureSentence(extra)}` : `${spread}.`;
+      ? `About ${count} addresses hold this token, and the largest holds about ${top}% of supply`
+      : `About ${count} addresses hold this token`;
+    const concentrated = extra.match(/^~([\d.]+)% across (\d+) non-market wallets holding at least 1% each$/i);
+    const extraSentence = concentrated
+      ? `About ${concentrated[1]}% of supply sits in ${concentrated[2]} addresses that are not known market venues, each holding at least 1%.`
+      : extra ? ensureSentence(extra) : "";
+    return extraSentence ? `${spread}. ${extraSentence}` : `${spread}.`;
   }
 
   const wash = raw.match(/^vol\/liquidity ([\d.]+)x but price flat \(([-.\d]+)%\):\s*wash-trade signature\.?$/i);
   if (wash) {
-    return `Trading volume was ${wash[1]} times the pool size while the price barely moved (${wash[2]}%). That pattern is a wash-trade signature, not proof of genuine demand.`;
+    return `This selected pool traded ${wash[1]} times its own size while the price barely moved (${wash[2]}%). That pattern is a wash-trade signature, not proof of genuine demand.`;
   }
 
   const tape = raw.match(/^24h vol\/liquidity ([\d.]+)x,\s*([\d,]+) buys \/ ([\d,]+) sells\.?$/i);
   if (tape) {
-    return `In the last day, trading volume in this pool was about ${tape[1]} times the pool size, with ${countPhrase(tape[2], "buy", "buys")} and ${countPhrase(tape[3], "sell", "sells")}.`;
+    return `In the last day, this selected pool traded about ${tape[1]} times its own size, with ${countPhrase(tape[2], "buy", "buys")} and ${countPhrase(tape[3], "sell", "sells")}. That is this pool only, not global volume.`;
   }
 
   const tapeIncomplete = raw.match(/^24h vol\/liquidity ([\d.]+)x\. Swap counts from this pool were incomplete\.?$/i);
   if (tapeIncomplete) {
-    return `In the last day, trading volume in this pool was about ${tapeIncomplete[1]} times the pool size. Swap counts from this feed were incomplete, so they are not part of the score.`;
+    return `In the last day, this selected pool traded about ${tapeIncomplete[1]} times its own size. Swap counts from this feed were incomplete, so they are not part of the score. That is this pool only, not global volume.`;
   }
 
   const tax = raw.match(/^(?:token tax )?buy ([\d.]+)% \/ sell ([\d.]+)%(?:\s*\((simulated)\))?\.?$/i);

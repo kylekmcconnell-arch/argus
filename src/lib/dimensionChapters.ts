@@ -125,7 +125,7 @@ function factsFor(axisKey: string, d: TokenDossier): ChapterFact[] {
   };
   switch (axisKey) {
     case "T1": {
-      push("Liquidity", money(d.liquidityUsd));
+      push("Selected-pool liquidity", money(d.liquidityUsd));
       if (d.symbol && d.quoteSymbol) {
         const venue = marketVenueName(d.dexId, d.dexLabels);
         push("Pool", venue === "this pool" ? `${d.symbol}/${d.quoteSymbol}` : `${d.symbol}/${d.quoteSymbol} on ${venue}`);

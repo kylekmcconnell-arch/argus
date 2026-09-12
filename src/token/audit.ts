@@ -18,6 +18,7 @@ import { arkhamProviderEnabled } from "../lib/providerCapabilities.js";
 import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
 import { classifyMarketAddress } from "../lib/marketAddresses";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
+import { tokenPassHeadline } from "../lib/tokenHeadline.js";
 import { finiteUsd, marketVenueName, poolIdentityTag, poolTapeUsable, resolveMarketValuation } from "./marketIntegrity.js";
 import {
   dexByPairResult, dexByTokenResult, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
@@ -1365,7 +1366,7 @@ async function runTokenAudit(
   const decisionBoundary = deriveTokenDecisionBoundary({ score, capApplied, axes });
   const headline = assessment.provisional && !capApplied
     ? `Score based on ${assessedWeight}/100 of the assessment weight. Evidence gaps: ${assessment.gaps.join(", ")}.`
-    : buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
+    : buildHeadline(verdict, capApplied, s, liquidityUsd, projectX, chain);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} · ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
 
   return {
@@ -1475,7 +1476,7 @@ function buildGraph(chain: string, address: string, symbol: string, verdict: str
   return { nodes, edges };
 }
 
-function buildHeadline(verdict: string, cap: string | null, s: NormalizedSafety, liq: number, projectX: string | null): string {
+function buildHeadline(verdict: string, cap: string | null, s: NormalizedSafety, liq: number, projectX: string | null, chain: string): string {
   if (cap === "ofac_sanctioned_address") return "A screened address is on the US Treasury OFAC sanctions list. Touching this token is a legal-exposure risk. Do not touch.";
   if (s.honeypot) return s.nonTransferable ? "Non-transferable: holders are locked in. Do not touch." : "Honeypot: buyers cannot sell. Do not touch.";
   if (cap === "mint_authority_active") return "Mint authority is live, the team can dilute holders to zero.";
@@ -1483,7 +1484,15 @@ function buildHeadline(verdict: string, cap: string | null, s: NormalizedSafety,
   if (cap === "reclaimable_ownership") return "Ownership can be reclaimed after renouncement, a classic rug setup.";
   if (cap === "owner_can_modify_balance") return "Owner can rewrite holder balances, they can zero your wallet at will.";
   if (cap === "balance_mutable_authority") return "A balance-mutable authority can rewrite your token balance at will.";
-  if (verdict === "PASS") return `Clears the forensic bar: ${s.ownerRenounced ? "authorities revoked" : "owned"}, ${s.lpLocked ? "LP locked" : "tradeable"}, with real depth${projectX ? `. Team: ${projectX}` : "."}`;
+  if (verdict === "PASS") {
+    return tokenPassHeadline({
+      chain,
+      ownerRenounced: s.ownerRenounced,
+      pausable: s.pausable,
+      lpLocked: s.lpLocked,
+      projectX,
+    });
+  }
   if (verdict === "CAUTION") return `Tradeable but with reservations${liq < 15000 ? "; liquidity is thin" : ""}. Size accordingly.`;
   if (!s.available) return "Scored on market data only; on-chain contract safety could not be verified keyless on this chain.";
   return "Falls short on the forensic checks. Treat as high risk.";

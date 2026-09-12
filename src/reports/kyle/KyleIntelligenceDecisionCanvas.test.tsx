@@ -63,12 +63,12 @@ it("explains token measurements in English instead of telemetry labels", () => {
       label: "Liquidity",
       score: 19,
       weight: 24,
-      rationale: "The liquidity pool holds $14,384,482, but liquidity-provider tokens are not confirmed locked. That is why it scored 19 of 24 points (5 points not earned).",
+      rationale: "The selected pool holds $14,384,482, but liquidity-provider tokens are not confirmed locked. That is this pool only, not all of the token's liquidity. That is why it scored 19 of 24 points (5 points not earned).",
       evidenceStrength: "measured",
       supportCount: 1,
     },
   ]} />));
-  expect(container.textContent).toContain("The liquidity pool holds $14,384,482, but liquidity-provider tokens are not confirmed locked.");
+  expect(container.textContent).toContain("The selected pool holds $14,384,482, but liquidity-provider tokens are not confirmed locked.");
   expect(container.textContent).toContain("That is why it scored 19 of 24 points");
   expect(container.textContent).toContain("These facts come from measurements recorded during the scan, not from the project's own claims.");
   expect(container.textContent).not.toContain("Evidence type:");
