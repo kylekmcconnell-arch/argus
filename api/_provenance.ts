@@ -702,6 +702,18 @@ function collectCheckRuns(rawChecks: unknown, context: ProvenanceContext): JsonR
     const decisionCritical = typeof check.decisionCritical === "boolean"
       ? check.decisionCritical
       : undefined;
+    // A scoped gap follow-up carries outcomes it was not authorized to
+    // re-measure. The row keeps the original completion time, and this stamp
+    // keeps it from reading as work the current run performed.
+    const carried = asRecord(check.carriedForward);
+    const carriedForward = carried && typeof carried.sourceReportVersionId === "string"
+      ? {
+          sourceReportVersionId: carried.sourceReportVersionId,
+          observedAt: timestampValue(carried.observedAt),
+          reason: textValue(carried, ["reason"], 60),
+          note: textValue(carried, ["note"], 300),
+        }
+      : undefined;
     rows.push({
       organization_id: context.organizationId,
       report_version_id: context.reportVersionId,
@@ -719,6 +731,7 @@ function collectCheckRuns(rawChecks: unknown, context: ProvenanceContext): JsonR
         note: textValue(check, ["note"], 500),
         notApplicable: status === "not-applicable",
         ...(decisionCritical !== undefined ? { decisionCritical } : {}),
+        ...(carriedForward ? { carriedForward, measuredInThisRun: false } : {}),
         completedAt,
         order,
       },

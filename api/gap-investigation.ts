@@ -28,8 +28,19 @@ import {
 import {
   authorizeGapInvestigation,
   GapInvestigationAuthorizationError,
+  savedResearchPlan,
   type AuthorizedResearchScope,
 } from "../src/lib/gapInvestigation.js";
+import {
+  checkIdentity,
+  mergeScopedFollowUpChecks,
+  savedScopedFollowUpComparison,
+  scopedFollowUpComparison,
+  selectedCheckIdsForScope,
+  type ScopedFollowUpComparison,
+  type ScopedFollowUpMerge,
+} from "../src/lib/gapCarryForward.js";
+import type { ScanCheck } from "../src/lib/scanChecklist.js";
 import { gapInvestigationReserves } from "../src/lib/investigationRuntime.js";
 import type { Dossier } from "../src/data/dossier.js";
 import type { TraceStep } from "../src/data/evidence.js";
@@ -119,6 +130,8 @@ function proposalPayload<T extends JsonRecord>(
   sourceReportVersionId: string,
   scope: AuthorizedResearchScope,
   observedCostUsd: number | null,
+  evidenceComparison: ScopedFollowUpComparison,
+  scopedScore: number | null,
 ): T & { gapInvestigation: JsonRecord } {
   return {
     ...payload,
@@ -138,9 +151,60 @@ function proposalPayload<T extends JsonRecord>(
       estimatedCostCeilingUsd: scope.estimatedCostCeilingUsd,
       observedCostUsd,
       budgetOutcome: observedCostUsd == null ? "unknown" : observedCostUsd > scope.estimatedCostCeilingUsd ? "estimate_exceeded" : "within_estimate",
+      // What the bounded re-run alone scored. It is deliberately kept out of the
+      // report's own score fields whenever this proposal also carries evidence
+      // the re-run never assessed.
+      scopedRunScore: scopedScore,
+      evidenceComparison,
       createdAt: new Date().toISOString(),
     },
   };
+}
+
+/**
+ * The checklist the source version actually froze.
+ *
+ * A live person run freezes `checkRuns` into the payload; older versions only
+ * have the provenance-side snapshot on the version context.
+ */
+function sourceChecklist(
+  kind: SupportedGapReportKind,
+  report: JsonRecord,
+  payload: unknown,
+): ScanCheck[] {
+  const fromPayload = reportChecks(kind, payload);
+  if (fromPayload.length) return fromPayload;
+  const context = record(report.versionContext);
+  return Array.isArray(context.checks) ? context.checks as ScanCheck[] : [];
+}
+
+/**
+ * Merge the bounded re-run onto the source version's evidence.
+ *
+ * A person follow-up runs only the authorized capabilities, so every check
+ * outside that scope comes back absent and must keep the source outcome. The
+ * integrated token collector re-runs its whole audit instead, so nothing there
+ * is carried: every check it produced is measured work in this run.
+ */
+function mergeFollowUpEvidence(input: {
+  kind: SupportedGapReportKind;
+  report: JsonRecord;
+  sourcePayload: unknown;
+  sourceReportVersionId: string;
+  freshChecks: readonly ScanCheck[];
+  scope: AuthorizedResearchScope;
+}): ScopedFollowUpMerge {
+  const sourceChecks = sourceChecklist(input.kind, input.report, input.sourcePayload);
+  const selectedCheckIds = input.kind === "token"
+    ? [...new Set([...sourceChecks, ...input.freshChecks].map(checkIdentity).filter(Boolean))]
+    : selectedCheckIdsForScope(savedResearchPlan(input.sourcePayload), input.scope.taskIds);
+  return mergeScopedFollowUpChecks({
+    sourceChecks,
+    freshChecks: input.freshChecks,
+    selectedCheckIds,
+    sourceReportVersionId: input.sourceReportVersionId,
+    sourceObservedAt: text(input.report.ts, 60),
+  });
 }
 
 function projectAccountHandle(payload: unknown): string {
@@ -414,6 +478,43 @@ async function authorizeAndExecute(
       ? Math.max(0, costRecord.usd)
       : null;
     const proposedBase = proposedReportPayload(supportedKind, payload, dossier);
+    const attestationState = (supportedKind === "person" || supportedKind === "token") && dossier.live
+      ? "server_collected" as const
+      : "analyst_submitted" as const;
+    const freshChecks = supportedKind === "person"
+      ? personDossier?.checkRuns ?? []
+      : reportChecks(supportedKind, proposedBase);
+    // A scoped re-run assessed only what it was authorized to assess. Merge its
+    // results onto the source version so untouched evidence survives with its
+    // original provenance instead of reappearing as never-run.
+    const evidenceMerge = mergeFollowUpEvidence({
+      kind: supportedKind,
+      report,
+      sourcePayload: payload,
+      sourceReportVersionId,
+      freshChecks,
+      scope,
+    });
+    const checks = evidenceMerge.checks;
+    // The frozen payload and the persisted checklist must describe the same
+    // evidence, so the merged rows replace the re-run's own record.
+    if (supportedKind === "person") proposedBase.checkRuns = checks;
+    // Only a person follow-up derives its own number: the bounded collector
+    // rescores from the axes it just built. A token + project follow-up keeps
+    // the frozen token score it did not touch, and an integrated token re-run
+    // rescores everything it collected, so neither is invalidated by carried
+    // rows.
+    const scoreFollowsFreshRun = supportedKind === "person";
+    const comparison = scopedFollowUpComparison(evidenceMerge, { scoreFollowsFreshRun });
+    const projection = reportProjection(supportedKind, report, proposedBase, dossier);
+    // The re-run scored only the evidence it saw. When the proposal also carries
+    // decision-critical evidence the scorer never saw, its number describes a
+    // different report than the one on screen, so it is withheld rather than
+    // spliced in. The scoped number stays visible as follow-up detail.
+    const scoreIsCoherent = !scoreFollowsFreshRun
+      || evidenceMerge.scoreBasis === "fresh_covers_merged_evidence";
+    const verdict = scoreIsCoherent ? projection.verdict : null;
+    const score = scoreIsCoherent ? projection.score : null;
     const proposed = proposalPayload(
       proposedBase,
       auth,
@@ -421,19 +522,15 @@ async function authorizeAndExecute(
       sourceReportVersionId,
       scope,
       observedCostUsd,
+      comparison,
+      projection.score,
     );
-    const { verdict, score } = reportProjection(supportedKind, report, proposed, dossier);
-    const attestationState = (supportedKind === "person" || supportedKind === "token") && dossier.live
-      ? "server_collected" as const
-      : "analyst_submitted" as const;
-    const checks = supportedKind === "person"
-      ? personDossier?.checkRuns ?? []
-      : reportChecks(supportedKind, proposed);
     if (supportedKind === "investigation") proposed.facets = investigationFacets(proposed as unknown as Investigation, checks);
     const requestedCompleteness = supportedKind === "person"
       ? personDossier?.completeness_state === "complete" ? "complete" : "partial"
       : reportCompleteness(supportedKind, proposed, checks);
-    const completenessState = observedCostUsd != null && observedCostUsd > scope.estimatedCostCeilingUsd
+    const completenessState = (observedCostUsd != null && observedCostUsd > scope.estimatedCostCeilingUsd)
+      || !scoreIsCoherent
       ? "partial" as const
       : coverageQualifiedCompleteness({
           completeness: requestedCompleteness,
@@ -487,6 +584,15 @@ async function authorizeAndExecute(
       proposedReportVersionId,
       status: completenessState === "complete" ? "proposed" : "partial",
       active: false,
+      evidence: {
+        summary: comparison.summary,
+        scoreBasis: comparison.scoreBasis,
+        carriedDecisionCriticalCount: comparison.carriedDecisionCriticalCount,
+        promotable: comparison.promotable,
+        promotionBlocks: comparison.promotionBlocks,
+        areas: comparison.areas,
+      },
+      scopedRunScore: projection.score,
       gap: scope.gap,
       taskIds: scope.taskIds,
       delegates: scope.delegates,
@@ -513,6 +619,60 @@ function savedIntent(payload: unknown): "investment_due_diligence" | "counterpar
     : "investment_due_diligence";
 }
 
+/**
+ * Refuse promotion of a proposal that would regress the active report.
+ *
+ * The check runs on the frozen proposal itself, so it holds for any caller and
+ * for proposals created in an earlier session. It fails closed: a proposal
+ * without a frozen evidence comparison predates carry-forward and may silently
+ * drop completed checks, so it is never promoted.
+ */
+async function promotionRefusal(
+  credentials: ServiceCredentials,
+  auth: AuthContext,
+  authorizationId: string,
+): Promise<JsonRecord | null> {
+  const response = await fetch(
+    `${credentials.url}/rest/v1/gap_investigations?select=proposed_report_version_id,status&id=eq.${encodeURIComponent(authorizationId)}&organization_id=eq.${encodeURIComponent(auth.organizationId)}&limit=1`,
+    { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+  );
+  if (!response.ok) {
+    throw new Error(`gap investigation read failed (${response.status})`);
+  }
+  const rows = await response.json() as unknown;
+  const row = record(Array.isArray(rows) ? rows[0] : null);
+  const proposedReportVersionId = text(row.proposed_report_version_id, 80);
+  if (!UUID.test(proposedReportVersionId)) {
+    return {
+      note: "This authorization has no proposed report version to promote.",
+      blocks: [{ code: "proposal_not_found", note: "No proposed version is recorded for this authorization." }],
+    };
+  }
+  const exact = await loadExactVersionReport(credentials, auth.organizationId, proposedReportVersionId);
+  const comparison = savedScopedFollowUpComparison(record(exact?.report).payload);
+  if (!comparison) {
+    return {
+      proposedReportVersionId,
+      note: "This proposal was created before scoped follow-ups preserved untouched evidence, so it may drop completed checks the active report still holds. Run a fresh assessment instead of promoting it.",
+      blocks: [{
+        code: "evidence_comparison_missing",
+        note: "The proposal carries no frozen evidence comparison, so its coverage cannot be verified against the source version.",
+      }],
+    };
+  }
+  if (comparison.promotable) return null;
+  return {
+    proposedReportVersionId,
+    note: "Promoting this proposal would publish a report that is not a safe replacement for the active version.",
+    blocks: comparison.promotionBlocks,
+    evidence: {
+      summary: comparison.summary,
+      scoreBasis: comparison.scoreBasis,
+      areas: comparison.areas,
+    },
+  };
+}
+
 async function mutateProposal(
   res: VercelResponse,
   auth: AuthContext,
@@ -524,6 +684,13 @@ async function mutateProposal(
   if (!UUID.test(authorizationId) || (action !== "promote" && action !== "rollback")) {
     res.status(400).json({ error: "authorization_and_action_required" });
     return;
+  }
+  if (action === "promote") {
+    const refusal = await promotionRefusal(credentials, auth, authorizationId);
+    if (refusal) {
+      res.status(409).json({ error: "promotion_blocked", ...refusal });
+      return;
+    }
   }
   const name = action === "promote"
     ? "promote_gap_investigation_proposal"
