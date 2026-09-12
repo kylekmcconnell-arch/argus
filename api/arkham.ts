@@ -66,12 +66,22 @@ export type ArkhamLabel = {
   risk?: ArkhamRisk;  // present only when the wallet carries real risk (level != NONE or a seed)
 };
 
-interface CallCounter { calls: number; succeeded: number }
+interface CallCounter { calls: number; succeeded: number; httpFailures: number[] }
+function emptyUsage(): CallCounter {
+  return { calls: 0, succeeded: 0, httpFailures: [] };
+}
+function panelCostMeta(usage: CallCounter): string {
+  const codes = [...new Set(usage.httpFailures.filter((code) => code === 401 || code === 429))].sort((a, b) => a - b);
+  return codes.length ? `subscription/keyed;http_${codes.join(",http_")}` : "subscription/keyed";
+}
 const getJson = async (url: string, key: string, usage: CallCounter) => {
   usage.calls += 1;
   try {
     const r = await fetch(url, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(9000) });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      usage.httpFailures.push(r.status);
+      return null;
+    }
     const data = await r.json();
     usage.succeeded += 1;
     return data;
@@ -248,13 +258,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const raw = typeof req.query.addresses === "string" ? req.query.addresses : typeof req.query.address === "string" ? req.query.address : "";
   const addrs = [...new Set(raw.split(",").map(providerAddressKey).filter(Boolean))].slice(0, 30);
   if (!addrs.length) { res.status(400).json({ error: "addresses required" }); return; }
-  const usage: CallCounter = { calls: 0, succeeded: 0 };
+  const usage = emptyUsage();
   try {
     const results = await Promise.all(addrs.map(async (a) => {
-      const addressUsage: CallCounter = { calls: 0, succeeded: 0 };
+      const addressUsage = emptyUsage();
       const outcome = await lookup(a, key, addressUsage);
       usage.calls += addressUsage.calls;
       usage.succeeded += addressUsage.succeeded;
+      usage.httpFailures.push(...addressUsage.httpFailures);
       return { address: providerAddressKey(a), ...outcome };
     }));
     const labels: Record<string, ArkhamLabel> = {};
@@ -269,7 +280,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         op: "panel:arkham-labels",
         calls: usage.calls,
         usd: 0,
-        meta: "subscription/keyed",
+        meta: panelCostMeta(usage),
         initiatedBy: auth.userId,
         status: usage.succeeded === usage.calls ? "succeeded" : usage.succeeded > 0 ? "partial" : "failed",
       });

@@ -7,7 +7,7 @@
 // via a curated hot-wallet list; Solana age via Helius signatures. Bounded and
 // best-effort - any wallet that can't be read is "unknown", never fatal.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { arr, rec } from "../src/lib/json.js";
+import { arr, isRecord, rec } from "../src/lib/json.js";
 
 export const config = { maxDuration: 30 };
 
@@ -81,12 +81,11 @@ async function inChunks<T, R>(items: T[], size: number, fn: (x: T) => Promise<R>
 
 async function solClassify(key: string, wallet: string): Promise<{ ageDays: number | null; lastDays: number | null; cexFunded: boolean } | null> {
   try {
-    const rpc = async (params: unknown) => {
-      const r = await fetch(`https://mainnet.helius-rpc.com/?api-key=${key}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSignaturesForAddress", params }), signal: AbortSignal.timeout(9000) });
-      return r.ok ? ((await r.json()) as unknown) : null;
-    };
-    const d = await rpc([wallet, { limit: 1000 }]);
-    const sigs = arr(rec(d).result);
+    const r = await fetch(`https://mainnet.helius-rpc.com/?api-key=${key}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSignaturesForAddress", params: [wallet, { limit: 1000 }] }), signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return null;
+    const body: unknown = await r.json().catch(() => null);
+    if (!isRecord(body) || body.error != null || !("result" in body) || !Array.isArray(body.result)) return null;
+    const sigs = body.result;
     if (!sigs.length) return { ageDays: null, lastDays: null, cexFunded: false };
     const newest = Number(rec(sigs[0]).blockTime ?? 0) * 1000;
     const oldest = Number(rec(sigs[sigs.length - 1]).blockTime ?? 0) * 1000;
@@ -154,6 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const bucket = { fresh: { n: 0, pct: 0 }, recent: { n: 0, pct: 0 }, dormant: { n: 0, pct: 0 }, cexFunded: { n: 0, pct: 0 }, aged: { n: 0, pct: 0 }, unknown: { n: 0, pct: 0 } };
   for (const r of rows) {
+    if (!r.assessed) continue;
     if (r.cexFunded) { bucket.cexFunded.n++; bucket.cexFunded.pct += r.pct; }
     if (r.ageDays == null) { bucket.unknown.n++; bucket.unknown.pct += r.pct; }
     else if (r.ageDays < 3) { bucket.fresh.n++; bucket.fresh.pct += r.pct; }
