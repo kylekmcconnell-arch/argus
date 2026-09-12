@@ -18,7 +18,7 @@ import { arkhamProviderEnabled } from "../lib/providerCapabilities.js";
 import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
 import { classifyMarketAddress } from "../lib/marketAddresses";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
-import { finiteUsd, marketVenueName, poolIdentityTag, poolTapeUsable, resolveMarketValuation } from "./marketIntegrity";
+import { finiteUsd, marketVenueName, poolIdentityTag, poolTapeUsable, resolveMarketValuation } from "./marketIntegrity.js";
 import {
   dexByPairResult, dexByTokenResult, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
   GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource, rugcheckReport,

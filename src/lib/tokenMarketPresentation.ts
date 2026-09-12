@@ -1,5 +1,5 @@
 import type { TokenDossier } from "../token/audit";
-import { finiteUsd } from "../token/marketIntegrity";
+import { finiteUsd } from "../token/marketIntegrity.js";
 
 /** A value without a collection receipt is unknown, including legacy fallbacks. */
 export function tokenMarketPresentation(d: TokenDossier) {

@@ -6,7 +6,7 @@
 // the ledger where they can be checked.
 import type { TokenDossier } from "../token/audit";
 import { publicStrengthLabel } from "./intelligencePresentation";
-import { finiteUsd, marketVenueName } from "../token/marketIntegrity";
+import { finiteUsd, marketVenueName } from "../token/marketIntegrity.js";
 import { plainScoreRationale } from "./verdictNarrative";
 
 export type ChapterTone = "pass" | "caution" | "fail";

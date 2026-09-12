@@ -15,7 +15,7 @@
 // graph write live here and each server call stays individually bounded.
 import { recordForensicEntities } from "../graph/store";
 import { fetchPanelJson, PanelRequestError, requiredPanelHeaders } from "./panelCostHeaders";
-import { finiteUsd } from "../token/marketIntegrity";
+import { finiteUsd } from "../token/marketIntegrity.js";
 
 const SOLADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
