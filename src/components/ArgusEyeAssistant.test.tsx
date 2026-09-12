@@ -311,4 +311,74 @@ describe("ARGUS Eye floating assistant", () => {
     expect(container.textContent).toContain("remains inactive");
     expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({ authorizationId, action: "rollback" });
   });
+
+  it("shows what a scoped follow-up kept and withholds promotion when it is not a safe replacement", async () => {
+    const authorizationId = "00000000-0000-4000-8000-000000000205";
+    const proposalId = "00000000-0000-4000-8000-000000000305";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        answer: "The frozen report leaves the track record unresolved.",
+        investigationRoute: {
+          intent: "investment_due_diligence",
+          reasoningMode: "plan_investigation",
+          inheritedIntent: false,
+          answerMode: "investigate_evidence_gap",
+          explanation: "The open track-record question needs new evidence.",
+          delegates: ["portfolio-web"],
+          blockedBy: [],
+          unresolvedQuestions: [{ id: "gap.track-record", prompt: "What is the verified track record?", state: "unresolved", materiality: "critical" }],
+          evidenceFocus: [],
+          changeConditions: [],
+          claimChains: [],
+          authorizationPreview: {
+            gapId: "gap.track-record",
+            gapPrompt: "What is the verified track record?",
+            taskIds: ["portfolio"],
+            timeBudgetSeconds: 300,
+            estimatedCostCeilingUsd: 3.5,
+          },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authorizationId,
+        proposedReportVersionId: proposalId,
+        status: "partial",
+        active: false,
+        reviewPath: `/?version=${proposalId}`,
+        evidence: {
+          promotable: false,
+          carriedDecisionCriticalCount: 2,
+          promotionBlocks: [{
+            code: "carried_evidence_not_rescored",
+            note: "Promoting it would publish a score that does not describe its own evidence.",
+          }],
+          areas: {
+            recovered: ["Founder track record"],
+            reconfirmed: [],
+            stillOpen: ["Founder relationships"],
+            carried: ["Adverse screen", "Founder asset distinction"],
+            carriedStale: [],
+            retryRegressed: [],
+            notSelectedOpen: [],
+            newlyMeasured: [],
+          },
+        },
+      }), { status: 201, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    act(() => root.render(<ArgusEyeAssistant subject="@alice" reportVersionId={reportVersionId} />));
+    clickByLabel("Ask ARGUS Eye about this report");
+    const prompt = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("change the conclusion"));
+    await act(async () => prompt!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const authorize = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Authorize investigation"));
+    await act(async () => authorize!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(container.textContent).toContain("What changed against the active report");
+    expect(container.textContent).toContain("Closed by this follow-up: Founder track record");
+    expect(container.textContent).toContain("Kept from the active report (not re-checked): Adverse screen, Founder asset distinction");
+    expect(container.textContent).toContain("Still open after the retry: Founder relationships");
+    expect(container.textContent).toContain("does not describe its own evidence");
+    expect(container.textContent).toContain("Promotion unavailable");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent?.includes("Promote after review"))).toBe(false);
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent?.includes("Roll back"))).toBe(true);
+  });
 });

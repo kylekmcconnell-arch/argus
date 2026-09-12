@@ -60,4 +60,39 @@ describe("MethodologyChecklist", () => {
     expect(container.textContent).toContain("2 of 2 main checks finished · 2 extra follow-ups open");
     expect(container.textContent).not.toContain("2 of 4 main checks");
   });
+
+  it("says a carried check was kept rather than measured again", () => {
+    act(() => {
+      root.render(
+        <MethodologyChecklist
+          summaryLabel="Person checks"
+          checks={[
+            {
+              label: "Adverse media screen",
+              status: "checked-empty",
+              completedAt: "2026-09-10T04:05:00.000Z",
+              carriedForward: {
+                schemaVersion: 1,
+                sourceReportVersionId: "11111111-1111-4111-8111-111111111111",
+                observedAt: "2026-09-10T04:05:00.000Z",
+                reason: "not_selected",
+                note: "Carried from the source version.",
+              },
+            },
+            { label: "Founder identity", status: "confirmed" },
+          ]}
+        />,
+      );
+    });
+
+    act(() => {
+      container.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain(
+      "Kept from the earlier report (checked 2026-09-10); this follow-up did not re-run it.",
+    );
+    // The freshly measured row makes no such claim.
+    expect(container.textContent?.match(/Kept from the earlier report/g)).toHaveLength(1);
+  });
 });

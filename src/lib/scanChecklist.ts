@@ -1,4 +1,5 @@
 import type { TokenDossier } from "../token/audit";
+import type { CarriedEvidenceProvenance } from "./gapCarryForward";
 import { arkhamProviderEnabled } from "./providerCapabilities.js";
 
 // The checklist is an evidence-coverage view, not a promise about work that may
@@ -41,6 +42,13 @@ export interface ScanCheck {
   provider?: string;
   sourceCount?: number;
   completedAt?: string;
+  /**
+   * Present when a scoped gap follow-up carried this outcome from the version
+   * it was authorized against instead of measuring it again. `completedAt`,
+   * `provider` and `sourceCount` stay as the original run recorded them, so a
+   * carried row never reads as newly measured work.
+   */
+  carriedForward?: CarriedEvidenceProvenance;
 }
 
 // These panels intentionally run after persistence with a short-lived signed
