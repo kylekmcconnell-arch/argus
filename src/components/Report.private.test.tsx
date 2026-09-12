@@ -185,8 +185,8 @@ describe("private person report evidence boundary", () => {
     expect(dual).not.toBeNull();
     expect(dual?.textContent).toContain("Person diligence score54");
     expect(dual?.textContent).toContain("Token safety score79");
-    expect(dual?.textContent).toContain("The liquidity");
-    expect(dual?.textContent).toContain("Code & security");
+    expect(dual?.textContent).toContain("Liquidity");
+    expect(dual?.textContent).toContain("Code and security");
     expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
   });
 

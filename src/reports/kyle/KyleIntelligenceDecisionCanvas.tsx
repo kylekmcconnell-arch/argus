@@ -10,6 +10,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { compositionRowColor, type CompositionRow } from "../../components/ScoreComposition";
+import { publicEvidenceOrigin } from "../../lib/scoreComposition";
 import { ReportChallengeButton } from "../../components/ReportChallengeButton";
 import { assessedPoints, recordedCount } from "../../lib/reportEvidenceSummary";
 import { HERO_SCORE_RING_SIZE, ScoreRing } from "../../components/ScoreRing";
@@ -751,7 +752,7 @@ export function KyleIntelligenceDecisionCanvas({
         <div className="kyle-section-intro">
           <p className="kyle-overline mono">02 · WHY {score ?? verdictLabel}</p>
           <h2 id="kyle-score-explanation-title">Why each area received its score.</h2>
-          <p>Read the saved reason for each area below. Points show its contribution before any final safety limit or adjustment. Open the sources to check the explanation.</p>
+      <p>Each area below is the saved reason for its score, in plain language. Points show its contribution before any final safety limit. Open the sources to check the explanation.</p>
         </div>
         <div className="kyle-composition-ledger">
           <div className="kyle-composition-summary mono">
@@ -775,8 +776,8 @@ export function KyleIntelligenceDecisionCanvas({
                   <ArrowDown size={15} weight="bold" aria-hidden="true" />
                 </summary>
                 <div className="kyle-composition-detail">
-                  <p className="mono">Evidence type: {row.evidenceStrength ? ({ verified: "independently confirmed", measured: "recorded measurements", attributed: "reported by a named source", self_reported: "reported by the subject; not independent confirmation" })[row.evidenceStrength] : "not recorded in this score breakdown"}</p>
                   <p>{sentence(row.rationale) || "No public rationale was saved for this dimension."}</p>
+                  <p>{publicEvidenceOrigin(row.evidenceStrength) ?? "This score breakdown did not record where the evidence came from."}</p>
                   <div>
                     <span className="mono">{row.supportCount ?? "Unrecorded"} supporting source{row.supportCount === 1 ? "" : "s"}</span>
                     {(row.counterCount ?? 0) > 0 && <span className="mono kyle-text-negative">{row.counterCount} counter-signal{row.counterCount === 1 ? "" : "s"}</span>}
