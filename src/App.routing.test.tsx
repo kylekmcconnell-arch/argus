@@ -1257,6 +1257,37 @@ describe("App routing safety", () => {
     expect(harness.recordContribution).not.toHaveBeenCalled();
   });
 
+  it("does not publish an investigation whose immutable save fails", async () => {
+    const address = "0x9999999999999999999999999999999999999999";
+    harness.syncReport.mockResolvedValue({ state: "failed", reason: "storage unavailable" });
+    await renderApp();
+    await act(async () => {
+      harness.scanOnComplete?.({
+        id: "scan-investigation-save-failed",
+        kind: "investigation",
+        priv: false,
+        result: {
+          rootRef: address,
+          token: tokenResult(address, "unsaved investigation"),
+          projectX: null,
+          siteUrl: null,
+          recon: { team: { names: [] }, socials: [] },
+          projectAccount: null,
+          founders: [],
+          founderNote: "Unsaved",
+          deployerTrail: null,
+          webTeam: [],
+        },
+        creditKey: "credit-investigation-save-failed",
+        startedAt: Date.now(),
+      });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+  });
+
   it("logs a finished token scan to recents with the same completion contract its report applies", async () => {
     const address = "0x7777777777777777777777777777777777777777";
     // Every check the standalone token collector actually runs has an outcome.
