@@ -18,6 +18,7 @@ import { arkhamProviderEnabled } from "../lib/providerCapabilities.js";
 import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
 import { classifyMarketAddress } from "../lib/marketAddresses";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
+import { finiteUsd, marketVenueName, poolIdentityTag, poolTapeUsable, resolveMarketValuation } from "./marketIntegrity";
 import {
   dexByPairResult, dexByTokenResult, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
   GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource, rugcheckReport,
@@ -129,7 +130,7 @@ export function deployerRoleLabel(
 
 export interface TokenDossier {
   cost?: import("../data/dossier").Dossier["cost"];
-  address: string; chain: string; dexId: string; dexLabels?: string[]; pairAddress?: string; symbol: string; name: string;
+  address: string; chain: string; dexId: string; dexLabels?: string[]; pairAddress?: string; quoteSymbol?: string; symbol: string; name: string;
   imageUrl?: string; priceUsd?: number; mcap?: number; fdv?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
   /** Which headline market fields DexScreener actually returned. Older frozen
    * reports omit this receipt and therefore render those values as derived. */
@@ -646,21 +647,18 @@ async function runTokenAudit(
   const address = pair.baseToken.address;
   const chain = pair.chainId;
   const liquidityUsd = pair.liquidity?.usd ?? 0;
-  // `mcap` is the circulating value when DexScreener provides it. Preserve FDV
-  // separately so the report does not label one as the other.
-  const fdv = pair.marketCap ?? pair.fdv ?? 0;
-  const fullyDilutedValuation = pair.fdv ?? pair.marketCap ?? 0;
   const vol24 = pair.volume?.h24 ?? 0;
   const buys = pair.txns?.h24?.buys ?? 0;
   const sells = pair.txns?.h24?.sells ?? 0;
+  const tapeUsable = poolTapeUsable({ volumeUsd: vol24, buys, sells, liquidityUsd });
   const pc24 = pair.priceChange?.h24 ?? 0;
   const ageDays = pair.pairCreatedAt ? (Date.now() - pair.pairCreatedAt) / 86400000 : undefined;
   // Trading-authenticity signals. High volume-to-liquidity churn is normal for
   // thin meme tokens, so it is NOT wash trading on its own — the signature is
   // heavy churn with the price going nowhere (volume that does not move price).
   const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
-  const washSignature = pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
-  step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
+  const washSignature = tapeUsable && pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
+  step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
 
   // ---- safety (chain-specific) ----
   const gpChain = GOPLUS_CHAIN[chain];
@@ -791,10 +789,17 @@ async function runTokenAudit(
     step({ phase: "Corroborate", label: "CoinGecko cross-check", detail: "Independent listing, CEX markets, market-cap vs FDV…", tone: "neutral" });
     cg = await coingeckoToken(chain, address, fetcher);
   }
+  const market = resolveMarketValuation({
+    pairMarketCap: pair.marketCap,
+    pairFdv: pair.fdv,
+    geckoMcap: cg?.mcapUsd ?? null,
+    geckoFdv: cg?.fdvUsd ?? null,
+  });
+  const circulatingMcap = market.marketCap ?? 0;
   // Independent evidence that holders can actually sell: a honeypot cannot
   // produce genuine sell transactions against deep liquidity, and cannot be
   // listed on many centralized venues. Both signals are keyless.
-  const provablySellable = sells >= 10 && liquidityUsd >= 250_000;
+  const provablySellable = tapeUsable && sells >= 10 && liquidityUsd >= 250_000;
   const broadlyTraded = (cg?.cexCount ?? 0) >= 5 || provablySellable;
 
   if (s.available) {
@@ -830,7 +835,7 @@ async function runTokenAudit(
     // couple of low-tier listings can't game it: broad listings (5+), or a few
     // listings on a material cap, or a single listing on a large cap.
     const cexN = cg?.cexCount ?? 0;
-    const mcap = fdv;
+    const mcap = circulatingMcap;
     const established = cexN >= 5 || (cexN >= 3 && mcap >= 10_000_000) || (cexN >= 1 && mcap >= 100_000_000);
     const authorityTone = established ? "warn" : "bad";
     const govNote = established ? " On a token with real centralized-exchange listings this is typically a governed emissions/ops mechanism, not a rug setup. Confirm the controller." : "";
@@ -977,10 +982,19 @@ async function runTokenAudit(
       });
     } else if (cg) {
       findings.push({ claim: `Corroborated on CoinGecko${cg.rank ? ` (rank #${cg.rank})` : ""}, ${cg.cexCount} centralized market${cg.cexCount === 1 ? "" : "s"}.`, tone: "good", source: "coingecko" });
-      if (cg.mcapUsd && fdv && fdv > cg.mcapUsd * 3) {
-        findings.push({ claim: `FDV is ${(fdv / cg.mcapUsd).toFixed(1)}x circulating market cap, creating a large unlock or dilution overhang.`, tone: "warn", source: "coingecko" });
+      if (finiteUsd(cg.mcapUsd) && finiteUsd(market.fdv) && market.fdv > cg.mcapUsd * 3) {
+        findings.push({ claim: `FDV is ${(market.fdv / cg.mcapUsd).toFixed(1)}x circulating market cap, creating a large unlock or dilution overhang.`, tone: "warn", source: "coingecko" });
       }
     }
+  }
+  if (market.discardedPairMarketCap) {
+    findings.push({
+      claim: market.marketCapSource === "coingecko"
+        ? "DexScreener returned a market-cap figure that is not a usable USD value. Circulating market cap is taken from CoinGecko."
+        : "DexScreener returned a market-cap figure that is not a usable USD value. Circulating market cap is unmeasured.",
+      tone: "warn",
+      source: market.marketCapSource === "coingecko" ? "coingecko + dexscreener" : "dexscreener",
+    });
   }
 
   // ---- holder concentration ----
@@ -1109,7 +1123,9 @@ async function runTokenAudit(
   // No usable LP record: the lock is UNKNOWN. Scoring it as loose told readers
   // that USDC's liquidity "does not appear locked or burned" and docked it.
   else if (s.available) { lpNote = ", liquidity protection unverified"; }
-  axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${lpNote}.` });
+  const venue = marketVenueName(pair.dexId, pair.labels);
+  const poolTag = poolIdentityTag(pair.baseToken.symbol, pair.quoteToken?.symbol, venue);
+  axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${poolTag}${lpNote}.` });
 
   let aT2 = 26;
   if (!s.available) aT2 = 9;
@@ -1142,7 +1158,7 @@ async function runTokenAudit(
   const solanaTaxRationale = s.transferFee
     ? "a Token-2022 transfer fee is configured on this mint."
     : "no Token-2022 transfer fee is configured.";
-  axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? (chain === "solana" ? solanaTaxRationale : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.`) : "Tax not verifiable keyless." });
+  axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? (chain === "solana" ? solanaTaxRationale : `token tax buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.`) : "Tax not verifiable keyless." });
 
   const topPct = holdersReliable ? concentrationTopPct : null;
   let aT4 = s.holderCount < 50 ? 3 : s.holderCount < 500 ? 7 : s.holderCount < 5000 ? 11 : 14;
@@ -1167,9 +1183,9 @@ async function runTokenAudit(
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
   if (washSignature) aT5 = 2; // churn without price movement = manufactured volume
-  else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
+  else if (tapeUsable && total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : tapeUsable ? `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` : `24h vol/liquidity ${volLiq.toFixed(2)}x. Swap counts from this pool were incomplete.` });
 
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
@@ -1185,7 +1201,7 @@ async function runTokenAudit(
   let aT6 = ageDays == null ? 4 : ageDays < 1 ? 2 : ageDays < 7 ? 4 : ageDays < 30 ? 6 : ageDays < 180 ? 8 : 10;
   if (socials.length) aT6 = clamp(aT6 + 1, 0, 10);
   if (cg?.cexCount) aT6 = clamp(aT6 + 2, 0, 10);
-  axes.push({ key: "T6", label: "Maturity & presence", score: aT6, weight: 10, rationale: `${ageDays != null ? (ageDays < 1 ? "<1 day" : Math.round(ageDays) + " days") + " old" : "age unknown"}${socials.length ? `, ${socials.length} socials` : ", no socials"}${cg?.cexCount ? `, ${cg.cexCount} CEX listings` : cg && !cg.listed ? ", not on CoinGecko" : ""}.` });
+  axes.push({ key: "T6", label: "Maturity & presence", score: aT6, weight: 10, rationale: `${ageDays != null ? (ageDays < 1 ? "<1 day" : Math.round(ageDays) + " days") + " old" : "age unknown"}${socials.length ? `, ${socials.length} ${socials.length === 1 ? "social" : "socials"}` : ", no socials"}${cg?.cexCount ? `, ${cg.cexCount} CEX listings` : cg && !cg.listed ? ", not on CoinGecko" : ""}.` });
 
   // ---- verdict ----
   const measured = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
@@ -1353,12 +1369,12 @@ async function runTokenAudit(
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} · ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
 
   return {
-    address, chain, dexId: pair.dexId, dexLabels: pair.labels ?? [], pairAddress: pair.pairAddress, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
+    address, chain, dexId: pair.dexId, dexLabels: pair.labels ?? [], pairAddress: pair.pairAddress, quoteSymbol: pair.quoteToken?.symbol, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? undefined, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
-    mcap: fdv, fdv: fullyDilutedValuation, liquidityUsd, vol24, ageDays,
+    mcap: market.marketCap, fdv: market.fdv, liquidityUsd, vol24, ageDays,
     marketEvidence: {
-      mcap: pair.marketCap != null && Number.isFinite(pair.marketCap),
-      fdv: pair.fdv != null && Number.isFinite(pair.fdv),
+      mcap: market.marketCap != null,
+      fdv: market.fdv != null,
       liquidityUsd: pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd),
       vol24: pair.volume?.h24 != null && Number.isFinite(pair.volume.h24),
       ageDays: pair.pairCreatedAt != null && Number.isFinite(pair.pairCreatedAt),

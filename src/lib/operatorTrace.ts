@@ -15,6 +15,7 @@
 // graph write live here and each server call stays individually bounded.
 import { recordForensicEntities } from "../graph/store";
 import { fetchPanelJson, PanelRequestError, requiredPanelHeaders } from "./panelCostHeaders";
+import { finiteUsd } from "../token/marketIntegrity";
 
 const SOLADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -442,7 +443,9 @@ async function markLiveness(toks: OperatorToken[], cap: number, chain: string, m
       for (const p of Array.isArray(pairs) ? pairs : []) {
         const liquidity = p.liquidity && typeof p.liquidity === "object" ? p.liquidity as Record<string, unknown> : {};
         const baseToken = p.baseToken && typeof p.baseToken === "object" ? p.baseToken as Record<string, unknown> : {};
-        const mc = Number(p.marketCap ?? p.fdv ?? 0);
+        const rawCap = Number(p.marketCap);
+        const rawFdv = Number(p.fdv);
+        const mc = finiteUsd(rawCap) ? rawCap : finiteUsd(rawFdv) ? rawFdv : 0;
         const liq = Number(liquidity.usd ?? 0);
         const base = String(baseToken.address ?? "");
         if (base && (mc >= 50_000 || liq >= 5_000)) alive.add(base);

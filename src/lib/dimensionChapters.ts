@@ -6,6 +6,7 @@
 // the ledger where they can be checked.
 import type { TokenDossier } from "../token/audit";
 import { publicStrengthLabel } from "./intelligencePresentation";
+import { finiteUsd, marketVenueName } from "../token/marketIntegrity";
 import { plainScoreRationale } from "./verdictNarrative";
 
 export type ChapterTone = "pass" | "caution" | "fail";
@@ -52,7 +53,7 @@ const PLAIN_AXES: Record<string, { label: string; order: number }> = {
   P6_transparency_integrity: { label: "Transparency", order: 60 },
   T5: { label: "Trading activity", order: 110 },
   T4: { label: "Holders", order: 120 },
-  T3: { label: "Trading costs", order: 130 },
+  T3: { label: "Buy and sell tax", order: 130 },
   T2: { label: "Code and security", order: 140 },
   T1: { label: "Liquidity", order: 150 },
   T6: { label: "Maturity & presence", order: 160 },
@@ -68,7 +69,7 @@ export const orderByPlainAxis = <T extends { axis: string }>(rows: T[]): T[] =>
   [...rows].sort((a, b) => plainAxisOrder(a.axis) - plainAxisOrder(b.axis));
 
 const money = (n?: number | null): string | null => {
-  if (n == null || !Number.isFinite(n)) return null;
+  if (n == null || !finiteUsd(n, true)) return null;
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
   if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
   if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
@@ -125,6 +126,10 @@ function factsFor(axisKey: string, d: TokenDossier): ChapterFact[] {
   switch (axisKey) {
     case "T1": {
       push("Liquidity", money(d.liquidityUsd));
+      if (d.symbol && d.quoteSymbol) {
+        const venue = marketVenueName(d.dexId, d.dexLabels);
+        push("Pool", venue === "this pool" ? `${d.symbol}/${d.quoteSymbol}` : `${d.symbol}/${d.quoteSymbol} on ${venue}`);
+      }
       if (s.lpBurnedPct > 0) push("LP burned", `${s.lpBurnedPct.toFixed(0)}%`, "pass");
       push(
         "LP lock",
@@ -149,8 +154,8 @@ function factsFor(axisKey: string, d: TokenDossier): ChapterFact[] {
       break;
     }
     case "T3": {
-      push("Buy tax", `${s.buyTax}%`, s.buyTax > 5 ? "caution" : "pass");
-      push("Sell tax", `${s.sellTax}%`, s.sellTax >= 15 ? "fail" : s.sellTax > 5 ? "caution" : "pass");
+      push("Buy token tax", `${s.buyTax}%`, s.buyTax > 5 ? "caution" : "pass");
+      push("Sell token tax", `${s.sellTax}%`, s.sellTax >= 15 ? "fail" : s.sellTax > 5 ? "caution" : "pass");
       break;
     }
     case "T4": {
@@ -168,7 +173,7 @@ function factsFor(axisKey: string, d: TokenDossier): ChapterFact[] {
     }
     case "T6": {
       if (d.ageDays != null) {
-        push("Token age", d.ageDays < 1 ? "under a day" : `${Math.round(d.ageDays)} days`, d.ageDays < 7 ? "caution" : undefined);
+        push("Pool age", d.ageDays < 1 ? "under a day" : `${Math.round(d.ageDays)} days`, d.ageDays < 7 ? "caution" : undefined);
       }
       push("Market cap", money(d.mcap));
       if (d.cg?.cexCount) push("Centralized exchanges", String(d.cg.cexCount), "pass");
