@@ -10,7 +10,7 @@ import { requestChallenge } from "../lib/challenge";
    divided by hairlines inside one panel, never nested boxes. */
 
 export type { CompositionRow } from "../lib/scoreComposition";
-import type { CompositionRow } from "../lib/scoreComposition";
+import { publicEvidenceOrigin, type CompositionRow } from "../lib/scoreComposition";
 
 function bandColor(ratio: number): string {
   if (ratio >= 0.7) return "var(--color-pass)";
@@ -57,6 +57,7 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
   const detailId = `composition-detail-${row.axis}`;
   const excluded = row.applicability !== undefined;
   const applicabilityLabel = row.applicability?.replace("_", " ");
+  const origin = publicEvidenceOrigin(row.evidenceStrength);
   return (
     <div className="score-composition-row">
       <button
@@ -115,7 +116,9 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
       >
         <div className="overflow-hidden">
           <div className="score-composition-detail px-4 pb-3.5 pt-0.5">
-            {row.evidenceStrength && <p className="text-[12px] text-ink-dim">Evidence type: {({ verified: "independently confirmed", measured: "recorded measurements", attributed: "reported by a named source", self_reported: "reported by the subject; not independent confirmation" })[row.evidenceStrength]}.</p>}
+            {origin && (
+              <p className="text-[12px] text-ink-dim">{origin}</p>
+            )}
             {row.countsLine ? (
               <p className="mono mt-2 text-[11px] text-ink-faint">{row.countsLine}</p>
             ) : (support > 0 || counter > 0 || questions > 0) && (

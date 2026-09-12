@@ -50,10 +50,30 @@ it("explains scores immediately without turning a high score into verified evide
   expect(container.querySelector('[aria-label="How to read this score"]')?.textContent).toContain("not a percentage chance of success");
   const rows = [...container.querySelectorAll<HTMLDetailsElement>(".kyle-composition-row")];
   expect(rows.every(row => row.open)).toBe(true);
-  expect(rows[0]?.textContent).toContain("Evidence type: not recorded");
+  expect(rows[0]?.textContent).toContain("This score breakdown did not record where the evidence came from.");
   expect(rows[0]?.textContent).not.toContain("FACT");
   expect(container.querySelector('.kyle-composition-detail a')?.getAttribute("href")).toBe("#evidence-ledger");
   expect(container.querySelector('button[aria-label^="Challenge"]')).toBeNull();
+});
+
+it("explains token measurements in English instead of telemetry labels", () => {
+  act(() => root.render(<KyleIntelligenceDecisionCanvas {...props} composition={[
+    {
+      axis: "T1",
+      label: "Liquidity",
+      score: 19,
+      weight: 24,
+      rationale: "The liquidity pool holds $14,384,482, but liquidity-provider tokens are not confirmed locked. That is why it scored 19 of 24 points (5 points not earned).",
+      evidenceStrength: "measured",
+      supportCount: 1,
+    },
+  ]} />));
+  expect(container.textContent).toContain("The liquidity pool holds $14,384,482, but liquidity-provider tokens are not confirmed locked.");
+  expect(container.textContent).toContain("That is why it scored 19 of 24 points");
+  expect(container.textContent).toContain("These facts come from measurements recorded during the scan, not from the project's own claims.");
+  expect(container.textContent).not.toContain("Evidence type:");
+  expect(container.textContent).not.toContain("recorded measurements");
+  expect(container.textContent).not.toContain("LP not locked");
 });
 
 it("keeps completion separate from evidence quality and missing summaries", () => {

@@ -26,3 +26,14 @@ export interface CompositionRow {
   applicability?: "not_applicable" | "deferred" | "unassessed";
 }
 
+/** Where the facts came from, in reader language. Engine strength stays on the record. */
+export function publicEvidenceOrigin(strength: CompositionRow["evidenceStrength"]): string | null {
+  if (!strength) return null;
+  return {
+    verified: "Independent sources confirmed these facts.",
+    measured: "These facts come from measurements recorded during the scan, not from the project's own claims.",
+    attributed: "A named source reported this. It is not independently confirmed.",
+    self_reported: "The project reported this. It is not independent confirmation.",
+  }[strength];
+}
+

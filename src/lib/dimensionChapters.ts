@@ -6,6 +6,7 @@
 // the ledger where they can be checked.
 import type { TokenDossier } from "../token/audit";
 import { publicStrengthLabel } from "./intelligencePresentation";
+import { plainScoreRationale } from "./verdictNarrative";
 
 export type ChapterTone = "pass" | "caution" | "fail";
 
@@ -49,11 +50,11 @@ const PLAIN_AXES: Record<string, { label: string; order: number }> = {
   P4_backing_and_partners: { label: "Backing & partners", order: 40 },
   P3_token_conduct: { label: "Token conduct", order: 50 },
   P6_transparency_integrity: { label: "Transparency", order: 60 },
-  T5: { label: "Onchain health", order: 110 },
-  T4: { label: "The holders", order: 120 },
-  T3: { label: "The token", order: 130 },
-  T2: { label: "Code & security", order: 140 },
-  T1: { label: "The liquidity", order: 150 },
+  T5: { label: "Trading activity", order: 110 },
+  T4: { label: "Holders", order: 120 },
+  T3: { label: "Trading costs", order: 130 },
+  T2: { label: "Code and security", order: 140 },
+  T1: { label: "Liquidity", order: 150 },
   T6: { label: "Maturity & presence", order: 160 },
 };
 
@@ -190,7 +191,7 @@ export function tokenDimensionChapters(d: TokenDossier): DimensionChapter[] {
       score: axis.score,
       weight: axis.weight,
       tone,
-      lead: axis.rationale,
+      lead: plainScoreRationale(axis.rationale),
       facts: factsFor(axis.key, d),
     };
   }));
