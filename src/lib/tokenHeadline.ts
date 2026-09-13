@@ -10,6 +10,7 @@ export function tokenPassHeadline(input: {
   chain: string;
   ownerRenounced: boolean;
   pausable?: boolean;
+  lpBurned?: boolean;
   lpLocked: boolean;
   projectX?: string | null;
 }): string {
@@ -26,9 +27,11 @@ export function tokenPassHeadline(input: {
   } else {
     control = "The owner still has control";
   }
-  const liquidity = input.lpLocked
-    ? "Liquidity-provider tokens are locked"
-    : "Liquidity lock was not confirmed";
+  const liquidity = input.lpBurned
+    ? "Liquidity-provider tokens were burned"
+    : input.lpLocked
+      ? "Liquidity-provider tokens are locked"
+      : "Liquidity lock or burn was not confirmed";
   const handle = input.projectX?.trim()
     ? ` A public X account on the market record is ${input.projectX}. That is not independent confirmation of the team.`
     : "";

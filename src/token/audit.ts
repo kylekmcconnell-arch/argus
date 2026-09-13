@@ -19,6 +19,7 @@ import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
 import { classifyMarketAddress } from "../lib/marketAddresses";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
 import { tokenPassHeadline } from "../lib/tokenHeadline.js";
+import { pauseIsCallable, summarizeLpHolders } from "./lpProtection.js";
 import { finiteUsd, marketVenueName, poolIdentityTag, poolTapeUsable, resolveMarketValuation } from "./marketIntegrity.js";
 import {
   dexByPairResult, dexByTokenResult, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
@@ -410,34 +411,17 @@ function handleFromUrl(url?: string): string | null {
   return handle ? "@" + handle.toLowerCase() : null;
 }
 
-const isBurnAddr = (a?: string) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
-const isBurnTag = (t?: string) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
-
-// --- normalize EVM safety from GoPlus + honeypot.is ---
-function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): NormalizedSafety {
+function evmSafety(
+  gp: GoPlusSecurity | null,
+  sim: HoneypotSim | null,
+  tokenAddress?: string,
+  poolAddresses: string[] = [],
+): NormalizedSafety {
   const s = sim;
-  // GoPlus documents missing/empty trading fields as unknown. Only a DEX-listed
-  // response with all three key outcomes recorded is a completed provider
-  // screen; a partial response must remain open unless market receipts fill it.
   const goplusTradeabilityAssessed = hasCompleteGoplusTradeability(gp);
   const simulationCompleted = s?.simSuccess === true;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
-  // Classify where the liquidity sits: burned (permanent) vs locked vs sitting in
-  // an unlocked wallet. Concentration in an unlocked CONTRACT (e.g. a pair/staking
-  // contract, as PEPE shows) is not a rug signal — only an unlocked non-contract
-  // wallet holding the LP is rug-ready.
-  let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
-  let lpRowsSeen = 0;
-  for (const h of gp?.lp_holders ?? []) {
-    const pct = Number(h.percent) * 100;
-    if (!Number.isFinite(pct) || pct < 0 || pct > 100) continue;
-    lpRowsSeen += 1;
-    if (!Number.isFinite(pct)) continue;
-    if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct;
-    else if (h.is_locked === 1) lpLockedPct += pct;
-    else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
-  }
-  const lpLocked = lpBurnedPct + lpLockedPct >= 50;
+  const lp = summarizeLpHolders(gp?.lp_holders, { tokenAddress, poolAddresses });
   const creatorShare = num(gp?.creator_percent);
   return {
     available: !!gp && Object.values(gp).some((v) => v != null && v !== "") || simulationCompleted,
@@ -469,8 +453,10 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     sellTax: s?.simSuccess ? s.sellTax : (num(gp?.sell_tax) ?? 0) * 100,
     holderCount: num(gp?.holder_count) ?? 0,
     topHolderPct,
-    lpLocked,
-    lpBurnedPct, lpLockedPct, lpTopUnlockedEoaPct,
+    lpLocked: lp.lpLocked,
+    lpBurnedPct: lp.lpBurnedPct,
+    lpLockedPct: lp.lpLockedPct,
+    lpTopUnlockedEoaPct: lp.lpTopUnlockedEoaPct,
     balanceMutable: false, transferHook: false, transferFee: false,
     proxy: t1(gp?.is_proxy),
     slippageModifiable: t1(gp?.slippage_modifiable) || t1(gp?.personal_slippage_modifiable),
@@ -480,7 +466,7 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     ownerChangeBalance: t1(gp?.owner_change_balance),
     creatorPercent: (creatorShare ?? 0) * 100,
     creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
-    lpAssessed: lpRowsSeen > 0,
+    lpAssessed: lp.lpAssessed,
   };
 }
 
@@ -751,7 +737,10 @@ async function runTokenAudit(
     gpEvm = gp;
     explorerHolders = explorer;
     contractSource = source;
-    safety = evmSafety(gp, sim);
+    safety = evmSafety(gp, sim, address, [
+      ...(pair.pairAddress ? [pair.pairAddress] : []),
+      ...allPairs.map((candidate) => candidate.pairAddress).filter((value): value is string => Boolean(value)),
+    ]);
     // Honeypot.is officially supports only Ethereum, BSC, and Base. On another
     // chain, two-sided activity in the selected liquid pool is a bounded but
     // definitive receipt that buying and selling occurred. It does not waive
@@ -923,9 +912,7 @@ async function runTokenAudit(
     else if (s.lpLockedPct >= 50) findings.push({ claim: lockedByRugcheck ? `RugCheck reports liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).` : `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: lpLockSource });
     else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet and can be pulled at any time.`, tone: "bad", source: "goplus" });
     else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet and removable at will.`, tone: "warn", source: "goplus" });
-    // No usable LP record is not the same fact as an unlocked pool. Asserting
-    // the latter told readers that USDC's liquidity "does not appear locked".
-    else if (s.lpAssessed) findings.push({ claim: lockedByRugcheck ? `RugCheck reports only ~${s.lpLockedPct.toFixed(0)}% of the liquidity locked. Most liquidity is not protected by a verified lock or burn and may be removable.` : "The LP records reviewed do not show meaningful lock or burn protection. Whoever controls the liquidity may be able to remove it.", tone: "warn", source: lpLockSource });
+    else if (s.lpAssessed && lockedByRugcheck) findings.push({ claim: `RugCheck reports only ~${s.lpLockedPct.toFixed(0)}% of the liquidity locked. Most liquidity is not protected by a verified lock or burn and may be removable.`, tone: "warn", source: lpLockSource });
     else findings.push({ claim: "Liquidity protection is unverified. ARGUS could not confirm that the pool's liquidity is locked or permanently burned. Until a locker record with an unlock date, a burn transaction, or equivalent on-chain custody proof is verified, whoever controls the liquidity may be able to remove it.", tone: "warn", source: "argus" });
   }
 
@@ -1120,14 +1107,18 @@ async function runTokenAudit(
   else if (s.lpLockedPct >= 50) { aT1 = clamp(aT1 + 2, 0, 24); lpNote = ", LP locked"; }
   else if (s.available && s.lpTopUnlockedEoaPct >= 80) { aT1 = clamp(aT1 - 6, 0, 24); lpNote = ", LP in one unlocked wallet"; }
   else if (s.available && s.lpTopUnlockedEoaPct >= 50) { aT1 = clamp(aT1 - 4, 0, 24); lpNote = ", LP mostly in one wallet"; }
-  else if (s.available && s.lpAssessed) { aT1 = clamp(aT1 - 3, 0, 24); lpNote = ", LP not locked"; }
-  // No usable LP record: the lock is UNKNOWN. Scoring it as loose told readers
-  // that USDC's liquidity "does not appear locked or burned" and docked it.
+  else if (s.available && s.lpAssessed && lpLockSource === "rugcheck") { aT1 = clamp(aT1 - 3, 0, 24); lpNote = ", LP not locked"; }
   else if (s.available) { lpNote = ", liquidity protection unverified"; }
   const venue = marketVenueName(pair.dexId, pair.labels);
   const poolTag = poolIdentityTag(pair.baseToken.symbol, pair.quoteToken?.symbol, venue);
   axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${poolTag}${lpNote}.` });
 
+  const livePause = pauseIsCallable({
+    pausable: s.pausable,
+    ownerRenounced: s.ownerRenounced,
+    takeBack: s.takeBack,
+    hiddenOwner: s.hiddenOwner,
+  });
   let aT2 = 26;
   if (!s.available) aT2 = 9;
   else if (chain === "solana") {
@@ -1136,7 +1127,7 @@ async function runTokenAudit(
     if (s.transferHook) aT2 -= 8;
   } else {
     if (!s.openSource) aT2 -= 8;
-    if (s.pausable) aT2 -= 8;
+    if (livePause) aT2 -= 8;
     if (s.selfdestruct) aT2 -= 10;
     if (!s.ownerRenounced) aT2 -= 4;
     // upgradeable / externally-mutable logic erodes contract safety
@@ -1145,7 +1136,7 @@ async function runTokenAudit(
     if (!s.ownerRenounced && (s.blacklist || s.tradingCooldown)) aT2 -= 3;
   }
   aT2 = clamp(aT2, 0, 26);
-  axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? (chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.openSource ? "verified" : "unverified"} source, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${s.pausable ? ", pausable" : ""}.`) : "On-chain safety not verifiable keyless on this chain." });
+  axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? (chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.openSource ? "verified" : "unverified"} source, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${livePause ? ", pausable" : ""}.`) : "On-chain safety not verifiable keyless on this chain." });
 
   const tax = s.buyTax + s.sellTax;
   let aT3 = !s.available ? 6 : tax === 0 ? 12 : tax <= 10 ? 10 : tax <= 20 ? 7 : tax <= 40 ? 3 : 0;
@@ -1488,7 +1479,13 @@ function buildHeadline(verdict: string, cap: string | null, s: NormalizedSafety,
     return tokenPassHeadline({
       chain,
       ownerRenounced: s.ownerRenounced,
-      pausable: s.pausable,
+      pausable: pauseIsCallable({
+        pausable: s.pausable,
+        ownerRenounced: s.ownerRenounced,
+        takeBack: s.takeBack,
+        hiddenOwner: s.hiddenOwner,
+      }),
+      lpBurned: s.lpBurnedPct >= 50,
       lpLocked: s.lpLocked,
       projectX,
     });
