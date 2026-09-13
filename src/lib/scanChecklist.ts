@@ -1,6 +1,7 @@
 import type { TokenDossier } from "../token/audit";
 import type { CarriedEvidenceProvenance } from "./gapCarryForward";
 import { arkhamProviderEnabled } from "./providerCapabilities.js";
+import { pauseIsCallable } from "../token/lpProtection.js";
 
 // The checklist is an evidence-coverage view, not a promise about work that may
 // have happened in a lazily mounted report panel. A status is only successful
@@ -240,7 +241,12 @@ function contractSafetyConcerns(dossier: TokenDossier): string[] {
   if (safety.hiddenOwner || safety.takeBack) concerns.push("owner-control risk");
   if (safety.contractPropertiesAssessed !== false && dossier.chain !== "solana" && !safety.openSource) concerns.push("source not verified");
   if (safety.selfdestruct) concerns.push("contract can self-destruct/close");
-  if (safety.pausable) concerns.push("transfers can be paused");
+  if (pauseIsCallable({
+    pausable: safety.pausable,
+    ownerRenounced: safety.ownerRenounced,
+    takeBack: safety.takeBack,
+    hiddenOwner: safety.hiddenOwner,
+  })) concerns.push("transfers can be paused");
   if (safety.proxy) concerns.push("upgradeable proxy");
   if (safety.metadataMutable) concerns.push("metadata mutable");
   if (safety.balanceMutable || safety.ownerChangeBalance) concerns.push("balances can be changed");
@@ -304,7 +310,12 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
   const tradeabilityFinding = safety.honeypot
     || safety.cannotSellAll
     || safety.blacklist
-    || safety.pausable
+    || pauseIsCallable({
+      pausable: safety.pausable,
+      ownerRenounced: safety.ownerRenounced,
+      takeBack: safety.takeBack,
+      hiddenOwner: safety.hiddenOwner,
+    })
     || safety.tradingCooldown
     || safety.ownerChangeBalance;
   const tradeabilityNote = safety.tradeabilityMethod === "observed-market"

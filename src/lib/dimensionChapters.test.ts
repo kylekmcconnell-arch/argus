@@ -65,7 +65,7 @@ describe("tokenDimensionChapters", () => {
     const chapters = tokenDimensionChapters(dossier());
 
     const t1 = chapters.find((c) => c.axis === "T1")!;
-    expect(t1.facts.map((f) => f.label)).toEqual(["Liquidity", "LP burned", "LP lock"]);
+    expect(t1.facts.map((f) => f.label)).toEqual(["Selected-pool liquidity", "LP burned", "LP lock"]);
     expect(t1.facts[0].value).toBe("$114.1K");
     expect(t1.facts[1]).toMatchObject({ value: "100%", tone: "pass" });
 
@@ -79,7 +79,7 @@ describe("tokenDimensionChapters", () => {
     const bare = dossier();
     (bare as unknown as { liquidityUsd?: number }).liquidityUsd = undefined;
     const t1 = tokenDimensionChapters(bare).find((c) => c.axis === "T1")!;
-    expect(t1.facts.some((f) => f.label === "Liquidity")).toBe(false);
+    expect(t1.facts.some((f) => f.label === "Selected-pool liquidity")).toBe(false);
   });
 });
 

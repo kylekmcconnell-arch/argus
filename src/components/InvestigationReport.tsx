@@ -2118,8 +2118,9 @@ export function InvestigationReport({
             </div>
             <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">
               {plainLanguageSummary(token.headline)
-                .replace(/^Clears the forensic bar:\s*/i, "Passed the main token checks: ")
-                .replace(/owned, tradeable, with real depth/gi, "tradeable with meaningful liquidity")}
+                .replace(/^Clears the forensic bar:\s*/i, "Most forensic checks passed. ")
+                .replace(/^Most forensic checks passed\.\s*/i, "Most forensic checks passed. ")
+                .replace(/owned, tradeable, with real depth/gi, "tradeable, with the selected pool's liquidity")}
             </p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
               <span>Liquidity <span className="mono text-ink-dim">{money(market.liquidityUsd ?? undefined)}</span></span>

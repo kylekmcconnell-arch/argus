@@ -18,6 +18,9 @@ import { arkhamProviderEnabled } from "../lib/providerCapabilities.js";
 import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
 import { classifyMarketAddress } from "../lib/marketAddresses";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
+import { tokenPassHeadline } from "../lib/tokenHeadline.js";
+import { pauseIsCallable, summarizeLpHolders } from "./lpProtection.js";
+import { finiteUsd, marketVenueName, poolIdentityTag, poolTapeUsable, resolveMarketValuation } from "./marketIntegrity.js";
 import {
   dexByPairResult, dexByTokenResult, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
   GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource, rugcheckReport,
@@ -129,7 +132,7 @@ export function deployerRoleLabel(
 
 export interface TokenDossier {
   cost?: import("../data/dossier").Dossier["cost"];
-  address: string; chain: string; dexId: string; dexLabels?: string[]; pairAddress?: string; symbol: string; name: string;
+  address: string; chain: string; dexId: string; dexLabels?: string[]; pairAddress?: string; quoteSymbol?: string; symbol: string; name: string;
   imageUrl?: string; priceUsd?: number; mcap?: number; fdv?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
   /** Which headline market fields DexScreener actually returned. Older frozen
    * reports omit this receipt and therefore render those values as derived. */
@@ -408,34 +411,17 @@ function handleFromUrl(url?: string): string | null {
   return handle ? "@" + handle.toLowerCase() : null;
 }
 
-const isBurnAddr = (a?: string) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
-const isBurnTag = (t?: string) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
-
-// --- normalize EVM safety from GoPlus + honeypot.is ---
-function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): NormalizedSafety {
+function evmSafety(
+  gp: GoPlusSecurity | null,
+  sim: HoneypotSim | null,
+  tokenAddress?: string,
+  poolAddresses: string[] = [],
+): NormalizedSafety {
   const s = sim;
-  // GoPlus documents missing/empty trading fields as unknown. Only a DEX-listed
-  // response with all three key outcomes recorded is a completed provider
-  // screen; a partial response must remain open unless market receipts fill it.
   const goplusTradeabilityAssessed = hasCompleteGoplusTradeability(gp);
   const simulationCompleted = s?.simSuccess === true;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
-  // Classify where the liquidity sits: burned (permanent) vs locked vs sitting in
-  // an unlocked wallet. Concentration in an unlocked CONTRACT (e.g. a pair/staking
-  // contract, as PEPE shows) is not a rug signal — only an unlocked non-contract
-  // wallet holding the LP is rug-ready.
-  let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
-  let lpRowsSeen = 0;
-  for (const h of gp?.lp_holders ?? []) {
-    const pct = Number(h.percent) * 100;
-    if (!Number.isFinite(pct) || pct < 0 || pct > 100) continue;
-    lpRowsSeen += 1;
-    if (!Number.isFinite(pct)) continue;
-    if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct;
-    else if (h.is_locked === 1) lpLockedPct += pct;
-    else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
-  }
-  const lpLocked = lpBurnedPct + lpLockedPct >= 50;
+  const lp = summarizeLpHolders(gp?.lp_holders, { tokenAddress, poolAddresses });
   const creatorShare = num(gp?.creator_percent);
   return {
     available: !!gp && Object.values(gp).some((v) => v != null && v !== "") || simulationCompleted,
@@ -467,8 +453,10 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     sellTax: s?.simSuccess ? s.sellTax : (num(gp?.sell_tax) ?? 0) * 100,
     holderCount: num(gp?.holder_count) ?? 0,
     topHolderPct,
-    lpLocked,
-    lpBurnedPct, lpLockedPct, lpTopUnlockedEoaPct,
+    lpLocked: lp.lpLocked,
+    lpBurnedPct: lp.lpBurnedPct,
+    lpLockedPct: lp.lpLockedPct,
+    lpTopUnlockedEoaPct: lp.lpTopUnlockedEoaPct,
     balanceMutable: false, transferHook: false, transferFee: false,
     proxy: t1(gp?.is_proxy),
     slippageModifiable: t1(gp?.slippage_modifiable) || t1(gp?.personal_slippage_modifiable),
@@ -478,7 +466,7 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     ownerChangeBalance: t1(gp?.owner_change_balance),
     creatorPercent: (creatorShare ?? 0) * 100,
     creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
-    lpAssessed: lpRowsSeen > 0,
+    lpAssessed: lp.lpAssessed,
   };
 }
 
@@ -646,21 +634,18 @@ async function runTokenAudit(
   const address = pair.baseToken.address;
   const chain = pair.chainId;
   const liquidityUsd = pair.liquidity?.usd ?? 0;
-  // `mcap` is the circulating value when DexScreener provides it. Preserve FDV
-  // separately so the report does not label one as the other.
-  const fdv = pair.marketCap ?? pair.fdv ?? 0;
-  const fullyDilutedValuation = pair.fdv ?? pair.marketCap ?? 0;
   const vol24 = pair.volume?.h24 ?? 0;
   const buys = pair.txns?.h24?.buys ?? 0;
   const sells = pair.txns?.h24?.sells ?? 0;
+  const tapeUsable = poolTapeUsable({ volumeUsd: vol24, buys, sells, liquidityUsd });
   const pc24 = pair.priceChange?.h24 ?? 0;
   const ageDays = pair.pairCreatedAt ? (Date.now() - pair.pairCreatedAt) / 86400000 : undefined;
   // Trading-authenticity signals. High volume-to-liquidity churn is normal for
   // thin meme tokens, so it is NOT wash trading on its own — the signature is
   // heavy churn with the price going nowhere (volume that does not move price).
   const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
-  const washSignature = pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
-  step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
+  const washSignature = tapeUsable && pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
+  step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
 
   // ---- safety (chain-specific) ----
   const gpChain = GOPLUS_CHAIN[chain];
@@ -752,7 +737,10 @@ async function runTokenAudit(
     gpEvm = gp;
     explorerHolders = explorer;
     contractSource = source;
-    safety = evmSafety(gp, sim);
+    safety = evmSafety(gp, sim, address, [
+      ...(pair.pairAddress ? [pair.pairAddress] : []),
+      ...allPairs.map((candidate) => candidate.pairAddress).filter((value): value is string => Boolean(value)),
+    ]);
     // Honeypot.is officially supports only Ethereum, BSC, and Base. On another
     // chain, two-sided activity in the selected liquid pool is a bounded but
     // definitive receipt that buying and selling occurred. It does not waive
@@ -791,10 +779,17 @@ async function runTokenAudit(
     step({ phase: "Corroborate", label: "CoinGecko cross-check", detail: "Independent listing, CEX markets, market-cap vs FDV…", tone: "neutral" });
     cg = await coingeckoToken(chain, address, fetcher);
   }
+  const market = resolveMarketValuation({
+    pairMarketCap: pair.marketCap,
+    pairFdv: pair.fdv,
+    geckoMcap: cg?.mcapUsd ?? null,
+    geckoFdv: cg?.fdvUsd ?? null,
+  });
+  const circulatingMcap = market.marketCap ?? 0;
   // Independent evidence that holders can actually sell: a honeypot cannot
   // produce genuine sell transactions against deep liquidity, and cannot be
   // listed on many centralized venues. Both signals are keyless.
-  const provablySellable = sells >= 10 && liquidityUsd >= 250_000;
+  const provablySellable = tapeUsable && sells >= 10 && liquidityUsd >= 250_000;
   const broadlyTraded = (cg?.cexCount ?? 0) >= 5 || provablySellable;
 
   if (s.available) {
@@ -830,7 +825,7 @@ async function runTokenAudit(
     // couple of low-tier listings can't game it: broad listings (5+), or a few
     // listings on a material cap, or a single listing on a large cap.
     const cexN = cg?.cexCount ?? 0;
-    const mcap = fdv;
+    const mcap = circulatingMcap;
     const established = cexN >= 5 || (cexN >= 3 && mcap >= 10_000_000) || (cexN >= 1 && mcap >= 100_000_000);
     const authorityTone = established ? "warn" : "bad";
     const govNote = established ? " On a token with real centralized-exchange listings this is typically a governed emissions/ops mechanism, not a rug setup. Confirm the controller." : "";
@@ -917,9 +912,7 @@ async function runTokenAudit(
     else if (s.lpLockedPct >= 50) findings.push({ claim: lockedByRugcheck ? `RugCheck reports liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).` : `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: lpLockSource });
     else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet and can be pulled at any time.`, tone: "bad", source: "goplus" });
     else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet and removable at will.`, tone: "warn", source: "goplus" });
-    // No usable LP record is not the same fact as an unlocked pool. Asserting
-    // the latter told readers that USDC's liquidity "does not appear locked".
-    else if (s.lpAssessed) findings.push({ claim: lockedByRugcheck ? `RugCheck reports only ~${s.lpLockedPct.toFixed(0)}% of the liquidity locked. Most liquidity is not protected by a verified lock or burn and may be removable.` : "The LP records reviewed do not show meaningful lock or burn protection. Whoever controls the liquidity may be able to remove it.", tone: "warn", source: lpLockSource });
+    else if (s.lpAssessed && lockedByRugcheck) findings.push({ claim: `RugCheck reports only ~${s.lpLockedPct.toFixed(0)}% of the liquidity locked. Most liquidity is not protected by a verified lock or burn and may be removable.`, tone: "warn", source: lpLockSource });
     else findings.push({ claim: "Liquidity protection is unverified. ARGUS could not confirm that the pool's liquidity is locked or permanently burned. Until a locker record with an unlock date, a burn transaction, or equivalent on-chain custody proof is verified, whoever controls the liquidity may be able to remove it.", tone: "warn", source: "argus" });
   }
 
@@ -977,10 +970,19 @@ async function runTokenAudit(
       });
     } else if (cg) {
       findings.push({ claim: `Corroborated on CoinGecko${cg.rank ? ` (rank #${cg.rank})` : ""}, ${cg.cexCount} centralized market${cg.cexCount === 1 ? "" : "s"}.`, tone: "good", source: "coingecko" });
-      if (cg.mcapUsd && fdv && fdv > cg.mcapUsd * 3) {
-        findings.push({ claim: `FDV is ${(fdv / cg.mcapUsd).toFixed(1)}x circulating market cap, creating a large unlock or dilution overhang.`, tone: "warn", source: "coingecko" });
+      if (finiteUsd(cg.mcapUsd) && finiteUsd(market.fdv) && market.fdv > cg.mcapUsd * 3) {
+        findings.push({ claim: `FDV is ${(market.fdv / cg.mcapUsd).toFixed(1)}x circulating market cap, creating a large unlock or dilution overhang.`, tone: "warn", source: "coingecko" });
       }
     }
+  }
+  if (market.discardedPairMarketCap) {
+    findings.push({
+      claim: market.marketCapSource === "coingecko"
+        ? "DexScreener returned a market-cap figure that is not a usable USD value. Circulating market cap is taken from CoinGecko."
+        : "DexScreener returned a market-cap figure that is not a usable USD value. Circulating market cap is unmeasured.",
+      tone: "warn",
+      source: market.marketCapSource === "coingecko" ? "coingecko + dexscreener" : "dexscreener",
+    });
   }
 
   // ---- holder concentration ----
@@ -1105,12 +1107,18 @@ async function runTokenAudit(
   else if (s.lpLockedPct >= 50) { aT1 = clamp(aT1 + 2, 0, 24); lpNote = ", LP locked"; }
   else if (s.available && s.lpTopUnlockedEoaPct >= 80) { aT1 = clamp(aT1 - 6, 0, 24); lpNote = ", LP in one unlocked wallet"; }
   else if (s.available && s.lpTopUnlockedEoaPct >= 50) { aT1 = clamp(aT1 - 4, 0, 24); lpNote = ", LP mostly in one wallet"; }
-  else if (s.available && s.lpAssessed) { aT1 = clamp(aT1 - 3, 0, 24); lpNote = ", LP not locked"; }
-  // No usable LP record: the lock is UNKNOWN. Scoring it as loose told readers
-  // that USDC's liquidity "does not appear locked or burned" and docked it.
+  else if (s.available && s.lpAssessed && lpLockSource === "rugcheck") { aT1 = clamp(aT1 - 3, 0, 24); lpNote = ", LP not locked"; }
   else if (s.available) { lpNote = ", liquidity protection unverified"; }
-  axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${lpNote}.` });
+  const venue = marketVenueName(pair.dexId, pair.labels);
+  const poolTag = poolIdentityTag(pair.baseToken.symbol, pair.quoteToken?.symbol, venue);
+  axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${poolTag}${lpNote}.` });
 
+  const livePause = pauseIsCallable({
+    pausable: s.pausable,
+    ownerRenounced: s.ownerRenounced,
+    takeBack: s.takeBack,
+    hiddenOwner: s.hiddenOwner,
+  });
   let aT2 = 26;
   if (!s.available) aT2 = 9;
   else if (chain === "solana") {
@@ -1119,7 +1127,7 @@ async function runTokenAudit(
     if (s.transferHook) aT2 -= 8;
   } else {
     if (!s.openSource) aT2 -= 8;
-    if (s.pausable) aT2 -= 8;
+    if (livePause) aT2 -= 8;
     if (s.selfdestruct) aT2 -= 10;
     if (!s.ownerRenounced) aT2 -= 4;
     // upgradeable / externally-mutable logic erodes contract safety
@@ -1128,7 +1136,7 @@ async function runTokenAudit(
     if (!s.ownerRenounced && (s.blacklist || s.tradingCooldown)) aT2 -= 3;
   }
   aT2 = clamp(aT2, 0, 26);
-  axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? (chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.openSource ? "verified" : "unverified"} source, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${s.pausable ? ", pausable" : ""}.`) : "On-chain safety not verifiable keyless on this chain." });
+  axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? (chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.openSource ? "verified" : "unverified"} source, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${livePause ? ", pausable" : ""}.`) : "On-chain safety not verifiable keyless on this chain." });
 
   const tax = s.buyTax + s.sellTax;
   let aT3 = !s.available ? 6 : tax === 0 ? 12 : tax <= 10 ? 10 : tax <= 20 ? 7 : tax <= 40 ? 3 : 0;
@@ -1142,7 +1150,7 @@ async function runTokenAudit(
   const solanaTaxRationale = s.transferFee
     ? "a Token-2022 transfer fee is configured on this mint."
     : "no Token-2022 transfer fee is configured.";
-  axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? (chain === "solana" ? solanaTaxRationale : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.`) : "Tax not verifiable keyless." });
+  axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? (chain === "solana" ? solanaTaxRationale : `token tax buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.`) : "Tax not verifiable keyless." });
 
   const topPct = holdersReliable ? concentrationTopPct : null;
   let aT4 = s.holderCount < 50 ? 3 : s.holderCount < 500 ? 7 : s.holderCount < 5000 ? 11 : 14;
@@ -1167,9 +1175,9 @@ async function runTokenAudit(
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
   if (washSignature) aT5 = 2; // churn without price movement = manufactured volume
-  else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
+  else if (tapeUsable && total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : tapeUsable ? `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` : `24h vol/liquidity ${volLiq.toFixed(2)}x. Swap counts from this pool were incomplete.` });
 
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
@@ -1185,7 +1193,7 @@ async function runTokenAudit(
   let aT6 = ageDays == null ? 4 : ageDays < 1 ? 2 : ageDays < 7 ? 4 : ageDays < 30 ? 6 : ageDays < 180 ? 8 : 10;
   if (socials.length) aT6 = clamp(aT6 + 1, 0, 10);
   if (cg?.cexCount) aT6 = clamp(aT6 + 2, 0, 10);
-  axes.push({ key: "T6", label: "Maturity & presence", score: aT6, weight: 10, rationale: `${ageDays != null ? (ageDays < 1 ? "<1 day" : Math.round(ageDays) + " days") + " old" : "age unknown"}${socials.length ? `, ${socials.length} socials` : ", no socials"}${cg?.cexCount ? `, ${cg.cexCount} CEX listings` : cg && !cg.listed ? ", not on CoinGecko" : ""}.` });
+  axes.push({ key: "T6", label: "Maturity & presence", score: aT6, weight: 10, rationale: `${ageDays != null ? (ageDays < 1 ? "<1 day" : Math.round(ageDays) + " days") + " old" : "age unknown"}${socials.length ? `, ${socials.length} ${socials.length === 1 ? "social" : "socials"}` : ", no socials"}${cg?.cexCount ? `, ${cg.cexCount} CEX listings` : cg && !cg.listed ? ", not on CoinGecko" : ""}.` });
 
   // ---- verdict ----
   const measured = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
@@ -1349,16 +1357,16 @@ async function runTokenAudit(
   const decisionBoundary = deriveTokenDecisionBoundary({ score, capApplied, axes });
   const headline = assessment.provisional && !capApplied
     ? `Score based on ${assessedWeight}/100 of the assessment weight. Evidence gaps: ${assessment.gaps.join(", ")}.`
-    : buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
+    : buildHeadline(verdict, capApplied, s, liquidityUsd, projectX, chain);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} · ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
 
   return {
-    address, chain, dexId: pair.dexId, dexLabels: pair.labels ?? [], pairAddress: pair.pairAddress, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
+    address, chain, dexId: pair.dexId, dexLabels: pair.labels ?? [], pairAddress: pair.pairAddress, quoteSymbol: pair.quoteToken?.symbol, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? undefined, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
-    mcap: fdv, fdv: fullyDilutedValuation, liquidityUsd, vol24, ageDays,
+    mcap: market.marketCap, fdv: market.fdv, liquidityUsd, vol24, ageDays,
     marketEvidence: {
-      mcap: pair.marketCap != null && Number.isFinite(pair.marketCap),
-      fdv: pair.fdv != null && Number.isFinite(pair.fdv),
+      mcap: market.marketCap != null,
+      fdv: market.fdv != null,
       liquidityUsd: pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd),
       vol24: pair.volume?.h24 != null && Number.isFinite(pair.volume.h24),
       ageDays: pair.pairCreatedAt != null && Number.isFinite(pair.pairCreatedAt),
@@ -1459,7 +1467,7 @@ function buildGraph(chain: string, address: string, symbol: string, verdict: str
   return { nodes, edges };
 }
 
-function buildHeadline(verdict: string, cap: string | null, s: NormalizedSafety, liq: number, projectX: string | null): string {
+function buildHeadline(verdict: string, cap: string | null, s: NormalizedSafety, liq: number, projectX: string | null, chain: string): string {
   if (cap === "ofac_sanctioned_address") return "A screened address is on the US Treasury OFAC sanctions list. Touching this token is a legal-exposure risk. Do not touch.";
   if (s.honeypot) return s.nonTransferable ? "Non-transferable: holders are locked in. Do not touch." : "Honeypot: buyers cannot sell. Do not touch.";
   if (cap === "mint_authority_active") return "Mint authority is live, the team can dilute holders to zero.";
@@ -1467,7 +1475,21 @@ function buildHeadline(verdict: string, cap: string | null, s: NormalizedSafety,
   if (cap === "reclaimable_ownership") return "Ownership can be reclaimed after renouncement, a classic rug setup.";
   if (cap === "owner_can_modify_balance") return "Owner can rewrite holder balances, they can zero your wallet at will.";
   if (cap === "balance_mutable_authority") return "A balance-mutable authority can rewrite your token balance at will.";
-  if (verdict === "PASS") return `Clears the forensic bar: ${s.ownerRenounced ? "authorities revoked" : "owned"}, ${s.lpLocked ? "LP locked" : "tradeable"}, with real depth${projectX ? `. Team: ${projectX}` : "."}`;
+  if (verdict === "PASS") {
+    return tokenPassHeadline({
+      chain,
+      ownerRenounced: s.ownerRenounced,
+      pausable: pauseIsCallable({
+        pausable: s.pausable,
+        ownerRenounced: s.ownerRenounced,
+        takeBack: s.takeBack,
+        hiddenOwner: s.hiddenOwner,
+      }),
+      lpBurned: s.lpBurnedPct >= 50,
+      lpLocked: s.lpLocked,
+      projectX,
+    });
+  }
   if (verdict === "CAUTION") return `Tradeable but with reservations${liq < 15000 ? "; liquidity is thin" : ""}. Size accordingly.`;
   if (!s.available) return "Scored on market data only; on-chain contract safety could not be verified keyless on this chain.";
   return "Falls short on the forensic checks. Treat as high risk.";

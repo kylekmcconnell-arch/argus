@@ -181,7 +181,7 @@ export function KyleIntelligencePreview() {
             composition: [
               { axis: "onchain", label: "Trading activity", score: 12, weight: 14, rationale: "The saved contract checks found no critical control issue.", supportCount: 3 },
               { axis: "holders", label: "Holders", score: 10, weight: 14, rationale: "Holder evidence met the saved safety threshold.", supportCount: 2 },
-              { axis: "token", label: "Trading costs", score: 12, weight: 14, rationale: "Token mechanics and transfer behavior were measurable.", supportCount: 3 },
+              { axis: "token", label: "Buy and sell tax", score: 12, weight: 14, rationale: "Token tax and transfer behavior were measurable.", supportCount: 3 },
               { axis: "code", label: "Code and security", score: 19, weight: 24, rationale: "Automated contract checks were completed without a critical finding.", supportCount: 4 },
               { axis: "liquidity", label: "Liquidity", score: 18, weight: 20, rationale: "The saved market showed a measurable liquidity surface.", supportCount: 2 },
               { axis: "maturity", label: "Maturity & presence", score: 13, weight: 14, rationale: "The token and project surfaces were consistently linked.", supportCount: 3 },
