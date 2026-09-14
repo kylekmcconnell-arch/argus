@@ -189,6 +189,11 @@ async function tokensCreated(key: string, wallet: string, usage: ProviderUsage):
     const mints = new Set<string>();
     for (const t of txs) {
       if (t.type !== "TOKEN_MINT" && t.type !== "CREATE") continue;
+      // The address endpoint returns every transaction the wallet PARTICIPATES
+      // in, including airdrops minted straight to it and launchpad CREATEs it
+      // merely bought into. Only a mint this wallet paid for is a launch it
+      // made; anything else would brand an airdrop recipient a serial minter.
+      if (t.feePayer !== wallet) continue;
       for (const x of t.tokenTransfers ?? []) if (typeof x.mint === "string" && x.mint && !DENY_MINT.has(x.mint)) mints.add(x.mint);
     }
     return mints.size;
