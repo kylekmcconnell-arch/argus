@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import {
   AuthContext,
@@ -79,6 +79,19 @@ type SessionResult =
   | { kind: "member"; profile: ArgusSessionProfile }
   | { kind: "waitlist"; session: WaitlistSession };
 
+/** A `/api/session` refusal, distinguishable from an outage by its status. */
+class SessionValidationError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "SessionValidationError";
+  }
+}
+
+/** Only an explicit refusal revokes access; timeouts and 5xx are outages. */
+export function sessionAccessRevoked(error: unknown): boolean {
+  return error instanceof SessionValidationError && (error.status === 401 || error.status === 403);
+}
+
 async function loadProfile(session: Session): Promise<SessionResult> {
   const response = await fetch("/api/session", {
     headers: { authorization: `Bearer ${session.access_token}` },
@@ -87,7 +100,7 @@ async function loadProfile(session: Session): Promise<SessionResult> {
   const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
   if (!response.ok) {
     const message = typeof body.message === "string" ? body.message : "ARGUS access could not be verified.";
-    throw new Error(message);
+    throw new SessionValidationError(message, response.status);
   }
   if (body.access === "waitlist") {
     return { kind: "waitlist", session: body as unknown as WaitlistSession };
@@ -196,22 +209,39 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("popstate", syncPublicRoute);
   }, []);
 
+  // Mirror of `profile` for the auth callback, which must decide synchronously
+  // whether a session event belongs to the member already using the app.
+  const profileRef = useRef<ArgusSessionProfile | null>(null);
+  profileRef.current = profile;
+
   const validate = useCallback(async (session: Session | null, validationId: number) => {
-    setProfile(null);
-    setWaitlist(null);
-    setAuthenticatedButDenied(false);
+    // Supabase refreshes the access token roughly hourly (TOKEN_REFRESHED) and
+    // re-emits SIGNED_IN on focus. When a member profile is already loaded for
+    // the same user, re-validate in the background: tearing the App down here
+    // destroyed the current view, the session result cache and unsaved Case
+    // Brief drafts on every refresh. Access is withdrawn only on a real
+    // sign-out or an explicit 401/403 from /api/session; an outage keeps the
+    // already-verified session in place.
+    const loaded = profileRef.current;
+    const background = !!session && !!loaded && session.user?.id === loaded.user.id;
+    if (!background) {
+      setProfile(null);
+      setWaitlist(null);
+      setAuthenticatedButDenied(false);
+    }
     if (!session) {
       validatedAccessToken = null;
       pendingAccessToken = null;
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!background) setLoading(true);
     try {
       const next = await loadProfile(session);
       if (validationId !== currentValidationId) return;
       validatedAccessToken = session.access_token;
       if (next.kind === "waitlist") {
+        setProfile(null);
         setWaitlist(next.session);
         setAnalyst(next.session.user.displayName);
       } else {
@@ -221,7 +251,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setError("");
     } catch (validationError) {
       if (validationId !== currentValidationId) return;
+      if (background && !sessionAccessRevoked(validationError)) {
+        // The refreshed token could not be confirmed because the session
+        // service was unavailable, not because access was refused. Keep the
+        // verified session; the next auth event re-validates this token.
+        return;
+      }
       validatedAccessToken = session.access_token;
+      setProfile(null);
+      setWaitlist(null);
       setAuthenticatedButDenied(true);
       setError(validationError instanceof Error ? validationError.message : "Access could not be verified.");
     } finally {
