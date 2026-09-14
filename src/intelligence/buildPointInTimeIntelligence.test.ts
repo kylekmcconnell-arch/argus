@@ -1769,6 +1769,77 @@ describe("buildPointInTimeIntelligence", () => {
     expect(question?.basis).toContain("no negative claim");
   });
 
+  it("does not let a zero-count measurement move an unavailable or unresolved question to partial", () => {
+    // Regression for INT-10: an empty audit scan emitted audit_lead_count = 0,
+    // which turned a failed (unavailable) audit ledger question into partial.
+    const evidence = projectEvidence();
+    evidence.securityAudits = {
+      securityPageUrl: "https://fixture.example.test/security",
+      selfAttested: [],
+      attestations: [],
+      corroborated: [],
+      capturedAt: "2026-08-05T12:40:00.000Z",
+    };
+    evidence.basicFactQuestionLedger = [{
+      questionId: "project.audit",
+      audience: "project",
+      batch: "structure_risk",
+      predicate: "audit",
+      question: "Which audits exist?",
+      critical: true,
+      status: "unanswered",
+      answerRefs: [],
+      providerRuns: [{ phase: "primary", provider: "grounded", state: "failed" }],
+    }];
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    expect(snapshot?.measurements.find((measurement) => measurement.id === "audit_lead_count")?.value).toBe(0);
+    expect(snapshot?.questions.find((candidate) => candidate.id === "project.audit")?.state).toBe("unavailable");
+
+    evidence.basicFactQuestionLedger[0] = { ...evidence.basicFactQuestionLedger[0], providerRuns: [{ phase: "primary", provider: "grounded", state: "completed_empty" }] };
+    expect(buildPointInTimeIntelligence(evidence)?.questions.find((candidate) => candidate.id === "project.audit")?.state).toBe("unresolved");
+  });
+
+  it("keeps deterministic collector answer references through the integrity gate", () => {
+    // Regression for INT-8: profile:/project-token:/team: answer refs were
+    // stripped as lost lineage, rewriting a resolved identity to partial and
+    // raising a spurious high integrity gap on every resolved project.
+    const evidence = projectEvidence();
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-05T09:00:00.000Z";
+    const identity = strictFact("@argusfixture is the official account", {
+      factId: "identity-1",
+      predicate: "official_identity",
+      questionId: "project.identity",
+    });
+    evidence.basicFacts = [identity];
+    evidence.basicFactQuestionLedger = [{
+      questionId: "project.identity",
+      audience: "project",
+      batch: "identity",
+      predicate: "official_identity",
+      question: "Which exact identity is official?",
+      critical: true,
+      status: "answered",
+      answerRefs: ["identity-1", "profile:twitterapi:argusfixture"],
+      providerRuns: [{ phase: "primary", provider: "test", state: "succeeded" }],
+    }];
+
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    const question = snapshot?.questions.find((candidate) => candidate.id === "project.identity");
+
+    expect(question).toMatchObject({ state: "resolved" });
+    expect(question?.answerRefs).toEqual(expect.arrayContaining(["identity-1", "profile:twitterapi:argusfixture"]));
+    expect(question?.basis).not.toContain("integrity gate");
+    expect(snapshot?.signals.find((signal) => signal.id === "intelligence_integrity_gap")).toBeUndefined();
+
+    // A profile reference for a different handle, or an unresolved profile, still fails.
+    evidence.basicFactQuestionLedger[0] = { ...evidence.basicFactQuestionLedger[0], answerRefs: ["identity-1", "profile:twitterapi:someoneelse"] };
+    const foreign = buildPointInTimeIntelligence(evidence)?.questions.find((candidate) => candidate.id === "project.identity");
+    expect(foreign?.answerRefs).toEqual(["identity-1"]);
+    expect(foreign?.basis).toContain("integrity gate");
+  });
+
   it("retains canonical fact-prefixed question answer references", () => {
     const evidence = projectEvidence();
     const product = strictFact("A lending protocol", {

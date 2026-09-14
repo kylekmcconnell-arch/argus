@@ -463,6 +463,16 @@ function rounded(value: number, digits = 4): number {
   return Math.round(value * factor) / factor;
 }
 
+/**
+ * A measurement answers part of a question only when it carries information.
+ * A zero count is a completed empty scan of one collector, not evidence about
+ * the question; a blank text or date is nothing at all.
+ */
+function informativeMeasurement(measurement: IntelligenceMeasurement): boolean {
+  if (measurement.valueType === "number") return Number.isFinite(measurement.value) && measurement.value !== 0;
+  return typeof measurement.value === "string" && measurement.value.trim().length > 0;
+}
+
 function uniqueSorted(values: readonly string[]): string[] {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
@@ -2233,20 +2243,33 @@ function buildQuestions(
         && evidence.evmControlReality?.state === "unavailable";
       if (relatedMeasurements.length > 0) {
         const hadBoundAnswer = question.answerRefs.length > 0 || question.sourceRefs.length > 0;
+        // Only an informative measurement moves a question. A zero count
+        // ("0 audit leads") answers nothing, and reported context never moves
+        // a question out of unavailable: an outage is not partially answered
+        // by a provider's index row. Only a deterministic observation
+        // (measured / bounded / verified) can address a facet after an outage.
+        const informative = relatedMeasurements.some(informativeMeasurement);
+        const deterministic = relatedMeasurements.some((measurement) =>
+          informativeMeasurement(measurement) && measurement.evidenceState !== "reported_context");
+        const movesToPartial = question.state === "unavailable" ? deterministic : informative;
         questions[existingIndex] = {
           ...question,
           state: question.state === "resolved"
             ? "resolved"
             : controlReadUnavailable && !hadBoundAnswer
               ? "unavailable"
-              : "partial",
+              : movesToPartial
+                ? "partial"
+                : question.state,
           basis: question.state === "resolved"
             ? question.basis
             : controlReadUnavailable
               ? hadBoundAnswer
                 ? `${question.basis} The fixed-block standard EVM read was unavailable, so the full control question remains open.`
                 : "The fixed-block standard EVM read was unavailable, so no negative or complete control claim is inferred."
-              : `${question.basis} Exact frozen measurements address part of the question but do not establish facet-level completeness.`,
+              : movesToPartial
+                ? `${question.basis} Exact frozen measurements address part of the question but do not establish facet-level completeness.`
+                : question.basis,
           answerRefs: uniqueSorted([
             ...question.answerRefs,
             ...relatedMeasurements.map((measurement) => measurement.id),
@@ -2274,9 +2297,10 @@ function buildQuestions(
     const controlReadUnavailable = definition.id === "project.control"
       && identityBindings.evmControlMatched
       && evidence.evmControlReality?.state === "unavailable";
+    const informativeMeasurements = relatedMeasurements.some(informativeMeasurement);
     const derivedState: IntelligenceQuestionState = controlReadUnavailable && !addressedByFact
       ? "unavailable"
-      : addressedByFact || relatedMeasurements.length > 0
+      : addressedByFact || informativeMeasurements
         ? "partial"
         : "not_collected";
     const derivedBasis = controlReadUnavailable
@@ -2289,7 +2313,7 @@ function buildQuestions(
           ? malformedConflictBasis(conflictFacts)
         : addressedByFact
           ? "One or more exact-predicate facts address this question, but no frozen question-ledger completion establishes that the full question was answered."
-          : relatedMeasurements.length > 0
+          : informativeMeasurements
             ? "The scan contains related measurements, but they do not answer the full decision question."
             : "This decision question has no completed collection record in the frozen scan.";
     questions.push({
@@ -4223,6 +4247,41 @@ function duplicateIds(items: readonly { id: string }[]): Set<string> {
   return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
 }
 
+/**
+ * Basic Facts answers a ledger question with a deterministic collector record
+ * as well as with content-addressed facts: the resolved provider profile
+ * (`profile:<provider>:<handle>`), the verified project token
+ * (`project-token:<id>`), a verified roster row (`team:<key>:<role>`) or a
+ * verified venture (`venture:<slug>:<role>`). Those references resolve against
+ * the frozen evidence rather than the fact catalog; dropping them as lost
+ * lineage rewrote every resolved identity question to partial.
+ */
+export function deterministicAnswerRefResolves(ref: string, evidence: Readonly<CollectedEvidence>): boolean {
+  const bare = (value: string) => value.trim().replace(/^@/, "").toLowerCase();
+  const profile = ref.match(/^profile:([^:]+):(.+)$/);
+  if (profile) {
+    return evidence.profile.profile_collection_state === "resolved"
+      && bare(profile[2]) === bare(evidence.profile.handle)
+      && profile[1] === (evidence.profile.profile_provider ?? "provider");
+  }
+  const token = ref.match(/^project-token:(.+)$/);
+  if (token) {
+    const projectToken = evidence.projectToken;
+    if (!projectToken?.verified) return false;
+    return projectToken.coingeckoId === token[1]
+      || `${projectToken.chain}:${String(projectToken.address).toLowerCase()}` === token[1];
+  }
+  if (/^team:.+:(?:founder|executive)$/.test(ref)) {
+    return (evidence.webTeam ?? []).some((member) =>
+      member.artifact_verified === true && member.evidence_origin !== "model_lead");
+  }
+  if (/^venture:.+:.+$/.test(ref)) {
+    return evidence.ventures.some((venture) =>
+      venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
+  }
+  return false;
+}
+
 export function sanitizeIntelligenceSnapshot(
   snapshot: IntelligenceSpineSnapshot,
   evidence: Readonly<CollectedEvidence>,
@@ -4296,7 +4355,8 @@ export function sanitizeIntelligenceSnapshot(
       const answerRefs = question.answerRefs.filter((answerRef) =>
         measurementIds.has(answerRef)
         || validFactIds.has(answerRef)
-        || (answerRef.startsWith("fact:") && validFactIds.has(answerRef.slice("fact:".length))));
+        || (answerRef.startsWith("fact:") && validFactIds.has(answerRef.slice("fact:".length)))
+        || deterministicAnswerRefResolves(answerRef, evidence));
       const lostLineage = sourceRefs.length !== question.sourceRefs.length
         || answerRefs.length !== question.answerRefs.length;
       if (!lostLineage) return question;
