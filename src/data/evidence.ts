@@ -47,6 +47,14 @@ export interface GithubAssessment {
   createdAt?: string;          // account creation date (ISO)
   accountAgeYears?: number;
   publicRepos: number;
+  /** Repositories actually listed; a most-recently-pushed window, not the account. */
+  sampledRepos?: number;
+  /**
+   * "complete" when the listed repos cover the account, "sample" when they are
+   * a per_page window of a larger account, "unavailable" when the list call
+   * failed (counts below are then 0 but not measurements).
+   */
+  repoSampleState?: "complete" | "sample" | "unavailable";
   originalCount: number;       // non-fork owned repos
   forkCount: number;
   forkRatio: number;           // forks / (originals + forks), 0 when no repos

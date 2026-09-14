@@ -35,7 +35,18 @@ function validGithubResult(path: string, value: unknown): boolean {
   return isRecord(value) || Array.isArray(value);
 }
 
-async function ghJson<T>(path: string, key: string): Promise<T | null> {
+/**
+ * A GitHub call has three outcomes and only one of them is an answer. A 404 is
+ * "no such record"; a transport error, 401/403/429/5xx, or a malformed body is
+ * an outage and must never be read as an empty account, an empty organization
+ * list, or "no public repositories".
+ */
+export type GhResult<T> =
+  | { status: "ok"; value: T }
+  | { status: "not_found" }
+  | { status: "unavailable"; detail: string };
+
+export async function ghFetch<T>(path: string, key: string): Promise<GhResult<T>> {
   const op = path.split("?")[0].split("/").slice(1, 3).join("/") || "api";
   const tier = "subscription/keyed";
   let res: Response;
@@ -43,31 +54,37 @@ async function ghJson<T>(path: string, key: string): Promise<T | null> {
     res = await deadlineFetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(8000) });
   } catch {
     recordCall("github", op, 0, `${tier} · transport_error`, "failed");
-    return null;
+    return { status: "unavailable", detail: "transport_error" };
   }
   if (!res.ok) {
     // A 404 from a lookup is an answer (no such account or repo), not an
     // outage; it must never render as a failed source check.
     if (res.status === 404) {
       recordCall("github", op, 0, `${tier} · no_record_404`, "succeeded");
-      return null;
+      return { status: "not_found" };
     }
     recordCall("github", op, 0, `${tier} · http_${res.status}`, "failed");
-    return null;
+    return { status: "unavailable", detail: `http_${res.status}` };
   }
 
   let value: unknown;
   try { value = await res.json(); }
   catch {
     recordCall("github", op, 0, `${tier} · response_json_error`, "failed");
-    return null;
+    return { status: "unavailable", detail: "response_json_error" };
   }
   if (!validGithubResult(path, value)) {
     recordCall("github", op, 0, `${tier} · result_shape_error`, "partial");
-    return null;
+    return { status: "unavailable", detail: "result_shape_error" };
   }
   recordCall("github", op, 0, tier, "succeeded");
-  return value as T;
+  return { status: "ok", value: value as T };
+}
+
+async function ghJson<T>(path: string, key: string, coverage?: { unavailable: boolean }): Promise<T | null> {
+  const result = await ghFetch<T>(path, key);
+  if (result.status === "unavailable" && coverage) coverage.unavailable = true;
+  return result.status === "ok" ? result.value : null;
 }
 
 interface GhUser { login: string; name?: string; bio?: string; company?: string; twitter_username?: string; blog?: string; public_repos?: number; created_at?: string }
@@ -135,14 +152,20 @@ export async function resolveGithub(
   handle: string,
   name: string | undefined,
   key: string,
-  subject?: { bioText?: string; siteDomain?: string; accountCreatedAt?: string },
+  subject?: {
+    bioText?: string;
+    siteDomain?: string;
+    accountCreatedAt?: string;
+    /** Set to true when any lookup was an outage rather than an answer. */
+    coverage?: { unavailable: boolean };
+  },
 ): Promise<GithubMatch | null> {
   const h = handle.replace(/^@/, "").toLowerCase();
   const candidates = new Set<string>([h]);
   for (const q of [name, handle.replace(/^@/, "")]) {
     if (!q) continue;
     for (const variant of searchQueryVariants(q)) {
-      const found = await ghJson<{ items?: { login: string }[] }>(`/search/users?q=${encodeURIComponent(variant)}&per_page=5`, key);
+      const found = await ghJson<{ items?: { login: string }[] }>(`/search/users?q=${encodeURIComponent(variant)}&per_page=5`, key, subject?.coverage);
       const items = found?.items ?? [];
       for (const it of items) candidates.add(it.login);
       // The raw name is only worth a second call when the ASCII form found no
@@ -155,7 +178,7 @@ export async function resolveGithub(
   let claimed: GithubMatch | null = null;
   let weak: GithubMatch | null = null;
   for (const login of [...candidates].slice(0, 8)) {
-    const u = await ghJson<GhUser>(`/users/${encodeURIComponent(login)}`, key);
+    const u = await ghJson<GhUser>(`/users/${encodeURIComponent(login)}`, key, subject?.coverage);
     if (!u) continue;
     if ((u.twitter_username ?? "").toLowerCase() === h) {
       const subjectLinksBack = !!bioText && bioText.includes(`github.com/${u.login.toLowerCase()}`);
@@ -173,12 +196,24 @@ export async function resolveGithub(
 }
 
 // Org memberships + the org-owned repos the user pushes to: the affiliations.
-export async function githubAffiliations(login: string, key: string): Promise<{ org: string; description?: string; via: string }[]> {
+export interface GithubAffiliationResult {
+  rows: { org: string; description?: string; via: string }[];
+  /** True when a list call failed: an empty `rows` is then not "no affiliations". */
+  unavailable: boolean;
+  detail?: string;
+}
+
+export async function githubAffiliations(login: string, key: string): Promise<GithubAffiliationResult> {
   const out = new Map<string, { org: string; description?: string; via: string }>();
-  const orgs = await ghJson<GhOrg[]>(`/users/${encodeURIComponent(login)}/orgs`, key);
-  for (const o of orgs ?? []) out.set(o.login.toLowerCase(), { org: o.login, description: o.description, via: "public org member" });
-  const repos = await ghJson<GhRepo[]>(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=all&per_page=30`, key);
-  for (const r of repos ?? []) {
+  const failures: string[] = [];
+  const orgs = await ghFetch<GhOrg[]>(`/users/${encodeURIComponent(login)}/orgs`, key);
+  if (orgs.status === "unavailable") failures.push(`orgs ${orgs.detail}`);
+  for (const o of orgs.status === "ok" ? orgs.value : []) {
+    out.set(o.login.toLowerCase(), { org: o.login, description: o.description, via: "public org member" });
+  }
+  const repos = await ghFetch<GhRepo[]>(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=all&per_page=30`, key);
+  if (repos.status === "unavailable") failures.push(`repos ${repos.detail}`);
+  for (const r of repos.status === "ok" ? repos.value : []) {
     if (r.fork) continue;
     const owner = r.owner;
     if (owner.type === "Organization" && owner.login.toLowerCase() !== login.toLowerCase()) {
@@ -186,7 +221,11 @@ export async function githubAffiliations(login: string, key: string): Promise<{ 
       if (!out.has(k)) out.set(k, { org: owner.login, via: `repo ${r.name}` });
     }
   }
-  return [...out.values()].slice(0, 10);
+  return {
+    rows: [...out.values()].slice(0, 10),
+    unavailable: failures.length > 0,
+    ...(failures.length ? { detail: failures.join("; ") } : {}),
+  };
 }
 
 // Team fan-out budget + the leader-role test (a project's founders/leads only).
@@ -204,10 +243,24 @@ const yearsSince = (fromIso: string, toMs: number): number | undefined => {
 // is a lead for a human, not a verdict.
 export function buildClaimChecks(
   bio: string,
-  a: { createdAt?: string; accountAgeYears?: number; originalCount: number; forkCount: number; forkRatio: number; totalStarsOnOriginals: number },
+  a: {
+    createdAt?: string;
+    accountAgeYears?: number;
+    originalCount: number;
+    forkCount: number;
+    forkRatio: number;
+    totalStarsOnOriginals: number;
+    /**
+     * "complete" when the repository list covers the whole account, "sample"
+     * when it is a per_page window of a larger account, "unavailable" when the
+     * list call failed. Ratio and emptiness grades need the complete list.
+     */
+    repoSampleState?: "complete" | "sample" | "unavailable";
+  },
 ): GithubClaimCheck[] {
   const checks: GithubClaimCheck[] = [];
   const b = bio ?? "";
+  const repoCoverage = a.repoSampleState ?? "complete";
 
   // 1) "since YYYY" / "est. 'YY" tenure claims vs the account's creation year.
   const ym = b.match(/\b(?:since|est\.?|building since|from)\s*'?(\d{4})\b/i) ?? b.match(/\bsince\s*'?(\d{2})\b/i);
@@ -228,14 +281,21 @@ export function buildClaimChecks(
   if (/founder|co-?founder|builder|\bbuild|\bdev\b|developer|engineer|\bship|core contributor|hacker|programmer/i.test(b)) {
     const total = a.originalCount + a.forkCount;
     const claim = "Bio presents a builder/founder persona";
-    if (total === 0) {
+    if (repoCoverage === "unavailable") {
+      // An outage on the repository list is not an empty account.
+      checks.push({ claim, observation: "GitHub repository list was unavailable; output could not be assessed", grade: "context" });
+    } else if (total === 0 && repoCoverage === "complete") {
       checks.push({ claim, observation: "GitHub account has no public repositories", grade: "unsupported" });
-    } else if (a.originalCount === 0) {
+    } else if (total === 0) {
+      checks.push({ claim, observation: "the account reports public repositories but none were returned in the sampled window", grade: "context" });
+    } else if (a.originalCount === 0 && repoCoverage === "complete") {
       checks.push({ claim, observation: `all ${total} public repos are forks - no original repositories`, grade: "contradicted" });
-    } else if (a.forkRatio >= 0.8) {
+    } else if (a.originalCount === 0) {
+      checks.push({ claim, observation: `the ${total} most recently pushed repos are all forks; older repositories were not sampled`, grade: "context" });
+    } else if (a.forkRatio >= 0.8 && repoCoverage === "complete") {
       checks.push({ claim, observation: `${a.forkCount} of ${total} repos are forks; ${a.originalCount} original with ${a.totalStarsOnOriginals}★`, grade: "unsupported" });
     } else {
-      checks.push({ claim, observation: `${a.originalCount} original repos (${a.totalStarsOnOriginals}★)`, grade: "consistent" });
+      checks.push({ claim, observation: `${a.originalCount} original repos (${a.totalStarsOnOriginals}★)${repoCoverage === "sample" ? " in the sampled window" : ""}`, grade: "consistent" });
     }
   }
 
@@ -250,7 +310,16 @@ export async function assessGithub(match: GithubMatch, key: string, bio: string,
   const perPage = opts?.maxRepos ?? 30;
   const u = await ghJson<GhUser>(`/users/${encodeURIComponent(login)}`, key);
   if (!u) return null;
-  const repos = (await ghJson<GhRepo[]>(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=owner&per_page=${perPage}`, key)) ?? [];
+  const repoList = await ghFetch<GhRepo[]>(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=owner&per_page=${perPage}`, key);
+  const repos = repoList.status === "ok" ? repoList.value : [];
+  // The list is a most-recently-pushed window, never the account. When it is
+  // shorter than the account's own repository count the derived counts are a
+  // sample; when the call failed they are not measurements at all.
+  const repoSampleState: NonNullable<GithubAssessment["repoSampleState"]> = repoList.status === "unavailable"
+    ? "unavailable"
+    : typeof u.public_repos === "number" && repos.length < u.public_repos
+      ? "sample"
+      : "complete";
 
   const originals = repos.filter((r) => !r.fork);
   const forks = repos.filter((r) => r.fork);
@@ -279,14 +348,19 @@ export async function assessGithub(match: GithubMatch, key: string, bio: string,
     forkCount: forks.length,
     forkRatio: Math.round(forkRatio * 100) / 100,
     totalStarsOnOriginals,
+    repoSampleState,
   };
-  const summary = `github.com/${login}: ${ageY != null ? `~${Math.round(ageY)}y old, ` : ""}${originals.length} original + ${forks.length} fork repos${totalStarsOnOriginals ? `, ${totalStarsOnOriginals}★ on originals` : ""}${topLanguages.length ? ` (${topLanguages.slice(0, 3).map((l) => l.language).join(", ")})` : ""}.`;
+  const repoSummary = repoSampleState === "unavailable"
+    ? `repository list unavailable (${repoList.status === "unavailable" ? repoList.detail : "unknown"})`
+    : `${originals.length} original + ${forks.length} fork repos${repoSampleState === "sample" ? ` in the ${total} most recently pushed of ${u.public_repos}` : ""}${totalStarsOnOriginals ? `, ${totalStarsOnOriginals}★ on originals` : ""}${topLanguages.length ? ` (${topLanguages.slice(0, 3).map((l) => l.language).join(", ")})` : ""}`;
+  const summary = `github.com/${login}: ${ageY != null ? `~${Math.round(ageY)}y old, ` : ""}${repoSummary}.`;
 
   return {
     login,
     confidence: match.confidence === "gold" ? "gold" : "weak",
     ...base,
     publicRepos: u.public_repos ?? total,
+    sampledRepos: total,
     topLanguages,
     notableRepos,
     lastActivity: lastMs ? new Date(lastMs).toISOString() : undefined,
@@ -305,12 +379,26 @@ export const githubAdapter: Adapter = {
     if (!key) return;
     const name = ctx.evidence.profile.display_name;
     ctx.emit({ phase: "P1 · Identity", label: "GitHub resolution", detail: `Matching ${ctx.handle} to a GitHub account by linked X handle…`, source: "github", tone: "neutral" });
+    const coverage = { unavailable: false };
     const match = await resolveGithub(ctx.handle, name, key, {
       bioText: [ctx.evidence.profile.bio, ctx.evidence.profile.website].filter(Boolean).join(" "),
       siteDomain: ctx.evidence.profile.website,
       accountCreatedAt: ctx.evidence.profile.account_created_at,
+      coverage,
     });
     if (!match) {
+      if (coverage.unavailable) {
+        // A 401/403/429/5xx or timeout during resolution is an outage, not
+        // "no account links back".
+        ctx.recordCheck?.({
+          id: "code-footprint-github",
+          status: "unavailable",
+          note: "GitHub resolution was interrupted by a provider failure; no account could be confirmed or excluded",
+          provider: "github",
+        });
+        ctx.emit({ phase: "P1 · Identity", label: "GitHub unavailable", detail: "GitHub lookups failed during resolution; the code footprint could not be assessed.", source: "github", tone: "warn" });
+        return;
+      }
       ctx.recordCheck?.({
         id: "code-footprint-github",
         status: "checked-empty",
@@ -368,7 +456,8 @@ export const githubAdapter: Adapter = {
     const assessment = await assessGithub(match, key, ctx.evidence.profile.bio);
     if (assessment) {
       ctx.evidence.profile.githubAssessment = assessment;
-      ctx.emit({ phase: "P1 · Identity", label: "GitHub assessment", detail: assessment.summary, source: "github", tone: assessment.forkRatio > 0.8 || assessment.originalCount === 0 ? "warn" : "neutral" });
+      const measured = assessment.repoSampleState === "complete";
+      ctx.emit({ phase: "P1 · Identity", label: "GitHub assessment", detail: assessment.summary, source: "github", tone: measured && (assessment.forkRatio > 0.8 || assessment.originalCount === 0) ? "warn" : "neutral" });
       for (const c of assessment.claimChecks) {
         if (c.grade === "contradicted" || c.grade === "unsupported") {
           ctx.emit({ phase: "P1 · Identity", label: "Bio vs GitHub", detail: `${c.claim} - ${c.observation}.`, source: "github", tone: "warn" });
@@ -394,8 +483,20 @@ export const githubAdapter: Adapter = {
     }
 
 
-    const affs = await githubAffiliations(match.login, key);
+    const affiliations = await githubAffiliations(match.login, key);
+    const affs = affiliations.rows;
     if (!affs.length) {
+      if (affiliations.unavailable) {
+        // A failed orgs/repos list is an outage; it never means "no orgs".
+        ctx.recordCheck?.({
+          id: "affiliations-associates",
+          status: "unavailable",
+          note: `GitHub organization and repository lists were unavailable (${affiliations.detail ?? "provider failure"})`,
+          provider: "github",
+        });
+        ctx.emit({ phase: "P1 · Identity", label: "GitHub affiliations unavailable", detail: "GitHub organization and repository lists could not be fetched; affiliations were not assessed.", source: "github", tone: "warn" });
+        return;
+      }
       ctx.recordCheck?.({
         id: "affiliations-associates",
         status: "checked-empty",
@@ -434,7 +535,7 @@ export const githubAdapter: Adapter = {
     ctx.recordCheck?.({
       id: "affiliations-associates",
       status: "confirmed",
-      note: `${affs.length} public GitHub organization affiliation${affs.length === 1 ? "" : "s"} returned`,
+      note: `${affs.length} public GitHub organization affiliation${affs.length === 1 ? "" : "s"} returned${affiliations.unavailable ? ` (partial: ${affiliations.detail})` : ""}`,
       provider: "github",
       sourceCount: affs.length,
     });
