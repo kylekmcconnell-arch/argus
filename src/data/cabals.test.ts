@@ -80,6 +80,7 @@ describe("lookups", () => {
     const hit = findCabalWallet("robinhood", "0xafb1d47ce1af439c5833bb4f6eb4978722df2fca")!;
     const s = describeCabalHit(hit);
     expect(s).toContain("hub");
-    expect(s).not.toContain("—");
+    // U+2014, written as an escape so this file itself passes the copy policy.
+    expect(s).not.toContain("\u2014");
   });
 });
