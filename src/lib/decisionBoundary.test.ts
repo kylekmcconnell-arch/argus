@@ -14,7 +14,7 @@ const axes: TokenAxis[] = [
 describe("deriveTokenDecisionBoundary", () => {
   it.each([
     ["honeypot_confirmed", 10],
-    ["cannot_sell_all", 15],
+    ["cannot_sell_all", 10],
     ["owner_can_modify_balance", 20],
     ["balance_mutable_authority", 20],
     ["serial_scammer_creator", 25],
