@@ -24,7 +24,7 @@ import {
 import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph } from "./graph/store";
 import { ThreatScanPage, ThreatLanding } from "./components/ThreatScanPage";
 import { WalletScanPage } from "./components/WalletScanPage";
-import type { Investigation } from "./lib/investigation";
+import { isProjectSiteBound, type Investigation } from "./lib/investigation";
 import type { Recon } from "./collect/recon";
 import { type Dossier } from "./data/dossier";
 import { probeBackend } from "./lib/live";
@@ -794,6 +794,10 @@ export default function App() {
         && persisted.panelCostToken
         && inv.siteUrl
         && inv.recon
+        // Paid team discovery runs only against a site bound to the scanned
+        // contract; a model-suggested site that never bound is a lead, and
+        // researching its team would pay to profile a namesake.
+        && isProjectSiteBound(inv)
       ) {
         void fetchReconWebTeam(inv.siteUrl, inv.token.name, inv.recon, persisted.panelCostToken)
           .then((webTeamDiscovery) => {

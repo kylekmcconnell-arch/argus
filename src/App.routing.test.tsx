@@ -1340,6 +1340,46 @@ describe("App routing safety", () => {
     ));
   });
 
+  it("never pays for team discovery against a model-suggested site that did not bind to the contract", async () => {
+    const address = "0x6767676767676767676767676767676767676767";
+    harness.syncReport.mockResolvedValue({
+      state: "persisted",
+      caseId: "00000000-0000-4000-8000-000000000267",
+      version: 1,
+      reportVersionId: "00000000-0000-4000-8000-000000000267",
+      panelCostToken: "signed-investigation-capability",
+    });
+    harness.fetchReconWebTeam.mockResolvedValue([{ name: "Namesake Founder", role: "founder" }]);
+    await renderApp();
+
+    await act(async () => {
+      harness.scanOnComplete?.({
+        id: "investigation-model-lead-scan",
+        kind: "investigation",
+        priv: false,
+        result: {
+          rootRef: address,
+          token: tokenResult(address, "investigation core"),
+          projectX: null,
+          siteUrl: "https://namesake-project.example",
+          siteUrlOrigin: "model_lead",
+          siteBinding: { origin: "model_lead", status: "unbound", note: "The suggested site does not publish this contract." },
+          recon: { team: { names: ["Namesake Founder"] }, socials: [] },
+          projectAccount: null,
+          founders: [],
+          founderNote: "A model-suggested site (unverified) names Namesake Founder.",
+          deployerTrail: null,
+          webTeam: [],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalled());
+    await settle();
+    expect(harness.fetchReconWebTeam).not.toHaveBeenCalled();
+  });
+
   it("attaches persist receipt versionContext so a live investigation is immediately a saved report", async () => {
     const address = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
     const candidate = {
