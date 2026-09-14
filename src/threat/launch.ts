@@ -222,9 +222,13 @@ interface LaunchApiResponse {
   pumpfun?: { complete?: boolean; curvePct?: number | null };
 }
 
-async function fromApi(chain: string, address: string): Promise<LaunchApiResponse | null> {
+async function fromApi(chain: string, address: string, pairAddress?: string): Promise<LaunchApiResponse | null> {
   try {
-    const r = await apiFetch(`/api/launch?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(20000) });
+    // The audited pool's address lets the snipe trace identify the pool
+    // directly instead of guessing it from transfer fan-out (a pre-pool
+    // airdrop from the deployer otherwise reads as the pool).
+    const pair = pairAddress && /^0x[0-9a-f]{40}$/i.test(pairAddress) ? `&pair=${encodeURIComponent(pairAddress.toLowerCase())}` : "";
+    const r = await apiFetch(`/api/launch?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}${pair}`, { signal: AbortSignal.timeout(20000) });
     if (!r.ok) return null;
     const value: unknown = await r.json();
     return value && typeof value === "object" && !Array.isArray(value)
@@ -262,11 +266,13 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
   try {
     // The pair we audited: dexId is on the dossier; the quote symbol needs a
     // (cheap, keyless) DexScreener re-read.
-    const pair = pickPair(await dexByToken(d.address).catch(() => []), d.address);
+    // Same-chain only: a token at one address on several chains must not have
+    // its quote asset and venue read from another chain's deepest pool.
+    const pair = pickPair((await dexByToken(d.address).catch(() => [])).filter((p) => p.chainId === d.chain), d.address);
     const quote = pair?.quoteToken?.symbol ?? null;
     const dexId = (d.dexId || pair?.dexId || "").toLowerCase();
 
-    const api = await fromApi(d.chain, d.address);
+    const api = await fromApi(d.chain, d.address, d.pairAddress);
     // Client fingerprints first; the server's creator-contract check (Blockscout)
     // catches the venues that leave no client-visible trace (Pons reads as plain
     // uniswap/WETH - only the token's creator address gives it away).
