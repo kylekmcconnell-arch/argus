@@ -16,7 +16,7 @@ import {
   type RepeatBackingResult,
 } from "./taxonomy";
 import { getProfile, effectiveCaps, classForAxis, SHARED_CAPS } from "./profiles";
-import { classifyTestimonial, scoreAxis, type AxisSummary } from "./corroboration";
+import { classifyTestimonial } from "./corroboration";
 import type { TokenApplicabilitySnapshot } from "../data/evidence";
 
 export const VERDICT_BANDS: [string, number, number][] = [
@@ -381,7 +381,10 @@ export class Audit {
     opts: { subject_class?: SubjectClass; roles?: SubjectClass[]; display_name?: string; organizationSubject?: boolean } = {},
   ) {
     this.handle = normalizeHandle(handle);
-    if (opts.roles) this.roles = opts.roles.map(asClass);
+    // A role held twice is one role. Finalize iterates the held roles, so a
+    // duplicate (fixture or persisted payload) would emit two role reports
+    // and double score_coverage totals.
+    if (opts.roles) this.roles = [...new Set(opts.roles.map(asClass))];
     else if (opts.subject_class != null) this.roles = [asClass(opts.subject_class)];
     else this.roles = [];
     this.subject_class = this.roles[0] ?? null;
@@ -509,22 +512,6 @@ export class Audit {
       ...(lineage.counterEvidenceRefs ? { counterEvidenceRefs: [...lineage.counterEvidenceRefs] } : {}),
       ...(lineage.gaps ? { gaps: [...lineage.gaps] } : {}),
     };
-  }
-
-  corroborationAxis(axis = "I4_testimonial_corroboration"): [number, AxisSummary, string | null] {
-    const w = getProfile(SubjectClass.INVESTOR).axes[axis];
-    return scoreAxis(
-      this.testimonials.map((t) => ({ corroboration_verdict: t.corroboration_verdict! })),
-      w,
-    );
-  }
-
-  advisoryCorroborationAxis(axis = "AD3_relationship_corroboration"): [number, AxisSummary, string | null] {
-    const w = getProfile(SubjectClass.ADVISOR).axes[axis];
-    return scoreAxis(
-      this.advisedProjects.map((t) => ({ corroboration_verdict: t.corroboration_verdict! })),
-      w,
-    );
   }
 
   private sharedCapsTriggered(): string[] {
