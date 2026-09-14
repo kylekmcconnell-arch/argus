@@ -34,6 +34,25 @@ describe("public report presentation policy", () => {
     expect(presentation.note).toContain("repeat backing, network quality");
   });
 
+  // E6 (2026-09-14 deep-dive): a fully assessed FAIL or CAUTION role that is
+  // relabelled composite PROVISIONAL (another role or axis unmeasured) must
+  // still carry its governing signal, the way PASS already did.
+  it.each([
+    { score: 30, signal: "FAIL SIGNAL" },
+    { score: 39, signal: "FAIL SIGNAL" },
+    { score: 40, signal: "CAUTION SIGNAL" },
+    { score: 69, signal: "CAUTION SIGNAL" },
+    { score: 70, signal: "PASS SIGNAL" },
+  ])("carries the governing $signal beside a provisional score of $score", ({ score, signal }) => {
+    const presentation = presentPublicReport({
+      verdict: "PROVISIONAL",
+      score,
+      completeness: "partial",
+      scoreCoverage: { assessedAxes: 5, totalAxes: 6, assessedWeight: 86, totalWeight: 100, missingAxes: ["P6_transparency_integrity"], provisional: true },
+    });
+    expect(presentation).toMatchObject({ displayVerdict: "PROVISIONAL", primaryScore: String(score), secondarySignal: signal, final: false });
+  });
+
   it.each(["incomplete", "provisional"] as const)("does not erase a usable score because readiness is %s", (status) => {
     expect(presentPublicReport({ verdict: "PASS", score: 71, completeness: "partial", readiness: { ...provisionalReadiness, status, coveragePercent: 40, evidenceBackedAxes: 2 } })).toMatchObject({ primaryScore: "71", scoreLabel: "PROVISIONAL SCORE", final: false });
   });

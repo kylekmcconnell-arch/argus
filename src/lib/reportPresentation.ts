@@ -195,6 +195,23 @@ function modelSignal(verdict: string, score: string, prefix: string): string {
   return `${prefix} · ${visibleVerdict(verdict)}${score ? ` ${score}/100` : ""}`;
 }
 
+/**
+ * A composite PROVISIONAL verdict is the governing role's band-derived verdict
+ * relabelled because another axis or role is still unmeasured. The governing
+ * score itself is unchanged, so its band is the governing signal: a fully
+ * assessed FAIL role must not read as a neutral provisional score with no
+ * FAIL signal. Same thresholds as scoreMatchesVerdict / the engine's
+ * VERDICT_BANDS (kept literal here: this module is native ESM for api/).
+ */
+function governingSignalForScore(score: string): string | null {
+  if (!score) return null;
+  const value = Number(score);
+  if (!Number.isFinite(value) || value < 0 || value > 100) return null;
+  if (value >= 70) return "PASS SIGNAL";
+  if (value >= 40) return "CAUTION SIGNAL";
+  return "FAIL SIGNAL";
+}
+
 function scoreMatchesVerdict(verdict: string, score: string): boolean {
   if (!score) return false;
   const value = Number(score);
@@ -262,7 +279,8 @@ export function presentPublicReport(input: {
       rawVerdict, displayVerdict: "PROVISIONAL", resultLabel: "DECISION READINESS",
       readinessLabel: "ASSESSMENT PROVISIONAL", coverageLabel,
       color: VERDICT_COLORS.PROVISIONAL, primaryScore: score,
-      scoreLabel: "PROVISIONAL SCORE", secondarySignal: rawVerdict === "PASS" ? "PASS SIGNAL" : null,
+      scoreLabel: "PROVISIONAL SCORE",
+      secondarySignal: rawVerdict === "PASS" ? "PASS SIGNAL" : governingSignalForScore(score),
       note: `${assessed}${missing} ${gap} The score may change as gaps are resolved.`, final: false,
     });
   }
