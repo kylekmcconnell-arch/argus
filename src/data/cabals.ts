@@ -19,7 +19,11 @@
 
 import type { AssociateInput } from "../engine/audit";
 
-export type CabalKind = "launch-farm" | "promo-ring" | "infra";
+export type CabalKind =
+  | "launch-farm"
+  | "promo-ring"
+  | "infra"
+  | "snipe-ring"; // same-block buyers at launch with no tie to the deployer found
 export type CabalIntent = "nefarious" | "benign" | "unestablished";
 
 export type WalletRole =
@@ -223,6 +227,36 @@ export const CABALS: Cabal[] = [
       { chain: RH, address: "0xdc1a9f464dcb4a1dfdae34253939fdb509b081bf", symbol: "STONKINU", name: "STONKINU", launchedAt: "2026-09-13T01:36:00Z", venue: "direct EOA deploy, uniswap-v2 WETH", outcome: "liquidity-pulled", note: "liquidity $8 after removeLiquidity 09-13 12:01", evidence: "DexScreener 2026-09-14; deployer removeLiquidity tx timeline" },
       { chain: RH, address: "0x038f31900fcde52884456a47bbd2bb308bda8064", symbol: "EMBERCAT", name: "EMBERCAT", launchedAt: "2026-09-12T11:08:00Z", venue: "direct EOA deploy, uniswap-v2 WETH", outcome: "liquidity-pulled", note: "liquidity $2 after removeLiquidity 09-13 01:30", evidence: "DexScreener 2026-09-14; deployer removeLiquidity tx timeline" },
       { chain: RH, address: "0x3adde168a09132b95f25f52119a440b2bf9b32d0", symbol: "JUGGERNAUT", name: "JUGGERNAUT", launchedAt: "2026-09-11T16:03:00Z", venue: "direct EOA deploy, uniswap-v2 WETH", outcome: "liquidity-pulled", note: "no pair left on DexScreener after removeLiquidity 09-12 10:48", evidence: "deployer removeLiquidity tx timeline 2026-09-14" },
+    ],
+  },
+  {
+    id: "rh-snipe-ring-hey",
+    name: "HEY block+24 snipe ring",
+    kind: "snipe-ring",
+    intent: "unestablished",
+    summary:
+      "Seven wallets bought 15.4% of HEY in the same block 2.4 seconds after launch through the Pons app proxy, in seven separate transactions. Six dumped after graduation. All seven are funded by prior Pons trading through the same proxy rather than by a GasliteDrop batch, and none of the rented snipe contracts appear, so this reads as independent bots racing the launch, not the deployer's own cluster. Kept as a ring because same-block entry with shared funding rails is coordination even without an operator.",
+    firstSeen: "2026-09-09",
+    lastSeen: "2026-09-09",
+    wallets: [
+      { chain: RH, address: "0x709b3fa0f8c85cff157fb92b045ae02321b0483b", role: "sniper", evidence: "1.94% at block +24 tx 0x64f3f890…; sold 1.94% into the pool after graduation" },
+      { chain: RH, address: "0x4a00bd844a0420ef7e6ef66392c2b47e8106aabd", role: "sniper", evidence: "1.82% at block +24 tx 0x215c211a…; sold all; ETH inflows from TransparentUpgradeableProxy (Pons app) 2026-09-09 17:19-17:21" },
+      { chain: RH, address: "0x04730fea4731717db4879ad16e897f9fe7a6cc7d", role: "sniper", evidence: "1.72% at block +24 tx 0xbebfeded…; sold all; funded through the Pons proxy 2026-09-09 17:19-17:21" },
+      { chain: RH, address: "0xb2dc08af65272ef5b53c04887dbab360d6249865", role: "sniper", evidence: "2.27% at block +24 tx 0x3de8a8cf…; sold 1.70%" },
+      { chain: RH, address: "0xce90934a71b57e2a280a129dc36f2eb9c0d1d5c8", role: "sniper", evidence: "2.23% at block +24 tx 0x7e803a21…; sold 1.12%" },
+      { chain: RH, address: "0xf8a0c331f3dc4fb7693f49a9586ec88f2cdaea43", role: "sniper", label: "still holding", evidence: "3.22% at block +24 tx 0x05633da3…; holds 1.35% on 2026-09-14; active Pons trader since 2026-07-28" },
+      { chain: RH, address: "0x0e28d6a22f48ad65b2aae44b9be8c5016377ef8d", role: "sniper", evidence: "2.17% at block +24 tx 0x6552e137…; sold 1.09%; passed 1.09% to 0xf8a0c331 at 17:39" },
+      { chain: RH, address: "0xb9f98bf3bcf48b538b682ab16262a81fb19f9690", role: "farm", label: "ring side wallet", evidence: "received 1.61% from ring wallet 0xf8a0c331 at 17:36 on launch day, sold 1.40%" },
+      { chain: RH, address: "0x1206d27741c771e573a915848f9c2c2bb4c2d3dc", role: "farm", label: "ring side wallet", evidence: "received 1.12% from ring wallet 0xce90934a at 17:38 on launch day, sold 1.12%" },
+      { chain: RH, address: "0x7a8cf45f286d9dfb32156a6a20f45503e958f062", role: "farm", label: "ring side wallet", evidence: "received 1.35% from ring wallet 0xf8a0c331 at 17:41 on launch day, sold 1.35%" },
+      { chain: RH, address: "0xfdfbcae9ed23dc88757a48b2c0cc3910e6c1afa6", role: "deployer", label: "HEY deployer, net buyer", evidence: "launchAndBuy 2026-09-09 17:35:06 took 2.53% (1% allocation + buy); moved that 2.53% to 0xd0f7d8c6… at 18:06 (still held there); bought a further ~2.8% from the pool 09-09..09-12; zero sells through 2026-09-14" },
+      { chain: RH, address: "0xd0f7d8c6e9f6d80c297bebe4f7fd1b9c8125c32f", role: "deployer", label: "deployer allocation holder", evidence: "received the deployer's 2.53% launch allocation 2026-09-09 18:06; no outflows through 2026-09-14" },
+    ],
+    accounts: [
+      { handle: "HeyResearch", role: "project", label: "Hey Research Lab (heyresearch.xyz), builder-intelligence site for Robinhood Chain; X since Oct 2022, 1,447 followers", evidence: "bio carries the HEY CA; site shows live builder and ship counts; no tie to the snipe ring found" },
+    ],
+    launches: [
+      { chain: RH, address: "0xb33eb16782776b4d738c0fd643577cb0284db610", symbol: "HEY", name: "Hey Research Lab", launchedAt: "2026-09-09T17:35:06Z", venue: "pons-v2", outcome: "organic", note: "Pons V2, graduated in 7 min; 15.4% taken by seven same-block wallets at +24 and mostly dumped post-graduation; deployer 0xfdfbcae9… bought 1.53% with the launch, holds ~1.2%, used a RobinhoodLocker lock and one Relay deposit, no fee-escrow claims on its first page; 527 distinct pool buyers and 242% turnover in the first 3.4 h; ~$144k cap, ~$35k liquidity on 2026-09-14. Ongoing-selling read over 4.6 days (456% cumulative turnover): the ring and its three side wallets sold 13.8% of supply, 12.3 points of it on launch day and 0.2% in the last 24 h; the deployer never sold and is a net buyer; last 24 h was 44% sold vs 47% bought across 95 sellers, none launch-connected", evidence: "creation tx 0x53baa96a…; RPC transfer logs blocks 58729102..58849101 (launch) and 58729102..latest on 2026-09-14 (15,381 transfers); Blockscout internal txs on the ring wallets; DexScreener 2026-09-14" },
     ],
   },
   {
