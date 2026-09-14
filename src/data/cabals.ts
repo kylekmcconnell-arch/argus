@@ -339,7 +339,80 @@ export function cabalAssociates(cabalId: string, subjectHandle?: string): Associ
       kind: a.role === "project" ? "org" : "person",
       in_cabal_kb: true,
       notes: a.evidence,
+      // Registry rows are hand-traced against on-chain and X artifacts, so
+      // they are graph-eligible; they are never a model lead.
+      evidence_origin: "human_verified",
+      artifact_verified: true,
+      provider: CABAL_REGISTRY_PROVIDER,
     }));
+}
+
+export const CABAL_REGISTRY_PROVIDER = "argus-cabal-registry";
+export const CABAL_MEMBERSHIP_FINDING = "CabalMembership";
+
+/**
+ * Everything the audit should ingest for a subject handle that appears in the
+ * registry: its cabal-mates as associates, plus one finding per NEFARIOUS
+ * cabal so the membership shows in the report and not only in the graph.
+ * Benign rings contribute associates only (a disclosure, never a penalty).
+ */
+export function cabalEvidenceForSubject(handle: string | null | undefined): {
+  associates: AssociateInput[];
+  findings: CabalMembershipFinding[];
+} {
+  const hits = findCabalHandle(handle);
+  const associates: AssociateInput[] = [];
+  const findings: CabalMembershipFinding[] = [];
+  const seen = new Set<string>();
+  for (const { cabal, account } of hits) {
+    for (const a of cabalAssociates(cabal.id, handle ?? undefined)) {
+      const k = a.associate_handle.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      associates.push(a);
+    }
+    if (cabal.intent !== "nefarious") continue;
+    findings.push({
+      finding_type: CABAL_MEMBERSHIP_FINDING,
+      claim: `@${account.handle} is recorded as ${account.role} of the ${cabal.name} (${cabal.kind.replace(/-/g, " ")}): ${account.evidence}`,
+      source_url: `argus://cabals/${cabal.id}`,
+      source_date: cabal.lastSeen,
+      source_author: CABAL_REGISTRY_PROVIDER,
+      verification_status: "Verified",
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "human_verified",
+      artifact_verified: true,
+      provider: CABAL_REGISTRY_PROVIDER,
+      finding_scope: {
+        scope: "direct_subject",
+        target_entity_key: `@${account.handle}`,
+        target_entity_type: account.role === "project" ? "project" : "person",
+        relationship_to_subject: "self",
+      },
+    });
+  }
+  return { associates, findings };
+}
+
+export interface CabalMembershipFinding {
+  finding_type: typeof CABAL_MEMBERSHIP_FINDING;
+  claim: string;
+  source_url: string;
+  source_date: string;
+  source_author: string;
+  verification_status: "Verified";
+  independent_source_count: number;
+  polarity: -1;
+  evidence_origin: "human_verified";
+  artifact_verified: true;
+  provider: string;
+  finding_scope: {
+    scope: "direct_subject";
+    target_entity_key: string;
+    target_entity_type: "project" | "person";
+    relationship_to_subject: "self";
+  };
 }
 
 /** Short, second-person sentence for scanner copy. */
