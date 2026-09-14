@@ -240,9 +240,11 @@ function launchInstant(token: TokenDossier): number | null {
  * investigation from before provenance was recorded) keeps its prior standing.
  */
 export function isProjectSiteBound(
-  inv: Pick<Investigation, "siteUrl" | "siteUrlOrigin" | "siteBinding">,
+  inv: Pick<Investigation, "siteUrlOrigin" | "siteBinding">,
 ): boolean {
-  if (!inv.siteUrl) return false;
+  // Only a model-suggested site can be unbound. Listing-published sites and
+  // investigations frozen before provenance was recorded keep their standing
+  // exactly as before (callers that spend still require a site and a recon).
   if (inv.siteUrlOrigin !== "model_lead") return true;
   return inv.siteBinding?.status === "bound";
 }
@@ -598,7 +600,7 @@ export function streamInvestigation(
       if (siteBinding && siteUrlOrigin === "model_lead") {
         h.onStep(milestone("Suggested-site binding", siteBinding.note, siteBinding.status === "bound" ? "good" : "warn"));
       }
-      const siteBound = isProjectSiteBound({ siteUrl, siteUrlOrigin, siteBinding });
+      const siteBound = !!siteUrl && isProjectSiteBound({ siteUrlOrigin, siteBinding });
 
       // ── Founders (honesty-gated; no auto-spend beyond the project account) ──
       const founders = deriveFounders(siteBound ? recon : null, projectX, projectAccount);

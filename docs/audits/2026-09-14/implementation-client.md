@@ -26,8 +26,9 @@ per finding.
   (`contract-on-page`), or (b) the verified project account's
   `official-domain` proof (`/api/x-authenticity` `proof.sourceUrl`) lives on
   that host (`official-account-domain`). `isProjectSiteBound(inv)` is the one
-  gate: token-sources sites and frozen investigations without the field read
-  as bound; a `model_lead` site is bound only with a recorded binding.
+  gate and depends only on provenance: token-sources sites and frozen
+  investigations without the field read as bound (their behaviour is
+  unchanged); a `model_lead` site is bound only with a recorded binding.
   `deriveFounders` receives `recon` only when bound; `founderNote` for an
   unbound lead says "A model-suggested site (host, unverified) names ...,
   but it does not publish this contract, so those names are leads about an
@@ -95,7 +96,9 @@ another user re-gates; sign-out unmounts.
 collecting and re-attaches to the version the server saves later", "offers a
 relaunch only once the disconnected run's server budget has passed"). The
 existing rejected-run tests are unchanged. The routing test's `./lib/runner`
-mock gained `streamDropRecoveryDeadline`.
+mock gained `streamDropRecoveryDeadline`. `src/lib/live.test.ts` ("aborts and
+reports a genuinely inactive stream") encoded the one-argument `onError`
+signature and now expects the `{ kind: "stream_dropped" }` classification.
 
 **Server note (not changed here)** `api/audit.ts` has no dedupe for a second
 concurrent audit of the same handle. The client now avoids launching one
