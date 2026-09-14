@@ -361,3 +361,33 @@ supply held by the deployer; a deployer whose prior creations all show
 `removeLiquidity` in their last hours; `eth_call` sell-path simulation from
 a non-deployer holder. All curated in `src/data/cabals.ts`
 (`rh-honeypot-factory-8fc191`).
+
+## Two more Robinhood Chain launch venues (read 2026-09-14, $FIH and $WRESTLER)
+
+Neither is Pons, and both read as plain "uniswap" on DexScreener.
+
+- **LaunchLocker factory.** $FIH (`0x4b3a3ff4…`) was created by
+  `0xd9ec2db5f3d1b236843925949fe5bd8a3836fccb` (unverified, ~93k txs by
+  September) which mints 100% of supply, seeds a Uniswap v3 WETH pool, and
+  moves the position NFT (Uniswap V3 Positions NFT-V1
+  `0x73991a25c818bf1f1128deaab1492d45638de0d3`) to a verified `LaunchLocker`
+  `0x7f03effbd7ceb22a3f80dd468f67ef27826acd85`, all in the creation tx.
+  Factory and locker share creator `0x7e035fb048a31e0481b88074557415b1c187242b`.
+  Detection: token creator == that factory; LP custody == `ownerOf(tokenId)`
+  on the NFPM resolving to the LaunchLocker. Launch read for FIH: first buy
+  at block +38, no same-block cluster, 72 buyers in the first hour, deployer
+  bought 2% at +3.5 min and later sold. Organic.
+- **RWAERC20LaunchpadFactory.** $WRESTLER (`0xab528169…`) was created through
+  verified `RWAERC20LaunchpadFactory`
+  `0xce9c48cfa068947f77738c81be406b53338e5b0d` (creator `0xaa8d6f5a…`),
+  which pools the full supply into a Uniswap v4 pool quoted in a tokenized
+  stock (GLXY) with no bonding curve; supply custodian
+  `0x0310cfebe1d7a69f2414f6595bbe9d17c5342acc`. Blockscout's
+  `getcontractcreation` reports a one-shot `contractFactory`
+  (`0xf86dfdb6…`) for it, so match on the creation tx `to` address, not the
+  reported factory. Launch read: first buy at +183, 5 buyers in the first
+  hour, pool still 94% full after an hour; the volume came with the
+  Altcoinist calls from Sep 7. Organic.
+
+Both belong in the `VENUES` table once a second token per venue confirms
+the fingerprint; recorded in `src/data/cabals.ts` (`altcoinist-ring`) for now.
