@@ -83,3 +83,23 @@ describe("resolveLinkHubWebsite", () => {
     expect(await resolveLinkHubWebsite("https://orbitgroup.ai", "@orbitgroup_ai", stub({}))).toBeNull();
   });
 });
+
+describe("a tweet link is not a profile backlink (ID-8)", () => {
+  it("rejects a site whose only x.com link is a status under the handle", async () => {
+    const hubText = "https://x.com/orbitgroup_ai https://orbitgroup.ai/launch";
+    const resolved = await resolveLinkHubWebsite("https://linktr.ee/orbitgroup_ai", "@orbitgroup_ai", stub({
+      "https://linktr.ee/orbitgroup_ai": page(hubText),
+      "https://orbitgroup.ai/": page("Orbit. See https://x.com/orbitgroup_ai/status/1234567890"),
+    }));
+    expect(resolved).toBeNull();
+  });
+
+  it("still accepts a bare profile link with a trailing slash or query", async () => {
+    const hubText = "https://x.com/orbitgroup_ai/ https://orbitgroup.ai/launch";
+    const resolved = await resolveLinkHubWebsite("https://linktr.ee/orbitgroup_ai", "@orbitgroup_ai", stub({
+      "https://linktr.ee/orbitgroup_ai": page(hubText),
+      "https://orbitgroup.ai/": page('<a href="https://twitter.com/orbitgroup_ai?ref=site">X</a>'),
+    }));
+    expect(resolved?.website).toBe("https://orbitgroup.ai/");
+  });
+});

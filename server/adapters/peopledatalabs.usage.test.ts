@@ -394,3 +394,46 @@ describe("People Data Labs provider attempt accounting", () => {
     expect(evidence.profile.resolved_name).toBeUndefined();
   });
 });
+
+describe("a PDL name match never launders a model-supplied domain (ID-4)", () => {
+  const upgrade = async (experience: unknown[]) => {
+    vi.stubEnv("PDL_API_KEY", "pdl-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      data: { full_name: "Ada Lovelace", twitter_url: "twitter.com/ada", experience },
+    })));
+    const evidence = emptyEvidence("@ada");
+    evidence.profile.display_name = "Ada Lovelace";
+    evidence.ventures.push({
+      project_name: "Aave",
+      role: "engineer",
+      period: "",
+      outcome: VentureOutcome.ACTIVE,
+      domain: "aave.net",
+      domain_evidence_origin: "model_lead",
+      x_handle: "@aave",
+      evidence_url: null,
+      notes: "grok affiliation lead · single-source lead, unverified",
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    });
+    await withCostLedger(() => peopledatalabsAdapter.run({
+      handle: evidence.profile.handle,
+      evidence,
+      emit: vi.fn(),
+      recordCheck: vi.fn(),
+    }));
+    return evidence.ventures[0];
+  };
+
+  it("drops the model's domain when the licensed record carries no company website", async () => {
+    const venture = await upgrade([{ company: { name: "Aave" }, title: { name: "Engineer" } }]);
+    expect(venture).toMatchObject({ project_name: "Aave", artifact_verified: true, evidence_origin: "deterministic" });
+    expect(venture.domain).toBeUndefined();
+    expect(venture.domain_evidence_origin).toBeUndefined();
+  });
+
+  it("replaces the model's domain with the licensed record's company website", async () => {
+    const venture = await upgrade([{ company: { name: "Aave", website: "www.aave.com" }, title: { name: "Engineer" } }]);
+    expect(venture).toMatchObject({ domain: "aave.com", domain_evidence_origin: "deterministic", artifact_verified: true });
+  });
+});

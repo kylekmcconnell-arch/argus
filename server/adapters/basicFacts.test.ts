@@ -19,6 +19,7 @@ import {
 import { readEntityFacts } from "../entityStore";
 
 vi.mock("../entityStore", () => ({ readEntityFacts: vi.fn(async () => null) }));
+import { storedEntityIdentityMatchesProfile } from "./basicFacts";
 
 const NOW = "2026-07-12T12:00:00.000Z";
 
@@ -5677,5 +5678,205 @@ describe("basic facts completion independent of fact yield", () => {
     const result = await collectBasicFacts(ctx, { discover: async () => [lead()], repair: async () => [],
       fetchSource: async () => ({ status: "failed", reason: "http_503" }) });
     expect(result.collectionCompleted).toBe(false);
+  });
+});
+
+describe("a venture's model-supplied domain is never an official counterparty scope (ID-4)", () => {
+  const advisorLead = (sourceUrl: string) => lead({
+    subject: "Alice",
+    predicate: "prior_role",
+    value: "Advisor at Acme",
+    questionId: "person.prior_role",
+    excerpt: "Alice previously served as Advisor at Acme.",
+    sourceUrl,
+  });
+  const advisorPage = (url: string, host: string) => document({
+    url,
+    host,
+    text: "<html><body><p>Alice previously served as Advisor at Acme.</p></body></html>",
+  });
+
+  it("does not verify a lead fetched from a model-cited lookalike host after a PDL-style upgrade", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.MEMBER];
+    evidence.ventures.push({
+      project_name: "Acme",
+      domain: "acme-lookalike.example",
+      domain_evidence_origin: "model_lead",
+      role: "Engineer",
+      period: "2020 to 2022",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: null,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "peopledatalabs",
+    });
+    const sourceUrl = "https://acme-lookalike.example/team";
+    await collectBasicFacts(ctx, {
+      discover: async () => [advisorLead(sourceUrl)],
+      fetchSource: fetchDocuments({ [sourceUrl]: advisorPage(sourceUrl, "acme-lookalike.example") }),
+    });
+    const verified = evidence.basicFacts.filter((fact) => fact.status === "verified" || fact.status === "corroborated");
+    expect(verified).toEqual([]);
+    expect(evidence.basicFacts.flatMap((fact) => fact.sources).some((source) => source.sourceClass === "official_counterparty")).toBe(false);
+  });
+
+  it("applies the venture identity check to a deterministic domain that names somebody else", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.MEMBER];
+    evidence.ventures.push({
+      project_name: "Acme",
+      domain: "unrelated-press.example",
+      domain_evidence_origin: "deterministic",
+      role: "Advisor",
+      period: "2020 to 2022",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: null,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const sourceUrl = "https://unrelated-press.example/team";
+    await collectBasicFacts(ctx, {
+      discover: async () => [advisorLead(sourceUrl)],
+      fetchSource: fetchDocuments({ [sourceUrl]: advisorPage(sourceUrl, "unrelated-press.example") }),
+    });
+    expect(evidence.basicFacts.flatMap((fact) => fact.sources).some((source) => source.sourceClass === "official_counterparty")).toBe(false);
+  });
+});
+
+describe("official-site recovery binds only a suspended account through a bare profile backlink (ID-8)", () => {
+  const driftCtx = (state: "unavailable" | "resolved") => {
+    const evidence = emptyEvidence("@driftprotocol");
+    evidence.profile.display_name = "driftprotocol";
+    evidence.profile.profile_collection_state = state;
+    if (state === "resolved") {
+      evidence.profile.profile_provider = "twitterapi";
+      evidence.profile.x_account_status = "active";
+      evidence.profile.website = "https://linktr.ee/driftprotocol";
+    }
+    const ctx: CollectContext = { handle: "@driftprotocol", evidence, emit: vi.fn() };
+    return { ctx, evidence };
+  };
+  const officialUrl = "https://drift.finance/token";
+  const page = (backlink: string) => document({
+    url: officialUrl,
+    host: "drift.finance",
+    text: `<html><body><h1>Drift Protocol token</h1>${backlink}</body></html>`,
+    contentHash: "e".repeat(64),
+  });
+  const run = (ctx: CollectContext, source: PublicTextDocument) => collectBasicFacts(ctx, {
+    discover: async () => [lead({
+      subject: "driftprotocol",
+      predicate: "official_token",
+      value: "DRIFT",
+      questionId: "person.official_token",
+      excerpt: "Drift Protocol token",
+      sourceUrl: officialUrl,
+      sourceTitle: "Token",
+    })],
+    fetchSource: fetchDocuments({ [officialUrl]: source, "https://drift.finance/": source }),
+  });
+
+  it("refuses a page whose only X link is a tweet under the handle", async () => {
+    const { ctx, evidence } = driftCtx("unavailable");
+    await run(ctx, page('<a href="https://x.com/driftprotocol/status/1234567890">announcement</a>'));
+    expect(evidence.profile.identity_confidence).not.toBe("Confirmed");
+    expect(evidence.profile.website).toBeUndefined();
+  });
+
+  it("refuses a bare handle URL that only appears as prose, not as a link", async () => {
+    const { ctx, evidence } = driftCtx("unavailable");
+    await run(ctx, page("<p>Follow us: https://x.com/driftprotocol</p>"));
+    expect(evidence.profile.identity_confidence).not.toBe("Confirmed");
+  });
+
+  it("still recovers a suspended account from a page that links the bare profile", async () => {
+    const { ctx, evidence } = driftCtx("unavailable");
+    await run(ctx, page('<a href="https://x.com/driftprotocol">X</a>'));
+    expect(evidence.profile.identity_confidence).toBe("Confirmed");
+    expect(evidence.profile.website).toBe("https://drift.finance/");
+  });
+
+  it("never runs recovery for a live, resolved profile that merely uses a link hub", async () => {
+    const { ctx, evidence } = driftCtx("resolved");
+    await run(ctx, page('<a href="https://x.com/driftprotocol">X</a>'));
+    expect(evidence.profile.identity_confidence).not.toBe("Confirmed");
+    expect(evidence.profile.website).toBe("https://linktr.ee/driftprotocol");
+  });
+});
+
+describe("knowledge-base reuse requires the live account to still be the stored one (ID-6)", () => {
+  const live = (overrides: Record<string, unknown> = {}) => ({
+    ...emptyEvidence("@alpha").profile,
+    profile_collection_state: "resolved" as const,
+    display_name: "Alpha Labs",
+    website: "https://alpha.example",
+    x_user_id: "1001",
+    account_created_at: "2021-03-01T00:00:00.000Z",
+    ...overrides,
+  });
+
+  it("accepts rows stored before identity was recorded", () => {
+    expect(storedEntityIdentityMatchesProfile(undefined, live())).toBe(true);
+    expect(storedEntityIdentityMatchesProfile({}, live())).toBe(true);
+  });
+
+  it("refuses a different X user id or creation time", () => {
+    expect(storedEntityIdentityMatchesProfile({ xUserId: "2002", displayName: "Alpha Labs" }, live())).toBe(false);
+    expect(storedEntityIdentityMatchesProfile({ accountCreatedAt: "2024-09-01T00:00:00.000Z" }, live())).toBe(false);
+    expect(storedEntityIdentityMatchesProfile({ xUserId: "1001", accountCreatedAt: "2021-03-01T00:00:00.000Z" }, live())).toBe(true);
+  });
+
+  it("requires display-name or website continuity on a resolved profile", () => {
+    expect(storedEntityIdentityMatchesProfile({ displayName: "Alpha Labs", websiteDomain: "alpha.example" }, live())).toBe(true);
+    expect(storedEntityIdentityMatchesProfile({ displayName: "Old Alpha", websiteDomain: "alpha.example" }, live())).toBe(true);
+    expect(storedEntityIdentityMatchesProfile({ displayName: "Alpha Labs", websiteDomain: "old.example" }, live())).toBe(true);
+    expect(storedEntityIdentityMatchesProfile({ displayName: "Beta Corp", websiteDomain: "beta.example" }, live())).toBe(false);
+    // An unresolved live profile cannot contradict the stored names.
+    expect(storedEntityIdentityMatchesProfile({ displayName: "Beta Corp" }, live({ profile_collection_state: "unavailable" }))).toBe(true);
+  });
+
+  it("does not reuse stored facts for a handle that changed hands", async () => {
+    vi.stubEnv("ARGUS_ENTITY_REUSE", "on");
+    vi.mocked(readEntityFacts).mockResolvedValueOnce({
+      facts: {
+        basicFacts: [{
+          factId: "kb-founder", subjectKey: "alice", predicate: "founder", value: "Acme",
+          normalizedValue: "acme", status: "verified", critical: true,
+          sources: [{
+            url: "https://alice.example/about", sourceClass: "official_subject", relation: "supports",
+            excerpt: "Alice founded Acme.", contentHash: "z".repeat(64), capturedAt: NOW, provider: "public-web", artifactVerified: true,
+          }],
+          evidence_origin: "deterministic", artifact_verified: true, provider: "public-web", questionId: "person.founder",
+        }],
+        identity: { xUserId: "9999", displayName: "Alice" },
+      },
+      updatedAt: NOW,
+      auditCount: 2,
+      entityType: "FOUNDER",
+    });
+    const evidence = emptyEvidence("@alice");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.profile.identity_binding = "licensed_exact_social";
+    evidence.profile.website = "https://alice.example";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.x_user_id = "1001";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const ctx: CollectContext = { handle: "@alice", evidence, emit: vi.fn(), organizationId: "org1" };
+    let discoveredIds: string[] = [];
+    await collectBasicFacts(ctx, {
+      discover: async (_c: CollectContext, qs: readonly { id: string }[]) => { discoveredIds = qs.map((q) => q.id); return []; },
+      fetchSource: vi.fn(),
+    });
+    expect(discoveredIds).toContain("person.founder");
+    expect(evidence.basicFacts.some((fact) => fact.predicate === "founder" && fact.status === "verified")).toBe(false);
+    expect(ctx.emit).toHaveBeenCalledWith(expect.objectContaining({ label: "Stored facts belong to a different account" }));
   });
 });
