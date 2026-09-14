@@ -634,6 +634,13 @@ export interface SourceArtifact {
   fundScaleTemporalState?: "current" | "historical" | "fixed_historical" | "unknown";
   fundScaleSourceCount?: number;
   fundScaleClaimId?: string;
+  /**
+   * The entity name exactly as the fetched page printed it. The strict gate
+   * requires it to equal `fundName`; a page naming "Sequoia Capital China"
+   * never verifies "Sequoia Capital". Absent only for first-person copy on a
+   * verified manager domain.
+   */
+  attributedEntityName?: string;
 }
 
 /**

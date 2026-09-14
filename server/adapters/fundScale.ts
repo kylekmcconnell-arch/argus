@@ -13,7 +13,9 @@ import {
 import {
   defaultInvestorDomainResolver,
   domainFromWebsite,
+  firstExactEntityMention,
   portfolioEntityForLead,
+  sameEntityName,
   type PortfolioInvestorDomainProof,
   type PortfolioInvestorDomainResolution,
   type PortfolioInvestorEntity,
@@ -92,6 +94,11 @@ export interface FundScaleMatch {
   publishedAt?: string;
   temporalState: NonNullable<SourceArtifact["fundScaleTemporalState"]>;
   eligibleForConfirmation: boolean;
+  /**
+   * The entity name exactly as the page printed it. Absent only for
+   * first-person copy on a verified manager domain, where the domain binds.
+   */
+  attributedEntityName?: string;
 }
 
 export interface FundScaleCollectorDependencies {
@@ -116,26 +123,6 @@ const normalized = (value: string): string => value
 
 const compact = (value: string): string => normalized(value).replace(/[^a-z0-9]+/g, "");
 const regexEscape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-function entityNamesMatch(leftRaw: string, rightRaw: string): boolean {
-  const left = compact(leftRaw);
-  const right = compact(rightRaw);
-  if (!left || !right) return false;
-  return left === right || (Math.min(left.length, right.length) >= 5 && (left.includes(right) || right.includes(left)));
-}
-
-function entityPattern(entity: string, caseSensitive = false): RegExp | null {
-  const words = normalized(entity.replace(/^@/, "")).split(/[^a-z0-9]+/).filter(Boolean);
-  if (!words.length || (words.length === 1 && words[0].length < 2)) return null;
-  const phrase = words.map(regexEscape).join("[^A-Za-z0-9]+");
-  return new RegExp(`(?:^|[^A-Za-z0-9])${phrase}(?=$|[^A-Za-z0-9])`, caseSensitive ? "" : "i");
-}
-
-function containsEntity(text: string, entity: string): boolean {
-  const words = normalized(entity.replace(/^@/, "")).split(/[^a-z0-9]+/).filter(Boolean);
-  const caseSensitive = words.length === 1 && words[0].length <= 4;
-  return entityPattern(entity, caseSensitive)?.test(text) ?? false;
-}
 
 function safeCandidateUrl(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 2_000) return null;
@@ -464,8 +451,11 @@ export function supportsFundScaleClaim(input: {
   const matches: FundScaleMatch[] = [];
   const seen = new Set<string>();
   for (const segment of segments) {
-    const entityMentioned = input.subjectAliases.some((alias) => containsEntity(segment, alias));
-    if (!entityMentioned && (!firstParty || !hasExplicitFirstPersonOwnership(segment))) continue;
+    // The alias must appear as the exact entity, not as the prefix of a longer
+    // name ("Sequoia Capital China"). The page's own spelling is frozen on the
+    // artifact so the strict gate can require it to equal the bound fund.
+    const mention = firstExactEntityMention(segment, input.subjectAliases);
+    if (!mention && (!firstParty || !hasExplicitFirstPersonOwnership(segment))) continue;
     for (const amount of parseUsdAmounts(segment)) {
       let metric = metricAroundAmount(segment, amount);
       if (!metric) continue;
@@ -498,6 +488,7 @@ export function supportsFundScaleClaim(input: {
         ...(publishedAt ? { publishedAt } : {}),
         temporalState,
         eligibleForConfirmation,
+        ...(mention ? { attributedEntityName: mention.text } : {}),
       });
       if (matches.length >= 8) return matches;
     }
@@ -585,6 +576,37 @@ function documentRegistrableDomain(document: PublicTextDocument): string {
   }
 }
 
+/**
+ * One page cited three ways (`/fund`, `/fund/`, `/fund?utm_source=x`) is one
+ * fetch and one source. Tracking parameters, fragments, and a trailing slash
+ * never distinguish documents.
+ */
+export function canonicalSourceUrlKey(raw: string): string {
+  const url = new URL(raw);
+  url.hash = "";
+  url.hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+  for (const key of [...url.searchParams.keys()]) {
+    if (/^(?:utm_|fbclid$|gclid$|mc_cid$|mc_eid$|ref$|source$)/i.test(key)) url.searchParams.delete(key);
+  }
+  url.searchParams.sort();
+  url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+  return url.toString();
+}
+
+function sameRegistrableDomain(left: string, right: string): boolean {
+  try {
+    return registrableApprox(new URL(left).hostname) === registrableApprox(new URL(right).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Distinct sources = distinct (registrable domain, fetched content) pairs. */
+function distinctSourceKey(document: PublicTextDocument): string {
+  const hash = /^[a-f0-9]{64}$/i.test(document.contentHash) ? document.contentHash.toLowerCase() : "";
+  return hash ? `${documentRegistrableDomain(document)}|${hash}` : canonicalSourceUrlKey(document.url);
+}
+
 function syntheticPortfolioLead(lead: FundScaleLead): PortfolioLead {
   return {
     projectName: lead.fundVehicleHint || `${lead.fundName} fund scale`,
@@ -625,7 +647,7 @@ function resolveFundEntity(ctx: CollectContext, lead: FundScaleLead, now: Date):
     artifact.kind === "portfolio_relationship"
     && artifact.match === "relationship_confirmed"
     && artifact.investorEntityName
-    && entityNamesMatch(artifact.investorEntityName, lead.fundName),
+    && sameEntityName(artifact.investorEntityName, lead.fundName),
   );
   if (existing?.investorEntityName && existing.attribution) {
     const domainProof = frozenInvestorDomainProof(existing);
@@ -764,7 +786,7 @@ export async function collectFundScale(
   const investorDomainByEntity = new Map<string, Promise<PortfolioInvestorDomainResolution | undefined>>();
   const sourceByUrl = new Map<string, Promise<PublicTextResult>>();
   const fetchSourceOnce = (url: string) => {
-    const key = new URL(url).toString();
+    const key = canonicalSourceUrlKey(url);
     const existing = sourceByUrl.get(key);
     if (existing) return existing;
     const pending = fetchSource(url).then((result) => {
@@ -957,7 +979,7 @@ export async function collectFundScale(
     const confirmed = authoritative || pressConfirmed;
     const sourceCount = new Set(eligible
       .filter((row) => row.sourceClass !== "other_public")
-      .map((row) => row.document.url)).size;
+      .map((row) => distinctSourceKey(row.document))).size;
     confirmations.set(claimKey, { confirmed, pressConfirmed, sourceCount });
     if (confirmed) confirmedClaims.add(claimKey);
   }
@@ -1021,14 +1043,24 @@ export async function collectFundScale(
       ...(row.match.publishedAt ? { publishedAt: row.match.publishedAt } : {}),
       fundScaleTemporalState: row.match.temporalState,
       fundScaleSourceCount: confirmation?.sourceCount ?? 0,
+      ...(row.match.attributedEntityName ? { attributedEntityName: row.match.attributedEntityName } : {}),
       fundScaleClaimId: row.claimKey,
     };
     const artifact: SourceArtifact = { ...unhashed, contentHash: artifactHash(unhashed) };
+    // The same fetched page under another URL spelling is the same source.
     const exists = ctx.evidence.sourceArtifacts.some((candidate) =>
       candidate.kind === "fund_scale"
       && candidate.fundScaleClaimId === artifact.fundScaleClaimId
       && candidate.fundScaleMetric === artifact.fundScaleMetric
-      && candidate.sourceUrl === artifact.sourceUrl,
+      && (
+        candidate.sourceUrl === artifact.sourceUrl
+        || (
+          Boolean(candidate.sourceContentHash)
+          && candidate.sourceContentHash?.toLowerCase() === artifact.sourceContentHash?.toLowerCase()
+          && candidate.sourceUrl !== undefined
+          && sameRegistrableDomain(candidate.sourceUrl, artifact.sourceUrl)
+        )
+      ),
     );
     if (!exists) ctx.evidence.sourceArtifacts.push(artifact);
   }

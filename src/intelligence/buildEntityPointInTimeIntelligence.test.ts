@@ -84,6 +84,7 @@ function scaleArtifact(sourceUrl: string, hash: string): SourceArtifact {
     attribution: "direct_subject",
     sourceClass: "first_party_subject",
     fundName: "Paradigm Capital",
+    attributedEntityName: "Paradigm Capital",
     fundSizeUsd: 850_000_000,
     fundVehicle: "Venture Fund III",
     fundScaleMetric: "final_close",
