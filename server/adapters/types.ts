@@ -53,6 +53,12 @@ export interface CheckObservation {
   provider: string;
   sourceCount?: number;
   completedAt?: string;
+  /**
+   * The exact name a name screen ran against. When a later observation for
+   * the same check screened a different resolved name, the earlier name's
+   * observations are superseded rather than merged.
+   */
+  screenedName?: string;
 }
 
 export interface CollectContext {
