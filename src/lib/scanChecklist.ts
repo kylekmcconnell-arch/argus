@@ -333,7 +333,9 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
   );
 
   const holderCount = safety.holderCount || dossier.topHolders.length;
-  const topHolderPct = safety.topHolderPct ?? dossier.topHolders[0]?.percent ?? null;
+  // The audit's figure is already pool-excluded. The fallback for older
+  // dossiers must skip contract rows too: row 0 is usually the pool itself.
+  const topHolderPct = safety.topHolderPct ?? dossier.topHolders.find((h) => !h.isContract)?.percent ?? null;
   checks.push(
     holderCount > 0
       ? {
