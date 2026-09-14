@@ -45,7 +45,7 @@ import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 import { deriveTokenApplicability } from "./tokenApplicability";
 
-import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, reverseBioClaimIsStanding, followsSubject, resetFollowScanMemo, resetReverseBioMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, isConfirmedOfficialSiteAccessDenial, officialSiteAccessDeniedFinding, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
@@ -637,6 +637,7 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
     ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
     ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
+    if (prof.userId) ctx.evidence.profile.x_user_id = prof.userId;
     if (prof.image) {
       ctx.evidence.profile.avatar_url = prof.image; // official X image source for the frozen integrity screen
       ctx.evidence.profile.avatar_source_state = "resolved";
@@ -658,6 +659,13 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
       : officialWebsites.find((url) => canonicalOfficialWebsite(url) !== null) ?? firstWebsite;
     ctx.evidence.profile.website = profileWebsite;
     if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
+    // URLs typed into the bio description are kept as leads about the
+    // account. They never enter `official_websites`: a fan page or an
+    // impersonator can paste the real project's site into its bio.
+    const bioWebsites = (prof.bioWebsites ?? [])
+      .map((url) => canonicalPublicProfileWebsite(url))
+      .filter((url): url is string => Boolean(url));
+    if (bioWebsites.length) ctx.evidence.profile.bio_websites = bioWebsites;
     // A link aggregator is a pointer, not a website: left as-is it kills
     // PROJECT routing, official-site verification, and token binding for the
     // whole run. Dereference it deterministically (hub must link this exact
@@ -952,6 +960,7 @@ export function mergeDiscoveredAffiliations(
       // it to the same project seen in another audit.
       x_handle: v.x_handle,
       domain: v.domain,
+      ...(v.domain ? { domain_evidence_origin: "model_lead" as const } : {}),
       role: v.role,
       period: v.year ?? "",
       outcome: VentureOutcome.ACTIVE,
@@ -1105,7 +1114,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // domain or a project name — a big public project's roster lives off-X, and
     // many project accounts put no plain domain in the bio.
     domain || ctx.evidence.profile.display_name
-      ? findTeamOnSite(domain, ctx.evidence.profile.display_name)
+      ? findTeamOnSite(domain, ctx.evidence.profile.display_name, ctx.handle)
       : Promise.resolve([] as TeamMember[]),
     // Read the project's own /team page directly (Grok's summary can miss it).
     fetchTeamPage(teamDomain, ctx.evidence.profile.display_name),
@@ -1375,14 +1384,16 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     }),
     // Reverse-bio twitterapi: the claimant's own bio @-mentions this subject
     // next to founder/COO/CEO/"we built @H" language. Handle is the unique id.
+    // A role read from a TWEET ("who is the founder of @proj?") is a lead;
+    // only a standing bio claim is a first-party artifact.
     ...reverseBioTwitter.team.map((member) => ({
       ...member,
-      evidence_origin: "deterministic" as const,
-      artifact_verified: true,
+      evidence_origin: reverseBioClaimIsStanding(member) ? "deterministic" as const : "model_lead" as const,
+      artifact_verified: reverseBioClaimIsStanding(member),
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "model_lead" as const,
-      handleProvenance: member.handle ? "subject_first_party" as const : undefined,
+      handleProvenance: member.handle && reverseBioClaimIsStanding(member) ? "subject_first_party" as const : undefined,
     })),
   ];
   for (const t of teamCandidates) {
@@ -1641,7 +1652,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     || postRoleTeam.length > 0
     || operatorTeam.length > 0
     || amplifiedTeam.length > 0
-    || reverseBioTwitter.team.length > 0
+    || reverseBioTwitter.team.some(reverseBioClaimIsStanding)
     || webTeam.some((t) => t.artifact_verified === true && norm(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
     ctx.emit({ phase: "P1 · Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
@@ -1661,7 +1672,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // and LinkedIn. The co-founder of a known fund should never render "named only".
   const nameOnly = webTeam.filter((m) => !m.handle && !m.linkedin).slice(0, 15);
   if (nameOnly.length >= 1) {
-    const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })));
+    const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })), ctx.handle);
     let linked = 0;
     for (const f of found) {
       const m = byName.get(norm(f.name));
@@ -1722,7 +1733,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // Only directly fetched first-party team pages and deterministic role scans
     // can raise identity confidence. Grok web/X results remain useful leads in
     // the roster, but cannot confirm the very identity it was asked to discover.
-    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam, ...reverseBioTwitter.team, ...operatorTeam, ...amplifiedTeam].filter((candidate) =>
+    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam, ...reverseBioTwitter.team.filter(reverseBioClaimIsStanding), ...operatorTeam, ...amplifiedTeam].filter((candidate) =>
       webTeam.some((member) =>
         (!!candidate.handle && norm(candidate.handle) === norm(member.handle)) ||
         (!!candidate.name && norm(candidate.name) === norm(member.name)),
@@ -1859,7 +1870,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
             // The archived page must name BOTH the subject AND the venture on its
             // own /team or /about page, so this is a genuine first-party team tie
             // (not a coincidental mention on a wrong or misguessed domain).
-            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name);
+            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name, ctx.handle);
             // The archive now reads a bounded spread of captures rather than only
             // the newest, so a name scrubbed from a current team page still
             // corroborates. When the tie survives only in the older captures the
@@ -1868,8 +1879,20 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
             if (arch) {
               corrob.push(...archiveCorroborationLabels(arch));
               rec.evidence_url = arch.url;
-              archiveVerified = true;
-              archiveProvider = arch.provider;
+              // The display name is not a bind key. Only a capture that also
+              // carries the audited @handle (or its bare profile backlink)
+              // ties THIS account to the venture; a name-only match is a
+              // corroborated lead that a namesake could equally satisfy.
+              if (arch.handleBound) {
+                archiveVerified = true;
+                archiveProvider = arch.provider;
+                // The archived /team page on this very domain named the
+                // venture and linked the audited account: the domain is now
+                // read from the artifact, not from the model.
+                rec.domain_evidence_origin = "deterministic";
+              } else {
+                corrob.push("the archived page names the display name only, not this X account (namesake possible; lead, not verified)");
+              }
             }
           }
           if (xHandle) {
@@ -3816,7 +3839,20 @@ export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Em
   }
 }
 
-async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
+/**
+ * X handles are case-insensitive. Every provider cache key downstream is
+ * built from the handle as given, so an embedded project-account audit
+ * (`@Uniswap` from a registry record) and a direct audit (`uniswap`) used to
+ * buy every intake search twice. Normalize exactly once, at the entry.
+ */
+export function normalizeAuditHandle(rawHandle: string): string {
+  const trimmed = rawHandle.trim();
+  const bare = trimmed.replace(/^@/, "");
+  return /^[A-Za-z0-9_]{1,30}$/.test(bare) ? bare.toLowerCase() : trimmed;
+}
+
+async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
+  const rawHandle = normalizeAuditHandle(inputHandle);
   const runtimeStartedAt = Date.now();
   const authorizedCapabilities = options?.authorizedResearchScope?.capabilities;
   const authorizedCapabilitySet = authorizedCapabilities ? new Set(authorizedCapabilities) : null;
@@ -3845,6 +3881,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   resetDefiLlamaScanMemo();
   // Same boundary, same reason: the follow answers belong to one subject's scan.
   resetFollowScanMemo();
+  // And the reverse-bio team discovery: a warm container must never replay a
+  // previous scan's (possibly outage-empty or since-edited) bio reads as this
+  // scan's evidence, for this tenant or another.
+  resetReverseBioMemo();
   // Single source of truth for the analyst start-by deadline (the route passes
   // it; fall back to the same formula for direct/test callers). Collection must
   // stop launching new provider work COLLECTION_ANALYST_RESERVE_MS before it, so
@@ -5573,6 +5613,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           ventures: verifiedVentures,
           roles: evidence.roles.map((role) => String(role)),
           projectToken: evidence.projectToken?.verified ? evidence.projectToken : undefined,
+          // Who these facts were recorded for. A handle can change hands; the
+          // reader refuses the row when the live account no longer matches.
+          identity: {
+            ...(evidence.profile.x_user_id ? { xUserId: evidence.profile.x_user_id } : {}),
+            ...(evidence.profile.account_created_at ? { accountCreatedAt: evidence.profile.account_created_at } : {}),
+            ...(evidence.profile.display_name ? { displayName: evidence.profile.display_name } : {}),
+            ...(canonicalOfficialWebsite(evidence.profile.website)?.domain
+              ? { websiteDomain: canonicalOfficialWebsite(evidence.profile.website)!.domain }
+              : {}),
+          },
         },
       });
     }

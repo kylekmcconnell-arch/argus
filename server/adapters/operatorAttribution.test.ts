@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { discoverOperatorsFromFollowings, operatorClaimInBio } from "./x";
+import { discoverOperatorsFromFollowings, operatorClaimInBio, projectRoleClaimInBio } from "./x";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -111,5 +111,31 @@ describe("discoverOperatorsFromFollowings", () => {
     await discoverOperatorsFromFollowings("@bigproject");
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("operatorClaimInBio · former, negated and neighbouring-handle roles never bind (ID-3)", () => {
+  it.each([
+    "ex @proj, now building @newco",
+    "Former CEO @proj. Now investing.",
+    "Not the founder of @proj, just a fan",
+    "ex-CTO @proj",
+    "Previously: founder @proj",
+    "no longer building @proj",
+    "Retired co-founder @proj",
+  ])("rejects %s", (bio) => {
+    expect(operatorClaimInBio(bio, "@proj")).toBeNull();
+    expect(projectRoleClaimInBio(bio, "@proj")).toBeNull();
+  });
+
+  it("still binds a current role stated after an unrelated former role", () => {
+    expect(operatorClaimInBio("ex-Google. Founder @proj", "@proj")?.role).toBe("founder");
+    expect(projectRoleClaimInBio("Formerly at Stripe, now co-founder @proj", "@proj")?.role).toBe("co-founder");
+    expect(operatorClaimInBio("Co-founder, COO @proj · @orghandle fund", "@proj")?.role).toMatch(/coo|co-founder/);
+  });
+
+  it("does not let a verb that belongs to the next handle bind the previous one", () => {
+    expect(operatorClaimInBio("investor in @proj, building @newco", "@proj")).toBeNull();
+    expect(operatorClaimInBio("investor in @proj, building @newco", "@newco")?.role).toBe("operator");
   });
 });

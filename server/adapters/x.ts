@@ -328,9 +328,13 @@ export interface XProfile {
   bio?: string;
   followers?: number;
   createdAt?: string;
+  /** Provider user id; stable across renames. */
+  userId?: string;
   website?: string;
-  /** Every official http(s) URL on this twitterapi profile record (website + entities). */
+  /** Every official http(s) URL in this twitterapi profile record's website field. */
   officialWebsites?: string[];
+  /** URLs typed into the bio description. Leads about the account, never official scopes. */
+  bioWebsites?: string[];
   image?: string; // real X profile photo URL (more reliable than an unavatar guess)
 }
 
@@ -390,31 +394,42 @@ export async function publicXAccountState(
 
 // The project's own website is the biggest un-mined lead on a project account —
 // the team page lives there, not in the tweets. twitterapi returns the bio
-// website and entity URLs under a few shapes. Keep EVERY unique-ID-bound
-// http(s) URL from that same profile record, not just the first: a project
-// can put the company site in the website field and the token site in a
-// bio entity (@CLUTCHMARKETS / clutch.markets vs stonkbrokers.cash).
+// website under a few shapes. Keep EVERY http(s) URL from the profile's
+// WEBSITE FIELD on that same record, not just the first.
+//
+// URLs typed into the bio description are a different thing: any account can
+// paste the real project's site into its bio, so a description link is a
+// lead about the account (see `twitterapiBioUrls`), never an official scope.
+// Only the website field feeds the official-domain gates.
+const pushHttpUrl = (out: string[]) => (value: unknown) => {
+  if (typeof value === "string" && /^https?:\/\//i.test(value) && !out.includes(value)) {
+    out.push(value);
+  }
+};
+
+const entityBucketUrls = (bucket: unknown, push: (value: unknown) => void) => {
+  if (!Array.isArray(bucket)) return;
+  for (const entry of bucket) push(entry?.expanded_url ?? entry?.url);
+};
+
 function twitterapiOfficialUrls(p: any): string[] {
   const out: string[] = [];
-  const push = (value: unknown) => {
-    if (typeof value === "string" && /^https?:\/\//i.test(value) && !out.includes(value)) {
-      out.push(value);
-    }
-  };
-  const takeEntityUrls = (entities: any) => {
-    for (const bucket of [entities?.url?.urls, entities?.description?.urls]) {
-      if (!Array.isArray(bucket)) continue;
-      for (const entry of bucket) {
-        push(entry?.expanded_url ?? entry?.url);
-      }
-    }
-  };
-  takeEntityUrls(p?.profile_bio?.entities);
-  takeEntityUrls(p?.entities);
+  const push = pushHttpUrl(out);
+  entityBucketUrls(p?.profile_bio?.entities?.url?.urls, push);
+  entityBucketUrls(p?.entities?.url?.urls, push);
   push(p?.url);
   push(p?.profile_url);
   push(p?.website);
   push(p?.link);
+  return out;
+}
+
+/** URLs the account typed into its bio description: leads only, never bind keys. */
+function twitterapiBioUrls(p: any): string[] {
+  const out: string[] = [];
+  const push = pushHttpUrl(out);
+  entityBucketUrls(p?.profile_bio?.entities?.description?.urls, push);
+  entityBucketUrls(p?.entities?.description?.urls, push);
   return out;
 }
 
@@ -467,8 +482,10 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
         bio: p.description,
         followers: p.followers ?? p.followers_count,
         createdAt: p.createdAt ?? p.created_at,
+        ...(String(p.id ?? p.id_str ?? "").trim() ? { userId: String(p.id ?? p.id_str).trim() } : {}),
         website: pickWebsite(p),
         officialWebsites: twitterapiOfficialUrls(p),
+        bioWebsites: twitterapiBioUrls(p),
         image,
       };
     } catch {
@@ -1504,6 +1521,12 @@ export interface TeamMember {
   biography?: string;
   evidence?: string;
   kind: "team" | "advisor";
+  /**
+   * Where the role claim was read. A live bio is the person's standing
+   * self-description; a tweet is one sentence that may be a question, a
+   * quote or a third party's claim, so tweet-only rows stay leads.
+   */
+  claimSurface?: "bio" | "tweet";
   linkedin?: string;
   source?: string;
   sourceUrl?: string;
@@ -1565,8 +1588,11 @@ export async function findTeam(
 // web/LinkedIn/Crunchbase search the Site-recon team finder uses, but from inside
 // a handle audit — pointed at the project's own domain (from its X bio link). It
 // is what surfaces named people (with LinkedIn) an X-post scan never sees.
-export async function findTeamOnSite(domain: string, projectName?: string): Promise<TeamMember[]> {
+export async function findTeamOnSite(domain: string, projectName?: string, subjectHandle?: string): Promise<TeamMember[]> {
   const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  // The cache key carries the audited handle: two accounts sharing a display
+  // name (a KOL and the protocol) must never share one team-search answer.
+  const subjectKey = (subjectHandle ?? "").replace(/^@/, "").toLowerCase();
   if (!clean && !projectName) return [];
   const anchor = clean ? `website ${clean}${projectName ? ` (${projectName})` : ""}` : `project "${projectName}"`;
   const system =
@@ -1584,7 +1610,7 @@ export async function findTeamOnSite(domain: string, projectName?: string): Prom
     ...(project ? [`"${project}" founder LinkedIn`, `"${project}" cofounder`] : []),
   ];
   const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for "built by", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, {
-    cacheKey: `team-site-v2:${clean || projectName}`,
+    cacheKey: `team-site-v3:${subjectKey}:${clean || projectName}`,
     queries: officialSiteQueries.length ? officialSiteQueries : undefined,
   });
   return parseTeamJSON(text, undefined, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
@@ -1597,14 +1623,16 @@ export async function findTeamOnSite(domain: string, projectName?: string): Prom
 export async function enrichTeamIdentities(
   project: string,
   people: { name: string; role?: string }[],
+  subjectHandle?: string,
 ): Promise<{ name: string; handle?: string; linkedin?: string }[]> {
   if (!people.length) return [];
+  const subjectKey = (subjectHandle ?? "").replace(/^@/, "").toLowerCase();
   const system =
     "You are an OSINT researcher with live web and X search. For each named team member of the given project, find their X (Twitter) handle and LinkedIn profile. " +
     "Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\"}]}. Provide one entry per input name, with fields omitted when unknown. NEVER invent. Never use em dashes.";
   const list = people.map((p) => `${p.name}${p.role ? ` (${p.role})` : ""}`).join("; ");
-  const text = await generalWebSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich:${project}:${people.map((p) => p.name).sort().join("|")}` });
+  const text = await generalWebSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich-v2:${subjectKey}:${project}:${people.map((p) => p.name).sort().join("|")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -1654,6 +1682,46 @@ const OPERATOR_VERB = "building|builder|build|built|we\\s+built|i\\s+built|dev(?
 const MAX_FOLLOWING_PAGES = 2;
 const FOLLOWING_PAGE_SIZE = 100;
 
+/**
+ * A role word immediately preceded by a tense or negation marker is not a
+ * current claim: "Former CEO @proj", "ex-CTO @proj", "Previously: founder
+ * @proj", "Not the founder of @proj". The marker must sit directly before
+ * the role (an article or punctuation may intervene) so "ex-Google, founder
+ * @proj" still reads as a current founder.
+ */
+const ROLE_NEGATION_BEFORE = /\b(?:ex|former(?:ly)?|prev(?:iously)?|past|no\s+longer|not|never|until|retired|stepped\s+down\s+as|used\s+to\s+be)\b[\s:,-]*(?:the\s+|an?\s+)?$/i;
+const ROLE_NEGATION_WINDOW = 40;
+
+function roleClaimNegated(text: string, roleStart: number): boolean {
+  return ROLE_NEGATION_BEFORE.test(text.slice(Math.max(0, roleStart - ROLE_NEGATION_WINDOW), roleStart));
+}
+
+/**
+ * In "@proj, now building @newco" the verb after the comma belongs to the
+ * NEXT handle. An after-the-subject match whose gap crosses a comma and whose
+ * verb is followed by another @handle is that other handle's claim.
+ */
+function verbBelongsToNextHandle(text: string, match: RegExpMatchArray): boolean {
+  if (!/,/.test(match[0])) return false;
+  const tail = text.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 40);
+  return /^[^@|\n]{0,30}@[A-Za-z0-9_]{2,30}/.test(tail);
+}
+
+/** First candidate match that is neither negated nor stolen by the next handle. */
+function currentRoleMatch(
+  text: string,
+  candidates: ReadonlyArray<{ match: RegExpMatchArray | null; roleStart: (match: RegExpMatchArray) => number; after: boolean }>,
+): RegExpMatchArray | null {
+  for (const candidate of candidates) {
+    const match = candidate.match;
+    if (!match) continue;
+    if (roleClaimNegated(text, candidate.roleStart(match))) continue;
+    if (candidate.after && verbBelongsToNextHandle(text, match)) continue;
+    return match;
+  }
+  return null;
+}
+
 /** Bio text that claims the subject, with the matched phrase for evidence. */
 export function operatorClaimInBio(
   bio: string,
@@ -1677,7 +1745,10 @@ export function operatorClaimInBio(
   // not, so "Building @other | @x" cannot steal the verb.
   const before = new RegExp(`\\b(${OPERATOR_VERB})\\b[^@|\\n]{0,40}${subject}\\b`, "i");
   const after = new RegExp(`${subject}\\b[^@|\\n]{0,16}\\b(${OPERATOR_VERB})\\b`, "i");
-  const match = text.match(before) ?? text.match(after);
+  const match = currentRoleMatch(text, [
+    { match: text.match(before), roleStart: (m) => m.index ?? 0, after: false },
+    { match: text.match(after), roleStart: (m) => (m.index ?? 0) + m[0].length - (m[1] ?? "").length, after: true },
+  ]);
   if (!match) return null;
   const verb = (match[1] ?? "").toLowerCase().replace(/\s+/g, " ");
   const role = /co-?founder/.test(verb)
@@ -1727,7 +1798,10 @@ export function projectRoleClaimInBio(
     `${at}\\b[^@\\n]{0,24}\\b((?:${PROJECT_BIO_ROLE})(?:\\s*[,/&]\\s*(?:${PROJECT_BIO_ROLE}))*)\\b`,
     "i",
   );
-  const match = text.match(before) ?? text.match(after);
+  const match = currentRoleMatch(text, [
+    { match: text.match(before), roleStart: (m) => m.index ?? 0, after: false },
+    { match: text.match(after), roleStart: (m) => (m.index ?? 0) + m[0].length - (m[1] ?? "").length, after: true },
+  ]);
   if (!match) return null;
   const raw = (match[1] ?? "").toLowerCase().replace(/\s+/g, " ");
   const role = /we[- ]?built/.test(raw) ? "builder"
@@ -2315,6 +2389,13 @@ async function twitterUserGraphPage(
 export interface ReverseBioDiscovery {
   team: TeamMember[];
   orgs: LinkedOrg[];
+  /**
+   * True when at least one discovery read (mention search, tweet search,
+   * mentions timeline, followings, followers) could not be read. The team
+   * returned is then a partial read, never an assessed empty, and it is not
+   * memoized: the next scan must ask the provider again.
+   */
+  unavailable?: boolean;
 }
 
 /**
@@ -2325,7 +2406,15 @@ export interface ReverseBioDiscovery {
  * co-founder / COO / CEO / "we built @H" language. Display names never bind.
  * Serper/web search is never consulted.
  */
-const reverseBioMemo = new Map<string, Promise<ReverseBioDiscovery>>();
+// One audit reads the reverse-bio discovery from two lanes (cold intake and
+// the reverse role search), so the in-flight promise is shared per subject.
+// The memo is bounded the way lastTweetsMemo is (TTL + cap), is cleared at
+// every scan start by orchestrate (resetReverseBioMemo), and never keeps a
+// result produced while a provider read failed: an outage-empty team must
+// not replay as "no team found" for the next scan of the same handle.
+const REVERSE_BIO_MEMO_TTL_MS = 10 * 60_000;
+const REVERSE_BIO_MEMO_MAX = 64;
+const reverseBioMemo = new Map<string, { at: number; pending: Promise<ReverseBioDiscovery> }>();
 
 export function resetReverseBioMemo(): void {
   reverseBioMemo.clear();
@@ -2338,10 +2427,17 @@ export async function discoverReverseBioFromTwitterapi(
 ): Promise<ReverseBioDiscovery> {
   const memoKey = subjectHandle.replace(/^@/, "").toLowerCase() || "_";
   const hit = reverseBioMemo.get(memoKey);
-  if (hit) return hit;
+  if (hit && Date.now() - hit.at < REVERSE_BIO_MEMO_TTL_MS) return hit.pending;
+  if (hit) reverseBioMemo.delete(memoKey);
   const pending = discoverReverseBioFromTwitterapiUncached(subjectHandle, subjectName, projectBio);
-  reverseBioMemo.set(memoKey, pending);
-  pending.catch(() => { if (reverseBioMemo.get(memoKey) === pending) reverseBioMemo.delete(memoKey); });
+  if (reverseBioMemo.size >= REVERSE_BIO_MEMO_MAX) {
+    const oldest = reverseBioMemo.keys().next().value;
+    if (oldest !== undefined) reverseBioMemo.delete(oldest);
+  }
+  const slot = { at: Date.now(), pending };
+  reverseBioMemo.set(memoKey, slot);
+  const forget = () => { if (reverseBioMemo.get(memoKey) === slot) reverseBioMemo.delete(memoKey); };
+  pending.then((result) => { if (result.unavailable) forget(); }, forget);
   return pending;
 }
 
@@ -2374,14 +2470,19 @@ async function discoverReverseBioFromTwitterapiUncached(
     });
   };
 
+  let unavailable = false;
   try {
-    const [mentionsSearch, tweetSearch, mentionTimeline, followings, followers] = await Promise.all([
+    const reads = await Promise.all([
       twitterSearchPayload(`@${handle}`, key),
       twitterSearchPayload(handle, key),
       twitterUserGraphPage("mentions", handle, key),
       twitterUserGraphPage("followings", handle, key),
       twitterUserGraphPage("followers", handle, key),
     ]);
+    const [mentionsSearch, tweetSearch, mentionTimeline, followings, followers] = reads;
+    // A null payload is a read the provider refused (transport, 4xx/5xx,
+    // unparseable), not an empty answer. The team below is then partial.
+    unavailable = reads.some((payload) => payload === null);
     for (const candidate of candidatesFromTweetPayload(mentionsSearch, subject)) add(candidate);
     for (const candidate of candidatesFromTweetPayload(tweetSearch, subject)) add(candidate);
     for (const candidate of candidatesFromTweetPayload(mentionTimeline, subject)) add(candidate);
@@ -2389,6 +2490,7 @@ async function discoverReverseBioFromTwitterapiUncached(
     for (const candidate of candidatesFromUserList(followers, ["followers", "users"])) add(candidate);
   } catch {
     // Discovery is best-effort; a single provider failure must not abort team.
+    unavailable = true;
   }
 
   const team: TeamMember[] = [];
@@ -2426,9 +2528,10 @@ async function discoverReverseBioFromTwitterapiUncached(
       handle: `@${userName}`,
       role: claim.role,
       kind: "team",
+      claimSurface: bioClaim ? "bio" : "tweet",
       evidence: bioClaim
         ? `their current X bio states "${claim.phrase}"`
-        : `their current X bio @-mentions @${handle} and they wrote "${claim.phrase}"`,
+        : `their current X bio @-mentions @${handle} and they wrote "${claim.phrase}" (a tweet, not a standing role claim; lead only)`,
       source: "reverse-bio twitterapi",
       sourceUrl: `https://x.com/${userName}`,
       projects: otherProjectsInBio(bio, handle),
@@ -2477,12 +2580,19 @@ async function discoverReverseBioFromTwitterapiUncached(
       });
     } catch { /* org bind is best-effort */ }
   }
-  return { team: team.slice(0, 8), orgs: orgs.slice(0, 8) };
+  return { team: team.slice(0, 8), orgs: orgs.slice(0, 8), ...(unavailable ? { unavailable: true } : {}) };
 }
+
+/** A reverse-bio row whose role was read from a live bio, not from a tweet. */
+export const reverseBioClaimIsStanding = (member: Pick<TeamMember, "claimSurface">): boolean =>
+  member.claimSurface !== "tweet";
 
 export function reverseBioTeamAsWebMembers(team: readonly TeamMember[]): WebTeamMember[] {
   return team.flatMap((member) => {
     if (!member.handle) return [];
+    // A tweet that mentions the role ("who is the founder of @proj?") is a
+    // lead for the analyst, never a verified first-party roster row.
+    const standing = reverseBioClaimIsStanding(member);
     return [{
       name: member.name,
       handle: member.handle,
@@ -2492,12 +2602,12 @@ export function reverseBioTeamAsWebMembers(team: readonly TeamMember[]): WebTeam
       source: member.source ?? "reverse-bio twitterapi",
       sourceUrl: member.sourceUrl,
       projects: member.projects,
-      evidence_origin: "deterministic" as const,
-      artifact_verified: true,
+      evidence_origin: standing ? "deterministic" as const : "model_lead" as const,
+      artifact_verified: standing,
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "model_lead" as const,
-      handleProvenance: "subject_first_party" as const,
+      ...(standing ? { handleProvenance: "subject_first_party" as const } : {}),
     }];
   });
 }
@@ -2917,12 +3027,17 @@ export const xAdapter: Adapter = {
       ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
+      if (prof.userId) ctx.evidence.profile.x_user_id = prof.userId;
       ctx.evidence.profile.website = canonicalPublicProfileWebsite(prof.website)
         ?? ctx.evidence.profile.website;
       const officialWebsites = (prof.officialWebsites ?? [])
         .map((url) => canonicalPublicProfileWebsite(url))
         .filter((url): url is string => Boolean(url));
       if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
+      const bioWebsites = (prof.bioWebsites ?? [])
+        .map((url) => canonicalPublicProfileWebsite(url))
+        .filter((url): url is string => Boolean(url));
+      if (bioWebsites.length) ctx.evidence.profile.bio_websites = bioWebsites;
       ctx.evidence.profile.followers = fmtFollowers(prof.followers);
       if (prof.image) {
         ctx.evidence.profile.avatar_url = prof.image;
