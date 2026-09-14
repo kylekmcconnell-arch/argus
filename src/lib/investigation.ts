@@ -199,10 +199,17 @@ export interface Investigation {
 // scan-time call to it answered 409, so this trail came back null on every
 // investigation and the report published "we could not confirm who owns the
 // wallet that deployed the contract" over a trace the server had already run.
-async function fetchDeployerTrail(wallet: string, mintedAt: number | null): Promise<DeployerTrail | null> {
+// Bounded like every other hop: an unanswered trace request used to hold the
+// whole investigation (and its sidebar chip) open indefinitely.
+export const DEPLOYER_TRAIL_TIMEOUT_MS = 30_000;
+
+async function fetchDeployerTrail(wallet: string, mintedAt: number | null, signal?: AbortSignal): Promise<DeployerTrail | null> {
   try {
     const pinned = mintedAt == null ? "" : `&mintedAt=${encodeURIComponent(String(mintedAt))}`;
-    const res = await fetch(`/api/deployer-origin?wallet=${encodeURIComponent(wallet)}${pinned}`);
+    const timeout = AbortSignal.timeout(DEPLOYER_TRAIL_TIMEOUT_MS);
+    const res = await fetch(`/api/deployer-origin?wallet=${encodeURIComponent(wallet)}${pinned}`, {
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
     if (!res.ok) return null;
     const d = await res.json() as Partial<DeployerTrail> & { available?: boolean; error?: unknown };
     if (d.available === false || d.error) return null;
@@ -454,7 +461,7 @@ export function streamInvestigation(
       if (token.deployer && token.chain === "solana") {
         h.onHop("tracing who funded the deployer");
         h.onStep(milestone("Step 1b · Deployer funding trail", `Tracing the SOL that funded deployer ${token.deployer.slice(0, 6)}…${token.deployer.slice(-4)}.`, "neutral"));
-        deployerTrail = await fetchDeployerTrail(token.deployer, launchInstant(token));
+        deployerTrail = await fetchDeployerTrail(token.deployer, launchInstant(token), tokenController.signal);
         if (!aborted && deployerTrail) {
           const tone = deployerTrail.funder?.kind === "cex" ? "good" : deployerTrail.serialDeployer ? "bad" : "neutral";
           h.onStep(milestone("Deployer trail", deployerTrail.note, tone));
