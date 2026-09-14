@@ -403,4 +403,25 @@ export const NOTABLE_ACCOUNTS: NotableAccount[] = [
   { handle: "haydenzadams", label: "founder · Uniswap" },
   { handle: "danheld", label: "Bitcoin educator" },
   { handle: "CryptoCobain", label: "trader · Cobie alt" },
+
+  // ── Robinhood Chain launch actors (see src/data/cabals.ts for the evidence) ──
+  // A follow from one of these is a signal about WHICH crowd a subject runs
+  // with, not a credibility endorsement: the labels say which ring.
+  { handle: "vladtenev", label: "founder · Robinhood (follows RH chain projects)" },
+  { handle: "fern", label: "Robinhood · Adam Fern" },
+  { handle: "ponsdotfamily", label: "RH launchpad · Pons" },
+  { handle: "MEADGod", label: "RH launchpad · Pons team (Ozzy)" },
+  { handle: "longdotxyz", label: "RH launchpad · LONG()" },
+  { handle: "ClutchMarkets", label: "RH project · StonkBrokers / Clutch" },
+  { handle: "OxSimpleFarmer", label: "RH project · StonkBrokers founder" },
+  { handle: "TheIndexFi", label: "RH project · Index (rwa.wtf)" },
+  { handle: "cashcat_token", label: "RH memecoin · Cash Cat" },
+  { handle: "Altcoinist", label: "promo ring · Altcoinist ($ALTT)" },
+  { handle: "KonstantinSebeo", label: "promo ring · Altcoinist co-founder (ALT BRAH)" },
+  { handle: "theunipcs", label: "KOL · Unipcs (Bonk Guy)" },
+  { handle: "wrestler_galaxy", label: "RH memecoin · $WRESTLER (Altcoinist ring)" },
+  { handle: "TradeOnPrism", label: "RH project · Prism Finance (fee-farmed token)" },
+  { handle: "synepsepad", label: "RH launchpad · Synapse (self-sniped launch)" },
+  { handle: "Quantrhood", label: "RH project · QUANT" },
+  { handle: "earnonhood", label: "RH project · earnonhood (scam accusation lead)" },
 ];

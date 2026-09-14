@@ -218,3 +218,146 @@ chain by finding a real V3 pool's Mint-log owner and cross-checking the
 explorer's contract name (see api/nftlock.ts for the resolved table). The
 live tracing of this custody chain ships as api/nftlock.ts + the LpCustody
 panel; this note records the mechanism so the next reader doesn't re-derive it.
+
+## Pons V2 launch farms on Robinhood Chain (traced 2026-09-12 to 2026-09-14)
+
+Four tokens traced end to end from RPC transfer logs, Blockscout internal
+transactions and the verified Pons V2 contracts. Each is a different shape;
+together they set the detection recipes below. Chain id 4663, block time
+~0.101 s. Explorer `robinhoodchain.blockscout.com` is Cloudflare-gated for
+curl but serves `/api/v2` to a browser session; the RPC
+`rpc.mainnet.chain.robinhood.com` is non-archive (state reads only at head)
+and rate-limits after ~100 fast calls.
+
+**Pons V2 mechanics (verified on-chain, not from docs).** The curve contract
+mints 100% to itself and gives the deployer 1% (`launchAndBuy` on
+PonsV2LaunchAndBuy `0xe33E9E479dF8802cb0866d5d05258bEc4cF62948`). The curve
+sells 71.4% of supply and graduates at ~8,090 USDG (or the ETH equivalent);
+PonsV2GraduationExecutor `0xc7819b64a1DaEcd7ec19856D026CB14efbD89046` moves
+20.4% of supply plus the curve proceeds into a Uniswap v4 pool and 8.16% to
+PonsV2LaunchLocker `0x267444D099b10fB5Ed7c3Cc7B7c767AdcA574952`. The pool
+hook is PonsV2MemeHook `0xE5e702641Ea86F4ae6cC3cDaeD2B886f976Be044`: 5% on
+normal sells, **100% on sells by wallets that bought in the launch block**,
+and the confiscated proceeds accrue as *creator tax* claimable by the deployer
+from PonsV2FeeEscrow `0xd3AFEB2a57f70eF218Aa82451c51B2fb0416Ac9e`. Factory is
+PonsV2LaunchFactory `0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e`, deployer
+contract PonsV2LaunchDeployer `0x3711ceA4feaDE896C913C68F01Eda97Cb06D1A42`
+(already in `api/launch.ts`). Uniswap v4 PoolManager
+`0x8366a39CC670B4001A1121B8F6A443A643e40951`, UniversalRouter
+`0x8876789976decbfcbbbe364623c63652db8c0904`. USDG
+`0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168` has **6 decimals**.
+
+**The anti-snipe tax is an extraction primitive when the sniper is the
+deployer.** LEBRON (`0xd553996e73a50501a940EA771B328998a7ac2478`, launched
+2026-09-12 18:31 UTC): one wallet funded the deployer and the sniper in the
+same GasliteDrop batch; the sniper bought the whole curve plus 17% more from
+the fresh pool (88.5% of supply for 68,136 USDG) and dumped it within 5 s.
+The hook took 72,843 USDG of sell proceeds as creator tax; 11 minutes later
+the deployer claimed 127,763 USDG from FeeEscrow. Net +64k USDG paid by
+organic buyers, then bridged Robinhood -> Base via Relay and swept into
+Binance deposit addresses. A punitive tax routed to the creator is a wash
+for a self-sniper and a drain on everyone else.
+
+**Curve-phase rotation evades the tax entirely.** SYNAPSE
+(`0xE96184C99B3A3B89C907ea0753C5fDE9E3C572Ab`, 2026-09-14 03:38 UTC): the
+sniper bought 20% at block +1 through a bundler, pushed it to a sell
+executor whose every sell re-issued the tokens from the curve to a fresh
+farm wallet inside the same transaction, and the ten farm wallets sold back
+to the curve at +32 s, before graduation, where no hook exists. 0.44 ETH in,
+0.82 ETH out. The launch-block wallet ends the day with zero balance and
+zero pool interaction, so a post-graduation snipe read misses it. The read
+that catches it: launch-block buyer -> transfers to a contract -> curve
+re-issues to N wallets -> all N sell to the curve before graduation.
+
+**Fee farming with a real front end.** PRISM
+(`0x71D389c48e29996BD8e20778f87fb915c1FFDcc2`, 2026-09-02): deployer and a
+block-2 buyer (22%, sold back into the curve in 8 s) funded from one hub;
+the deployer then claimed creator fees 82 times in 11 days (~24 ETH),
+swapped 15 ETH to USDG, and routed the rest through a wallet that bridges to
+Solana via Relay. No team wallet ever held or sold the token after launch
+day; the extraction is the fee stream. Holder base was organic.
+
+**Not a farm, still a disclosure.** QUANT
+(`0x41af7e794dee45eefab49b6c387eac9368d69c4d`, 2026-07-17, custom OpenZeppelin
+ERC-20 on Uniswap v2, not Pons): 20% of supply held by the contract as a
+"clog" and sold into launch buys at a 25% launch tax with proceeds to a
+project wallet (8.4 ETH in 6 minutes), then a 4% tax to a verified
+StockPayDistributor that buys tokenized stocks for holders (117 ETH so far,
+80% to holders). Owner never renounced (`setExempt`, `removeLimits`,
+`lowerTaxes`, distributor cycler controls 0x calldata). Revenue decayed from
+95 ETH launch week to 0.07 ETH by week nine. A fair-looking distribution can
+still hide an undisclosed team sale in the first minutes.
+
+**Shared infrastructure across operators.** Buy bundlers
+`0x1e43ce0055b35373cb108e67586fd3b19ee32618` and
+`0x14b9A544e8c179Fc2040D3089dCC73bAF25aa8F9`, and sell executor
+`0xb06983db4fad9cd94efbf9088c364ebcacde1214`, are all by
+`0xCa33026341691F48A3067e22febcbd54f0cB5dE2` (6k+ txs, self-funded through
+GasliteDrop) and were used on LEBRON, SYNAPSE, and stock-token-paired Pons
+launches (AAPL, RBLX, PLTR, NFLX, NVDA, QQQ, SPY). GasliteDrop
+`0xE68d0bbc023de3fEBdA04f413db23cE9C5EA1934` `airdropETH` is the funding
+primitive for every farm seen; the sender of the batch that funded a
+deployer is the operator's hub. Hubs seen: `0xcCfb5e8F8Db1B50FFA37Ab9527D25f78e3E10Ae7`
+(LEBRON, off-ramp `0xE0BCad36FD0C2F0af1796f18AA291e232102d46C` -> Relay ->
+Base -> Binance 73 `0x3304E22DDaa22bCdC5fCa2269b418046aE7b566A`),
+`0x45f4A022Dd3758bDF8421e3293fc04F7F775Fd2F` (PRISM, off-ramp
+`0x9787CE5701F98F83a669642dE5b5dF42A6D50085` -> Relay -> Solana),
+`0xafB1D47ce1aF439C5833bB4f6Eb4978722DF2fCa` (SYNAPSE, 36 batches since
+Jul 25, daily since Sep 7, refilled by one-off wallets). Curated in
+`src/data/cabals.ts`.
+
+**Bridge attribution.** RelayDepository
+`0x4cD00E387622C35bDDB9b4c962C136462338BC31` `depositNative`; destination
+resolves keyless via `GET api.relay.link/requests/v2?hash=<deposit tx>`
+(chainId, recipient, outTx). Relay "open deposit addresses" look like fresh
+EOAs on Robinhood Chain; the real sender is `depositAddress.depositor`.
+Relay solver `0xf70da97812CB96acDF810712Aa562db8dfA3dbEF`. On Base, addresses
+that forward to Binance 73 (or to Binance Dep `0x487cab40f6D11a278fa7C442C6741Eabe44eAb5d`)
+on :x0:03 sweep ticks are Binance deposit addresses.
+
+**Detection recipes (what the scanner should measure, not conclude).**
+1. Deployer and any launch-block or block+1 buyer received ETH from the same
+   GasliteDrop `airdropETH` transaction, or from the same EOA within 2 hours
+   of launch. Measurement: shared funder tx hash. This was true on every farm
+   launch and on no organic launch checked.
+2. A launch-block buyer's tokens leave through a contract and the curve
+   re-issues tokens to >= 5 wallets inside those transactions; those wallets
+   sell to the curve before graduation. Measurement: pre-graduation sells
+   attributable to the launch-block bag as a share of supply.
+3. Creator-fee claim cadence on Pons: `PonsV2FeeEscrow.claim` count per day
+   by the deployer, and the share of claimed ETH/USDG that leaves via
+   Relay/GasliteDrop within 24 h. PRISM: 82 claims in 11 days, ~90% routed
+   out. A project treasury claiming weekly and holding reads differently.
+4. Advertised fee recipient vs the recipient set in the creation
+   transaction. SYNAPSE's docs name a treasury; the creation tx names the
+   farm deployer. Measurement: address mismatch, reported as a mismatch.
+5. On custom-contract launches, supply retained by the token contract at
+   mint and sold on buys before "graduation" (QUANT `clogAmount`), with
+   swap-back ETH going to a project wallet rather than holders.
+6. Same-second first activity: deployer and sniper first transactions in the
+   same block or second, both against SwapRouter02 / UniversalRouter, is the
+   cheapest early tell (LEBRON: both at 17:30:28).
+
+## Daily honeypot factory on Robinhood Chain (traced 2026-09-14, $DOGEGPT)
+
+Not a launchpad token: EOA `0x8fc191daa5ac8eb3b30066ffa554d999fe35885e`
+deploys an unverified custom ERC-20 (3.3 KB, `owner()` reads zero, has
+`renounceOwnership`) straight to a Uniswap v2 WETH pair, keeps every LP unit
+in its own wallet, and calls a custom `actionPair(...)` on the token right
+after. Result on `0x26becab467bf74a3e09c095c30427acbd6544608`: 101 buys and
+0 sells in six hours, +24,800% on the chart, ~$79k "liquidity". `eth_call`
+of `transfer(pair, amount)` from three holders: succeeds only from the
+deployer-funded wallet `0x10d28597…`, reverts from the others; transfers to
+a plain EOA succeed for everyone, so it is a sell-path whitelist, not a
+transfer lock. Cadence: JUGGERNAUT 09-11, EMBERCAT 09-12, STONKINU 09-13,
+ZZZCAT 09-13, DOGEGPT 09-14, each preceded by
+`removeLiquidityETHSupportingFeeOnTransferTokens` on the previous one and
+followed by a LiFi/Across bridge out. GoPlus for chain 4663 returned an
+empty holder set and `lp_holder_count: 1` with the zero address "locked",
+which is wrong: LP `balanceOf(deployer)` is 100%. Do not trust the keyless
+LP read on this chain; read the pair contract. Cheapest tells, in order:
+zero sells against dozens of buys on a pair younger than a day; LP token
+supply held by the deployer; a deployer whose prior creations all show
+`removeLiquidity` in their last hours; `eth_call` sell-path simulation from
+a non-deployer holder. All curated in `src/data/cabals.ts`
+(`rh-honeypot-factory-8fc191`).
