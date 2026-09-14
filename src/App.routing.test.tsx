@@ -208,6 +208,7 @@ vi.mock("./graph/store", () => ({
   investigationContribution: vi.fn(),
   personContribution: harness.personContribution,
   recordContribution: harness.recordContribution,
+  setGraphStoreOrganization: vi.fn(),
   tokenContribution: vi.fn(),
 }));
 
@@ -1214,6 +1215,30 @@ describe("App routing safety", () => {
         reportVersionId: "version-2",
       }),
     })));
+  });
+
+  it("keeps a just-persisted session result when the durable projection lags behind activation", async () => {
+    const address = "0x3434343434343434343434343434343434343434";
+    harness.syncReport.mockResolvedValue({ state: "persisted", caseId: "case-lag", version: 3, reportVersionId: "version-lag-3", panelCostToken: "panel-lag" });
+    harness.recentRef = address;
+    const view = await renderApp();
+    await act(async () => {
+      harness.scanOnComplete?.({ id: "scan-lag", kind: "token", priv: false, result: tokenResult(address, "persisted in this tab") });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledTimes(1));
+    await settle();
+
+    // The case is open but the read model has not activated the version yet.
+    harness.fetchReportState.mockResolvedValue({ status: "open", report: null });
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='reopen-recent']")?.click());
+    await settle();
+
+    expect(view.textContent).not.toContain("immutable projection is temporarily unavailable");
+    expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({
+      headline: "persisted in this tab",
+      persistence: expect.objectContaining({ state: "persisted", reportVersionId: "version-lag-3" }),
+    }));
   });
 
   it("prefers a scan that completes while durable report lookup is in flight", async () => {

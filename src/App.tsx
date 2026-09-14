@@ -21,7 +21,7 @@ import {
   type StoredCaseSubject,
   type StoredCaseResolution,
 } from "./lib/reports";
-import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph } from "./graph/store";
+import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph, setGraphStoreOrganization } from "./graph/store";
 import { ThreatScanPage, ThreatLanding } from "./components/ThreatScanPage";
 import { WalletScanPage } from "./components/WalletScanPage";
 import { isProjectSiteBound, type Investigation } from "./lib/investigation";
@@ -397,7 +397,7 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
 }
 
 export default function App() {
-  const { role } = useArgusAuth();
+  const { role, organizationId } = useArgusAuth();
   const [boot] = useState(initialFromUrl);
   const [evidenceReviewVersionId, setEvidenceReviewVersionId] = useState<string | null>(boot.openVersionId ?? null);
   const [phase, setPhase] = useState<Phase>(boot.phase);
@@ -525,7 +525,11 @@ export default function App() {
   // sees everyone's work (no-op when no backend is configured).
   // Warm the serverless backend on load (functions scale to zero after idle) so
   // the first audit click of the day doesn't eat a cold start on the live path.
-  useEffect(() => { void hydrateCommunityGraph(); void hydrateSharedLog(); void probeBackend(); }, []);
+  // The graph cache is bound to the signed-in organization BEFORE it hydrates,
+  // so only this tenant's rows are read or backfilled; an org switch rebinds
+  // and re-hydrates.
+  useEffect(() => { setGraphStoreOrganization(organizationId); void hydrateCommunityGraph(); }, [organizationId]);
+  useEffect(() => { void hydrateSharedLog(); void probeBackend(); }, []);
 
   const showPrivacyConflict = useCallback((ref: string) => {
     setQuery(ref);
@@ -1271,7 +1275,12 @@ export default function App() {
     const sessionCached = cachedForRef(resultCache.current, ref, cachedKind);
     const sessionPersistence = cachedPersistence(sessionCached);
     if (lookup.status === "open" && !lookup.report) {
-      if (sessionCached && (sessionPersistence?.state === "pending" || sessionPersistence?.state === "failed")) {
+      // A result this tab just produced outranks a lagging projection:
+      // pending and failed saves as before, and a PERSISTED result whose
+      // activation the read model has not caught up with yet. Evicting that
+      // one dead-ended the analyst on "temporarily unavailable" while the
+      // client held the exact payload and version id it had just received.
+      if (sessionCached && (sessionPersistence?.state === "pending" || sessionPersistence?.state === "failed" || sessionPersistence?.state === "persisted")) {
         showCached(ref, sessionCached);
         return;
       }

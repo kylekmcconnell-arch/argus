@@ -37,6 +37,7 @@ vi.mock("./components/WaitlistPortal", () => ({ WaitlistPortal: () => <div>WAITL
 vi.mock("./components/ArgusMark", () => ({ ArgusMark: () => null }));
 vi.mock("./lib/analyst", () => ({ setAnalyst: vi.fn() }));
 vi.mock("./lib/signInRequest", () => ({ requestArgusSignInLink: vi.fn() }));
+vi.mock("./graph/store", () => ({ clearGraphStoreForSignOut: vi.fn() }));
 
 import { AuthGate } from "./auth";
 

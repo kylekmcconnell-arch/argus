@@ -14,6 +14,7 @@ import {
 } from "./lib/authenticatedFetch";
 import { setAnalyst } from "./lib/analyst";
 import { requestArgusSignInLink } from "./lib/signInRequest";
+import { clearGraphStoreForSignOut } from "./graph/store";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, "") || "";
 const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
@@ -307,6 +308,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     validatedAccessToken = null;
     pendingAccessToken = null;
     currentValidationId += 1;
+    // The browser graph cache is tenant data: it must not outlive the
+    // session that produced it on a shared machine.
+    clearGraphStoreForSignOut();
     await supabase?.auth.signOut();
     setProfile(null);
     setWaitlist(null);
