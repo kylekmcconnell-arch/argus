@@ -8,7 +8,8 @@
 // to the report on completion; the data-side logging (log + persist + graph) runs
 // via onComplete regardless of what the user is looking at, so a backgrounded
 // audit still appears in Recent audits and Dossiers.
-import { streamAudit } from "./live";
+import { streamAudit, type LiveFailureKind } from "./live";
+import { DEEP_INVESTIGATION_MAX_DURATION_SECONDS } from "./investigationRuntime";
 import { threatScan } from "../threat/scan";
 import type { ThreatScan } from "../threat/types";
 import {
@@ -28,10 +29,34 @@ export interface BgRun {
   pct: number;
   status: "running" | "done" | "error";
   error?: string;
+  /**
+   * How a run reached `error`. "stream_dropped" means only the browser's
+   * connection died: the server keeps collecting and persists on its own, so
+   * the owner view re-attaches by polling for the saved version until
+   * `serverDeadlineAt` instead of relaunching a paid audit. "rejected" means
+   * the server declared the run dead. Absent for save failures.
+   */
+  errorKind?: LiveFailureKind;
   dossier?: Dossier;
   startedAt: number;
+  /** The instant the server's own collection budget for this run expires. */
+  serverDeadlineAt: number;
   priv?: boolean;   // private/incognito: never persisted, logged, graphed, or shown in the sidebar
   intent?: ResearchIntent;
+}
+
+/** How far past the server's own budget a dropped stream keeps being polled. */
+export const STREAM_DROP_RECOVERY_GRACE_MS = 45_000;
+
+/**
+ * The instant a run whose stream dropped can no longer produce a saved
+ * version: the server budget from the run's start plus persistence grace.
+ */
+export function streamDropRecoveryDeadline(run: Pick<BgRun, "startedAt" | "serverDeadlineAt">): number {
+  const serverDeadline = typeof run.serverDeadlineAt === "number" && Number.isFinite(run.serverDeadlineAt)
+    ? run.serverDeadlineAt
+    : run.startedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000;
+  return serverDeadline + STREAM_DROP_RECOVERY_GRACE_MS;
 }
 
 type Listener = () => void;
@@ -74,13 +99,15 @@ export function startPersonAudit(
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
 
+  const startedAt = Date.now();
   const run: BgRun = {
     handle: handle.startsWith("@") ? handle : "@" + key,
     key,
     steps: [],
     pct: 0,
     status: "running",
-    startedAt: Date.now(),
+    startedAt,
+    serverDeadlineAt: startedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000,
     priv,
     intent,
   };
@@ -228,9 +255,10 @@ export function startPersonAudit(
       if (s.token) startThreatLeg(s.token);
     },
     onDone: (d) => { void finalize(d); },
-    onError: (e) => {
+    onError: (e, failure) => {
       run.status = "error";
       run.error = e;
+      run.errorKind = failure?.kind;
       aborts.delete(key);
       emit();
     },

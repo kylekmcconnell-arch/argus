@@ -221,6 +221,8 @@ vi.mock("./lib/runner", () => ({
     harness.personOnComplete = callback;
   }),
   startPersonAudit: harness.startPersonAudit,
+  streamDropRecoveryDeadline: (run: { startedAt: number; serverDeadlineAt?: number }) =>
+    (run.serverDeadlineAt ?? run.startedAt + 600_000) + 45_000,
 }));
 
 vi.mock("./lib/scanrunner", () => ({
@@ -2070,5 +2072,75 @@ describe("App routing safety", () => {
 
     expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull();
     expect(view.textContent).not.toContain("The scan didn't finish");
+  });
+
+  /** A run whose only failure is the browser's stream: the server is still collecting. */
+  const droppedRun = () => ({
+    status: "error",
+    error: "the audit stream closed before finishing. The server is still collecting.",
+    errorKind: "stream_dropped",
+    startedAt: Date.now(),
+    serverDeadlineAt: Date.now() + 600_000,
+  });
+
+  it("treats a dropped stream as still collecting and re-attaches to the version the server saves later", async () => {
+    servePersonVersion(4);
+    harness.getRun.mockImplementation(droppedRun);
+
+    const view = await renderApp("/?s=persisted_person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='person-rescan']")?.click());
+    await settle();
+    expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='fail-person-run']")?.click());
+      // Well past the old six-second cut-off: still no relaunch offer.
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(view.textContent).toContain("the server is still collecting");
+      expect(view.textContent).toContain("Check for the saved report now");
+      expect(view.textContent).not.toContain("Run the scan again");
+      expect(view.textContent).not.toContain("nothing was saved");
+      expect(view.querySelector("[data-testid='stored-person-report']")).toBeNull();
+
+      // Minutes later the server persists the run's own version.
+      servePersonVersion(5);
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle();
+
+    expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull();
+    expect(view.textContent).not.toContain("still collecting");
+    // The disconnected run was re-attached, never relaunched.
+    expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a relaunch only once the disconnected run's server budget has passed", async () => {
+    servePersonVersion(4);
+    harness.getRun.mockImplementation(droppedRun);
+
+    const view = await renderApp("/?s=persisted_person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='person-rescan']")?.click());
+    await settle();
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='fail-person-run']")?.click());
+      await act(async () => { await vi.advanceTimersByTimeAsync(500_000); });
+      expect(view.textContent).not.toContain("Run the scan again");
+      await act(async () => { await vi.advanceTimersByTimeAsync(200_000); });
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle();
+
+    expect(view.textContent).toContain("The scan didn't finish");
+    expect(view.textContent).toContain("Run the scan again");
+    expect(view.textContent).toContain("Open last saved report");
+    expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
   });
 });

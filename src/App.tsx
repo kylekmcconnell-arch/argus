@@ -28,7 +28,7 @@ import { isProjectSiteBound, type Investigation } from "./lib/investigation";
 import type { Recon } from "./collect/recon";
 import { type Dossier } from "./data/dossier";
 import { probeBackend } from "./lib/live";
-import { startPersonAudit, setOnComplete, getRun } from "./lib/runner";
+import { startPersonAudit, setOnComplete, getRun, streamDropRecoveryDeadline } from "./lib/runner";
 import { startTokenScan, startInvestigationScan, setScanOnComplete, getScanRun, type ScanRun } from "./lib/scanrunner";
 import { isRunnableTokenInput, resolveInput, type RunnableTokenInput, type ResolvedInput } from "./lib/resolveInput";
 import { formatInvestigationRescanError, resolveInvestigationRescanInput } from "./lib/investigationRescan";
@@ -434,13 +434,15 @@ export default function App() {
   // instead of the "no live dossier / demo" copy that implies nothing ever ran.
   const [liveError, setLiveError] = useState<string | null>(null);
   const [caseNotice, setCaseNotice] = useState<{
-    reason: "archived" | "missing" | "unavailable" | "search-unavailable" | "launch-failed" | "token-unresolved" | "case-ambiguous" | "privacy-conflict" | "rescan-failed";
+    reason: "archived" | "missing" | "unavailable" | "search-unavailable" | "launch-failed" | "token-unresolved" | "case-ambiguous" | "privacy-conflict" | "rescan-failed" | "stream-dropped";
     ref: string;
     kind?: ReportKind;
     mode?: TokenLaunchMode;
     reuseStored?: boolean;
     /** A stored report exists for this subject, offered explicitly (rescan-failed only). */
     storedAvailable?: boolean;
+    /** When the disconnected server run can no longer save a version (stream-dropped only). */
+    recoveryDeadline?: number;
     /** The exact durable cases behind an ambiguous label, offered as a chooser (case-ambiguous only). */
     subjects?: StoredCaseSubject[];
   } | null>(null);
@@ -1128,9 +1130,21 @@ export default function App() {
   // throttle) — but the server persists finished audits, so recover the report
   // before dead-ending. Poll a few times: the server upsert may land just after
   // our stream died. Only show "not found" when nothing was produced.
-  const onLiveError = useCallback(async () => {
+  //
+  // Two failures look alike from the browser and must not be treated alike:
+  //  - the server REJECTED or ended the run (non-OK response, `error` event):
+  //    nothing more will be saved, so a short poll then "the scan didn't
+  //    finish" is honest and a relaunch is the right offer;
+  //  - only the STREAM DROPPED (proxy idle cut, tab throttling, network blip):
+  //    api/audit keeps collecting for up to its full budget and persists on
+  //    its own, typically minutes later. Declaring "nothing was saved" after
+  //    six seconds and offering "Run the scan again" started a second paid
+  //    audit of the same subject while the first was still running. A dropped
+  //    stream is therefore treated as "still collecting, disconnected": poll
+  //    with backoff for the remaining server budget, and only offer a relaunch
+  //    once that budget (plus persistence grace) has passed.
+  const recoverPersonRun = useCallback(async (ref: string) => {
     const requestId = ++safeAuditRequestRef.current;
-    const ref = query;
     if (privRef.current) {
       setLiveError(getRun(ref)?.error ?? "The private live audit didn't finish.");
       setPhase("notfound");
@@ -1145,8 +1159,19 @@ export default function App() {
     const baseline = recorded && normalizeSubjectRef(recorded.ref) === normalizeSubjectRef(ref)
       ? recorded
       : null;
+    const run = getRun(ref);
+    const dropped = run?.status === "error" && run.errorKind === "stream_dropped";
+    const recoveryDeadline = dropped && run ? streamDropRecoveryDeadline(run) : 0;
+    if (dropped) {
+      // Say what is known right away: the server is still working, this page
+      // will update, and no second collection has been launched.
+      setLiveError(run?.error ?? "The audit stream dropped.");
+      setCaseNotice({ reason: "stream-dropped", ref, kind: "person", recoveryDeadline });
+      setPhase("notfound");
+    }
     let storedFallback = false;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    let attempt = 0;
+    for (;;) {
       const rep = await fetchReport(ref, "person");
       if (requestId !== safeAuditRequestRef.current) return;
       if (rep?.payload && rep.kind === "person") {
@@ -1163,10 +1188,17 @@ export default function App() {
         // A newer immutable version means the run finished server-side and only
         // our stream died — that is a real recovery. A version at or below the
         // baseline is the report this run was meant to replace.
-        if (storedReportIsNewerThanBaseline(rep, baseline)) { showCached(ref, c); return; }
+        if (storedReportIsNewerThanBaseline(rep, baseline)) { setCaseNotice(null); showCached(ref, c); return; }
         storedFallback = true;
       }
-      await new Promise((r) => setTimeout(r, 1500));
+      attempt += 1;
+      const stillCollecting = dropped && Date.now() < recoveryDeadline;
+      if (!stillCollecting && attempt >= 4) break;
+      // Four quick polls catch a save that landed just as the stream died;
+      // after that a disconnected run is checked with backoff, never faster
+      // than the server can plausibly finish.
+      const delay = attempt < 4 ? 1500 : Math.min(15_000, 5_000 * (attempt - 3));
+      await new Promise((r) => setTimeout(r, Math.min(delay, Math.max(0, stillCollecting ? recoveryDeadline - Date.now() : delay))));
       if (requestId !== safeAuditRequestRef.current) return;
     }
     // This run produced nothing. Surface WHY (timeout, stream drop, backend
@@ -1175,7 +1207,9 @@ export default function App() {
     setLiveError(getRun(ref)?.error ?? "The live audit didn't finish.");
     setCaseNotice({ reason: "rescan-failed", ref, kind: "person", storedAvailable: storedFallback });
     setPhase("notfound");
-  }, [query, setCaseNotice, showCached]);
+  }, [setCaseNotice, showCached]);
+
+  const onLiveError = useCallback(() => recoverPersonRun(query), [query, recoverPersonRun]);
 
 
   // Clicking a recent audit SHOWS the report already produced (with a Rescan
@@ -1974,6 +2008,8 @@ export default function App() {
                       ? "Couldn't start the audit"
                       : caseNotice.reason === "rescan-failed"
                         ? "The scan didn't finish"
+                      : caseNotice.reason === "stream-dropped"
+                        ? "The connection dropped; the server is still collecting"
                       : caseNotice.reason === "privacy-conflict"
                         ? "A scan is already running in another privacy mode"
                         : caseNotice.reason === "token-unresolved"
@@ -1993,6 +2029,8 @@ export default function App() {
                         ? caseNotice.storedAvailable
                           ? "This scan produced no new report, so ARGUS is not showing one. The last saved report is unchanged and still available below. It is the earlier scan's result, not this one's."
                           : "This scan produced no new report, and nothing was saved for this subject. ARGUS did not show an older result in its place."
+                      : caseNotice.reason === "stream-dropped"
+                        ? `The live stream to this scan was interrupted, but the collector keeps running on the server and saves its result on its own, usually within a few minutes. ARGUS is checking for the saved report and will open it as soon as it appears${caseNotice.recoveryDeadline ? ` (until ${new Date(caseNotice.recoveryDeadline).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})` : ""}. No second scan was launched and no additional credit was used.`
                       : caseNotice.reason === "privacy-conflict"
                         ? "ARGUS will not attach a private view to a public run, or suppress persistence for a public request by reusing a private run. Let the current scan finish, then retry."
                         : caseNotice.reason === "token-unresolved"
@@ -2021,7 +2059,7 @@ export default function App() {
                   ))}
                 </div>
               ) : null}
-              {(caseNotice.reason === "launch-failed" || caseNotice.reason === "rescan-failed") && liveError && (
+              {(caseNotice.reason === "launch-failed" || caseNotice.reason === "rescan-failed" || caseNotice.reason === "stream-dropped") && liveError && (
                 <div role="alert" className="mono panel-inset mt-3 max-w-md break-words px-3 py-2 text-left text-[12.5px] text-ink-dim">
                   {liveError}
                 </div>
@@ -2032,6 +2070,8 @@ export default function App() {
                     if (caseNotice.reason === "archived") setPhase("dossiers");
                     else if (caseNotice.reason === "missing") reset();
                     else if (caseNotice.reason === "rescan-failed") void onAudit(caseNotice.ref, privRef.current);
+                    // Re-attach to the disconnected server run; never relaunch it.
+                    else if (caseNotice.reason === "stream-dropped") void recoverPersonRun(caseNotice.ref);
                     else if (caseNotice.reason === "unavailable") void onOpenRecent(caseNotice.ref, caseNotice.kind);
                     else if (caseNotice.reason === "search-unavailable" || caseNotice.reason === "launch-failed") void onSafeAuditMode(
                       caseNotice.ref,
@@ -2053,6 +2093,8 @@ export default function App() {
                       ? "Back to home"
                       : caseNotice.reason === "rescan-failed"
                         ? "Run the scan again"
+                      : caseNotice.reason === "stream-dropped"
+                        ? "Check for the saved report now"
                       : caseNotice.reason === "launch-failed"
                         ? "Retry audit"
                         : caseNotice.reason === "unavailable" || caseNotice.reason === "search-unavailable"

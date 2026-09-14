@@ -37,10 +37,21 @@ export async function probeBackend(timeoutMs = 8000): Promise<ProviderStatus[] |
   return null;
 }
 
+/**
+ * Why a live stream ended without a dossier.
+ *  - "rejected": the server answered (a non-OK response or an `error` event),
+ *    so the run is known dead and nothing more will be saved for it.
+ *  - "stream_dropped": the connection died or went silent while the server
+ *    was still working. The route keeps collecting and persists on its own
+ *    schedule, so the client must not read this as "nothing was produced".
+ */
+export type LiveFailureKind = "rejected" | "stream_dropped";
+export interface LiveFailure { kind: LiveFailureKind }
+
 export interface LiveHandlers {
   onStep: (step: TraceStep) => void;
   onDone: (dossier: Dossier) => void;
-  onError: (err: string) => void;
+  onError: (err: string, failure?: LiveFailure) => void;
 }
 
 // Streams /api/audit via fetch + manual SSE parsing (EventSource can't be
@@ -73,7 +84,7 @@ export function streamAudit(
   const armWatchdog = () => {
     if (watchdog) clearTimeout(watchdog);
     watchdog = setTimeout(() => {
-      settle(() => h.onError("timed out: the audit stream stopped responding"));
+      settle(() => h.onError("timed out: the audit stream stopped responding", { kind: "stream_dropped" }));
       ctrl.abort();
     }, AUDIT_STREAM_INACTIVITY_TIMEOUT_MS);
   };
@@ -99,7 +110,7 @@ export function streamAudit(
           : body?.error === "credit_budget_exhausted"
             ? "You have no investigation credits left. Ask a workspace owner to add credits before starting another scan."
             : `The investigation service returned ${res.status}. No report was created.`;
-        settle(() => h.onError(reason));
+        settle(() => h.onError(reason, { kind: "rejected" }));
         return;
       }
       armWatchdog();
@@ -120,14 +131,14 @@ export function streamAudit(
           const data = JSON.parse(dataLine);
           if (ev === "step") h.onStep(data as TraceStep);
           else if (ev === "done") settle(() => h.onDone(data as Dossier));
-          else if (ev === "error") settle(() => h.onError(data?.error ?? "error"));
+          else if (ev === "error") settle(() => h.onError(data?.error ?? "error", { kind: "rejected" }));
         }
       }
       // Stream closed. If we never saw a done/error event, the backend ended
       // early — surface it instead of leaving the UI spinning forever.
-      settle(() => h.onError("the audit stream closed before finishing. Please retry."));
+      settle(() => h.onError("the audit stream closed before finishing. The server is still collecting.", { kind: "stream_dropped" }));
     } catch (e) {
-      if ((e as Error).name !== "AbortError") settle(() => h.onError(String(e)));
+      if ((e as Error).name !== "AbortError") settle(() => h.onError(String(e), { kind: "stream_dropped" }));
     } finally {
       if (watchdog) clearTimeout(watchdog);
     }
