@@ -30,6 +30,15 @@ describe("tieStrength", () => {
     expect(tieStrength("risk:provider-label")).toBe("weak");
     expect(tieStrength("@somefounder")).toBe("medium");
   });
+
+  it("never binds on a display-name slug or a ticker", () => {
+    // Regression for INT-7: a namesake "John Smith" on a failed report and a
+    // second $PEPE promotion produced medium ties and a cap of 69.
+    expect(tieStrength("name:john smith")).toBe("weak");
+    expect(tieStrength("ticker:pepe")).toBe("weak");
+    expect(tieStrength("$pepe")).toBe("weak");
+    expect(tieStrength("token:evm:0x1111111111111111111111111111111111111111")).toBe("hard");
+  });
 });
 
 describe("reconcileVerdict", () => {
