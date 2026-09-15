@@ -432,9 +432,14 @@ function profileSupportsVenture(
 
 function mergeProjectedFact(evidence: CollectedEvidence, fact: BasicFact): BasicFact {
   const existing = evidence.basicFacts ?? (evidence.basicFacts = []);
+  // Attribution scope is part of a fact's identity. A direct-subject projection
+  // must never be absorbed into a related-entity (or unresolved) fact with the
+  // same value, where the ledger and the analyst would skip it.
+  const scope = (candidate: BasicFact) => candidate.attributionScope ?? "direct_subject";
   const same = existing.find((candidate) =>
     candidate.predicate === fact.predicate
-    && candidate.normalizedValue === fact.normalizedValue,
+    && candidate.normalizedValue === fact.normalizedValue
+    && scope(candidate) === scope(fact),
   );
   if (!same) {
     existing.push(fact);
