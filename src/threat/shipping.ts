@@ -76,6 +76,12 @@ export interface ShippingStargazer {
   repos?: number;
 }
 
+export interface ShippingStarDay {
+  /** ISO date (UTC day). */
+  date: string;
+  stars: number;
+}
+
 export interface ShippingPricePoint {
   /** ISO date of the close. */
   date: string;
@@ -113,6 +119,10 @@ export interface ShippingInput {
   stargazers?: ShippingStargazer[];
   /** Which repository the stargazer sample was read from. */
   stargazerRepo?: string;
+  /** Daily star counts for the flagship repository from GitHub's star-history endpoint, any order. */
+  starHistory?: ShippingStarDay[];
+  /** Which repository the star history was read from. */
+  starHistoryRepo?: string;
   priceSeries?: ShippingPricePoint[];
   claims?: ShippingClaim[];
   peers?: ShippingPeers;
@@ -206,6 +216,9 @@ export interface ShippingAssessment {
     lowActivitySharePct?: number;
     burstSharePct?: number;
     burstWindowStart?: string;
+    /** Stars counted by the daily history, when one was read. */
+    historyStars?: number;
+    launchBurst?: boolean;
     evidence: string[];
   };
   hygiene: {
@@ -422,6 +435,12 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
   else origin = "original";
 
   // ---- stars -----------------------------------------------------------
+  // GitHub restricted stargazer LISTS to a repository's own admins on
+  // 2026-06-30 (spam scraping), so the account-level StarScout read (young,
+  // empty accounts) can only run on a sample someone else supplied. What is
+  // public since 2026-09-04 is the star HISTORY: daily counts back to creation.
+  // That carries the other StarScout signature, lockstep timing, and the
+  // proportion check (stars against forks, watchers and work) needs no list.
   const sample = input.stargazers ?? [];
   const starTotal = input.repos.reduce((n, r) => n + r.stars, 0);
   const starEvidence: string[] = [];
@@ -429,32 +448,41 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
   let lowActivitySharePct: number | undefined;
   let burstSharePct: number | undefined;
   let burstWindowStart: string | undefined;
+  let historyStars: number | undefined;
+  let launchBurst = false;
+  const flagship = input.repos.find((r) => r.nameWithOwner === (input.starHistoryRepo ?? input.stargazerRepo)) ?? [...input.repos].sort((a, b) => b.stars - a.stars)[0];
+  const proportion = (() => {
+    if (!flagship || flagship.stars < 100) return null;
+    const forkRatio = flagship.forks / flagship.stars;
+    const watchRatio = flagship.watchers != null ? flagship.watchers / flagship.stars : undefined;
+    const commitsOnFlagship = commits.filter((c) => c.repo === flagship.nameWithOwner).length;
+    const thinWork = commitsOnFlagship < 5 && (flagship.commitsInWindow ?? commitsOnFlagship) < 5;
+    const disproportionate = forkRatio < 0.02 && (watchRatio == null || watchRatio < 0.01) && (thinWork || flagship.stars >= 1000);
+    const line = `${flagship.nameWithOwner} has ${flagship.stars} stars against ${flagship.forks} forks${flagship.watchers != null ? ` and ${flagship.watchers} watchers` : ""}${thinWork ? " with under five commits in the window" : ""}.`;
+    return { disproportionate, line };
+  })();
+  const history = (input.starHistory ?? []).filter((d) => Number.isFinite(parse(d.date)) && Number.isFinite(d.stars) && d.stars >= 0).sort((a, b) => parse(a.date) - parse(b.date));
+  if (history.length) {
+    historyStars = history.reduce((n, d) => n + d.stars, 0);
+    if (historyStars >= 30) {
+      // Largest three consecutive days against everything the history holds.
+      let best = 0;
+      let bestStart = history[0].date;
+      for (let i = 0; i < history.length; i++) {
+        let n = 0;
+        for (let j = i; j < history.length && parse(history[j].date) - parse(history[i].date) < 3 * DAY; j++) n += history[j].stars;
+        if (n > best) { best = n; bestStart = history[i].date; }
+      }
+      burstSharePct = pct(best, historyStars);
+      burstWindowStart = bestStart;
+      const repoAgeAtBurstDays = flagship ? (parse(bestStart) - parse(flagship.createdAt)) / DAY : undefined;
+      launchBurst = repoAgeAtBurstDays != null && repoAgeAtBurstDays <= 30;
+    }
+  }
   if (starTotal === 0) {
     starVerdict = "none";
     starEvidence.push("No stars on the reviewed repositories, so there is nothing to authenticate.");
-  } else if (sample.length < 20) {
-    // GitHub no longer serves stargazer lists to ordinary tokens (every
-    // stargazers endpoint returned 404 / an empty connection on 2026-09-15), so
-    // the account-level read usually has no sample. Fall back to proportion:
-    // bought stars buy nothing else, so a repository with many stars and almost
-    // no forks, watchers or commits is disproportionate in a way organic
-    // attention is not.
-    const flagship = [...input.repos].sort((a, b) => b.stars - a.stars)[0];
-    if (flagship && flagship.stars >= 100) {
-      const forkRatio = flagship.forks / flagship.stars;
-      const watchRatio = flagship.watchers != null ? flagship.watchers / flagship.stars : undefined;
-      const commitsOnFlagship = commits.filter((c) => c.repo === flagship.nameWithOwner).length;
-      const thinWork = commitsOnFlagship < 5 && (flagship.commitsInWindow ?? commitsOnFlagship) < 5;
-      const disproportionate = forkRatio < 0.02 && (watchRatio == null || watchRatio < 0.01) && (thinWork || flagship.stars >= 1000);
-      starVerdict = disproportionate ? "suspect" : "insufficient";
-      starEvidence.push(`No stargazer sample was available, so the read is proportional: ${flagship.nameWithOwner} has ${flagship.stars} stars against ${flagship.forks} forks${flagship.watchers != null ? ` and ${flagship.watchers} watchers` : ""}${thinWork ? " with under five commits in the window" : ""}.`);
-      if (disproportionate) starEvidence.push("Organic attention brings forks, watchers and contributors along with stars; this repository has the stars alone.");
-      else starEvidence.push("The proportions are ordinary; nothing here separates bought stars from earned ones without the stargazer list.");
-    } else {
-      starVerdict = "insufficient";
-      starEvidence.push(`Only ${sample.length} stargazer${sample.length === 1 ? "" : "s"} could be sampled; a star-authenticity read needs at least 20.`);
-    }
-  } else {
+  } else if (sample.length >= 20) {
     const low = sample.filter((s) => {
       const created = parse(s.createdAt);
       const starred = parse(s.starredAt);
@@ -473,14 +501,34 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
     }
     burstSharePct = pct(best, times.length);
     burstWindowStart = Number.isFinite(bestStart) ? new Date(bestStart).toISOString() : undefined;
-    const flagship = input.repos.find((r) => r.nameWithOwner === input.stargazerRepo);
-    const repoAgeAtBurstDays = flagship && Number.isFinite(bestStart) ? (bestStart - parse(flagship.createdAt)) / DAY : undefined;
-    const launchBurst = repoAgeAtBurstDays != null && repoAgeAtBurstDays <= 30;
+    const sampledRepo = input.repos.find((r) => r.nameWithOwner === input.stargazerRepo);
+    const repoAgeAtBurstDays = sampledRepo && Number.isFinite(bestStart) ? (bestStart - parse(sampledRepo.createdAt)) / DAY : undefined;
+    launchBurst = repoAgeAtBurstDays != null && repoAgeAtBurstDays <= 30;
     const suspect = lowActivitySharePct >= 40 || (burstSharePct >= 50 && !launchBurst);
     starVerdict = suspect ? "suspect" : "organic";
     starEvidence.push(`${lowActivitySharePct}% of ${sample.length} sampled stargazers are low-activity accounts (created within 30 days of starring, or no repos and no followers).`);
     starEvidence.push(`${burstSharePct}% of sampled stars landed inside one 72-hour window${launchBurst ? " during the repository's first month, which is a normal launch pattern" : ""}.`);
     if (suspect) starEvidence.push("This is the signature StarScout (Six Million Suspected Fake Stars, ICSE 2026) associates with purchased stars.");
+  } else if (burstSharePct != null && historyStars != null && flagship) {
+    // Timing from the public daily history, proportion from the repo counts.
+    const timedBurst = burstSharePct >= 50 && !launchBurst;
+    const softBurst = burstSharePct >= 30 && !launchBurst;
+    const suspect = timedBurst || (softBurst && !!proportion?.disproportionate) || (!!proportion?.disproportionate && burstSharePct >= 15);
+    starVerdict = suspect ? "suspect" : "organic";
+    starEvidence.push(`${burstSharePct}% of ${flagship.nameWithOwner}'s ${historyStars.toLocaleString("en-US")} stars arrived inside one three-day window starting ${burstWindowStart}${launchBurst ? ", inside the repository's first month, which is a normal launch pattern" : ""}.`);
+    if (proportion) starEvidence.push(proportion.line + (proportion.disproportionate ? " Organic attention brings forks, watchers and contributors along with stars; this repository has the stars alone." : ""));
+    if (suspect) starEvidence.push("A star burst outside launch week, with nothing else growing alongside it, is the lockstep signature StarScout associates with purchased stars. GitHub no longer exposes who starred, so the accounts themselves cannot be checked.");
+    else starEvidence.push("Star timing is spread across the history; the accounts behind the stars are no longer readable since GitHub restricted stargazer lists in June 2026.");
+  } else if (proportion) {
+    starVerdict = proportion.disproportionate ? "suspect" : "insufficient";
+    starEvidence.push(`No star history or stargazer sample was available, so the read is proportional: ${proportion.line}`);
+    if (proportion.disproportionate) starEvidence.push("Organic attention brings forks, watchers and contributors along with stars; this repository has the stars alone.");
+    else starEvidence.push("The proportions are ordinary; nothing here separates bought stars from earned ones without the star history.");
+  } else {
+    starVerdict = "insufficient";
+    starEvidence.push(historyStars != null && historyStars < 30
+      ? `The star history holds ${historyStars} star${historyStars === 1 ? "" : "s"}; a timing read needs at least 30.`
+      : `Only ${sample.length} stargazer${sample.length === 1 ? "" : "s"} could be sampled; a star-authenticity read needs at least 20.`);
   }
 
   // ---- hygiene ---------------------------------------------------------
@@ -639,7 +687,7 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
     substance,
     authorship: { verdict: authorship, aiTrailerCount, genericMessageSharePct: total ? pct(generic, total) : undefined, bulkDropCount: bulkDrops.length, mirroredSharePct, evidence: authorshipEvidence },
     origin: { verdict: origin, forks, forkSharePct, templates, bulkImports },
-    stars: { verdict: starVerdict, total: starTotal, sampled: sample.length, repo: input.stargazerRepo, lowActivitySharePct, burstSharePct, burstWindowStart, evidence: starEvidence },
+    stars: { verdict: starVerdict, total: starTotal, sampled: sample.length, repo: input.starHistoryRepo ?? input.stargazerRepo, lowActivitySharePct, burstSharePct, burstWindowStart, historyStars, launchBurst, evidence: starEvidence },
     hygiene: { verdict: hygieneVerdict, ...hyg },
     market: { read: marketRead, priceChangePct, commitTrendPct, detail: marketDetail },
     claims: { graded, supported, context, unsupported, detail: claimDetail },

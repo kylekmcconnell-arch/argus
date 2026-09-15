@@ -227,6 +227,54 @@ describe("assessShipping · stars", () => {
     expect(earned.stars.evidence.join(" ")).toMatch(/proportions are ordinary/);
   });
 
+  // Daily counts from GitHub's star-history endpoint (the only star timing that
+  // is public since stargazer lists were restricted in June 2026).
+  const spread = (total: number, days = 300) => Array.from({ length: days }, (_, i) => ({ date: daysAgo(days - i).slice(0, 10), stars: i % Math.max(1, Math.round(days / total)) === 0 ? 1 : 0 }));
+
+  it("times a burst outside launch month from the daily history and calls it suspect", () => {
+    const history = spread(60, 300);
+    history[200] = { ...history[200], stars: 400 };
+    history[201] = { ...history[201], stars: 350 };
+    const a = assessShipping(base({ repos: [repo({ stars: 900, forks: 4, watchers: 3 })], commits: teamCommits(), starHistory: history, starHistoryRepo: "acme/protocol" }));
+    expect(a.stars.verdict).toBe("suspect");
+    expect(a.stars.burstSharePct).toBeGreaterThan(80);
+    expect(a.stars.launchBurst).toBe(false);
+    expect(a.stars.historyStars).toBeGreaterThan(700);
+    expect(a.stars.evidence.join(" ")).toMatch(/lockstep signature/);
+    expect(a.stars.evidence.join(" ")).toMatch(/no longer exposes who starred/);
+  });
+
+  it("reads a launch-month burst in the history as normal", () => {
+    const created = daysAgo(40);
+    const history = spread(20, 40).map((d, i) => (i === 2 ? { ...d, stars: 250 } : d));
+    const a = assessShipping(base({ repos: [repo({ stars: 300, forks: 20, watchers: 10, createdAt: created })], commits: teamCommits(), starHistory: history, starHistoryRepo: "acme/protocol" }));
+    expect(a.stars.verdict).toBe("organic");
+    expect(a.stars.launchBurst).toBe(true);
+    expect(a.stars.evidence.join(" ")).toMatch(/normal launch pattern/);
+  });
+
+  it("reads spread star timing with ordinary proportions as organic", () => {
+    const a = assessShipping(base({ repos: [repo({ stars: 300, forks: 40, watchers: 12 })], commits: teamCommits(), starHistory: spread(300, 300), starHistoryRepo: "acme/protocol" }));
+    expect(a.stars.verdict).toBe("organic");
+    expect(a.stars.burstSharePct).toBeLessThan(10);
+    expect(a.stars.evidence.join(" ")).toMatch(/spread across the history/);
+  });
+
+  it("combines a soft burst with disproportion into suspect", () => {
+    const history = spread(100, 300);
+    history[150] = { ...history[150], stars: 60 };
+    const a = assessShipping(base({ repos: [repo({ stars: 1200, forks: 5, watchers: 2, commitsInWindow: 1 })], commits: [commit({ date: daysAgo(3) })], starHistory: history, starHistoryRepo: "acme/protocol" }));
+    expect(a.stars.burstSharePct).toBeGreaterThanOrEqual(30);
+    expect(a.stars.burstSharePct).toBeLessThan(50);
+    expect(a.stars.verdict).toBe("suspect");
+  });
+
+  it("refuses a timing read on a history with fewer than 30 stars", () => {
+    const a = assessShipping(base({ repos: [repo({ stars: 12 })], commits: teamCommits(), starHistory: spread(12, 100), starHistoryRepo: "acme/protocol" }));
+    expect(a.stars.verdict).toBe("insufficient");
+    expect(a.caveats.join(" ")).toMatch(/needs at least 30/);
+  });
+
   it("refuses a read on fewer than 20 sampled stargazers", () => {
     const a = assessShipping(base({ repos: [repo({ stars: 30 })], commits: teamCommits(), stargazers: gazers(5, () => ({})), stargazerRepo: "acme/protocol" }));
     expect(a.stars.verdict).toBe("insufficient");

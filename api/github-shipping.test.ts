@@ -34,6 +34,10 @@ function gql(data: unknown, status = 200): Response {
   return new Response(JSON.stringify({ data }), { status, headers: { "content-type": "application/json" } });
 }
 
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
 const repoNode = (over: Record<string, unknown> = {}) => ({
   nameWithOwner: "acme/protocol",
   isFork: false,
@@ -143,6 +147,48 @@ describe("GitHub shipping provider completeness", () => {
     expect(assessment.origin).toMatchObject({ verdict: "partly-derivative", forks: [{ parent: "Uniswap/v4-core" }] });
     expect(cacheSetJson).toHaveBeenCalledWith(expect.stringMatching(/^ghship:acme:none:/), expect.objectContaining({ available: true }));
     expect(attachPanelCost).toHaveBeenCalledWith(ORGANIZATION_ID, VERSION_ID, expect.objectContaining({ calls: 2, status: "succeeded" }));
+  });
+
+  it("walks the star history for the flagship repository and flattens it to days", async () => {
+    const week = 1789257600; // 2026-09-13T00:00:00Z, a Sunday: GitHub weeks start on Sunday
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(gql({ repositoryOwner: { repositories: { nodes: [repoNode({ stargazerCount: 250 })] } } }))
+      .mockResolvedValueOnce(gql({ r0: { nameWithOwner: "acme/protocol", defaultBranchRef: { target: { history: { nodes: [0, 1].map(commitNode) } } } } }))
+      .mockResolvedValueOnce(json([{ week, total: 9, days: [3, 2, 4, 0, 0, 0, 0] }, { week: week - 7 * 86400, total: 14, days: [2, 2, 2, 2, 2, 2, 2] }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+    await handler(request() as never, res as never);
+    expect(String(fetchMock.mock.calls[2][0])).toBe("https://api.github.com/repos/acme/protocol/stargazers/history?per_page=30&page=1");
+    expect(fetchMock.mock.calls[2][1]).toMatchObject({ headers: expect.objectContaining({ "x-github-api-version": "2026-03-10" }) });
+    const input = captured.body?.input as { starHistoryRepo: string; starHistory: { date: string; stars: number }[] };
+    expect(input.starHistoryRepo).toBe("acme/protocol");
+    expect(input.starHistory).toHaveLength(14);
+    expect(input.starHistory[0]).toEqual({ date: "2026-09-13", stars: 3 });
+    expect(input.starHistory[7]).toEqual({ date: "2026-09-06", stars: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(3); // a short page ends the walk
+    expect(attachPanelCost).toHaveBeenCalledWith(ORGANIZATION_ID, VERSION_ID, expect.objectContaining({ calls: 3, status: "succeeded" }));
+  });
+
+  it("skips the star history below the star floor and survives its failure above it", async () => {
+    const few = vi.fn()
+      .mockResolvedValueOnce(gql({ repositoryOwner: { repositories: { nodes: [repoNode({ stargazerCount: 12 })] } } }))
+      .mockResolvedValueOnce(gql({ r0: { nameWithOwner: "acme/protocol", defaultBranchRef: { target: { history: { nodes: [0].map(commitNode) } } } } }));
+    vi.stubGlobal("fetch", few);
+    let { res, captured } = response();
+    await handler(request() as never, res as never);
+    expect(few).toHaveBeenCalledTimes(2);
+    expect((captured.body?.input as { starHistory?: unknown }).starHistory).toBeUndefined();
+
+    const failing = vi.fn()
+      .mockResolvedValueOnce(gql({ repositoryOwner: { repositories: { nodes: [repoNode({ stargazerCount: 500 })] } } }))
+      .mockResolvedValueOnce(gql({ r0: { nameWithOwner: "acme/protocol", defaultBranchRef: { target: { history: { nodes: [0].map(commitNode) } } } } }))
+      .mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    vi.stubGlobal("fetch", failing);
+    ({ res, captured } = response());
+    await handler(request() as never, res as never);
+    expect(captured.body).toMatchObject({ available: true });
+    expect((captured.body?.input as { starHistory?: unknown }).starHistory).toBeUndefined();
+    expect(attachPanelCost).toHaveBeenLastCalledWith(ORGANIZATION_ID, VERSION_ID, expect.objectContaining({ calls: 3, status: "partial" }));
   });
 
   it("adds the sector baseline when a known sector is requested and survives its failure", async () => {

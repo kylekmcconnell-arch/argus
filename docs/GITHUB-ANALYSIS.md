@@ -117,9 +117,9 @@ the project compares with its sector.
 | --- | --- | --- |
 | Judgement | `src/threat/shipping.ts` | Pure `assessShipping(input)`. Replayable, no network, shared by server and client. |
 | Peers | `src/threat/shippingPeers.ts` | Eleven sectors, three verified public repos each, keyword detection from the project's own copy. |
-| Fetch | `api/github-shipping.ts` | Three GraphQL calls (owner repos, history across the four busiest, sector peers cached daily). Panel-metered, cached in six-hour buckets, fails closed. |
+| Fetch | `api/github-shipping.ts` | Three GraphQL calls (owner repos, history across the four busiest, sector peers cached daily) plus up to four REST pages of daily star counts for the flagship repo. Panel-metered, cached in six-hour buckets, fails closed. |
 | Panel | `src/components/GithubShipping.tsx` | On-click, mounted by `ProjectResearch` above the existing commit-forensics panel, so it appears on token, investigation and recon reports. Re-runs the judgement locally with the price series and posts. |
-| Tests | `src/threat/shipping.test.ts` (19), `api/github-shipping.test.ts` (8), `src/components/GithubShipping.test.tsx` (3) | Fixtures include the HEY mirror shape, a bought-stars shape, a launch-week star burst, price-versus-commit joins, claim grading and peer positioning. |
+| Tests | `src/threat/shipping.test.ts` (24), `api/github-shipping.test.ts` (10), `src/components/GithubShipping.test.tsx` (3) | Fixtures include the HEY mirror shape, a bought-stars shape, a launch-week star burst, price-versus-commit joins, claim grading and peer positioning. |
 
 ### What it answers, mapped to the checklist
 
@@ -135,17 +135,24 @@ the project compares with its sector.
 | Replica of something else | declared forks with parents, template repos, repos whose history opens with a ≥1,500-line drop inside the window | origin: original / partly-derivative / derivative |
 | Marketing matches code | ship-claim posts ("launched", "v1.2", "mainnet", "is live") matched to releases within ±7 days or ≥3 commits in [−7d, +2d] | claims: supported / context / unsupported |
 | Sector comparison | subject vs peer median on commits, human authors and stars, positioned below (<0.5×) / within / above (>1.5×) | peers table with the three repos named |
-| Stars real or bought | StarScout signature when a stargazer sample exists (≥40% low-activity accounts, or ≥50% in one 72h window outside launch month); otherwise proportional fallback (stars vs forks, watchers and commits) | stars: organic / suspect / insufficient / none |
+| Stars real or bought | daily star history from GitHub: largest three-day burst share (≥50% outside launch month is suspect; ≥30% with disproportionate forks/watchers/commits is suspect); StarScout account read when a stargazer sample is supplied; proportional fallback otherwise | stars: organic / suspect / insufficient / none |
 | Socials vs usage | not in this slice; see §4 | |
 
-### A hard limit found while building
+### Star authenticity after GitHub's June 2026 restriction
 
-GitHub's stargazer list endpoints returned 404 (REST, star media type) and an
-empty connection (GraphQL) for every repository tested on 2026-09-15, with a
-classic token carrying `repo` scope and with no token. The account-level fake
-star screen from the StarScout paper therefore cannot run against the live API.
-The module keeps the input so it works if access returns or if a GH Archive
-export is fed in; until then the panel says the read is proportional and why.
+GitHub restricted `/repos/{owner}/{repo}/stargazers` and `/subscribers` to a
+repository's own admins and collaborators on 2026-06-30 ("misused to collect
+user data for spam activities"); the GraphQL `stargazers` connection returns an
+empty list for everyone else and the REST endpoint answers 404. The account
+half of the StarScout screen (young, empty accounts) therefore cannot run
+against the live API. On 2026-09-04 GitHub shipped
+`GET /repos/{owner}/{repo}/stargazers/history`, weekly rows with per-day star
+counts back to creation, public without authentication. The handler walks up to
+four pages of it for the most-starred repository (30 weeks a page) and the
+module times the largest three-day burst against the whole history, exempts a
+burst inside the repository's first month, and combines the timing with the
+proportion check (stars against forks, watchers and commits). The stargazer
+sample input stays in the module for anyone who can still supply one.
 
 ### Reading the HEY repo through it
 
@@ -182,6 +189,6 @@ told from a launch push. That is the right read and it is what the test
    answer "who is using them versus who is talking about them".
 5. **Cabal registry.** Add the 2022 Ethereum HEY lineage to `rh-snipe-ring-hey`
    on the cabal branch once it merges.
-6. **Star lists.** Re-test the stargazer endpoints monthly; if they reopen, the
-   handler needs one REST call for the flagship's newest 100 stargazers and one
-   batched GraphQL call for their account ages.
+6. **Star lists.** Only a repository admin can read who starred. If a project
+   under review grants collaborator access, the stargazer sample input already
+   runs the account-level StarScout read.

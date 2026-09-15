@@ -12,18 +12,22 @@
 //
 // Budget: one GraphQL query for the owner's repositories, one for commit
 // history across the busiest repositories, one for the sector peers (cached a
-// day). GitHub's stargazer lists were not readable with an ordinary token on
-// 2026-09-15 (every endpoint 404s), so no stargazer sample is fetched; the
-// assessment falls back to a proportional read and says so.
+// day), and up to four REST pages of daily star counts for the flagship
+// repository. GitHub restricted stargazer LISTS to repository admins on
+// 2026-06-30, so no stargazer sample is fetched; the star-history endpoint it
+// shipped on 2026-09-04 (daily counts back to creation) is what the burst read
+// runs on.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, cacheGetJson, cacheSetJson, resolvePanelCostVersion } from "./_cache.js";
-import { assessShipping, type ShippingCommit, type ShippingInput, type ShippingPeerRepo, type ShippingRepo } from "../src/threat/shipping.js";
+import { assessShipping, type ShippingCommit, type ShippingInput, type ShippingPeerRepo, type ShippingRepo, type ShippingStarDay } from "../src/threat/shipping.js";
 import { peerSectorById, type PeerSector } from "../src/threat/shippingPeers.js";
 
 export const config = { maxDuration: 30 };
 
 const GQL = "https://api.github.com/graphql";
+const REST = "https://api.github.com";
+const API_VERSION = "2026-03-10";
 const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9_.-]{1,100}$/;
 const WINDOW_DAYS = 90;
@@ -31,6 +35,8 @@ const OWNER_REPOS = 12;
 const HISTORY_REPOS = 4;
 const HISTORY_PER_REPO = 100;
 const CACHE_BUCKET_MS = 6 * 3600 * 1000;
+const STAR_HISTORY_PAGES = 4; // 30 weeks a page: about 2.3 years of daily counts
+const STAR_HISTORY_MIN_STARS = 30;
 
 interface CallCounter { calls: number; succeeded: number }
 
@@ -50,6 +56,39 @@ async function graphql<T>(query: string, variables: Record<string, unknown>, key
   if (!body.data) throw new Error("GitHub GraphQL returned no data");
   usage.succeeded += 1;
   return body.data;
+}
+
+async function rest<T>(path: string, key: string, usage: CallCounter): Promise<T> {
+  usage.calls += 1;
+  const r = await fetch(REST + path, {
+    headers: { authorization: `Bearer ${key}`, accept: "application/vnd.github+json", "x-github-api-version": API_VERSION, "user-agent": "argus-due-diligence" },
+    signal: AbortSignal.timeout(9000),
+  });
+  if (!r.ok) throw new Error(`GitHub ${r.status}`);
+  const data: unknown = await r.json();
+  usage.succeeded += 1;
+  return data as T;
+}
+
+/**
+ * Daily star counts for one repository: GET /repos/{o}/{r}/stargazers/history
+ * returns weeks (newest first, 30 a page) as { week: unix seconds, total, days[7] }.
+ * Flattened to one point per day; a short page ends the walk.
+ */
+async function readStarHistory(full: string, key: string, usage: CallCounter): Promise<ShippingStarDay[]> {
+  const out: ShippingStarDay[] = [];
+  for (let page = 1; page <= STAR_HISTORY_PAGES; page++) {
+    const rows = await rest<{ week: number; total: number; days: number[] }[]>(`/repos/${full}/stargazers/history?per_page=30&page=${page}`, key, usage);
+    if (!Array.isArray(rows)) throw new Error("GitHub star history had an invalid shape");
+    for (const row of rows) {
+      if (typeof row?.week !== "number" || !Array.isArray(row.days)) continue;
+      row.days.forEach((n, i) => {
+        if (typeof n === "number" && Number.isFinite(n)) out.push({ date: new Date((row.week + i * 86400) * 1000).toISOString().slice(0, 10), stars: n });
+      });
+    }
+    if (rows.length < 30) break;
+  }
+  return out;
 }
 
 const REPO_FIELDS = `
@@ -231,6 +270,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ranked = [...repos].sort((a, b) => Number(a.isFork) - Number(b.isFork) || (b.commitsInWindow ?? 0) - (a.commitsInWindow ?? 0));
     const active = ranked.filter((r) => (r.commitsInWindow ?? 0) > 0).slice(0, HISTORY_REPOS);
     const commits = await readHistory(active, since, key, usage);
+    // Star timing for the most-starred repository, when there are enough stars
+    // to time. A failed history read is a missing read, not a failed assessment.
+    const flagship = [...repos].sort((a, b) => b.stars - a.stars)[0];
+    let starHistory: ShippingStarDay[] | undefined;
+    if (flagship && flagship.stars >= STAR_HISTORY_MIN_STARS) {
+      try {
+        const days = await readStarHistory(flagship.nameWithOwner, key, usage);
+        if (days.length) starHistory = days;
+      } catch {
+        // proportional fallback in the module
+      }
+    }
     let peers: ShippingInput["peers"];
     if (sector) {
       try {
@@ -247,6 +298,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       windowDays: WINDOW_DAYS,
       repos,
       commits,
+      ...(starHistory && flagship ? { starHistory, starHistoryRepo: flagship.nameWithOwner } : {}),
       ...(peers ? { peers } : {}),
     };
     const assessment = assessShipping(input);
