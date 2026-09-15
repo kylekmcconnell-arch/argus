@@ -1057,8 +1057,8 @@ export async function collectFundScale(
         || (
           Boolean(candidate.sourceContentHash)
           && candidate.sourceContentHash?.toLowerCase() === artifact.sourceContentHash?.toLowerCase()
-          && candidate.sourceUrl !== undefined
-          && sameRegistrableDomain(candidate.sourceUrl, artifact.sourceUrl)
+          && Boolean(candidate.sourceUrl && artifact.sourceUrl)
+          && sameRegistrableDomain(candidate.sourceUrl ?? "", artifact.sourceUrl ?? "")
         )
       ),
     );

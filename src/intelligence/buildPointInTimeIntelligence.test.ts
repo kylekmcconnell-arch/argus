@@ -1612,10 +1612,10 @@ describe("buildPointInTimeIntelligence", () => {
       name: "Fixture",
       geckoId: "fixture",
       rounds: [
-        { date: "2024", round: "Series B", amountUsd: 50_000_000, leadInvestors: ["Growth Fund"], otherInvestors: [] },
-        { date: "2024-03-01", round: "Seed", amountUsd: 2_000_000, leadInvestors: ["Seed Fund"], otherInvestors: [] },
-        { date: "Q1 2024", round: "Angel", amountUsd: 500_000, leadInvestors: [], otherInvestors: [] },
-        { date: "sometime in 2023", round: "Pre-seed", amountUsd: 100_000, leadInvestors: [], otherInvestors: [] },
+        { date: "2024", round: "Series B", amountUsd: 50_000_000, leadInvestors: ["Growth Fund"], otherInvestors: [], valuationUsd: null },
+        { date: "2024-03-01", round: "Seed", amountUsd: 2_000_000, leadInvestors: ["Seed Fund"], otherInvestors: [], valuationUsd: null },
+        { date: "Q1 2024", round: "Angel", amountUsd: 500_000, leadInvestors: [], otherInvestors: [], valuationUsd: null },
+        { date: "sometime in 2023", round: "Pre-seed", amountUsd: 100_000, leadInvestors: [], otherInvestors: [], valuationUsd: null },
       ],
       totalRaisedUsd: 52_600_000,
       leadInvestors: ["Growth Fund", "Seed Fund"],
@@ -1632,7 +1632,7 @@ describe("buildPointInTimeIntelligence", () => {
     expect(measurement("days_since_latest_funding_round")).toBeUndefined();
     expect(measurement("funding_round_unparseable_date_count")?.value).toBe(1);
 
-    evidence.protocolFunding.rounds = [{ date: "2024-03-01", round: "Seed", amountUsd: 2_000_000, leadInvestors: [], otherInvestors: [] }];
+    evidence.protocolFunding!.rounds = [{ date: "2024-03-01", round: "Seed", amountUsd: 2_000_000, leadInvestors: [], otherInvestors: [], valuationUsd: null }];
     const dayPrecision = buildPointInTimeIntelligence(evidence);
     expect(dayPrecision?.measurements.find((candidate) => candidate.id === "days_since_latest_funding_round")?.value).toBe(883);
   });

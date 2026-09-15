@@ -28505,7 +28505,7 @@ async function collectFundScale(ctx, dependencies = {}) {
     };
     const artifact = { ...unhashed, contentHash: artifactHash2(unhashed) };
     const exists = ctx.evidence.sourceArtifacts.some(
-      (candidate) => candidate.kind === "fund_scale" && candidate.fundScaleClaimId === artifact.fundScaleClaimId && candidate.fundScaleMetric === artifact.fundScaleMetric && (candidate.sourceUrl === artifact.sourceUrl || Boolean(candidate.sourceContentHash) && candidate.sourceContentHash?.toLowerCase() === artifact.sourceContentHash?.toLowerCase() && candidate.sourceUrl !== void 0 && sameRegistrableDomain(candidate.sourceUrl, artifact.sourceUrl))
+      (candidate) => candidate.kind === "fund_scale" && candidate.fundScaleClaimId === artifact.fundScaleClaimId && candidate.fundScaleMetric === artifact.fundScaleMetric && (candidate.sourceUrl === artifact.sourceUrl || Boolean(candidate.sourceContentHash) && candidate.sourceContentHash?.toLowerCase() === artifact.sourceContentHash?.toLowerCase() && Boolean(candidate.sourceUrl && artifact.sourceUrl) && sameRegistrableDomain(candidate.sourceUrl ?? "", artifact.sourceUrl ?? ""))
     );
     if (!exists) ctx.evidence.sourceArtifacts.push(artifact);
   }
