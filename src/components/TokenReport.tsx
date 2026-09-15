@@ -1,5 +1,6 @@
 import { tokenSubjectIdentity } from "../lib/tokenIdentity";
 import { DeepLaunchPanel } from "./DeepLaunchPanel";
+import { ShippingScorecard } from "./ShippingScorecard";
 import { tokenCompositionRow, tokenMarketPresentation } from "../lib/tokenPresentation";
 import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
@@ -565,6 +566,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
 
         {!shareView && <DeepLaunchPanel chain={d.chain} reportVersionId={versionContext?.reportVersionId ?? (livePersistence?.state === 'persisted' ? livePersistence.reportVersionId ?? undefined : undefined)} />}
+        {/* frozen development read: scored by the engine, closed on the checklist, printed with the PDF */}
+        <ShippingScorecard shipping={d.shipping} delta={d.reportDelta} githubOrg={ghOrg} />
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
         {showCurrentIntelligence && panelCostToken && (
           <div className="mt-4">
@@ -580,7 +583,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             intelligence, and GitHub forensics — the same cluster every report uses */}
         {showCurrentIntelligence && (
           <div className="mt-4">
-            <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} record={canRecordCurrentIntelligence} {...(panelCostToken ? { panelCostToken } : {})} />
+            <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} record={canRecordCurrentIntelligence} token={{ address: d.address, chain: d.chain, deployer: d.deployer, mcap: d.mcap ?? undefined, ageDays: d.ageDays ?? undefined }} projectHandle={d.projectX} previousShipping={d.reportDelta?.category === "development" ? d.reportDelta.previousShipping ?? null : null} {...(panelCostToken ? { panelCostToken } : {})} />
           </div>
         )}
 

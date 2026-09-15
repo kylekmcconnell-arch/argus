@@ -161,3 +161,41 @@ describe("buildMaterialReportDelta", () => {
     });
   });
 });
+
+const shipping = (over: Partial<import("../threat/shipping").ShippingSummary> = {}): import("../threat/shipping").ShippingSummary => ({
+  version: 1, target: "acme", capturedAt: "2026-08-20T10:00:00.000Z", windowDays: 90,
+  grade: "shipping-team", headline: "Shipping as a team: 45 commits in 90 days from 3 people.",
+  cadenceStatus: "shipping", totalCommits: 45, activeWeeks: 13, distinctHuman: 3, concentration: "team",
+  authorship: "hand-authored", origin: "original", stars: "organic", market: "mixed",
+  claimsSupported: 0, claimsUnsupported: 0, live: "unknown", adoption: "unknown", health: "sound",
+  leadDeparted: false, reposRead: 3, commitsRead: 45, releasesInWindow: 1,
+  ...over,
+});
+
+describe("buildMaterialReportDelta · development", () => {
+  it("reports a shipping project that stalled and carries the prior summary", () => {
+    const before = { ...token(), shipping: shipping() };
+    const after = { ...token(), shipping: shipping({ grade: "stalled", cadenceStatus: "dormant", totalCommits: 2, distinctHuman: 1, headline: "Development has stalled: last commit 75 days ago." }) };
+    const delta = buildMaterialReportDelta("token", prior(before), after);
+    expect(delta).toMatchObject({ category: "development", id: "delta-development-stalled", headline: "Development stalled in the linked GitHub since the last scan", evidenceHref: "#development" });
+    expect(delta?.previous.value).toBe("shipping team, 45 commits and 3 human committers in 90 days");
+    expect(delta?.current.value).toBe("stalled, 2 commits and 1 human committer in 90 days");
+    expect(delta?.previousShipping?.totalCommits).toBe(45);
+  });
+
+  it("names a departed lead and a resumed project, and ignores a re-linked repository", () => {
+    const departed = buildMaterialReportDelta("token", prior({ ...token(), shipping: shipping() }), { ...token(), shipping: shipping({ leadDeparted: true }) });
+    expect(departed?.id).toBe("delta-development-departed");
+    expect(departed?.consequence).toMatch(/wrote most of the code has stopped/);
+    const resumed = buildMaterialReportDelta("token", prior({ ...token(), shipping: shipping({ grade: "stalled", totalCommits: 1 }) }), { ...token(), shipping: shipping() });
+    expect(resumed?.id).toBe("delta-development-resumed");
+    expect(resumed?.headline).toMatch(/Development resumed/);
+    const relinked = buildMaterialReportDelta("token", prior({ ...token(), shipping: shipping({ target: "other-org" }) }), { ...token(), shipping: shipping({ grade: "stalled", totalCommits: 0 }) });
+    expect(relinked).toBeNull();
+  });
+
+  it("stays quiet when development merely fluctuates", () => {
+    const delta = buildMaterialReportDelta("token", prior({ ...token(), shipping: shipping() }), { ...token(), shipping: shipping({ totalCommits: 30, distinctHuman: 2 }) });
+    expect(delta).toBeNull();
+  });
+});

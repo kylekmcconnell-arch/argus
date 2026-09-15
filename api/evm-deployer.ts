@@ -21,6 +21,14 @@ const CHAINID: Record<string, number> = {
   ethereum: 1, bsc: 56, base: 8453, polygon: 137, arbitrum: 42161,
   optimism: 10, avalanche: 43114, fantom: 250, linea: 59144, scroll: 534352,
 };
+// Chains Etherscan v2 does not index but a Blockscout instance does. Blockscout's
+// v1 route speaks the same module/action dialect (status, message, result), no
+// key needed, so the same reads run unchanged against it.
+const BLOCKSCOUT: Record<string, string> = {
+  robinhood: "https://robinhoodchain.blockscout.com/api",
+  gnosis: "https://gnosis.blockscout.com/api",
+};
+type Explorer = { kind: "etherscan"; chainid: number; key: string } | { kind: "blockscout"; base: string };
 
 // Major CEX hot wallets (lowercased). A funder match here means the deployer's gas
 // traces to a KYC'd exchange withdrawal — a real subpoena target, not an anon hand.
@@ -28,11 +36,14 @@ const CHAINID: Record<string, number> = {
 
 const ES = "https://api.etherscan.io/v2/api";
 interface CallCounter { calls: number; succeeded: number }
-async function es(chainid: number, params: Record<string, string>, key: string, usage: CallCounter): Promise<unknown> {
+async function es(x: Explorer, params: Record<string, string>, usage: CallCounter): Promise<unknown> {
   usage.calls += 1;
-  const q = new URLSearchParams({ chainid: String(chainid), apikey: key, ...params });
-  const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) });
-  if (!r.ok) throw new Error(`etherscan ${r.status}`);
+  const q = x.kind === "etherscan"
+    ? new URLSearchParams({ chainid: String(x.chainid), apikey: x.key, ...params })
+    : new URLSearchParams(params);
+  const url = x.kind === "etherscan" ? `${ES}?${q}` : `${x.base}?${q}`;
+  const r = await fetch(url, { headers: { accept: "application/json", "user-agent": "argus-due-diligence" }, signal: AbortSignal.timeout(12000) });
+  if (!r.ok) throw new Error(`${x.kind} ${r.status}`);
   const data = await r.json();
   const record = rec(data);
   const emptyMessage = `${String(record.message)} ${String(record.result)}`;
@@ -48,13 +59,13 @@ const lc = (s: string) => s.toLowerCase();
 
 // The account that first sent ETH/gas into a wallet (its funder), from the oldest
 // txs. The first INCOMING value-bearing tx from a different account is the funder.
-async function fundingSource(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<{ funder: string | null; firstTs: number | null }> {
+async function fundingSource(x: Explorer, wallet: string, usage: CallCounter): Promise<{ funder: string | null; firstTs: number | null }> {
   // Read BOTH external txs and INTERNAL txs (contract-routed ETH — a disperse
   // contract, a multisig, a CEX withdrawal via proxy — invisible to txlist), then
   // take the earliest inflow across both as the true first funder.
   const [d, di] = await Promise.all([
-    es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key, usage),
-    es(chainid, { module: "account", action: "txlistinternal", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key, usage),
+    es(x, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, usage),
+    es(x, { module: "account", action: "txlistinternal", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, usage),
   ]);
   const txs = arr(rec(d).result);
   const itxs = arr(rec(di).result);
@@ -74,17 +85,23 @@ async function fundingSource(chainid: number, wallet: string, key: string, usage
 // How many contracts this wallet has DEPLOYED, from its tx history (creation txs
 // have an empty `to` and a populated contractAddress). A wallet that has minted
 // many contracts is a serial launcher on its own.
-async function deploymentsBy(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<number> {
-  const d = await es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "10000", sort: "asc" }, key, usage);
+// The list itself (address + time) is what the shipping read joins commits to:
+// a deploy that follows a release is the code going live.
+export interface DeploymentRecord { address: string; at: string }
+async function deploymentsBy(x: Explorer, wallet: string, usage: CallCounter): Promise<DeploymentRecord[]> {
+  const d = await es(x, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "10000", sort: "asc" }, usage);
   const txs = arr(rec(d).result);
-  const created = new Set<string>();
+  const created = new Map<string, string>();
   for (const value of txs) {
     const tx = rec(value);
     const to = str(tx.to);
     const contractAddress = str(tx.contractAddress);
-    if (!to && contractAddress && isAddr(contractAddress) && lc(str(tx.from)) === lc(wallet)) created.add(lc(contractAddress));
+    const ts = Number(str(tx.timeStamp));
+    if (!to && contractAddress && isAddr(contractAddress) && lc(str(tx.from)) === lc(wallet) && !created.has(lc(contractAddress))) {
+      created.set(lc(contractAddress), Number.isFinite(ts) && ts > 0 ? new Date(ts * 1000).toISOString() : "");
+    }
   }
-  return created.size;
+  return [...created.entries()].map(([address, at]) => ({ address, at }));
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -107,9 +124,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const subject = walletQ || address;
   const chain = (typeof req.query.chain === "string" ? req.query.chain : "").toLowerCase();
   const chainid = CHAINID[chain];
+  const blockscout = BLOCKSCOUT[chain];
   if (!isAddr(subject)) { res.status(400).json({ error: "valid EVM address required (?address= contract or ?wallet= wallet)" }); return; }
-  if (!chainid) { res.status(200).json({ address: subject, chain, available: false, note: `No Etherscan chain id for '${chain}'.` }); return; }
-  if (!key) { res.status(200).json({ address: subject, chain, available: false, note: "Etherscan not configured; EVM deployer trail unavailable." }); return; }
+  if (!chainid && !blockscout) { res.status(200).json({ address: subject, chain, available: false, note: `No Etherscan chain id or Blockscout instance for '${chain}'.` }); return; }
+  if (chainid && !key) { res.status(200).json({ address: subject, chain, available: false, note: "Etherscan not configured; EVM deployer trail unavailable." }); return; }
+  const explorer: Explorer = chainid && key ? { kind: "etherscan", chainid, key } : { kind: "blockscout", base: blockscout };
 
   const usage: CallCounter = { calls: 0, succeeded: 0 };
   try {
@@ -117,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     //    contract, look up who deployed it.
     let deployer: string | null = walletQ && isAddr(walletQ) ? walletQ : null;
     if (!deployer) {
-      const cc = await es(chainid, { module: "contract", action: "getcontractcreation", contractaddresses: address }, key, usage);
+      const cc = await es(explorer, { module: "contract", action: "getcontractcreation", contractaddresses: address }, usage);
       const creation = rec(arr(rec(cc).result)[0]);
       const contractCreator = str(creation.contractCreator);
       deployer = contractCreator && isAddr(contractCreator) ? contractCreator : null;
@@ -126,13 +145,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 2. The deployer's funder + age, and how many contracts it has deployed.
     const [fund, deployments] = await Promise.all([
-      fundingSource(chainid, deployer, key, usage),
-      deploymentsBy(chainid, deployer, key, usage),
+      fundingSource(explorer, deployer, usage),
+      deploymentsBy(explorer, deployer, usage),
     ]);
     const funderAddr = fund.funder;
     const cexLabel = funderAddr ? CEX[lc(funderAddr)] ?? null : null;
     const walletAgeDays = fund.firstTs ? Math.max(0, Math.round((Date.now() / 1000 - fund.firstTs) / 86400)) : null;
-    const serialDeployer = deployments >= 5;
+    const serialDeployer = deployments.length >= 5;
 
     const note = !funderAddr
       ? "No clear funding source found for the deployer in its earliest transactions."
@@ -145,7 +164,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       deployer,
       funder: funderAddr ? { address: funderAddr, label: cexLabel, kind: cexLabel ? "cex" : "wallet" } : null,
       terminatesAtCex: !!cexLabel,
-      deployments,
+      deployments: deployments.length,
+      // Newest fifty creations with their times, for the shipping read's
+      // code-to-chain join. Older history only inflates the count above.
+      deploymentList: deployments.slice(-50),
       serialDeployer,
       walletAgeDays,
       firstActivity: fund.firstTs ? new Date(fund.firstTs * 1000).toISOString().slice(0, 10) : null,
@@ -156,7 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } finally {
     if (usage.calls > 0) {
       await attachPanelCost(auth.organizationId, panelCostVersionId, {
-        provider: "etherscan",
+        provider: explorer.kind,
         op: "panel:evm-deployer",
         calls: usage.calls,
         usd: 0,

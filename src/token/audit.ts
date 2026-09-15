@@ -11,6 +11,7 @@ import type { MaterialReportDelta } from "../lib/reportDelta";
 import { deriveTokenDecisionBoundary, type TokenDecisionBoundary } from "../lib/decisionBoundary";
 import type { TraceStep } from "../data/evidence";
 import type { SocialActivitySnapshot } from "../data/socialActivity";
+import type { ShippingSummary } from "../threat/shipping";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import { tokenEntityKey, walletEntityKey } from "../graph/network";
 import { fetchPriceHistory, type PriceHistory } from "../lib/priceHistory";
@@ -165,6 +166,8 @@ export interface TokenDossier {
   projectX: string | null;
   /** Frozen X conversation breadth captured as part of this token scan. */
   socialActivity?: SocialActivitySnapshot;
+  /** Frozen development read of the project's linked GitHub (scan-time summary lane). */
+  shipping?: ShippingSummary;
   deployer: string | null;
   /** Which source named the deployer, and whether it proved the creation. */
   deployerAttribution?: DeployerAttribution;
@@ -262,6 +265,9 @@ export interface DeployerRiskOutcome {
   completedAt: string;
 }
 export type ScreenDeployerRiskFn = (address: string) => Promise<DeployerRiskOutcome | undefined>;
+/** Scan-time shipping summary for a linked GitHub owner; undefined when the lane is off or fails. */
+export type CollectTokenShippingFn = (githubOrg: string, options?: { fetchImpl?: typeof fetch; deadlineAt?: number }) => Promise<ShippingSummary | undefined>;
+
 export type CollectTokenSocialActivityFn = (identity: {
   handle: string;
   ticker: string;
@@ -574,11 +580,11 @@ const CACHE_TTL = 60_000;
 export async function auditToken(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
+  opts?: { chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn; collectShipping?: CollectTokenShippingFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
-  const key = `${opts?.chain ?? ""}:${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}`;
+  const key = `${opts?.chain ?? ""}:${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}:${opts?.collectShipping ? 1 : 0}`;
   const hit = opts?.force ? undefined : _cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
   const signal = opts?.deadlineAt != null
@@ -599,7 +605,7 @@ export async function auditToken(
 async function runTokenAudit(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
+  opts?: { chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn; collectShipping?: CollectTokenShippingFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const fetcher = opts?.fetchImpl ?? fetch;
@@ -1242,6 +1248,27 @@ async function runTokenAudit(
         contractAddress: pair.baseToken.address,
       }, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt }).catch(() => undefined)
     : undefined;
+  // Development read: the project's linked GitHub owner, summarised by the
+  // scan-time lane. Absent when nothing links a repository, when the lane is
+  // off, or when GitHub could not be read; the checklist says which.
+  const githubOrg = socials
+    .map((x) => x.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
+    .find((g): g is string => !!g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing|apps|collections)$/i.test(g));
+  let shipping: ShippingSummary | undefined;
+  if (githubOrg && opts?.collectShipping) {
+    step({ phase: "Corroborate", label: "Development", detail: `Reading github.com/${githubOrg}: cadence, committers, substance, whether the code reaches production.`, tone: "neutral" });
+    opts?.signal?.throwIfAborted();
+    shipping = await opts.collectShipping(githubOrg, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt }).catch(() => undefined);
+    if (shipping) {
+      step({ phase: "Corroborate", label: "Development read", detail: shipping.headline, tone: shipping.grade === "stalled" ? "bad" : shipping.grade === "thin" ? "warn" : shipping.grade === "unknown" ? "neutral" : "good" });
+      if (shipping.market === "price-without-shipping") findings.push({ claim: "The token's price rose over the last quarter while commits to the linked repositories fell: the move is not backed by visible development.", tone: "warn", source: "github" });
+      if (shipping.leadDeparted) findings.push({ claim: "The lead committer of the prior two months has stopped while the repository carried on: a departure signal, not yet a departure.", tone: "warn", source: "github" });
+      if (shipping.grade === "stalled") findings.push({ claim: `Development has stalled in the linked GitHub: ${shipping.headline}`, tone: "warn", source: "github" });
+      if (shipping.grade === "shipping-team" && shipping.live === "live") findings.push({ claim: `A team is shipping and the code is reaching production: ${shipping.headline}`, tone: "good", source: "github" });
+    } else {
+      step({ phase: "Corroborate", label: "Development read", detail: `github.com/${githubOrg} could not be read; the development lane is unassessed, not failed.`, tone: "neutral" });
+    }
+  }
   const deployer = deployerAttribution?.address ?? null;
   // What the report is allowed to call this wallet. Only a source that saw the
   // creation signed earns the word "deployer"; everything else is an address a
@@ -1374,7 +1401,7 @@ async function runTokenAudit(
     // page as the finding explaining that the 37% line is the pool itself.
     verdict, score, assessment, capApplied, headline, axes, ...(decisionBoundary ? { decisionBoundary } : {}), safety: { ...s, topHolderPct: concentrationTopPct }, socials,
     holdersAssessed: holdersReliable,
-    projectX, ...(socialActivity ? { socialActivity } : {}), deployer, ...(deployerAttribution ? { deployerAttribution } : {}),
+    projectX, ...(socialActivity ? { socialActivity } : {}), ...(shipping ? { shipping } : {}), deployer, ...(deployerAttribution ? { deployerAttribution } : {}),
     topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
     sanctionsScreen,
     deployerRisk,

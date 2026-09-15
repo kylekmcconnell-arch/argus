@@ -18,6 +18,7 @@
 //     gap, not an absence claim.
 import { auditToken, type TokenDossier } from "../token/audit";
 import { collectTokenSocialActivity, scanScopedFetch } from "./socialActivityClient";
+import { collectTokenShipping } from "./shippingClient";
 import type { RunnableTokenInput } from "./resolveInput";
 import { runRecon, type Recon } from "../collect/recon";
 import { streamAudit, probeBackend } from "./live";
@@ -306,7 +307,7 @@ export function streamInvestigation(
       const token = await auditToken(
         input,
         (s) => { if (!aborted) h.onStep(s); },
-        { signal: tokenController.signal, deadlineAt: Date.now() + 120_000, force: opts?.forceTokenAudit, collectSocialActivity: collectTokenSocialActivity, fetchImpl: scanScopedFetch(opts?.creditKey) },
+        { signal: tokenController.signal, deadlineAt: Date.now() + 120_000, force: opts?.forceTokenAudit, collectSocialActivity: collectTokenSocialActivity, collectShipping: collectTokenShipping, fetchImpl: scanScopedFetch(opts?.creditKey) },
       );
       if (aborted) return;
       if (!token) { h.onError("Could not resolve that contract on any DEX."); return; }
