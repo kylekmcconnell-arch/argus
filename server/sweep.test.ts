@@ -12,7 +12,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 /** One fetch mock answering the watchlist, graph, open-case and upsert reads in order. */
 function backend(watches: unknown[]) {
-  return vi.fn(async (input: string | URL | Request) => {
+  return vi.fn(async (input: string | URL | Request, _init?: RequestInit) => {
     const url = String(input);
     if (url.includes("kind=eq.watch")) return jsonResponse(watches);
     if (url.includes("graph_contributions")) return jsonResponse([]);
