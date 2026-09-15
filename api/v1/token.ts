@@ -8,7 +8,7 @@ import { presentPublicReport } from "../../src/lib/reportPresentation.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { ResolvedInput, RunnableTokenInput } from "../../src/lib/resolveInput.js";
 import { auditToken, collectSocialActivity, resolveInput } from "../_collector.js";
-import { consumeInvestigationQuota, requireArgusAuth, serviceCredentials, serviceHeaders } from "../_auth.js";
+import { consumeInvestigationQuota, refundInvestigationCredit, requireArgusAuth, serviceCredentials, serviceHeaders } from "../_auth.js";
 import { screenSanctionedAddresses } from "../_sanctions-core.js";
 import { claimScanReceipt, recordScanReceipt } from "../_scanReceipts.js";
 
@@ -56,7 +56,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (typeof idempotencyHeader === "string") {
     const credentials = serviceCredentials();
     if (!credentials) { res.status(503).json({ error: "report_store_unavailable" }); return; }
-    const receiptResponse = await fetch(`${credentials.url}/rest/v1/scan_run_receipts?organization_id=eq.${encodeURIComponent(auth.organizationId)}&run_key=eq.${encodeURIComponent(idempotencyKey)}&select=route,canonical_ref,report_version_id,status&limit=1`, { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8000) }).catch(() => null);
+    // Replay is scoped to the analyst who paid: the debit key is per user, so
+    // another analyst presenting the same Idempotency-Key gets no free result
+    // here and falls through to their own debit, whose claim then collides.
+    const receiptResponse = await fetch(`${credentials.url}/rest/v1/scan_run_receipts?organization_id=eq.${encodeURIComponent(auth.organizationId)}&initiated_by=eq.${encodeURIComponent(auth.userId)}&run_key=eq.${encodeURIComponent(idempotencyKey)}&select=route,canonical_ref,report_version_id,status&limit=1`, { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8000) }).catch(() => null);
     if (!receiptResponse?.ok) { res.status(503).json({ error: "scan_recovery_unavailable" }); return; }
     const prior = (await receiptResponse.json())[0];
     if (prior) {
@@ -93,10 +96,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     displayQuery: ref, status: "running", creditsCharged: quota.used,
     startedAt: new Date(startedAt).toISOString(),
   });
+  if (claim === "duplicate") {
+    // The user-scoped replay above found nothing, so this key belongs to
+    // another analyst's run: the debit just taken can never be spent under it.
+    const refunded = await refundInvestigationCredit(auth, idempotencyKey, "scan_run_already_claimed");
+    res.status(409).json({
+      error: "scan_run_already_claimed",
+      creditState: refunded ? "refunded" : "held",
+      message: "This scan identifier belongs to another run. Use a new Idempotency-Key.",
+    });
+    return;
+  }
   if (claim !== "written") {
-    res.status(claim === "duplicate" ? 409 : 503).json({
-      error: claim === "duplicate" ? "scan_run_already_claimed" : "scan_run_claim_unavailable",
-      message: "This scan could not be started. Open its saved result or use a new scan identifier.",
+    res.status(503).json({
+      error: "scan_run_claim_unavailable",
+      creditState: "held",
+      message: "ARGUS could not register this scan. The credit is held on this Idempotency-Key; retrying with the same key will not charge again.",
     });
     return;
   }

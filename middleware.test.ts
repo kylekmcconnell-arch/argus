@@ -402,7 +402,24 @@ describe("Case Brief middleware policy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/rest/v1/rpc/consume_usage_quota"))).toBe(false);
   });
-  it.each([['/api/ask',false],['/api/ask',null],['/api/deep-launch',false],['/api/deep-launch',null]])("blocks %s when budget admission is %s", async (path, allowed) => {
+  // /api/ask and /api/reclassify reserve their own unit from the handler
+  // after validation (reserveSupplementalBudget). Pre-reserving here charged
+  // the daily allowance for 409s, clarification-only turns and provider
+  // outages that delivered nothing.
+  it.each(["/api/ask", "/api/reclassify"])("admits %s without a middleware budget reservation", async (path) => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: "00000000-0000-4000-8000-000000000010", email_confirmed_at: "2026-07-11T00:00:00Z" }))
+      .mockResolvedValueOnce(jsonResponse([{ organization_id: "00000000-0000-4000-8000-000000000001", role: "owner", active: true }]))
+      .mockResolvedValueOnce(jsonResponse([{ allowed: false, used: 100, remaining: 0 }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await middleware(new Request(`https://argus.example${path}`, { method: "POST", headers: { authorization: "Bearer owner-token" } }));
+    expect(response.status).toBe(204);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("reserve_supplemental_budget"))).toBe(false);
+  });
+
+  it.each([['/api/x-find',false],['/api/x-find',null],['/api/deep-launch',false],['/api/deep-launch',null]])("blocks %s when budget admission is %s", async (path, allowed) => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ id: "00000000-0000-4000-8000-000000000010", email_confirmed_at: "2026-07-11T00:00:00Z" }))
       .mockResolvedValueOnce(jsonResponse([{ organization_id: "00000000-0000-4000-8000-000000000001", role: "analyst", active: true }]))

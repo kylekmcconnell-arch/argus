@@ -299,3 +299,100 @@ export async function consumeInvestigationQuota(
     return { allowed: false, used: 0, remaining: 0, error: "credit_ledger_unavailable" };
   }
 }
+
+/**
+ * Reverse one investigation debit that can never be spent: the receipt claim
+ * for its key collided with another analyst's run. Idempotent on the key so a
+ * repeated collision never refunds twice. Never used for an own-run failure:
+ * the debit RPC replays on the same key, so a refunded key that is retried
+ * would run for free. Own-run claim failures hold the credit on the key and
+ * the retry with the same key claims it without a second charge.
+ */
+export async function refundInvestigationCredit(
+  auth: AuthContext,
+  idempotencyKey: string,
+  cause: string,
+): Promise<boolean> {
+  const credentials = serviceCredentials();
+  if (!credentials) return false;
+  try {
+    const response = await fetch(`${credentials.url}/rest/v1/credit_ledger?on_conflict=organization_id,idempotency_key`, {
+      method: "POST",
+      headers: serviceHeaders(credentials.key, { prefer: "resolution=ignore-duplicates,return=minimal" }),
+      body: JSON.stringify({
+        organization_id: auth.organizationId,
+        user_id: auth.userId,
+        amount_millis: CREDIT_MILLIS,
+        reason: "refund",
+        idempotency_key: `refund:investigation:${auth.userId}:${idempotencyKey}`,
+        metadata: { userId: auth.userId, debitKey: `investigation:${auth.userId}:${idempotencyKey}`, cause },
+      }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) console.error("[credits] refund rejected", response.status);
+    return response.ok;
+  } catch (error) {
+    console.error("[credits] refund failed", error instanceof Error ? error.message : "transport");
+    return false;
+  }
+}
+
+export interface SupplementalReservation {
+  allowed: boolean;
+  used?: number;
+  remaining?: number;
+  limit: number;
+  error?: "supplemental_budget_not_configured" | "supplemental_budget_unavailable";
+}
+
+/**
+ * Reserve one unit of the workspace's daily supplemental allowance from inside
+ * a handler, after the request has been validated and the paid work is about
+ * to start. Routes listed as handler-metered in middleware.ts are not reserved
+ * there, so a rejected or clarification-only request costs nothing.
+ */
+export async function reserveSupplementalBudget(auth: AuthContext, route: string): Promise<SupplementalReservation> {
+  const configured = process.env.ARGUS_SUPPLEMENTAL_DAILY_LIMIT?.trim();
+  const limit = configured ? Number(configured) : 100;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100000) {
+    return { allowed: false, limit: 0, error: "supplemental_budget_not_configured" };
+  }
+  const credentials = serviceCredentials();
+  if (!credentials) return { allowed: false, limit, error: "supplemental_budget_unavailable" };
+  try {
+    const response = await fetch(`${credentials.url}/rest/v1/rpc/reserve_supplemental_budget`, {
+      method: "POST",
+      headers: serviceHeaders(credentials.key),
+      body: JSON.stringify({ p_organization_id: auth.organizationId, p_user_id: auth.userId, p_route: route, p_daily_limit: limit }),
+      signal: AbortSignal.timeout(8_000),
+    });
+    const rows: unknown = response.ok ? await response.json().catch(() => null) : null;
+    const row = Array.isArray(rows) && rows[0] && typeof rows[0] === "object" ? rows[0] as Record<string, unknown> : null;
+    if (!row || typeof row.allowed !== "boolean") return { allowed: false, limit, error: "supplemental_budget_unavailable" };
+    return {
+      allowed: row.allowed,
+      used: typeof row.used === "number" ? row.used : undefined,
+      remaining: typeof row.remaining === "number" ? row.remaining : undefined,
+      limit,
+    };
+  } catch (error) {
+    console.error("[supplemental] reservation failed", error instanceof Error ? error.message : "transport");
+    return { allowed: false, limit, error: "supplemental_budget_unavailable" };
+  }
+}
+
+/** Write the standard response for a refused supplemental reservation. Returns true when the request must stop. */
+export function rejectSupplementalReservation(res: VercelResponse, reservation: SupplementalReservation): boolean {
+  if (reservation.allowed) return false;
+  res.setHeader("cache-control", "no-store");
+  if (reservation.error) {
+    res.status(503).json({ error: reservation.error });
+    return true;
+  }
+  res.status(429).json({
+    error: "supplemental_daily_limit_reached",
+    limit: reservation.limit,
+    message: "This workspace has reached its daily limit for supplemental checks and report chat.",
+  });
+  return true;
+}

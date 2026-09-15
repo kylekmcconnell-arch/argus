@@ -114,10 +114,46 @@ function invitationOrigin(): string {
   return "http://localhost:5173";
 }
 
+// Supabase admin listing is paged. One page of 1000 used to be treated as the
+// whole directory, so every auth user past it (waitlist sign-ups count) was
+// invisible: blank emails in the roster, a 502 when inviting an already
+// registered address, a 404 when editing that member. Page until the
+// directory ends, with a hard ceiling so a runaway directory stays bounded.
+const AUTH_PAGE_SIZE = 1000;
+const AUTH_MAX_PAGES = 50;
+
+async function* authUserPages(client: SupabaseClient): AsyncGenerator<User[]> {
+  for (let page = 1; page <= AUTH_MAX_PAGES; page++) {
+    const { data, error } = await client.auth.admin.listUsers({ page, perPage: AUTH_PAGE_SIZE });
+    if (error) throw error;
+    const users = data?.users ?? [];
+    if (users.length) yield users;
+    if (users.length < AUTH_PAGE_SIZE) return;
+  }
+}
+
 async function allAuthUsers(client: SupabaseClient): Promise<User[]> {
-  const { data, error } = await client.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  if (error) throw error;
-  return data.users;
+  const users: User[] = [];
+  for await (const page of authUserPages(client)) users.push(...page);
+  return users;
+}
+
+async function findAuthUserByEmail(client: SupabaseClient, email: string): Promise<User | undefined> {
+  for await (const page of authUserPages(client)) {
+    const match = page.find((candidate) => candidate.email?.trim().toLowerCase() === email);
+    if (match) return match;
+  }
+  return undefined;
+}
+
+async function findAuthUserById(client: SupabaseClient, userId: string): Promise<User | null> {
+  const { data, error } = await client.auth.admin.getUserById(userId);
+  if (error) {
+    // A missing user is a 404-class answer, not a directory failure.
+    if (typeof error.status === "number" && error.status === 404) return null;
+    throw error;
+  }
+  return data?.user ?? null;
 }
 
 function hasVerifiedEmail(user: User): boolean {
@@ -270,8 +306,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
-      const users = await allAuthUsers(client);
-      let user = users.find((candidate) => candidate.email?.trim().toLowerCase() === email);
+      let user = await findAuthUserByEmail(client, email);
       let invitationSent = false;
       let invitationResent = false;
       let authUserCreated = false;
@@ -370,8 +405,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const nextRole = roleValue(body.role) || existing.role;
     const nextActive = typeof body.active === "boolean" ? body.active : existing.active;
-    const users = await allAuthUsers(client);
-    const targetUser = users.find((user) => user.id === userId);
+    const targetUser = await findAuthUserById(client, userId);
     if (!targetUser) {
       res.status(404).json({ error: "auth_user_not_found" });
       return;

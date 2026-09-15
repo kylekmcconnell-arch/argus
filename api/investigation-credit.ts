@@ -1,10 +1,18 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { consumeInvestigationQuota, requireArgusAuth } from "./_auth.js";
-import { claimScanReceipt } from "./_scanReceipts.js";
+import { consumeInvestigationQuota, refundInvestigationCredit, requireArgusAuth } from "./_auth.js";
+import { claimScanReceipt, readScanReceipt, scanReceiptClaimInputValid } from "./_scanReceipts.js";
 
 const KEY = /^[A-Za-z0-9:_-]{8,180}$/;
 const KINDS = new Set(["token", "investigation"]);
 
+/**
+ * Credit reservation contract (docs/audits/2026-09-14/implementation-api.md):
+ * the debit is idempotent on the client's creditKey and the receipt claim is
+ * insert-only on the same key, so the key is the whole unit of work. A retry
+ * MUST reuse the key: a replayed own-run reservation answers 200 without a
+ * second charge, and an own-run claim failure holds the credit on the key
+ * instead of orphaning it. Only a ledger failure means no credit moved.
+ */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     res.status(405).setHeader("Allow", "POST").json({ error: "method_not_allowed" });
@@ -20,7 +28,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const canonicalRef = typeof body.canonicalRef === "string" ? body.canonicalRef.trim() : "";
   const displayQuery = typeof body.displayQuery === "string" ? body.displayQuery.trim() : canonicalRef;
   const startedAt = typeof body.startedAt === "string" ? body.startedAt : new Date().toISOString();
-  if (!KEY.test(idempotencyKey) || !KINDS.has(kind) || !canonicalRef || !displayQuery) {
+  const receipt = {
+    runKey: idempotencyKey,
+    route: "/app/scan",
+    kind: kind as "token" | "investigation",
+    canonicalRef,
+    displayQuery,
+    privateRun: body.privateRun === true,
+    status: "running" as const,
+    startedAt,
+  };
+  // Everything the receipt write would refuse is refused here, before the
+  // ledger moves: a malformed start time used to debit and then fail to claim.
+  if (!KEY.test(idempotencyKey) || !KINDS.has(kind) || !scanReceiptClaimInputValid(receipt)) {
     res.status(400).json({
       error: "invalid_credit_reservation",
       message: "ARGUS could not identify this scan. Start it again from New investigation.",
@@ -37,6 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (quota.error) {
     res.status(503).json({
       error: quota.error,
+      creditState: "none",
       message: "ARGUS could not check your credit balance. No providers were started and no credit was taken. Try again.",
     });
     return;
@@ -49,29 +70,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     return;
   }
-  const claim = await claimScanReceipt(auth, {
-    runKey: idempotencyKey,
-    route: "/app/scan",
-    kind: kind as "token" | "investigation",
-    canonicalRef,
-    displayQuery,
-    privateRun: body.privateRun === true,
-    status: "running",
-    creditsCharged: quota.used,
-    startedAt,
-  });
-  if (claim !== "written") {
-    res.status(claim === "duplicate" ? 409 : 503).json({
-      error: claim === "duplicate" ? "scan_run_already_claimed" : "scan_run_claim_unavailable",
-      message: "This scan could not be started. Open its saved result or use a new scan identifier.",
+  const claim = await claimScanReceipt(auth, { ...receipt, creditsCharged: quota.used });
+  if (claim === "written") {
+    res.status(200).json({
+      allowed: true,
+      chargedCredits: quota.used,
+      remainingCredits: quota.remaining,
+      receiptRecorded: true,
     });
     return;
   }
-
-  res.status(200).json({
-    allowed: true,
-    chargedCredits: quota.used,
-    remainingCredits: quota.remaining,
-    receiptRecorded: true,
+  if (claim === "duplicate") {
+    const existing = await readScanReceipt(auth, idempotencyKey);
+    if (existing && existing !== "unavailable" && existing.initiatedBy === auth.userId) {
+      // Same analyst, same key: the earlier reservation committed and this is
+      // its retry (a lost response, a browser reload). The debit replayed
+      // without a second charge; hand back the run instead of refusing it.
+      res.status(200).json({
+        allowed: true,
+        chargedCredits: quota.used,
+        remainingCredits: quota.remaining,
+        receiptRecorded: true,
+        replayed: true,
+        receiptStatus: existing.status,
+        reportVersionId: existing.reportVersionId,
+      });
+      return;
+    }
+    if (existing && existing !== "unavailable") {
+      // Another analyst's run owns this key. This user's debit can never be
+      // spent under it, so it is reversed; the key stays unusable for them.
+      const refunded = await refundInvestigationCredit(auth, idempotencyKey, "scan_run_already_claimed");
+      res.status(409).json({
+        error: "scan_run_already_claimed",
+        creditState: refunded ? "refunded" : "held",
+        message: "This scan identifier belongs to another run. Start a new scan.",
+      });
+      return;
+    }
+  }
+  res.status(503).json({
+    error: "scan_run_claim_unavailable",
+    creditState: "held",
+    message: "ARGUS could not register this scan. Your credit is held on this scan identifier and retrying it will not charge again.",
   });
 }

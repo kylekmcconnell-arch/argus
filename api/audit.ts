@@ -343,6 +343,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : {};
     const dossier = await runAudit(handle, emit, {
       organizationId: auth.organizationId,
+      // The private flag used to govern only report persistence; the
+      // collector's knowledge-base write-back still left an org-visible row.
+      privateRun,
       intent: typeof req.query.intent === "string" && RESEARCH_INTENTS.has(req.query.intent as ResearchIntent)
         ? req.query.intent as ResearchIntent
         : "investment_due_diligence",
@@ -410,10 +413,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? issuePanelCostToken(auth.organizationId, reportVersionId)
         : undefined;
       const cost = dossier.cost && typeof dossier.cost === "object" && !Array.isArray(dossier.cost)
-        ? dossier.cost as { usd?: unknown; estimated?: unknown; calls?: Array<{ status?: unknown }> }
+        ? dossier.cost as { usd?: unknown; estimated?: unknown; calls?: Array<{ status?: unknown; failed?: unknown }> }
         : null;
       const providerCostUsd = typeof cost?.usd === "number" && Number.isFinite(cost.usd) ? Math.max(0, cost.usd) : null;
-      const providerIssue = cost?.calls?.some((line) => line?.status === "failed" || line?.status === "partial") === true;
+      // Terminal provider failures only (the same rule as providerFailureLines
+      // in server/cost.ts). A line that mixes live and cached reads, or a
+      // legitimately empty model answer, is not a degraded scan.
+      const providerIssue = cost?.calls?.some((line) => line?.status === "failed" && typeof line.failed === "number" && line.failed > 0) === true;
       const receiptStatus = persistence === "failed" || providerIssue ? "degraded" : "complete";
       await recordScanReceipt(auth, {
         runKey: receiptRunKey, route: "/api/audit", kind: "person", canonicalRef: handle,

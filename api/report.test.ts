@@ -161,6 +161,42 @@ describe("report case lifecycle API", () => {
     expect(captured.body).toMatchObject({ ok: true, action: "archive" });
   });
 
+  // 2026-09-14 deep-dive API-3/#383: a case the identity backfill stamped
+  // legacy_unknown can never be saved again; the client retried the generic
+  // 502 three times and showed "storage failed" with the raw database text.
+  it("answers a legacy-identity refusal with a non-retryable code and no raw database text", async () => {
+    const address = "0x00000000000000000000000000000000000000aa";
+    persistReportVersionBundle.mockRejectedValue(new Error(
+      "immutable report bundle write failed (400): {\"code\":\"P0001\",\"message\":\"legacy token identity needs reconciliation\"}",
+    ));
+    const { res, captured } = response();
+
+    await handler(request("POST", {
+      body: { kind: "token", ref: address, query: "$TEST", payload: { address }, checkRuns: [] },
+    }), res);
+
+    expect(captured.statusCode).toBe(409);
+    expect(captured.body).toEqual({
+      error: "legacy_identity_reconciliation_required",
+      retryable: false,
+      message: expect.stringContaining("reconcile"),
+    });
+    expect(JSON.stringify(captured.body)).not.toContain("P0001");
+  });
+
+  it("keeps other storage failures retryable with a stable message", async () => {
+    const address = "0x00000000000000000000000000000000000000aa";
+    persistReportVersionBundle.mockRejectedValue(new Error("immutable report bundle write failed (503): {\"message\":\"upstream connect error\"}"));
+    const { res, captured } = response();
+
+    await handler(request("POST", {
+      body: { kind: "token", ref: address, query: "$TEST", payload: { address }, checkRuns: [] },
+    }), res);
+
+    expect(captured.statusCode).toBe(502);
+    expect(captured.body).toEqual({ error: "report_store_failed", message: "Report storage failed. Try again." });
+  });
+
   it("relies on atomic immutable persistence without a second projection write", async () => {
     const address = "0x00000000000000000000000000000000000000aa";
     const versionId = "00000000-0000-4000-8000-000000000301";
@@ -760,6 +796,7 @@ describe("report case lifecycle API", () => {
     expect(captured.statusCode).toBe(200);
     expect(captured.body).toEqual({
       available: true,
+      truncated: false,
       reports: [{
         caseId,
         ref: "0xabc",

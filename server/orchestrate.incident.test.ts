@@ -102,4 +102,33 @@ describe("material project incident findings", () => {
       returned_amount_usd: 25_000_000,
     }));
   });
+
+  // 2026-09-14 deep-dive OR-8: dedup keyed on (page URL, date) collapsed two
+  // undated or same-day incidents into one finding.
+  it("keeps two distinct undated incidents of one protocol as two findings, still idempotent", () => {
+    const evidence = emptyEvidence("@twiceprotocol");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.protocolTvl = {
+      slug: "twice",
+      name: "Twice",
+      symbol: "TWICE",
+      tvlUsd: 10_000_000,
+      chains: ["Ethereum"],
+      chainBreakdown: [{ chain: "Ethereum", tvlUsd: 10_000_000 }],
+      geckoId: "twice",
+      hacks: [
+        { date: null, amountUsd: 4_000_000, returnedFunds: false, returnedAmountUsd: null, classification: "Protocol Logic", technique: "Oracle manipulation" },
+        { date: null, amountUsd: 1_500_000, returnedFunds: false, returnedAmountUsd: null, classification: "Infrastructure", technique: "Compromised signer" },
+      ],
+      sourceUrl: "https://defillama.com/protocol/twice",
+      capturedAt: "2026-07-24T12:00:00.000Z",
+    };
+
+    expect(recordProtocolSecurityIncidentFindings(evidence)).toBe(2);
+    expect(recordProtocolSecurityIncidentFindings(evidence)).toBe(0);
+    const incidents = evidence.findings.filter((finding) => finding.finding_type === "ProtocolSecurityIncident");
+    expect(incidents).toHaveLength(2);
+    expect(incidents.map((finding) => finding.protocol_incident?.amount_usd).sort()).toEqual([1_500_000, 4_000_000]);
+    expect(incidents.some((finding) => finding.claim.includes("Compromised signer"))).toBe(true);
+  });
 });
