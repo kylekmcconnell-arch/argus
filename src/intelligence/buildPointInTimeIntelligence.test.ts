@@ -1591,6 +1591,52 @@ describe("buildPointInTimeIntelligence", () => {
     expect(gap?.finding).toContain("108.1667 hours");
   });
 
+  it("reports, rather than measures, a domain whose only measurements are reported context", () => {
+    // Regression for INT-12: one analyst contradiction row made identity "measured".
+    const evidence = projectEvidence();
+    evidence.contradictions = [{ claim: "Founded in 2019", conflict: "Registry shows 2022", severity: "medium", confidence: "low" }];
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    expect(snapshot?.measurements.find((measurement) => measurement.id === "analyst_contradiction_lead_count")?.evidenceState)
+      .toBe("reported_context");
+    const identity = snapshot?.coverage.find((domain) => domain.domain === "identity");
+    expect(identity?.state).toBe("reported");
+  });
+
+  it("orders indexed rounds by precision-aware intervals and never fakes a day count from a year", () => {
+    // Regression for INT-11: "2024" parsed as 1 January, so a March 2024 seed
+    // outranked a 2024 Series B and a lone "2024" read as 947.5 days ago.
+    const evidence = projectEvidence();
+    addCanonicalToken(evidence);
+    evidence.protocolFunding = {
+      slug: "fixture",
+      name: "Fixture",
+      geckoId: "fixture",
+      rounds: [
+        { date: "2024", round: "Series B", amountUsd: 50_000_000, leadInvestors: ["Growth Fund"], otherInvestors: [] },
+        { date: "2024-03-01", round: "Seed", amountUsd: 2_000_000, leadInvestors: ["Seed Fund"], otherInvestors: [] },
+        { date: "Q1 2024", round: "Angel", amountUsd: 500_000, leadInvestors: [], otherInvestors: [] },
+        { date: "sometime in 2023", round: "Pre-seed", amountUsd: 100_000, leadInvestors: [], otherInvestors: [] },
+      ],
+      totalRaisedUsd: 52_600_000,
+      leadInvestors: ["Growth Fund", "Seed Fund"],
+      sourceUrl: "https://defillama.example.test/raises/fixture",
+      capturedAt: "2026-08-01T00:00:00.000Z",
+    };
+
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    const measurement = (id: string) => snapshot?.measurements.find((candidate) => candidate.id === id);
+
+    expect(measurement("latest_funding_round_type")?.value).toBe("Series B");
+    expect(measurement("latest_funding_round_date")?.value).toBe("2024");
+    expect(measurement("latest_funding_round_date_precision")?.value).toBe("year");
+    expect(measurement("days_since_latest_funding_round")).toBeUndefined();
+    expect(measurement("funding_round_unparseable_date_count")?.value).toBe(1);
+
+    evidence.protocolFunding.rounds = [{ date: "2024-03-01", round: "Seed", amountUsd: 2_000_000, leadInvestors: [], otherInvestors: [] }];
+    const dayPrecision = buildPointInTimeIntelligence(evidence);
+    expect(dayPrecision?.measurements.find((candidate) => candidate.id === "days_since_latest_funding_round")?.value).toBe(883);
+  });
+
   it("withholds stale fee-to-TVL, fee-trend, and fee-to-funding comparisons independently", () => {
     const evidence = projectEvidence();
     addCanonicalToken(evidence);

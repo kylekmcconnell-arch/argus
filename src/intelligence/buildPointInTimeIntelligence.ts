@@ -463,6 +463,53 @@ function rounded(value: number, digits = 4): number {
   return Math.round(value * factor) / factor;
 }
 
+export interface RoundDateInterval {
+  precision: "day" | "month" | "quarter" | "year";
+  /** The date as the producer recorded it, at its own precision. */
+  native: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Precision-aware parse of an indexed round date. "2024" is the whole year,
+ * "2024-03" the whole month, "Q1 2024" the quarter; only "2024-03-01" (or a
+ * full timestamp) is a day. Anything else is unparseable and reported as such
+ * rather than silently dropped.
+ */
+export function parseRoundDateInterval(raw: string | undefined | null): RoundDateInterval | null {
+  const value = (raw ?? "").trim();
+  if (!value) return null;
+  const utc = (year: number, month: number, day: number) => Date.UTC(year, month, day);
+  const endOfDay = (time: number) => time + 86_400_000 - 1;
+  let match = value.match(/^(\d{4})$/);
+  if (match) {
+    const year = Number(match[1]);
+    return { precision: "year", native: match[1], start: utc(year, 0, 1), end: endOfDay(utc(year, 11, 31)) };
+  }
+  match = value.match(/^(\d{4})-(\d{2})$/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (month < 1 || month > 12) return null;
+    return { precision: "month", native: value, start: utc(year, month - 1, 1), end: endOfDay(utc(year, month, 0)) };
+  }
+  match = value.match(/^(?:Q([1-4])\s*(\d{4})|(\d{4})\s*[- ]?Q([1-4]))$/i);
+  if (match) {
+    const quarter = Number(match[1] ?? match[4]);
+    const year = Number(match[2] ?? match[3]);
+    const firstMonth = (quarter - 1) * 3;
+    return { precision: "quarter", native: `${year}-Q${quarter}`, start: utc(year, firstMonth, 1), end: endOfDay(utc(year, firstMonth + 3, 0)) };
+  }
+  match = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/);
+  if (match) {
+    const time = Date.parse(value.length === 10 ? `${value}T00:00:00.000Z` : value);
+    if (!Number.isFinite(time)) return null;
+    return { precision: "day", native: new Date(time).toISOString(), start: time, end: time };
+  }
+  return null;
+}
+
 /**
  * A measurement answers part of a question only when it carries information.
  * A zero count is a completed empty scan of one collector, not evidence about
@@ -1654,15 +1701,25 @@ function buildMeasurements(evidence: Readonly<CollectedEvidence>): IntelligenceM
       addNumber(measurements, disclosedRoundSumUsd, { id: "indexed_disclosed_round_sum_usd", domain: "funding", label: "Arithmetic sum of positive disclosed indexed round amounts", unit: "usd", entityKey, window: { kind: "instant", asOf: fundingRecord.capturedAt }, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
     }
     addNumber(measurements, uniqueSorted(fundingRecord.leadInvestors).length, { id: "funding_lead_investor_count", domain: "funding", label: "Distinct indexed lead investors", unit: "count", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
-    const datedRounds = fundingRecord.rounds
-      .flatMap((round) => round.date && Number.isFinite(Date.parse(round.date))
-        ? [{ round, time: Date.parse(round.date) }]
-        : [])
-      .sort((left, right) => right.time - left.time || left.round.round.localeCompare(right.round.round));
+    // Producers record round dates at mixed precision ("2024", "2024-03",
+    // "2024-03-01", "Q1 2024"). A year is an interval, not 1 January: rounds
+    // order by the end of their interval and the latest date is emitted at its
+    // native precision. Dates that cannot be parsed are counted, never dropped
+    // silently.
+    const parsedRounds = fundingRecord.rounds.map((round) => ({ round, interval: parseRoundDateInterval(round.date) }));
+    const unparseableDates = parsedRounds.filter(({ round, interval }) => Boolean(round.date?.trim()) && !interval).length;
+    if (unparseableDates > 0) {
+      addNumber(measurements, unparseableDates, { id: "funding_round_unparseable_date_count", domain: "chronology", label: "Indexed funding rounds whose recorded date could not be parsed", unit: "count", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
+    }
+    const datedRounds = parsedRounds
+      .flatMap(({ round, interval }) => interval ? [{ round, interval }] : [])
+      .sort((left, right) => right.interval.end - left.interval.end
+        || right.interval.start - left.interval.start
+        || left.round.round.localeCompare(right.round.round));
     const latest = datedRounds[0];
     if (latest) {
-      const date = new Date(latest.time).toISOString();
-      measurements.push({ id: "latest_funding_round_date", domain: "chronology", label: "Latest dated indexed funding round", unit: "date", valueType: "date", value: date, entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
+      measurements.push({ id: "latest_funding_round_date", domain: "chronology", label: `Latest dated indexed funding round (${latest.interval.precision} precision)`, unit: "date", valueType: "date", value: latest.interval.native, entityKey, window: { kind: "historical", start: new Date(latest.interval.start).toISOString(), end: new Date(latest.interval.end).toISOString() }, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
+      measurements.push({ id: "latest_funding_round_date_precision", domain: "chronology", label: "Precision of the latest indexed funding round date", unit: "text", valueType: "text", value: latest.interval.precision, entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
       measurements.push({ id: "latest_funding_round_type", domain: "funding", label: "Latest dated indexed funding round type", unit: "text", valueType: "text", value: latest.round.round, entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
       addNumber(measurements, latest.round.amountUsd, { id: "latest_funding_round_amount_usd", domain: "funding", label: "Latest dated indexed round disclosed amount", unit: "usd", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
       const latestValuation = "valuationUsd" in latest.round
@@ -1671,8 +1728,10 @@ function buildMeasurements(evidence: Readonly<CollectedEvidence>): IntelligenceM
         : null;
       addNumber(measurements, latestValuation, { id: "latest_funding_round_valuation_usd", domain: "funding", label: "Latest dated indexed round disclosed valuation", unit: "usd", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
       const capturedTime = Date.parse(fundingRecord.capturedAt);
-      if (Number.isFinite(capturedTime) && capturedTime >= latest.time) {
-        addNumber(measurements, rounded((capturedTime - latest.time) / 86_400_000, 1), { id: "days_since_latest_funding_round", domain: "chronology", label: "Days from latest dated indexed round to capture", unit: "days", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
+      // A day-count is only meaningful from a day-precision date; a year-only
+      // round is somewhere in a 365-day interval, not 947.5 days ago.
+      if (latest.interval.precision === "day" && Number.isFinite(capturedTime) && capturedTime >= latest.interval.start) {
+        addNumber(measurements, rounded((capturedTime - latest.interval.start) / 86_400_000, 1), { id: "days_since_latest_funding_round", domain: "chronology", label: "Days from latest dated indexed round to capture", unit: "days", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
       }
     }
   }
@@ -2339,7 +2398,10 @@ function buildQuestions(
   return questions.sort((left, right) => left.id.localeCompare(right.id));
 }
 
-function coverageState(questions: readonly IntelligenceQuestion[], measurementCount: number): IntelligenceCoverageState {
+function coverageState(
+  questions: readonly IntelligenceQuestion[],
+  measurements: readonly Pick<IntelligenceMeasurement, "evidenceState">[],
+): IntelligenceCoverageState {
   const openQuestions = questions.filter((question) =>
     question.state === "reported"
     || question.state === "partial"
@@ -2348,7 +2410,14 @@ function coverageState(questions: readonly IntelligenceQuestion[], measurementCo
     || question.state === "not_collected",
   );
   const closedQuestions = questions.filter((question) => question.state === "resolved");
-  if (measurementCount > 0) return openQuestions.length > 0 ? "partial" : "measured";
+  // Coverage follows the strongest measurement state. A domain whose only
+  // measurements are reported context (a provider index row, an analyst
+  // contradiction row) is reported, not measured.
+  const deterministic = measurements.some((measurement) => measurement.evidenceState !== "reported_context");
+  if (measurements.length > 0) {
+    if (openQuestions.length > 0) return "partial";
+    return deterministic ? "measured" : "reported";
+  }
   if (closedQuestions.length > 0 && openQuestions.length > 0) return "partial";
   if (questions.some((question) => question.state === "partial")) return "partial";
   const distinctOpenStates = new Set(openQuestions.map((question) => question.state));
@@ -2401,7 +2470,7 @@ function buildCoverage(
       || question.state === "unavailable"
       || question.state === "not_collected",
     ).length;
-    const state = coverageState(domainQuestions, domainMeasurements.length);
+    const state = coverageState(domainQuestions, domainMeasurements);
     return {
       domain,
       state,
