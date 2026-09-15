@@ -580,7 +580,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             intelligence, and GitHub forensics — the same cluster every report uses */}
         {showCurrentIntelligence && (
           <div className="mt-4">
-            <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} record={canRecordCurrentIntelligence} {...(panelCostToken ? { panelCostToken } : {})} />
+            <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} record={canRecordCurrentIntelligence} token={{ address: d.address, chain: d.chain }} {...(panelCostToken ? { panelCostToken } : {})} />
           </div>
         )}
 
