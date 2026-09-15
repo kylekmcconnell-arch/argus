@@ -134,6 +134,55 @@ export async function claimScanReceipt(auth: AuthContext, input: ScanReceiptWrit
   return writeScanReceipt(auth, input);
 }
 
+/** True when the reservation input can be written as a running receipt. Checked before any credit moves. */
+export function scanReceiptClaimInputValid(input: Pick<ScanReceiptWrite, "runKey" | "canonicalRef" | "displayQuery" | "route" | "startedAt">): boolean {
+  return RUN_KEY.test(input.runKey)
+    && cleanText(input.canonicalRef, 500).length > 0
+    && cleanText(input.displayQuery, 500).length > 0
+    && cleanText(input.route, 160).length > 0
+    && iso(input.startedAt) !== null;
+}
+
+export interface ExistingScanReceipt {
+  initiatedBy: string;
+  route: string;
+  kind: string;
+  canonicalRef: string;
+  status: string;
+  reportVersionId: string | null;
+}
+
+/**
+ * Read the tenant/run receipt a duplicate claim collided with. `null` means no
+ * row; `"unavailable"` means the store could not answer, which callers must
+ * treat as unknown rather than as absence.
+ */
+export async function readScanReceipt(auth: AuthContext, runKey: string): Promise<ExistingScanReceipt | null | "unavailable"> {
+  const credentials = serviceCredentials();
+  if (!credentials || !RUN_KEY.test(runKey)) return "unavailable";
+  try {
+    const response = await fetch(
+      `${credentials.url}/rest/v1/scan_run_receipts?organization_id=eq.${encodeURIComponent(auth.organizationId)}&run_key=eq.${encodeURIComponent(runKey)}&select=initiated_by,route,kind,canonical_ref,status,report_version_id&limit=1`,
+      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
+    );
+    if (!response.ok) return "unavailable";
+    const rows = await response.json() as unknown;
+    const row = Array.isArray(rows) && rows[0] && typeof rows[0] === "object" ? rows[0] as Record<string, unknown> : null;
+    if (!row) return null;
+    return {
+      initiatedBy: typeof row.initiated_by === "string" ? row.initiated_by : "",
+      route: typeof row.route === "string" ? row.route : "",
+      kind: typeof row.kind === "string" ? row.kind : "",
+      canonicalRef: typeof row.canonical_ref === "string" ? row.canonical_ref : "",
+      status: typeof row.status === "string" ? row.status : "",
+      reportVersionId: typeof row.report_version_id === "string" ? row.report_version_id : null,
+    };
+  } catch (error) {
+    console.error("[scan-receipt] read failed", error instanceof Error ? error.message : "transport");
+    return "unavailable";
+  }
+}
+
 export async function recordScanReceipt(auth: AuthContext, input: ScanReceiptWrite): Promise<boolean> {
   return (await writeScanReceipt(auth, input)) !== "unavailable";
 }

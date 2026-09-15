@@ -12,6 +12,7 @@ vi.mock("../_collector.js", async () => {
 
 vi.mock("../_auth.js", () => ({
   consumeInvestigationQuota: vi.fn(),
+  refundInvestigationCredit: vi.fn(),
   serviceCredentials: vi.fn(() => ({ url: "https://db.example", key: "test" })),
   serviceHeaders: vi.fn(() => ({})),
   requireArgusAuth: vi.fn(async () => ({
@@ -30,8 +31,9 @@ vi.mock("../_sanctions-core.js", () => ({
   screenSanctionedAddresses: vi.fn(),
 }));
 
-import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
+import { consumeInvestigationQuota, refundInvestigationCredit, requireArgusAuth } from "../_auth.js";
 import { auditToken, resolveInput } from "../_collector.js";
+import { claimScanReceipt } from "../_scanReceipts.js";
 import handler from "./token";
 import { persistReportVersionBundle } from "../_provenance.js";
 afterEach(() => vi.unstubAllGlobals());
@@ -184,4 +186,31 @@ it("recovers a committed version even when finishing the receipt failed", async 
   expect(captured.body).toMatchObject({ replayed: true, reportVersionId: "saved-version", score: 67 });
   expect(fetcher.mock.calls[1][0]).toContain("run_id=eq.token-api%3Alost-response-key");
   expect(consumeInvestigationQuota).not.toHaveBeenCalled(); expect(auditToken).not.toHaveBeenCalled();
+});
+// 2026-09-14 deep-dive API-5: replay was org-scoped while the debit is
+// user-scoped, so another analyst's key returned their result for free.
+it("scopes idempotent replay to the analyst who paid for the run", async () => {
+  const address = "0x1111111111111111111111111111111111111111";
+  const fetcher = vi.fn().mockResolvedValueOnce(Response.json([]));
+  vi.stubGlobal("fetch", fetcher);
+  vi.mocked(consumeInvestigationQuota).mockClear().mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+  vi.mocked(auditToken).mockClear().mockResolvedValue(null);
+  const req = request({ address }); req.headers["idempotency-key"] = "someone-elses-key";
+  const { res } = response(); await handler(req, res);
+  expect(String(fetcher.mock.calls[0][0])).toContain("initiated_by=eq.00000000-0000-4000-8000-000000000010");
+  expect(consumeInvestigationQuota).toHaveBeenCalledOnce();
+});
+it("refunds the debit and refuses a key that another analyst's run already claimed", async () => {
+  const address = "0x1111111111111111111111111111111111111111";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json([])));
+  vi.mocked(consumeInvestigationQuota).mockClear().mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+  vi.mocked(auditToken).mockClear();
+  vi.mocked(claimScanReceipt).mockResolvedValueOnce("duplicate");
+  vi.mocked(refundInvestigationCredit).mockResolvedValueOnce(true);
+  const req = request({ address }); req.headers["idempotency-key"] = "someone-elses-key";
+  const { res, captured } = response(); await handler(req, res);
+  expect(captured.statusCode).toBe(409);
+  expect(captured.body).toMatchObject({ error: "scan_run_already_claimed", creditState: "refunded" });
+  expect(refundInvestigationCredit).toHaveBeenCalledWith(expect.objectContaining({ userId: "00000000-0000-4000-8000-000000000010" }), "someone-elses-key", "scan_run_already_claimed");
+  expect(auditToken).not.toHaveBeenCalled();
 });
