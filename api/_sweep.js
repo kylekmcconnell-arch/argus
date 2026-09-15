@@ -2244,6 +2244,57 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
   return "Falls short on the forensic checks. Treat as high risk.";
 }
 
+// server/cost.ts
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "node:async_hooks";
+var PRICE = {
+  // Fallback only. Successful xAI responses now return their exact billed
+  // cost in usage.cost_in_usd_ticks, which always takes precedence. Grok 4.3
+  // is the current redirect target for retired grok-4-fast model slugs.
+  grokIn: 1.25 / 1e6,
+  grokOut: 2.5 / 1e6,
+  grokToolCall: 5 / 1e3,
+  claudeIn: 3 / 1e6,
+  claudeOut: 15 / 1e6,
+  claudeWebSearch: 10 / 1e3,
+  haikuIn: 1 / 1e6,
+  haikuOut: 5 / 1e6,
+  serperQuery: 1 / 1e3,
+  twitterapiCall: 2e-4,
+  pdlMatch: 0.1,
+  heliusCall: 1e-4
+};
+var createState = () => ({
+  ledger: /* @__PURE__ */ new Map(),
+  grok: { in: 0, out: 0, calls: 0, sources: 0 },
+  claude: { in: 0, out: 0, calls: 0 }
+});
+var auditCostState = new AsyncLocalStorage2();
+var fallbackState = createState();
+var currentState = () => auditCostState.getStore() ?? fallbackState;
+function withCostLedger(work) {
+  return auditCostState.run(createState(), work);
+}
+var round4 = (n) => Math.round(n * 1e4) / 1e4;
+function getCost() {
+  const { ledger, grok, claude } = currentState();
+  const lines = [...ledger.values()].map((l) => ({ ...l, usd: round4(l.usd) })).sort((a, b) => b.usd - a.usd || b.calls - a.calls);
+  const grokUsd = lines.filter((l) => l.provider === "grok").reduce((a, l) => a + l.usd, 0);
+  const claudeUsd = lines.filter((l) => l.provider === "claude").reduce((a, l) => a + l.usd, 0);
+  const total = lines.reduce((a, l) => a + l.usd, 0);
+  const round2 = (n) => Math.round(n * 100) / 100;
+  return {
+    schemaVersion: 1,
+    usd: round2(total),
+    grokUsd: round2(grokUsd),
+    claudeUsd: round2(claudeUsd),
+    grokCalls: grok.calls,
+    claudeCalls: claude.calls,
+    sources: grok.sources,
+    estimated: true,
+    calls: lines
+  };
+}
+
 // src/lib/subjectRef.ts
 var EVM_ADDRESS4 = /^0x[0-9a-f]{40}$/i;
 var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -2715,12 +2766,17 @@ function reportCompleteness(kind, payload, checks = reportChecks(kind, payload))
 
 // server/sweep.ts
 var MAX_TOKEN_CHECKS = 15;
+var TOKEN_CHECK_RESERVE_MS = 2e4;
 function creds() {
   const url = env("SUPABASE_URL");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
   return url && key ? { url: url.replace(/\/$/, ""), key } : null;
 }
-var headers = (key) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
+var headers = (key) => ({
+  apikey: key,
+  ...key.startsWith("sb_secret_") ? {} : { authorization: `Bearer ${key}` },
+  "content-type": "application/json"
+});
 var sha = (s) => createHash("sha256").update(s).digest("hex").slice(0, 24);
 async function pg(c, path, init) {
   try {
@@ -2746,10 +2802,16 @@ async function telegram(text) {
   } catch {
   }
 }
-async function runSweep(organizationId) {
+function runSweep(organizationId, options = {}) {
+  return withCostLedger(async () => {
+    const result = await runSweepInLedger(organizationId, options);
+    return { ...result, cost: getCost() };
+  });
+}
+async function runSweepInLedger(organizationId, options) {
   const c = creds();
-  if (!c) return { checked: 0, alerts: [], note: "no backend configured" };
-  if (!organizationId) return { checked: 0, alerts: [], note: "organization required" };
+  if (!c) return { checked: 0, alerts: [], note: "no backend configured", unavailable: true };
+  if (!organizationId) return { checked: 0, alerts: [], note: "organization required", unavailable: true };
   const orgFilter = `organization_id=eq.${encodeURIComponent(organizationId)}`;
   const watchRows = await pg(c, `reports?select=ref,payload&${orgFilter}&kind=eq.watch&order=ts.desc&limit=100`);
   const watches = (watchRows ?? []).map((r) => r.payload?.item).filter(Boolean);
@@ -2760,11 +2822,19 @@ async function runSweep(organizationId) {
   const openCases = new Set((openCaseRows ?? []).map((row) => normalizeSubjectRef(row.canonical_ref)).filter(Boolean));
   const found = [];
   let tokenChecks2 = 0;
+  let deferred = 0;
+  const deadlineAt = options.deadlineAt;
+  const remainingMs = () => deadlineAt == null ? Number.POSITIVE_INFINITY : deadlineAt - Date.now();
   for (const w of watches) {
-    if (w.kind === "token" && openCases.has(normalizeSubjectRef(w.id)) && tokenChecks2 < MAX_TOKEN_CHECKS) {
+    const tokenCheckWanted = w.kind === "token" && openCases.has(normalizeSubjectRef(w.id)) && tokenChecks2 < MAX_TOKEN_CHECKS;
+    if (tokenCheckWanted && remainingMs() < TOKEN_CHECK_RESERVE_MS) deferred++;
+    if (tokenCheckWanted && remainingMs() >= TOKEN_CHECK_RESERVE_MS) {
       tokenChecks2++;
       const input = { kind: "token", ref: w.id.includes(":") ? w.id.split(":")[1] : w.id, chain: w.chain, via: w.via ?? "evm" };
-      const d = await auditToken(input, void 0, { skipSim: true }).catch(() => null);
+      const d = await auditToken(input, void 0, {
+        skipSim: true,
+        ...deadlineAt != null ? { deadlineAt: Math.min(deadlineAt - TOKEN_CHECK_RESERVE_MS / 2, Date.now() + 6e4) } : {}
+      }).catch(() => null);
       if (d && w.snapshot) {
         const s = w.snapshot;
         if (s.verdict && d.verdict !== s.verdict) {
@@ -2813,7 +2883,7 @@ async function runSweep(organizationId) {
     await telegram(`ARGUS sweep: ${fresh.length} new alert${fresh.length === 1 ? "" : "s"}
 ` + fresh.map((a) => `\u2022 ${a.label}: ${a.detail}`).join("\n"));
   }
-  return { checked: watches.length, alerts: fresh };
+  return { checked: watches.length, alerts: fresh, ...deferred ? { deferred, note: `${deferred} token check${deferred === 1 ? "" : "s"} deferred: sweep time budget reached` } : {} };
 }
 export {
   runSweep

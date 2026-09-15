@@ -15,8 +15,12 @@ export async function withProviderDeadline<T>(deadlineAt: number, work: () => Pr
       return result;
     });
   } finally {
+    // Only the deadline aborts. An adapter's last act is often a detached
+    // `void cacheSet(...)` for its most expensive provider answer; aborting on
+    // return killed that write every time, so the next rescan re-bought the
+    // call. Detached work carries its own timeout and the store is scoped to
+    // this scope's continuation, so nothing leaks into another adapter.
     clearTimeout(timer);
-    controller.abort();
   }
 }
 

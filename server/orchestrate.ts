@@ -3055,11 +3055,6 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
     .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")))
     .slice(0, 5)) {
     const sourceDate = incident.date ?? protocol.capturedAt;
-    const duplicate = evidence.findings.some((finding) =>
-      finding.finding_type === "ProtocolSecurityIncident"
-      && finding.source_url === protocol.sourceUrl
-      && finding.source_date === sourceDate);
-    if (duplicate) continue;
     const amount = incident.amountUsd ? `$${(incident.amountUsd / 1_000_000).toFixed(incident.amountUsd % 1_000_000 === 0 ? 0 : 1)}M` : "an unquantified";
     const classification = incident.classification ? `${incident.classification.toLowerCase()} ` : "";
     const technique = incident.technique ? ` Technique recorded: ${incident.technique}.` : "";
@@ -3074,9 +3069,20 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
         || incident.amountUsd == null
         || incident.returnedAmountUsd >= incident.amountUsd
       );
+    const claim = `DeFiLlama records ${amount} ${classification}security incident affecting ${protocol.name}${incident.date ? ` on ${incident.date}` : ""}.${technique}${recovery} This is evidence of protocol security and control failure, not by itself evidence of fraud or intentional misconduct.`;
+    // Every incident of a protocol shares the page URL, and undated rows share
+    // the capture date, so keying on those collapsed distinct exploits into
+    // one finding. The claim is built from the incident row itself (date,
+    // amount, classification, technique, recovery), so equal claims are the
+    // same incident and different incidents never collide.
+    const duplicate = evidence.findings.some((finding) =>
+      finding.finding_type === "ProtocolSecurityIncident"
+      && finding.source_url === protocol.sourceUrl
+      && finding.claim === claim);
+    if (duplicate) continue;
     evidence.findings.push({
       finding_type: "ProtocolSecurityIncident",
-      claim: `DeFiLlama records ${amount} ${classification}security incident affecting ${protocol.name}${incident.date ? ` on ${incident.date}` : ""}.${technique}${recovery} This is evidence of protocol security and control failure, not by itself evidence of fraud or intentional misconduct.`,
+      claim,
       source_url: protocol.sourceUrl,
       source_date: sourceDate,
       source_author: "defillama",
@@ -3742,6 +3748,55 @@ interface RunAuditOptions {
   tokenAddress?: string;
   tokenChain?: string;
   tokenSymbol?: string;
+  /**
+   * The request asked for a private run: nothing durable and org-visible may
+   * be left behind. Persistence of the report is the route's decision; this
+   * flag governs the collector's own write-backs (entity knowledge base).
+   */
+  privateRun?: boolean;
+}
+
+/**
+ * Adapters an authorized gap-investigation scope may run, keyed by the
+ * delegate names a frozen research plan carries. An adapter missing from this
+ * map can never run under a scope, so every registered adapter must appear.
+ */
+export const ADAPTER_DELEGATES: Readonly<Record<string, readonly string[]>> = {
+  x: ["x-profile", "twitterapi", "official-x"],
+  github: ["github"],
+  peopledatalabs: ["peopledatalabs"],
+  "offchain-diligence": ["official-domain", "public-web", "independent-web", "adverse-search", "courtlistener", "opensanctions"],
+  dexscreener: ["dexscreener"],
+  coingecko: ["coingecko"],
+  onchain: ["direct-chain-rpc", "wallet-graph"],
+  // Arkham had no entry, so a wallet-graph or person scope never re-collected
+  // deployer attribution or exposure and the row read "outside the frozen
+  // gap-investigation authorization" for work the analyst had authorized.
+  arkham: ["wallet-graph", "arkham"],
+  "basic-facts": ["basic-facts"],
+};
+
+/**
+ * Capabilities the cold intake wave serves (team and claim discovery, handle
+ * and wallet identity, affiliations, orientation, product and site
+ * discovery). A scoped follow-up authorized for none of them (an
+ * official-facts, token, fund-scale or legal-only re-run) gets its profile
+ * resolved and goes straight to the authorized adapters instead of re-buying
+ * the whole unscoped intake first and exhausting the collection window on it.
+ */
+export const COLD_INTAKE_CAPABILITIES: readonly ResearchCapability[] = [
+  "role_resolution",
+  "identity_resolution",
+  "people_and_control",
+  "project_fundamentals",
+  "portfolio_and_outcomes",
+  "network_connections",
+  "counter_evidence",
+];
+
+export function coldIntakeAuthorized(scope: RunAuditOptions["authorizedResearchScope"] | undefined): boolean {
+  if (!scope) return true;
+  return scope.capabilities.some((capability) => COLD_INTAKE_CAPABILITIES.includes(capability));
 }
 
 /**
@@ -3825,18 +3880,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const authorizedDelegates = options?.authorizedResearchScope
     ? new Set(options.authorizedResearchScope.delegates)
     : null;
-  const adapterDelegates: Record<string, readonly string[]> = {
-    x: ["x-profile", "twitterapi", "official-x"],
-    github: ["github"],
-    peopledatalabs: ["peopledatalabs"],
-    "offchain-diligence": ["official-domain", "public-web", "independent-web", "adverse-search", "courtlistener", "opensanctions"],
-    dexscreener: ["dexscreener"],
-    coingecko: ["coingecko"],
-    onchain: ["direct-chain-rpc", "wallet-graph"],
-    "basic-facts": ["basic-facts"],
-  };
   const adapterIsAuthorized = (adapter: Adapter): boolean => !authorizedDelegates
-    || (adapterDelegates[adapter.id] ?? []).some((delegate) => authorizedDelegates.has(delegate));
+    || (ADAPTER_DELEGATES[adapter.id] ?? []).some((delegate) => authorizedDelegates.has(delegate));
   // The DeFiLlama reader coalesces reads of the same URL for a short window so
   // one protocol document is not pulled three times per scan. That window is
   // already far shorter than a scan, but a warm serverless container can start
@@ -4289,7 +4334,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     }
     evidence.roles = providerBackedRoles(evidence);
     recordOfficialXAccountStatusFinding(evidence);
-    await coldIntake(ctx, true);
+    if (coldIntakeAuthorized(options?.authorizedResearchScope)) {
+      await coldIntake(ctx, true);
+    } else {
+      emit({
+        phase: "Collect",
+        label: "Discovery intake skipped",
+        detail: "This scoped follow-up authorizes none of the discovery capabilities, so the collection budget goes to the authorized adapters; untouched evidence carries forward from the source version.",
+        tone: "neutral",
+      });
+    }
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
 
@@ -5551,34 +5605,44 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // Best-effort, org-scoped, verified-only. Time-sensitive + legal signals are
   // intentionally EXCLUDED: BasicFact legal_regulatory_event, adverse findings,
   // and sanctions/legal source artifacts must all be re-screened live every run.
-  if (options?.organizationId) {
-    const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) =>
-      fact.artifact_verified === true
-      && (fact.status === "verified" || fact.status === "corroborated")
-      && fact.predicate !== "legal_regulatory_event"
-      // Provider-projection facts are regenerated fresh every run from free
-      // providers; storing them only grows the row and re-injects stale
-      // captures (the compounding "captured ..., captured ..." duplication).
-      && fact.providerProjection !== true);
-    const verifiedVentures = (evidence.ventures ?? []).filter((venture) =>
-      venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
-    if (verifiedBasicFacts.length || verifiedVentures.length || evidence.projectToken?.verified === true) {
-      void writeEntityFacts(options.organizationId, canonicalEntityKey({ handle: evidence.profile.handle }), {
-        entityType: evidence.roles[0] ? String(evidence.roles[0]) : null,
-        handle: evidence.profile.handle,
-        displayName: evidence.profile.resolved_name || evidence.profile.display_name,
-        facts: {
-          schema: 1,
-          basicFacts: verifiedBasicFacts,
-          ventures: verifiedVentures,
-          roles: evidence.roles.map((role) => String(role)),
-          projectToken: evidence.projectToken?.verified ? evidence.projectToken : undefined,
-        },
-      });
-    }
-  }
+  writeVerifiedEntityFacts(evidence, options);
   finishRuntimeStage("pipeline", runtimeStartedAt);
   return dossier;
+}
+
+/**
+ * Knowledge-base write-back of a run's verified facts. Best-effort and
+ * org-scoped. A private run leaves no durable org-visible trace: the entity
+ * row (handle, display name, facts, audit_count, fresh updated_at) would
+ * otherwise let a colleague's later scan stream "verified recently" for a
+ * subject the analyst scanned privately. Returns whether a write was started.
+ */
+export function writeVerifiedEntityFacts(evidence: CollectedEvidence, options: RunAuditOptions | undefined): boolean {
+  if (!options?.organizationId || options.privateRun) return false;
+  const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) =>
+    fact.artifact_verified === true
+    && (fact.status === "verified" || fact.status === "corroborated")
+    && fact.predicate !== "legal_regulatory_event"
+    // Provider-projection facts are regenerated fresh every run from free
+    // providers; storing them only grows the row and re-injects stale
+    // captures (the compounding "captured ..., captured ..." duplication).
+    && fact.providerProjection !== true);
+  const verifiedVentures = (evidence.ventures ?? []).filter((venture) =>
+    venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
+  if (!verifiedBasicFacts.length && !verifiedVentures.length && evidence.projectToken?.verified !== true) return false;
+  void writeEntityFacts(options.organizationId, canonicalEntityKey({ handle: evidence.profile.handle }), {
+    entityType: evidence.roles[0] ? String(evidence.roles[0]) : null,
+    handle: evidence.profile.handle,
+    displayName: evidence.profile.resolved_name || evidence.profile.display_name,
+    facts: {
+      schema: 1,
+      basicFacts: verifiedBasicFacts,
+      ventures: verifiedVentures,
+      roles: evidence.roles.map((role) => String(role)),
+      projectToken: evidence.projectToken?.verified ? evidence.projectToken : undefined,
+    },
+  });
+  return true;
 }
 
 export function runAudit(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {

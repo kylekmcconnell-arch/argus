@@ -47,7 +47,7 @@ vi.mock("./_graph.js", () => ({ activateReportVersionWithAuthoritativeGraph }));
 import { consumeInvestigationQuota, requireArgusAuth, serviceCredentials } from "./_auth.js";
 import { activateReportVersion } from "./_provenance.js";
 import { resolveInput, runAudit } from "./_collector.js";
-import { claimScanReceipt } from "./_scanReceipts.js";
+import { claimScanReceipt, recordScanReceipt } from "./_scanReceipts.js";
 import handler, { config } from "./audit";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
@@ -344,6 +344,57 @@ describe("person audit input guard", () => {
     const stream = captured.chunks.join("");
     const done = JSON.parse(stream.match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
     expect(done.persistence).toEqual({ state: "private", reportVersionId: null });
+  });
+
+  // 2026-09-14 deep-dive OR-2: the private flag governed report persistence
+  // only; the collector still wrote org-visible entity_facts.
+  it("tells the collector a private run is private", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@argus",
+      report: { audit_id: "private-run-flag", composite_verdict: "PASS", governing_score: 81 },
+    } as never);
+    const { res } = response();
+
+    await handler(request("argus", { private: "1" }), res);
+
+    expect(runAudit).toHaveBeenLastCalledWith("argus", expect.any(Function), expect.objectContaining({ privateRun: true }));
+
+    await handler(request("argus"), res);
+    expect(runAudit).toHaveBeenLastCalledWith("argus", expect.any(Function), expect.objectContaining({ privateRun: false }));
+  });
+
+  // 2026-09-14 deep-dive OR-7: any line that was not wholly succeeded
+  // (a recovered retry, a cache hit next to a live read) flipped the receipt to
+  // degraded/provider_incomplete on a run where every provider answered.
+  it("receipts a run with recovered retries and cache hits as complete, and a terminal failure as degraded", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
+    persistReportVersionBundle.mockResolvedValue({
+      caseId: "00000000-0000-4000-8000-000000000201",
+      reportVersionId: "00000000-0000-4000-8000-000000000303",
+      version: 1,
+    });
+    const dossier = (calls: unknown[]) => ({
+      live: true,
+      handle: "@argus",
+      report: { audit_id: "receipt-status", composite_verdict: "PASS", governing_score: 81 },
+      cost: { schemaVersion: 1, usd: 0.3, estimated: true, calls },
+    }) as never;
+
+    vi.mocked(runAudit).mockResolvedValue(dossier([
+      { provider: "grok", op: "live-search", calls: 2, succeeded: 1, partial: 0, failed: 1, cached: 0, usd: 0.2, status: "partial" },
+      { provider: "defillama", op: "tvl", calls: 2, succeeded: 1, partial: 0, failed: 0, cached: 1, usd: 0, status: "succeeded" },
+    ]));
+    await handler(request("argus"), response().res);
+    expect(recordScanReceipt).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ status: "complete", failureCode: null }));
+
+    vi.mocked(runAudit).mockResolvedValue(dossier([
+      { provider: "twitterapi", op: "profile", calls: 1, succeeded: 0, partial: 0, failed: 1, cached: 0, usd: 0, status: "failed" },
+    ]));
+    await handler(request("argus"), response().res);
+    expect(recordScanReceipt).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ status: "degraded", failureCode: "provider_incomplete" }));
   });
 
   it("does not activate or publish a report when core usage attribution fails", async () => {
