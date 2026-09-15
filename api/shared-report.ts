@@ -34,6 +34,22 @@ export function sanitizeSharedPayload(payload: unknown): unknown {
   return clone;
 }
 
+/**
+ * The share capability opens one frozen report, not the workspace around it.
+ * The analyst's display name (defaults to their email local-part) and the raw
+ * text they typed into search are workspace facts; the recipient gets the
+ * subject's canonical reference instead.
+ */
+export function sanitizeSharedReport(report: Record<string, unknown>): Record<string, unknown> {
+  const ref = typeof report.ref === "string" ? report.ref : "";
+  return {
+    ...report,
+    contributor: "shared",
+    query: ref,
+    payload: sanitizeSharedPayload(report.payload),
+  };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("cache-control", "no-store");
   res.setHeader("x-robots-tag", "noindex, nofollow");
@@ -88,7 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     res.status(200).json({
       available: true,
-      report: { ...exact.report, payload: sanitizeSharedPayload(exact.report.payload) },
+      report: sanitizeSharedReport(exact.report),
       expiresAt,
     });
   } catch (error) {
