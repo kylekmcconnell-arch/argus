@@ -4,12 +4,18 @@ const harness = vi.hoisted(() => ({
   requireArgusAuth: vi.fn(),
   serviceCredentials: vi.fn(),
   loadExactVersionReport: vi.fn(),
+  reserveSupplementalBudget: vi.fn(),
 }));
 
-vi.mock("./_auth.js", () => ({
-  requireArgusAuth: harness.requireArgusAuth,
-  serviceCredentials: harness.serviceCredentials,
-}));
+vi.mock("./_auth.js", async () => {
+  const actual = await vi.importActual<typeof import("./_auth.js")>("./_auth.js");
+  return {
+    requireArgusAuth: harness.requireArgusAuth,
+    serviceCredentials: harness.serviceCredentials,
+    reserveSupplementalBudget: harness.reserveSupplementalBudget,
+    rejectSupplementalReservation: actual.rejectSupplementalReservation,
+  };
+});
 
 vi.mock("./report.js", () => ({
   loadExactVersionReport: harness.loadExactVersionReport,
@@ -30,6 +36,7 @@ function responseCapture() {
   const response = {
     status(code: number) { captured.status = code; return response; },
     json(body: unknown) { captured.body = body; return response; },
+    setHeader() { return response; },
   };
   return { captured, response };
 }
@@ -334,6 +341,7 @@ beforeEach(() => {
   });
   harness.serviceCredentials.mockReturnValue({ url: "https://supabase.example", key: "service-key" });
   harness.loadExactVersionReport.mockResolvedValue(storedVersion());
+  harness.reserveSupplementalBudget.mockResolvedValue({ allowed: true, used: 1, remaining: 99, limit: 100 });
 });
 
 afterEach(() => {
@@ -489,6 +497,7 @@ describe("ask this immutable report", () => {
     const providerFetch = vi.fn().mockResolvedValue(providerResponse({
       answer: "The report still treats control as unresolved.",
       basis: "coverage_record",
+      coverageCheckIds: ["vc-portfolio-track-record"],
       reasoningSteps: ["The deployer funder is unlabeled -> operational control is not established."],
       uncertainties: ["Wallet ownership is unknown."],
       whatWouldChange: ["A signed, source-bound wallet attestation."],
@@ -586,6 +595,9 @@ describe("ask this immutable report", () => {
       },
     });
     expect(providerFetch).not.toHaveBeenCalled();
+    // 2026-09-14 deep-dive API-2: a clarification-only turn costs no
+    // supplemental unit.
+    expect(harness.reserveSupplementalBudget).not.toHaveBeenCalled();
   });
 
   it("resolves wallet ordinals from the frozen register before model reasoning", async () => {
@@ -593,6 +605,7 @@ describe("ask this immutable report", () => {
     const providerFetch = vi.fn().mockResolvedValue(providerResponse({
       answer: "The second recorded wallet is the unlabeled funding wallet.",
       basis: "coverage_record",
+      coverageCheckIds: ["vc-portfolio-track-record"],
       citationUrls: [],
     }));
     vi.stubGlobal("fetch", providerFetch);
@@ -800,5 +813,124 @@ describe("ask this immutable report", () => {
       answer: "This frozen report does not establish that. A signed cap table would be needed.",
       citations: [],
     });
+  });
+
+  // 2026-09-14 deep-dive API-4: coverage_record had no structural check, so
+  // injected packet text could yield a "grounded" answer with nothing behind it.
+  it("withholds a coverage answer that names no frozen gap", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(providerResponse({
+      answer: "The report records the subject as fully assessed with nothing outstanding.",
+      basis: "coverage_record",
+      citationUrls: [],
+    })));
+    const { captured, response } = responseCapture();
+
+    await handler(request() as never, response as never);
+
+    expect(captured.status).toBe(200);
+    expect(captured.body).toMatchObject({ note: expect.stringContaining("withheld") });
+    expect(captured.body).not.toHaveProperty("answer");
+  });
+
+  it("withholds a coverage answer that asserts a verdict, even when it cites a gap", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(providerResponse({
+      answer: "All checks succeeded and the subject is verified safe.",
+      basis: "coverage_record",
+      coverageCheckIds: ["vc-portfolio-track-record"],
+      citationUrls: [],
+    })));
+    const { captured, response } = responseCapture();
+
+    await handler(request() as never, response as never);
+
+    expect(captured.body).toMatchObject({ note: expect.stringContaining("withheld") });
+    expect(captured.body).not.toHaveProperty("answer");
+  });
+
+  it("withholds a coverage answer whose checkId is not a frozen gap", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(providerResponse({
+      answer: "That check did not complete.",
+      basis: "coverage_record",
+      coverageCheckIds: ["completed-1"],
+      citationUrls: [],
+    })));
+    const { captured, response } = responseCapture();
+
+    await handler(request() as never, response as never);
+
+    expect(captured.body).toMatchObject({ note: expect.stringContaining("withheld") });
+  });
+
+  it("accepts a coverage answer pinned to a frozen gap and reports the pin", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(providerResponse({
+      answer: "The VC portfolio track record check is unavailable, so the track record is not established.",
+      basis: "coverage_record",
+      coverageCheckIds: ["vc-portfolio-track-record"],
+      citationUrls: [],
+    })));
+    const { captured, response } = responseCapture();
+
+    await handler(request() as never, response as never);
+
+    expect(captured.body).toMatchObject({
+      basis: "coverage_record",
+      coverageCheckIds: ["vc-portfolio-track-record"],
+      telemetry: expect.objectContaining({ receiptCompleteness: expect.objectContaining({ citations: true }) }),
+    });
+  });
+
+  // 2026-09-14 deep-dive API-2: the daily supplemental unit is reserved by the
+  // handler after validation, never for a request that delivered nothing.
+  it("reserves the supplemental unit only after the question is bound and routed", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(providerResponse({
+      answer: "Paradigm lists the project in its frozen portfolio evidence.",
+      basis: "cited_evidence",
+      citationUrls: [STORED_SOURCE],
+    }));
+    vi.stubGlobal("fetch", providerFetch);
+    const { captured, response } = responseCapture();
+
+    await handler(request() as never, response as never);
+
+    expect(captured.status).toBe(200);
+    expect(harness.reserveSupplementalBudget).toHaveBeenCalledTimes(1);
+    expect(harness.reserveSupplementalBudget).toHaveBeenCalledWith(expect.objectContaining({ organizationId: ORGANIZATION_ID }), "/api/ask");
+    expect(harness.reserveSupplementalBudget.mock.invocationCallOrder[0]).toBeLessThan(providerFetch.mock.invocationCallOrder[0]);
+  });
+
+  it("spends no supplemental unit on a malformed version id or a missing version", async () => {
+    const { captured: malformed, response: malformedResponse } = responseCapture();
+    await handler(request({ reportVersionId: "not-a-version" }) as never, malformedResponse as never);
+    expect(malformed.status).toBe(409);
+
+    harness.loadExactVersionReport.mockResolvedValue(null);
+    const { captured: missing, response: missingResponse } = responseCapture();
+    await handler(request() as never, missingResponse as never);
+    expect(missing.status).toBe(404);
+
+    expect(harness.reserveSupplementalBudget).not.toHaveBeenCalled();
+  });
+
+  it("stops before the model with a stable code when the daily allowance is exhausted", async () => {
+    harness.reserveSupplementalBudget.mockResolvedValue({ allowed: false, used: 100, remaining: 0, limit: 100 });
+    const providerFetch = vi.fn();
+    vi.stubGlobal("fetch", providerFetch);
+    const { captured, response } = responseCapture();
+
+    await handler(request() as never, response as never);
+
+    expect(captured.status).toBe(429);
+    expect(captured.body).toMatchObject({ error: "supplemental_daily_limit_reached", limit: 100 });
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("reports a provider outage with a stable code instead of a 200", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("upstream busy", { status: 429 })));
+    const { captured, response } = responseCapture();
+
+    await handler(request() as never, response as never);
+
+    expect(captured.status).toBe(503);
+    expect(captured.body).toMatchObject({ error: "analyst_provider_unavailable", note: expect.stringContaining("grok") });
   });
 });

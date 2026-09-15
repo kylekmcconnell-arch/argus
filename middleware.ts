@@ -48,6 +48,12 @@ const SUPPLEMENTAL_PATHS = new Set([
   "evm-funder", "evm-cluster", "evm-deployer", "code-review", "wallet-taxonomy", "deployer-origin", "migration", "early-buyers",
   "cohort", "wallet-holdings", "deployer-risk", "reclassify", "resolve-deployer", "ocr-clue",
 ].map((route) => `/api/${route}`));
+// Routes that reserve their own supplemental unit from the handler, after
+// validation and immediately before paid work (reserveSupplementalBudget in
+// api/_auth.ts). Reserving here charged the daily allowance for 4xx
+// rejections, clarification-only turns and provider outages that delivered
+// nothing. Every path listed here MUST call the helper before its model call.
+export const HANDLER_METERED_SUPPLEMENTAL_PATHS = new Set(["/api/ask", "/api/reclassify"]);
 const ROLE_RANK: Record<string, number> = { viewer: 0, analyst: 1, owner: 2 };
 
 export const config = {
@@ -241,7 +247,9 @@ export default async function middleware(request: Request): Promise<Response> {
     // Invalid/used scope cannot bypass the ordinary daily allowance.
   }
 
-  if (SUPPLEMENTAL_PATHS.has(pathname) || (["/api/augment", "/api/deep-launch"].includes(pathname) && request.method === "POST")) {
+  const supplementalRoute = SUPPLEMENTAL_PATHS.has(pathname)
+    || (["/api/augment", "/api/deep-launch"].includes(pathname) && request.method === "POST");
+  if (supplementalRoute && !HANDLER_METERED_SUPPLEMENTAL_PATHS.has(pathname)) {
     const configuredLimit = Number(process.env.ARGUS_SUPPLEMENTAL_DAILY_LIMIT ?? 100);
     if (!Number.isInteger(configuredLimit) || configuredLimit < 1 || configuredLimit > 100000) {
       return Response.json({ error: "supplemental_budget_not_configured" }, { status: 503 });
