@@ -125,6 +125,17 @@ describe("assessShipping · point-in-time reads", () => {
   });
 });
 
+describe("assessShipping · thin is volume and substance together", () => {
+  it("does not call hundreds of small commits from a team thin", () => {
+    const commits = Array.from({ length: 300 }, (_, i) => commit({ date: daysAgo(i % 89), ...people[i % 3], additions: 3, deletions: 1, files: 1 }));
+    const a = assessShipping(base({ commits }));
+    expect(a.substance.medianLinesChanged).toBe(4);
+    expect(a.grade).toBe("shipping-team");
+    const few = assessShipping(base({ commits: commits.slice(0, 20) }));
+    expect(few.grade).toBe("thin");
+  });
+});
+
 describe("assessShipping · trend, roadmap, cohort, delta, coverage", () => {
   it("builds a yearly trend from provider weekly stats with price, releases and deploys per week", () => {
     const weeklyCommits = Array.from({ length: 52 }, (_, i) => ({ weekStart: daysAgo((52 - i) * 7).slice(0, 10), commits: i % 2 ? 4 : 1 }));

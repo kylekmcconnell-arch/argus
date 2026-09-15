@@ -1046,7 +1046,10 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
   let grade: ShippingGrade;
   if (status === "unknown") grade = "unknown";
   else if (status === "dormant") grade = "stalled";
-  else if (total < 10 || (substance.medianLinesChanged != null && substance.medianLinesChanged < 10 && releasesInWindow === 0)) grade = "thin";
+  // Thin is about volume and substance together. A repository with hundreds of
+  // small commits from a team is a busy repository, not a thin one; the
+  // substance rule only bites when the volume is also low.
+  else if (total < 10 || (total < 30 && substance.medianLinesChanged != null && substance.medianLinesChanged < 10 && releasesInWindow === 0)) grade = "thin";
   else if (concentration === "team" || concentration === "lead-plus") grade = "shipping-team";
   else grade = "shipping-solo";
 

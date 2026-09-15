@@ -176,29 +176,44 @@ Tests added: `src/threat/shipping.decision.test.ts` (14), `src/threat/scan.shipp
 cases in `src/lib/reportDelta.test.ts` and `src/lib/scanChecklist.test.ts`, and the
 rewritten `api/github-shipping.test.ts` (12) with a URL-routed fetch.
 
-**Backtest, first run.** The harness works end to end: the reference repo reads as
-shipping-solo / mirrored / bulk-imported at 2026-09-15 and Aerodrome as shipping-team
-with six human authors at 2026-06-01. Two limits showed up and are recorded rather than hidden: GitHub's
-edge times the wide repository query out on very large organisations (Uniswap, gmx-io,
-elizaOS, Virtual-Protocol returned 502/504), so the collector now retries with the five
-most recently pushed repositories and says so in the coverage notes; and GeckoTerminal
-serves 200 daily candles, so forward returns need subjects whose as-of date is inside
-that window. The seed file is six controls; the set that would let the grades be
-reweighted with any confidence is a few dozen tokens with known outcomes, which is a
-data-entry task, not an engineering one.
+**Backtest.** `eval/shipping-backtest.json` now holds 33 subjects whose token
+addresses were confirmed on DEX Screener and whose GitHub organisations were
+confirmed to exist, read as of 2026-04-01 with a 90-day horizon. The run
+found two bugs before it found anything about tokens: a `Math.max(..., NaN)`
+that poisoned the recency read, so a repository with no commits in the window
+graded "unknown" instead of "stalled" (fixed, pinned by a test, and it
+affected live reads too); and a "thin" rule that fired on 400 small commits
+from 21 people (now thin needs low volume as well as low substance). With
+those fixed:
+
+| grade | n priced | median 90-day return | share positive |
+| --- | --- | --- | --- |
+| shipping-team | 8 | -14% | 38% |
+| stalled | 2 | -32% | 0% |
+| thin | 1 | -31% | 0% |
+
+The direction is what the engine assumes (stalled and thin projects did worse
+than shipping teams over a quarter in which almost everything fell) and the
+numbers are far too few to reweight anything. Coverage is the limit, not the
+method: 11 of 33 subjects priced (GeckoTerminal rate-limits bursts and serves
+200 daily candles), and 4 failed at GitHub's edge (the wide GraphQL query
+times out on the largest organisations even at the five-repository fallback).
+The set is skewed to blue chips because those are the tokens with verifiable
+GitHub organisations; the stalled and thin rows that would carry the finding
+are exactly the projects that rarely link a repository. Growing the set means
+adding small tokens with linked repositories as they are scanned, which the
+frozen summary on every saved report now does automatically.
 
 ## 5. Still open
 
-1. **A backtest set worth trusting.** `eval/shipping-backtest.json` holds six
-   controls. Reweighting the engine's development penalties needs a few dozen
-   tokens with known outcomes and as-of dates inside GeckoTerminal's 200-day
-   candle window; until then the penalties are judgement, and the doc says so.
-2. **Robinhood Chain deploy trail.** `api/evm-deployer.ts` reads Etherscan v2,
-   which has no chain 4663 entry, so Robinhood Chain tokens get no deploy list
-   and the live read stays "unknown" there. A Blockscout creation reader
-   (the `getcontractcreation` call in `api/launch.ts` is the precedent) closes it.
-3. **PyPI and crates.** Only npm is read for publishes and downloads; Rust and
-   Python projects show no package signal.
-5. **Star lists.** Only a repository admin can read who starred. If a project
+1. **Backtest breadth.** 33 subjects, 11 priced. The engine's development
+   penalties remain judgement until stalled and thin rows number in the dozens;
+   small tokens with linked repositories are the rows to add, and each saved
+   report now contributes a frozen summary to that pool.
+2. **Very large organisations.** GitHub's edge returns 502 on the repository
+   query for the largest orgs even at the five-repository fallback. A
+   per-repository read path (one query per repo, no nested samples) would
+   close it at the cost of more calls.
+3. **Star lists.** Only a repository admin can read who starred. If a project
    under review grants collaborator access, the stargazer sample input already
    runs the account-level StarScout read.
