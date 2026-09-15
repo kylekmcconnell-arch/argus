@@ -14,7 +14,8 @@ const SWEEP_MAX_DURATION_SECONDS = 120;
 // platform kills the invocation.
 const SWEEP_FINALIZATION_RESERVE_MS = 15_000;
 
-export const config = { maxDuration: SWEEP_MAX_DURATION_SECONDS };
+// Vercel reads this statically: it must stay a literal (keep equal to SWEEP_MAX_DURATION_SECONDS).
+export const config = { maxDuration: 120 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const startedAt = Date.now();
