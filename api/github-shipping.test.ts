@@ -200,6 +200,28 @@ describe("GitHub shipping provider completeness", () => {
     expect(attachPanelCost).toHaveBeenCalledWith(ORGANIZATION_ID, VERSION_ID, expect.objectContaining({ calls: 6, status: "succeeded" }));
   });
 
+  it("reads PyPI and crates.io packages declared in pyproject.toml and Cargo.toml", async () => {
+    const fetchMock = routedFetch([
+      ownerRoute([repoNode({ pkg: null, pyproject: { text: '[build-system]\nrequires = ["hatchling"]\n\n[project]\nname = "acme-sdk"\nversion = "1.0"\n' }, cargo: { text: '[package]\nname = "acme-core"\nversion = "0.3.0"\n\n[dependencies]\nname = "not-this"\n' } })]),
+      historyRoute([0].map(commitNode)),
+      identityRoute,
+      weeklyRoute([]),
+      (u) => (u.startsWith("https://pypi.org/pypi/acme-sdk/json") ? json({ releases: { "1.0": [{ upload_time_iso_8601: "2026-09-10T00:00:00Z" }], "0.9": [{ upload_time_iso_8601: "2026-01-01T00:00:00Z" }] } }) : undefined),
+      (u) => (u.startsWith("https://pypistats.org/api/packages/acme-sdk/recent") ? json({ data: { last_month: 5400 } }) : undefined),
+      (u) => (u.startsWith("https://crates.io/api/v1/crates/acme-core") ? json({ crate: { recent_downloads: 900 }, versions: [{ num: "0.3.0", created_at: "2026-09-01T00:00:00Z" }] }) : undefined),
+    ]);
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+    await handler(request() as never, res as never);
+    const input = captured.body?.input as { repos: { pypiName?: string; crateName?: string }[]; packages: { registry: string; name: string; versions: unknown[]; downloadsLastMonth?: number }[] };
+    expect(input.repos[0]).toMatchObject({ pypiName: "acme-sdk", crateName: "acme-core" });
+    expect(input.packages).toEqual([
+      { registry: "pypi", name: "acme-sdk", versions: [{ version: "1.0", date: "2026-09-10T00:00:00Z" }, { version: "0.9", date: "2026-01-01T00:00:00Z" }], downloadsLastMonth: 5400 },
+      { registry: "crates", name: "acme-core", versions: [{ version: "0.3.0", date: "2026-09-01T00:00:00Z" }], downloadsLastMonth: 300 },
+    ]);
+    expect((captured.body?.assessment as { adoption: { verdict: string; packages: string[] } }).adoption).toMatchObject({ verdict: "used", packages: ["pypi:acme-sdk", "crates:acme-core"] });
+  });
+
   it("walks the star history for the flagship repository and flattens it to days", async () => {
     const week = 1789257600;
     const fetchMock = routedFetch([

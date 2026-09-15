@@ -12,8 +12,8 @@
 // dates is reported as unpriced, never dropped silently.
 //
 // The subjects file is a JSON array of
-//   { "label": "HEY", "target": "hey-research-lab", "kind": "org" | "repo", "chain": "robinhood",
-//     "address": "0x...", "asOf": "2026-09-15", "note": "optional" }
+//   { "label": "AERO", "target": "aerodrome-finance", "kind": "org" | "repo", "chain": "base",
+//     "address": "0x...", "asOf": "2026-04-01", "note": "optional" }
 // The default file is eval/shipping-backtest.json.
 import { readFileSync } from "node:fs";
 import { assessShipping, type ShippingAssessment } from "../src/threat/shipping";

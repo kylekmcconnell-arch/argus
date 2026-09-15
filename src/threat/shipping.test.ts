@@ -82,24 +82,24 @@ describe("assessShipping · cadence and committers", () => {
   });
 
   it("reads a private-repo mirror as unattributed, never as a person", () => {
-    // The HEY Research Lab shape: every public commit is a squashed sync from a
+    // The private-mirror shape: every public commit is a squashed sync from a
     // bot account, so the public history says who published, not who wrote.
     const commits = Array.from({ length: 44 }, (_, i) =>
       commit({
         date: daysAgo(4 - Math.floor(i / 11), 6 + (i % 11)),
-        authorKey: "327801004+hey-research-lab@users.noreply.github.com",
-        authorName: "HEY Research Lab",
-        authorLogin: "hey-research-lab",
+        authorKey: "327801004+mirror-labs@users.noreply.github.com",
+        authorName: "Mirror Labs",
+        authorLogin: "mirror-labs",
         authorAccountCreatedAt: daysAgo(4),
-        headline: `Sync from HEY Research Lab (${i.toString(16).padStart(7, "0")})`,
+        headline: `Sync from Mirror Labs (${i.toString(16).padStart(7, "0")})`,
         body: "fix(ui): tolerate a root the public export does not carry\ndocs: the two GitHub budgets",
         additions: 200 + i,
         deletions: 100,
         files: 12,
-        repo: "hey-research-lab/hey-research-open",
+        repo: "mirror-labs/mirror-open",
       }),
     );
-    const a = assessShipping(base({ target: "hey-research-lab", repos: [repo({ nameWithOwner: "hey-research-lab/hey-research-open", createdAt: daysAgo(4), stars: 0 })], commits }));
+    const a = assessShipping(base({ target: "mirror-labs", repos: [repo({ nameWithOwner: "mirror-labs/mirror-open", createdAt: daysAgo(4), stars: 0 })], commits }));
     expect(a.committers.concentration).toBe("unattributed");
     expect(a.committers.distinctHuman).toBe(0);
     expect(a.committers.mirrorSharePct).toBe(100);

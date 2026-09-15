@@ -29,22 +29,22 @@ const NOW = "2026-09-15T12:00:00Z";
 const daysAgo = (d: number) => new Date(Date.parse(NOW) - d * 864e5).toISOString();
 
 const input: ShippingInput = {
-  target: "hey-research-lab",
+  target: "mirror-labs",
   kind: "org",
   now: NOW,
   windowDays: 90,
-  repos: [{ nameWithOwner: "hey-research-lab/hey-research-open", isFork: false, createdAt: daysAgo(4), pushedAt: daysAgo(0), stars: 0, forks: 0, license: "MIT", releases: [], releaseCount: 0, hasReadme: true, hasCi: true, hasTests: true }],
+  repos: [{ nameWithOwner: "mirror-labs/mirror-open", isFork: false, createdAt: daysAgo(4), pushedAt: daysAgo(0), stars: 0, forks: 0, license: "MIT", releases: [], releaseCount: 0, hasReadme: true, hasCi: true, hasTests: true }],
   commits: Array.from({ length: 44 }, (_, i) => ({
     sha: `s${i}`,
     date: daysAgo(4 - Math.floor(i / 11)),
-    authorKey: "327801004+hey-research-lab@users.noreply.github.com",
-    authorName: "HEY Research Lab",
-    authorLogin: "hey-research-lab",
+    authorKey: "327801004+mirror-labs@users.noreply.github.com",
+    authorName: "Mirror Labs",
+    authorLogin: "mirror-labs",
     additions: 200,
     deletions: 100,
     files: 12,
-    headline: `Sync from HEY Research Lab (${i})`,
-    repo: "hey-research-lab/hey-research-open",
+    headline: `Sync from Mirror Labs (${i})`,
+    repo: "mirror-labs/mirror-open",
   })),
   peers: {
     sector: "analytics",
@@ -59,7 +59,7 @@ describe("GithubShipping panel", () => {
   it("refuses to fetch without a panel token and says a saved report is required", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await act(async () => { root.render(<GithubShipping org="hey-research-lab" />); });
+    await act(async () => { root.render(<GithubShipping org="mirror-labs" />); });
     const button = container.querySelector("button") as HTMLButtonElement;
     expect(button.textContent).toBe("saved report required");
     expect(button.disabled).toBe(true);
@@ -69,14 +69,14 @@ describe("GithubShipping panel", () => {
   it("detects the sector from the copy and requests it, then renders the assessment", async () => {
     const fetchMock = vi.fn().mockResolvedValue(json({ available: true, input, assessment: undefined }));
     vi.stubGlobal("fetch", fetchMock);
-    await act(async () => { root.render(<GithubShipping org="hey-research-lab" sectorText="builder intelligence and research analytics for Robinhood Chain" panelCostToken="signed" />); });
+    await act(async () => { root.render(<GithubShipping org="mirror-labs" sectorText="builder intelligence and research analytics for Robinhood Chain" panelCostToken="signed" />); });
     expect(container.textContent).toContain("leading crypto analytics and research tooling");
     const button = container.querySelector("button") as HTMLButtonElement;
     await act(async () => { button.click(); });
     await act(async () => { await Promise.resolve(); });
 
     const url = String(fetchMock.mock.calls[0][0]);
-    expect(url).toContain("/api/github-shipping?org=hey-research-lab");
+    expect(url).toContain("/api/github-shipping?org=mirror-labs");
     expect(url).toContain("sector=analytics");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ headers: expect.objectContaining({ "x-argus-panel-token": "signed" }) });
 

@@ -110,6 +110,21 @@ describe("assessShipping · live, adoption and health", () => {
   });
 });
 
+describe("assessShipping · point-in-time reads", () => {
+  it("reads recency from the repository push date when there are no commits, and never from the future", () => {
+    // Regression: Math.max(...pushes, NaN) poisoned the recency read, so a repo
+    // with no window commits graded "unknown" instead of "stalled".
+    const stalled = assessShipping(base({ commits: [], repos: [repo({ pushedAt: daysAgo(200) })] }));
+    expect(stalled.cadence.status).toBe("dormant");
+    expect(stalled.cadence.lastCommitDaysAgo).toBe(200);
+    expect(stalled.grade).toBe("stalled");
+    // A push or release after the read's `now` is not known at that moment.
+    const future = assessShipping(base({ commits: [], repos: [repo({ pushedAt: daysAgo(-40), releases: [{ tag: "v9", publishedAt: daysAgo(-10) }], releaseCount: 1 })] }));
+    expect(future.cadence.status).toBe("unknown");
+    expect(future.cadence.releasesInWindow).toBe(0);
+  });
+});
+
 describe("assessShipping · trend, roadmap, cohort, delta, coverage", () => {
   it("builds a yearly trend from provider weekly stats with price, releases and deploys per week", () => {
     const weeklyCommits = Array.from({ length: 52 }, (_, i) => ({ weekStart: daysAgo((52 - i) * 7).slice(0, 10), commits: i % 2 ? 4 : 1 }));

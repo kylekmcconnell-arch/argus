@@ -18,11 +18,16 @@ const GQL = "https://api.github.com/graphql";
 const REST = "https://api.github.com";
 const NPM_REGISTRY = "https://registry.npmjs.org";
 const NPM_DOWNLOADS = "https://api.npmjs.org/downloads/point/last-month";
+const PYPI_REGISTRY = "https://pypi.org/pypi";
+const PYPI_DOWNLOADS = "https://pypistats.org/api/packages";
+const CRATES_REGISTRY = "https://crates.io/api/v1/crates";
 const API_VERSION = "2026-03-10";
 export const GITHUB_LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 export const GITHUB_REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9_.-]{1,100}$/;
 const LOGIN_RE = GITHUB_LOGIN_RE;
 const NPM_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+const PYPI_NAME_RE = /^[A-Za-z0-9]([A-Za-z0-9._-]{0,80}[A-Za-z0-9])?$/;
+const CRATE_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const WINDOW_DAYS = 90;
 const OWNER_REPOS = 10;
 const OWNER_REPOS_FALLBACK = 5; // a lighter second try when GitHub times the big query out
@@ -144,6 +149,8 @@ const REPO_FIELDS = `
   auditsDir: object(expression: "HEAD:audits") { ... on Tree { entries { name } } }
   auditDir: object(expression: "HEAD:audit") { ... on Tree { entries { name } } }
   pkg: object(expression: "HEAD:package.json") { ... on Blob { text } }
+  pyproject: object(expression: "HEAD:pyproject.toml") { ... on Blob { text } }
+  cargo: object(expression: "HEAD:Cargo.toml") { ... on Blob { text } }
   defaultBranchRef { target { ... on Commit {
     history(since: $since, until: $until) { totalCount }
     statusCheckRollup { state }
@@ -171,6 +178,8 @@ type GqlRepo = {
   forks?: { nodes: { pushedAt?: string | null }[] } | null;
   readme?: { byteSize?: number } | null; workflows?: Tree; testDir?: Tree; testsDir?: Tree; auditsDir?: Tree; auditDir?: Tree;
   pkg?: { text?: string | null } | null;
+  pyproject?: { text?: string | null } | null;
+  cargo?: { text?: string | null } | null;
   defaultBranchRef?: { target?: ({ history?: { totalCount: number }; statusCheckRollup?: { state?: string } | null } & Record<string, unknown>) | null } | null;
 };
 type GqlCommit = {
@@ -195,6 +204,21 @@ function packageNameOf(text?: string | null): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The `name = "..."` under a TOML table such as [project], [tool.poetry] or [package]. */
+export function tomlNameUnder(text: string | null | undefined, tables: string[], valid: RegExp): string | undefined {
+  if (!text || text.length > 200_000) return undefined;
+  for (const table of tables) {
+    const start = text.indexOf(`[${table}]`);
+    if (start < 0) continue;
+    const body = text.slice(start + table.length + 2);
+    const end = body.search(/\n\s*\[/);
+    const section = end >= 0 ? body.slice(0, end) : body;
+    const m = section.match(/^\s*name\s*=\s*"([^"]+)"/m);
+    if (m && valid.test(m[1])) return m[1];
+  }
+  return undefined;
 }
 
 function normaliseRepo(r: GqlRepo, since: string): ShippingRepo {
@@ -232,6 +256,8 @@ function normaliseRepo(r: GqlRepo, since: string): ShippingRepo {
     ciState,
     lockfileUpdatedAt: lockDates.length ? lockDates[lockDates.length - 1] : undefined,
     packageName: packageNameOf(r.pkg?.text),
+    pypiName: tomlNameUnder(r.pyproject?.text, ["project", "tool.poetry"], PYPI_NAME_RE),
+    crateName: tomlNameUnder(r.cargo?.text, ["package"], CRATE_NAME_RE),
     pullRequestsSampled: prs.length,
     externalPullRequests: prs.filter((p) => isExternal(p.authorAssociation)).length,
     issuesSampled: issues.length,
@@ -323,18 +349,38 @@ async function readIdentities(logins: string[], key: string, usage: CallCounter)
   return out;
 }
 
-/** Published versions and last-month downloads for the packages the repositories declare. */
-async function readPackages(names: string[], usage: CallCounter): Promise<ShippingPackage[]> {
+/** Published versions and recent downloads for the packages the repositories declare, across npm, PyPI and crates.io. */
+export interface DeclaredPackage { registry: ShippingPackage["registry"]; name: string }
+async function readPackages(declared: DeclaredPackage[], usage: CallCounter): Promise<ShippingPackage[]> {
   const out: ShippingPackage[] = [];
-  for (const name of [...new Set(names)].slice(0, PACKAGES_MAX)) {
-    const meta = await keyless<{ name?: string; time?: Record<string, string> }>(`${NPM_REGISTRY}/${encodeURIComponent(name).replace("%40", "@")}`, usage);
-    if (!meta?.time) continue;
-    const versions = Object.entries(meta.time)
-      .filter(([v]) => v !== "created" && v !== "modified")
-      .map(([version, date]) => ({ version, date }))
-      .filter((v) => Number.isFinite(Date.parse(v.date)));
-    const dl = await keyless<{ downloads?: number }>(`${NPM_DOWNLOADS}/${encodeURIComponent(name).replace("%40", "@")}`, usage);
-    out.push({ name, registry: "npm", versions, downloadsLastMonth: typeof dl?.downloads === "number" ? dl.downloads : undefined });
+  const seen = new Set<string>();
+  for (const { registry, name } of declared) {
+    const k = `${registry}:${name}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (out.length >= PACKAGES_MAX) break;
+    if (registry === "npm") {
+      const enc = encodeURIComponent(name).replace("%40", "@");
+      const meta = await keyless<{ time?: Record<string, string> }>(`${NPM_REGISTRY}/${enc}`, usage);
+      if (!meta?.time) continue;
+      const versions = Object.entries(meta.time).filter(([v]) => v !== "created" && v !== "modified").map(([version, date]) => ({ version, date })).filter((v) => Number.isFinite(Date.parse(v.date)));
+      const dl = await keyless<{ downloads?: number }>(`${NPM_DOWNLOADS}/${enc}`, usage);
+      out.push({ name, registry, versions, downloadsLastMonth: typeof dl?.downloads === "number" ? dl.downloads : undefined });
+    } else if (registry === "pypi") {
+      const meta = await keyless<{ releases?: Record<string, { upload_time_iso_8601?: string }[]> }>(`${PYPI_REGISTRY}/${encodeURIComponent(name)}/json`, usage);
+      if (!meta?.releases) continue;
+      const versions = Object.entries(meta.releases)
+        .map(([version, files]) => ({ version, date: files?.[0]?.upload_time_iso_8601 ?? "" }))
+        .filter((v) => Number.isFinite(Date.parse(v.date)));
+      const dl = await keyless<{ data?: { last_month?: number } }>(`${PYPI_DOWNLOADS}/${encodeURIComponent(name)}/recent`, usage);
+      out.push({ name, registry, versions, downloadsLastMonth: typeof dl?.data?.last_month === "number" ? dl.data.last_month : undefined });
+    } else {
+      const meta = await keyless<{ crate?: { recent_downloads?: number }; versions?: { num: string; created_at: string }[] }>(`${CRATES_REGISTRY}/${encodeURIComponent(name)}`, usage);
+      if (!meta?.versions) continue;
+      const versions = meta.versions.map((v) => ({ version: v.num, date: v.created_at })).filter((v) => Number.isFinite(Date.parse(v.date)));
+      // crates.io reports 90-day downloads; a third of it is the monthly figure the other registries give.
+      out.push({ name, registry, versions, downloadsLastMonth: typeof meta.crate?.recent_downloads === "number" ? Math.round(meta.crate.recent_downloads / 3) : undefined });
+    }
   }
   return out;
 }
@@ -438,9 +484,13 @@ export async function collectShipping(opts: CollectShippingOptions): Promise<Shi
 
   // Packages the repositories publish (keyless registry reads).
   let packages: ShippingPackage[] | undefined;
-  const names = repos.map((r) => r.packageName).filter((n): n is string => !!n);
-  if (names.length && !pointInTime) {
-    packages = await readPackages(names, usage);
+  const declared: DeclaredPackage[] = repos.flatMap((r) => [
+    ...(r.packageName ? [{ registry: "npm" as const, name: r.packageName }] : []),
+    ...(r.pypiName ? [{ registry: "pypi" as const, name: r.pypiName }] : []),
+    ...(r.crateName ? [{ registry: "crates" as const, name: r.crateName }] : []),
+  ]);
+  if (declared.length && !pointInTime) {
+    packages = await readPackages(declared, usage);
     if (!packages.length) packages = undefined;
   }
 

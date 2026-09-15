@@ -7,12 +7,13 @@
 // pure function of that input so it can be replayed in tests and re-run on the
 // client with the price series and the project's own posts joined in.
 //
-// Inspired by the way HEY Research Lab (heyresearch.xyz) separates "what was
-// shipped" from "how the token trades": activity status is derived only from
-// source-backed development, never from price. We go further in the directions
-// a due-diligence report needs: committer concentration, commit substance,
-// machine-authored and mirrored history, copied code, star authenticity,
-// marketing claims against the commit log, and the sector peer baseline.
+// The governing idea: "what was shipped" is read apart from "how the token
+// trades". Activity status is derived only from source-backed development,
+// never from price, and the market read is set beside it afterwards. On top of
+// that separation sit the reads a due-diligence report needs: committer
+// concentration, commit substance, machine-authored and mirrored history,
+// copied code, star authenticity, marketing claims against the commit log, and
+// the sector peer baseline.
 //
 // Every verdict here is evidence-graded, never an accusation: "single-author"
 // says one person wrote the code, not that the project is fake.
@@ -74,6 +75,10 @@ export interface ShippingRepo {
   lockfileUpdatedAt?: string;
   /** `name` from package.json at HEAD, when present and public. */
   packageName?: string;
+  /** `[project].name` or `[tool.poetry].name` from pyproject.toml at HEAD. */
+  pypiName?: string;
+  /** `[package].name` from Cargo.toml at HEAD. */
+  crateName?: string;
   /** Pull requests sampled newest-first with the author's association to the repository. */
   pullRequestsSampled?: number;
   externalPullRequests?: number;
@@ -568,7 +573,10 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
   }
   const activeWeeks = weeks.filter((w) => w.commits > 0).length;
   const lastCommitMs = commits.length ? parse(commits[commits.length - 1].date) : NaN;
-  const lastPushMs = Math.max(...input.repos.map((r) => parse(r.pushedAt)).filter(Number.isFinite), NaN);
+  // A push after the read's `now` is not known at that moment: a point-in-time
+  // read must not see the future through the repository's current pushed_at.
+  const pushTimes = input.repos.map((r) => parse(r.pushedAt)).filter((t) => Number.isFinite(t) && t <= nowMs + DAY);
+  const lastPushMs = pushTimes.length ? Math.max(...pushTimes) : NaN;
   const recencyMs = Number.isFinite(lastCommitMs) ? lastCommitMs : lastPushMs;
   const lastCommitDaysAgo = Number.isFinite(recencyMs) ? Math.max(0, Math.round((nowMs - recencyMs) / DAY)) : undefined;
   const gaps: number[] = [];
@@ -576,7 +584,7 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
   if (commits.length) gaps.push((nowMs - lastCommitMs) / DAY);
   const longestGapDays = gaps.length ? round1(Math.max(...gaps)) : undefined;
   const medianGapDays = gaps.length ? round1(median(gaps) ?? 0) : undefined;
-  const releasesInWindow = input.repos.reduce((n, r) => n + r.releases.filter((rel) => parse(rel.publishedAt) >= windowStart).length, 0);
+  const releasesInWindow = input.repos.reduce((n, r) => n + r.releases.filter((rel) => parse(rel.publishedAt) >= windowStart && parse(rel.publishedAt) <= nowMs + DAY).length, 0);
   const status: CadenceStatus = input.repos.length === 0 && commits.length === 0 ? "unknown" : statusFromDays(lastCommitDaysAgo);
 
   // ---- committers ------------------------------------------------------
@@ -912,7 +920,7 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
   // ---- live: is the code reaching the chain? ---------------------------
   const deploys = (input.deploys ?? []).filter((d) => Number.isFinite(parse(d.date)) && parse(d.date) >= windowStart);
   const publishes = (input.packages ?? []).flatMap((pk) => pk.versions.filter((v) => Number.isFinite(parse(v.date)) && parse(v.date) >= windowStart).map((v) => ({ ...v, name: pk.name })));
-  const releaseTimes = input.repos.flatMap((r) => r.releases.map((rel) => parse(rel.publishedAt))).filter(Number.isFinite);
+  const releaseTimes = input.repos.flatMap((r) => r.releases.map((rel) => parse(rel.publishedAt))).filter((t) => Number.isFinite(t) && t <= nowMs + DAY);
   const followsCode = (t: number) => releaseTimes.some((r) => t >= r && t - r <= 14 * DAY) || commits.filter((c) => parse(c.date) <= t && t - parse(c.date) <= 14 * DAY).length >= 3;
   const codeToChain = [...deploys.map((d) => parse(d.date)), ...publishes.map((p) => parse(p.date))].filter(followsCode).length;
   const verifiedDeploys = deploys.filter((d) => d.verified).length;
