@@ -81,7 +81,7 @@ describe("X provider attempt accounting", () => {
     expect(String(fetchMock.mock.calls[1][0])).toBe("https://x.com/driftprotocol");
   });
 
-  it("keeps every twitterapi website and entity URL, not just the first", async () => {
+  it("keeps every twitterapi website-field URL as official and bio description URLs as leads", async () => {
     vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
       data: {
@@ -101,7 +101,8 @@ describe("X provider attempt accounting", () => {
       handle: "@CLUTCHMARKETS",
       accountStatus: "active",
       website: "https://clutch.markets/",
-      officialWebsites: ["https://clutch.markets/", "https://stonkbrokers.cash/"],
+      officialWebsites: ["https://clutch.markets/"],
+      bioWebsites: ["https://stonkbrokers.cash/"],
     }));
   });
 

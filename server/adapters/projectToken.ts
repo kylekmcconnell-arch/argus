@@ -7,7 +7,7 @@ import { declaredTokenFromBio, type TokenCandidate } from "../../src/lib/project
 import { env } from "../config";
 import { captureTimestamp } from "../captureTime";
 import { recordCall } from "../cost";
-import { fetchPublicTextWithRecovery, type PublicTextWithRecoveryResult } from "../publicWeb";
+import { fetchPublicTextWithRecovery, readBoundedResponseText, type PublicTextWithRecoveryResult } from "../publicWeb";
 import type { Adapter, AdapterRunResult, CollectContext, CollectedEvidence } from "./types";
 
 const COINGECKO_PUBLIC = "https://api.coingecko.com/api/v3";
@@ -27,6 +27,8 @@ export const coingeckoThrottle = { backoffMs: 1_500 };
 const MAX_HISTORY_POINTS = 90;
 const PRICE_TOLERANCE = 0.25;
 const MIN_POOL_LIQUIDITY_USD = 25_000;
+/** Most of an official page ARGUS will read while looking for a contract declaration. */
+const SITE_DECLARATION_MAX_BYTES = 400_000;
 
 const EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -501,16 +503,32 @@ const domainsMatch = (left: string, right: string): boolean =>
   left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
 
 /**
+ * A bio that says the account is NOT the project: fan pages, parody and
+ * community accounts routinely link the real project's site. Such a link is
+ * a pointer to someone else's property, so no official-domain gate may treat
+ * it as this account's own scope. Matched on the frozen bio and display name.
+ */
+const AFFILIATION_DISCLAIMER = /\b(?:not\s+(?:officially\s+)?affiliated|unaffiliated|no\s+affiliation|unofficial|fan[\s-]?(?:page|account|club|made|run|community)|fans\s+of|parody|satire|tribute|community[\s-]run|run\s+by\s+(?:the\s+)?community)\b/i;
+
+export function profileDisclaimsAffiliation(profile: { bio?: string; display_name?: string }): boolean {
+  return AFFILIATION_DISCLAIMER.test(`${profile.display_name ?? ""} ${profile.bio ?? ""}`);
+}
+
+/**
  * Credible official domains declared on the provider-frozen X profile record:
- * the profile website plus every other twitterapi website/entity URL on that
+ * the profile website plus every other twitterapi website-field URL on that
  * same record. Nothing else qualifies here. A search lead, a registry
- * homepage or a third-party citation must never enter this set, because these
- * scopes are one half of the CoinGecko official-domain gate and of the
- * DexScreener dual gate.
+ * homepage, a third-party citation or a URL typed into the bio description
+ * must never enter this set, because these scopes are one half of the
+ * CoinGecko official-domain gate and of the DexScreener dual gate.
  *
  * Reading only `profile.website` left the gate unsatisfiable whenever the
  * first profile URL was a shared host (t.me, youtube.com): the real domain sat
  * in `official_websites` on the same frozen record and the token never bound.
+ *
+ * An account whose own bio disclaims affiliation ("unofficial", "fan page",
+ * "not affiliated") declares no official scope at all: a fan account that
+ * links uniswap.org is pointing at somebody else's site.
  */
 function profileOfficialScopes(ctx: CollectContext): OfficialWebsiteScope[] {
   const profile = ctx.evidence.profile;
@@ -519,6 +537,7 @@ function profileOfficialScopes(ctx: CollectContext): OfficialWebsiteScope[] {
     profile.profile_collection_state !== "resolved"
     || profile.profile_provider !== "twitterapi"
     || !Number.isFinite(capturedAt)
+    || profileDisclaimsAffiliation(profile)
   ) return [];
   const seen = new Set<string>();
   const scopes: OfficialWebsiteScope[] = [];
@@ -541,9 +560,24 @@ const homepageOnProfileDomain = (
     })
   : undefined;
 
+/**
+ * A registry record whose homepage sits on this profile's declared domain
+ * but whose official X account is a DIFFERENT handle. That is the shape of a
+ * fan page, a community account or an impersonator linking the real project's
+ * site: the registry itself says who the project's account is, and it is not
+ * the audited one. Recorded as a lead, never bound.
+ */
+export interface RegistryNamesake {
+  name: string;
+  symbol: string;
+  homepage: string;
+  officialX: string;
+}
+
 function verifyIdentity(
   ctx: CollectContext,
   details: JsonRecord,
+  namesakes?: RegistryNamesake[],
 ): { verification: ProjectTokenSnapshot["verification"]; homepage?: string; officialX?: string } | null {
   const links = isRecord(details.links) ? details.links : {};
   const officialHandle = cleanText(links.twitter_screen_name);
@@ -559,11 +593,42 @@ function verifyIdentity(
 
   const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), homepages);
   if (!homepage) return null;
+  // The domain gate is one-sided: a bio can link any site. When the registry
+  // record names its own official X account and that account is not the
+  // audited handle, the record contradicts the binding it would otherwise
+  // support. Refuse it and keep the contradiction as an impersonation lead.
+  const registryHandles = registryOfficialXHandles(details);
+  if (registryHandles.length && !registryHandles.some((handle) => handle === normalizeHandle(ctx.handle))) {
+    namesakes?.push({
+      name: cleanText(details.name),
+      symbol: cleanText(details.symbol).toUpperCase(),
+      homepage,
+      officialX: `@${officialHandle.replace(/^@/, "") || registryHandles[0]}`,
+    });
+    return null;
+  }
   return {
     verification: "official_domain",
     homepage,
     ...(officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}),
   };
+}
+
+/** Every X account the CoinGecko record itself declares (screen name + curated X links), normalized. */
+function registryOfficialXHandles(details: JsonRecord): string[] {
+  const links = isRecord(details.links) ? details.links : {};
+  const out = new Set<string>();
+  const screenName = normalizeHandle(cleanText(links.twitter_screen_name).replace(/^@/, ""));
+  if (screenName) out.add(screenName);
+  for (const key of COINGECKO_LINK_ARRAYS) {
+    const value = links[key];
+    const rows = Array.isArray(value) ? value : value ? [value] : [];
+    for (const row of rows) {
+      const handle = xHandleFromUrl(row);
+      if (handle) out.add(handle);
+    }
+  }
+  return [...out];
 }
 
 const xHandleFromUrlRaw = officialXProfileHandle;
@@ -664,6 +729,146 @@ const SITE_SOLANA_ADDRESS = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32
 // insensitive hex, base58 mints are case-sensitive.
 const addressKey = (address: string): string => address.startsWith("0x") ? address.toLowerCase() : address;
 
+/**
+ * Canonical infrastructure contracts a project page prints without meaning
+ * "this is our token": stablecoins, wrapped natives, bridged majors, routers,
+ * program ids. "We accept USDC" beside the USDC contract is not a token
+ * declaration, and a dapp's embedded config lists WETH on every chain.
+ * EVM keys are lowercase; base58 mints are case-sensitive.
+ */
+const INFRA_CONTRACTS: ReadonlySet<string> = new Set([
+  // Ethereum
+  "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", // USDC
+  "0xdac17f958d2ee523a2206206994597c13d831ec7", // USDT
+  "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", // WETH
+  "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", // WBTC
+  "0x6b175474e89094c44da98b954eedeac495271d0f", // DAI
+  "0xae7ab96520de3a18e5e111b5eaab095312d7fe84", // stETH
+  "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0", // wstETH
+  "0x000000000022d473030f116ddee9f6b43ac78ba3", // Permit2
+  "0xca11bde05977b3631167028862be2a173976ca11", // Multicall3
+  "0x7a250d5630b4cf539739df2c5dacb4c659f2488d", // Uniswap V2 router
+  "0xe592427a0aece92de3edee1f18e0157c05861564", // Uniswap V3 router
+  "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad", // Uniswap universal router
+  // Base / Optimism (OP-stack predeploys share addresses)
+  "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", // USDC (Base)
+  "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca", // USDbC
+  "0x4200000000000000000000000000000000000006", // WETH (OP stack)
+  "0x4200000000000000000000000000000000000042", // OP
+  "0x50c5725949a6f0c72e6c4a641f24049a917db0cb", // DAI (Base)
+  "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", // cbBTC
+  "0x0b2c639c533813f4aa9d7837caf62653d097ff85", // USDC (Optimism)
+  "0x7f5c764cbc14f9669b88837ca1490cca17c31607", // USDC.e (Optimism)
+  "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58", // USDT (Optimism)
+  "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", // DAI (Optimism / Arbitrum)
+  // Arbitrum
+  "0xaf88d065e77c8cc2239327c5edb3a432268e5831", // USDC
+  "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8", // USDC.e
+  "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", // USDT
+  "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", // WETH
+  "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", // WBTC
+  "0x912ce59144191c1204e64559fe8253a0e49e6548", // ARB
+  // Polygon
+  "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", // USDC
+  "0x2791bca1f2de4661ed88a30c99a7a9449aa84174", // USDC.e
+  "0xc2132d05d31c914a87c6611c10748aeb04b58e8f", // USDT
+  "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619", // WETH
+  "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270", // WMATIC / WPOL
+  "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6", // WBTC
+  "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063", // DAI
+  // BNB chain
+  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", // WBNB
+  "0x55d398326f99059ff775485246999027b3197955", // USDT
+  "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", // USDC
+  "0xe9e7cea3dedca5984780bafc599bd69add087d56", // BUSD
+  "0x2170ed0880ac9a755fd29b2688956bd959f933f8", // ETH
+  "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", // BTCB
+  "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3", // DAI
+  // Avalanche
+  "0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7", // WAVAX
+  "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e", // USDC
+  "0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7", // USDT
+  "0x49d5c2bdffac6ce2bfdb6640f4f80f226bc10bab", // WETH.e
+  // Solana
+  "So11111111111111111111111111111111111111112", // wSOL
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", // Token program
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", // Token-2022
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", // Associated token program
+  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s", // Metaplex metadata
+  "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", // Raydium AMM v4
+  "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4", // Jupiter aggregator
+  "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", // pump.fun
+]);
+
+export function isInfrastructureContract(address: string): boolean {
+  return INFRA_CONTRACTS.has(addressKey(address));
+}
+
+/**
+ * A page declares an address as ITS contract only when it labels it as one,
+ * the same rule `declaredTokenFromBio` applies to the bio ("CA:", "contract
+ * address", "token address", "mint"). A bare address anywhere in the markup
+ * (a vault link, a partner's token, an embedded dapp config) is not a
+ * declaration. The label must sit within a short window of the address in
+ * the markup with presentation attributes removed, so a copy button's
+ * `title="Copy contract address"` or a "$TOKEN CA" badge beside the address
+ * both count while a label three sections away does not.
+ */
+const SITE_CONTRACT_LABEL = /\b(?:contract(?:\s+address)?|token\s+(?:address|contract)|mint(?:\s+address)?|c\.a\.|ca)\b/i;
+const SITE_LABEL_WINDOW_BEFORE = 200;
+const SITE_LABEL_WINDOW_AFTER = 80;
+const PRESENTATION_ATTRIBUTES = /\s(?:class|style|data-[\w-]+|aria-[\w-]+|id|role|tabindex|type|target|rel)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+const ANY_SITE_ADDRESS = /0x[a-fA-F0-9]{40}|(?:^|[^1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![1-9A-HJ-NP-Za-km-z])/;
+
+export function siteDeclaredContractCandidates(html: string, limit = 10): string[] {
+  const text = html.replace(PRESENTATION_ATTRIBUTES, " ").replace(/\s+/g, " ");
+  const out: string[] = [];
+  const seen = new Set<string>();
+  // The label must be the nearest one with no OTHER address between it and
+  // the candidate: "Contract: A B" declares A, not B, and a label two
+  // addresses up the page belongs to the address it sits beside.
+  const declared = (address: string, index: number): boolean => {
+    const before = text.slice(Math.max(0, index - SITE_LABEL_WINDOW_BEFORE), index);
+    const labelsBefore = [...before.matchAll(new RegExp(SITE_CONTRACT_LABEL.source, "gi"))];
+    const lastBefore = labelsBefore[labelsBefore.length - 1];
+    if (lastBefore && !ANY_SITE_ADDRESS.test(before.slice((lastBefore.index ?? 0) + lastBefore[0].length))) return true;
+    // A label AFTER the address ("0xabc ... Copy CA") counts only when it is
+    // not itself the prefix label of the next address ("0xabc Mint: DEF").
+    const after = text.slice(index + address.length, index + address.length + SITE_LABEL_WINDOW_AFTER);
+    const firstAfter = after.match(SITE_CONTRACT_LABEL);
+    if (!firstAfter || ANY_SITE_ADDRESS.test(after.slice(0, firstAfter.index ?? 0))) return false;
+    const labelEnd = index + address.length + (firstAfter.index ?? 0) + firstAfter[0].length;
+    const nextAddress = text.slice(labelEnd, labelEnd + SITE_LABEL_WINDOW_AFTER).match(ANY_SITE_ADDRESS);
+    return !nextAddress || addressKey(nextAddress[0].replace(/^[^0-9A-Za-z]/, "")) === addressKey(address);
+  };
+  for (const match of text.matchAll(SITE_EVM_ADDRESS)) {
+    const address = match[0];
+    if (/^0x0{40}$/i.test(address) || /^0x0{38}dead$/i.test(address)) continue;
+    const key = addressKey(address);
+    if (seen.has(key) || isInfrastructureContract(address) || !declared(address, match.index ?? 0)) continue;
+    seen.add(key);
+    out.push(address);
+    if (out.length >= limit) return out;
+  }
+  // Blank EVM matches in place (same length) so base58 offsets stay aligned
+  // with `text`; the hex tail of a zero-free 0x address is itself base58.
+  const rest = text.replace(SITE_EVM_ADDRESS, (hit) => " ".repeat(hit.length));
+  for (const match of rest.matchAll(SITE_SOLANA_ADDRESS)) {
+    const address = match[1];
+    if (/^1+$/.test(address) || /^[0-9a-f]+$/i.test(address)) continue;
+    const key = addressKey(address);
+    // The match starts at the boundary character; the mint itself starts after it.
+    const start = (match.index ?? 0) + match[0].length - address.length;
+    if (seen.has(key) || isInfrastructureContract(address) || !declared(address, start)) continue;
+    seen.add(key);
+    out.push(address);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 export function siteContractCandidates(html: string, limit = 10): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -732,14 +937,35 @@ async function dexSearch(query: string): Promise<JsonRecord[] | null> {
   return pairs;
 }
 
+/** The name-relevance gate every DEX row must pass before identity is even checked. */
+const MIN_NAME_RELEVANCE = 500;
+
+/**
+ * How strongly a token's registry name/symbol relates to one search query:
+ * exact normalized name, containment either way, shared words, exact symbol.
+ * Shared by the DEX name search and by the official-site declaration tier so
+ * both tiers answer "is this token even about this subject?" the same way.
+ */
+function tokenNameRelevance(query: string, name: string, symbol: string): number {
+  const cleanQuery = projectName(query);
+  const queryKey = normalized(cleanQuery);
+  if (!queryKey) return 0;
+  const queryWords = cleanQuery.toLowerCase().split(/\s+/).filter((word) => word.length >= 3);
+  const nameKey = normalized(name);
+  const symbolKey = normalized(symbol);
+  let relevance = 0;
+  if (nameKey && nameKey === queryKey) relevance += 1_000;
+  else if (nameKey && (nameKey.includes(queryKey) || queryKey.includes(nameKey))) relevance += 600;
+  relevance += queryWords.filter((word) => name.toLowerCase().includes(word)).length * 80;
+  if (symbolKey && symbolKey === queryKey) relevance += 500;
+  return relevance;
+}
+
 function dexProjectCandidates(
   ctx: CollectContext,
   query: string,
   rows: JsonRecord[],
 ): DexProjectCandidate[] {
-  const cleanQuery = projectName(query);
-  const queryKey = normalized(cleanQuery);
-  const queryWords = cleanQuery.toLowerCase().split(/\s+/).filter((word) => word.length >= 3);
   const candidates = rows.flatMap((row): DexProjectCandidate[] => {
     const base = isRecord(row.baseToken) ? row.baseToken : {};
     const name = cleanText(base.name);
@@ -748,13 +974,7 @@ function dexProjectCandidates(
     const chain = cleanText(row.chainId).toLowerCase();
     const pairAddress = cleanText(row.pairAddress);
     const sourceUrl = cleanText(row.url);
-    const nameKey = normalized(name);
-    const symbolKey = normalized(symbol);
-    let relevance = 0;
-    if (nameKey === queryKey) relevance += 1_000;
-    else if (nameKey && queryKey && (nameKey.includes(queryKey) || queryKey.includes(nameKey))) relevance += 600;
-    relevance += queryWords.filter((word) => name.toLowerCase().includes(word)).length * 80;
-    if (symbolKey && symbolKey === queryKey) relevance += 500;
+    const relevance = tokenNameRelevance(query, name, symbol);
     const addressValid = chain === "solana" ? SOLANA_ADDRESS.test(address) : EVM_ADDRESS.test(address);
     if (
       !name
@@ -763,7 +983,7 @@ function dexProjectCandidates(
       || !chain
       || !pairAddress
       || !sourceUrl
-      || relevance < 500
+      || relevance < MIN_NAME_RELEVANCE
     ) return [];
     const identity = dexIdentity(ctx, row);
     if (!identity) return [];
@@ -912,15 +1132,19 @@ function dexHandleBoundHomepages(ctx: CollectContext, row: JsonRecord): string[]
 /**
  * Official websites already unique-ID bound to this subject. Never search
  * leads: only the provider-frozen X profile website, extra twitterapi
- * website/entity URLs on that same profile record, first-party official
- * sites already cited on the evidence (verified official_subject sources),
- * and DexScreener/CoinGecko homepages whose official X already equals the
- * audited handle.
+ * website-field URLs on that same profile record, and DexScreener/CoinGecko
+ * homepages whose official X already equals the audited handle.
+ *
+ * Fact source URLs (a verified blog post or docs page) are deliberately not
+ * declaration scopes: a post saying "buy $PARTNER here" is on an official
+ * host, but the page that declares THE project's contract is its site root.
+ * A profile whose bio disclaims affiliation declares no scope at all.
  */
 function officialWebsiteScopes(
   ctx: CollectContext,
   extraUrls: readonly string[] = [],
 ): OfficialWebsiteScope[] {
+  if (profileDisclaimsAffiliation(ctx.evidence.profile)) return [];
   const seen = new Set<string>();
   const scopes: OfficialWebsiteScope[] = [];
   const add = (value: unknown) => {
@@ -932,19 +1156,33 @@ function officialWebsiteScopes(
   add(ctx.evidence.profile.website);
   for (const url of ctx.evidence.profile.official_websites ?? []) add(url);
   for (const url of extraUrls) add(url);
-  for (const fact of ctx.evidence.basicFacts ?? []) {
-    if (fact.artifact_verified !== true) continue;
-    if (fact.status !== "verified" && fact.status !== "corroborated") continue;
-    for (const source of fact.sources) {
-      if (
-        source.sourceClass !== "official_subject"
-        || source.relation !== "supports"
-        || source.artifactVerified !== true
-      ) continue;
-      add(source.url);
-    }
-  }
   return scopes;
+}
+
+/**
+ * Does the token a page declares even look like THIS subject's token? The
+ * name/symbol must relate to the display name, the handle, a bio cashtag or
+ * the declaring domain's own label, by the same relevance rule the DEX name
+ * search applies. A payments app that prints a partner's contract with a
+ * "CA:" label still does not get that partner's token.
+ */
+function siteTokenRelatesToSubject(
+  ctx: CollectContext,
+  scope: OfficialWebsiteScope,
+  name: string,
+  symbol: string,
+): boolean {
+  const profile = ctx.evidence.profile;
+  const handle = ctx.handle.replace(/^@/, "");
+  const anchors = [
+    profile.display_name || "",
+    cleanRegistryName(profile.display_name || ""),
+    handle,
+    scope.domain.split(".")[0] ?? "",
+  ].filter((anchor) => normalized(anchor).length >= 3);
+  if (anchors.some((anchor) => tokenNameRelevance(anchor, name, symbol) >= MIN_NAME_RELEVANCE)) return true;
+  const ticker = symbol.toUpperCase();
+  return Boolean(ticker) && bioTickerQueries(profile.bio).some((cashtag) => cashtag === ticker);
 }
 
 type SiteDeclarationResult =
@@ -981,7 +1219,12 @@ async function resolveSiteDeclaredOnPage(
         return { state: "failed" };
       }
     } else {
-      html = (await response.text()).slice(0, 400_000);
+      const body = await readBoundedResponseText(response, SITE_DECLARATION_MAX_BYTES);
+      if (body === null) {
+        recordCall("site-fetch", "token-declaration", 0, "response_too_large", "failed");
+        return { state: "failed" };
+      }
+      html = body;
       identityCapturedAt = captureTimestamp();
     }
   } catch {
@@ -994,7 +1237,7 @@ async function resolveSiteDeclaredOnPage(
     identityCapturedAt = captureTimestamp();
     recordCall("site-fetch", "token-declaration", 0, "reader_recovery_after_transport_error", "succeeded");
   }
-  const candidates = siteContractCandidates(html);
+  const candidates = siteDeclaredContractCandidates(html);
   if (!candidates.length) {
     recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
     return { state: "empty" };
@@ -1055,6 +1298,13 @@ async function resolveSiteDeclaredOnPage(
   if (!symbol || !chain) {
     recordCall("site-fetch", "token-declaration", 0, "candidate_metadata_incomplete", "failed");
     return { state: "failed" };
+  }
+  if (!siteTokenRelatesToSubject(ctx, scope, cleanText(base.name), symbol)) {
+    // The page labels a contract, and it trades, but the token is named for
+    // somebody else: a partner, a listed asset, a quote currency. Assessed as
+    // no declaration of this subject's token, not as a provider gap.
+    recordCall("site-fetch", "token-declaration", 0, "declared_token_unrelated_to_subject", "succeeded");
+    return { state: "empty" };
   }
   const info = isRecord(best.info) ? best.info as JsonRecord : {};
   const priceUsd = finiteNumber(best.priceUsd);
@@ -1652,6 +1902,9 @@ export async function collectProjectTokenIdentity(
   let search: CoinSearchRow[] | null = null;
   const candidates: CoinSearchRow[] = [];
   let inspected: Array<{ details: JsonRecord | null; selected: SelectedToken | null }> = [];
+  // Registry records that link this profile's domain but name a different
+  // official X account: impersonation / fan-page leads, never bindings.
+  const registryNamesakes: RegistryNamesake[] = [];
   let detailAttempts = 0;
   let contractLookupFailed = false;
   let seedPairAttempts = 0;
@@ -1724,7 +1977,7 @@ export async function collectProjectTokenIdentity(
       const details = await coinDetails(candidate.id);
       if (!details) return { details: null, selected: null };
       registryHomepages.push(...cgHandleBoundHomepages(ctx, details));
-      const identity = verifyIdentity(ctx, details);
+      const identity = verifyIdentity(ctx, details, registryNamesakes);
       const contract = canonicalContract(details);
       return {
         details,
@@ -1832,7 +2085,7 @@ export async function collectProjectTokenIdentity(
     // project's own site can, and it is the stronger evidence of the two.
     const declared = await collectSiteDeclaredToken(
       ctx,
-      fetch,
+      deadlineFetch,
       registryHomepages,
       dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery,
     );
@@ -1936,12 +2189,25 @@ export async function collectProjectTokenIdentity(
     const cgSamples = candidates.slice(0, 3).map((row) => `${row.name} ($${row.symbol.toUpperCase()})`);
     const alikeSamples = [...new Set([...cgSamples, ...dexAlikes])].slice(0, 3);
     const alikeCount = Math.max(candidates.length + dexAlikeCount, alikeSamples.length);
+    const namesake = registryNamesakes[0];
+    if (namesake) {
+      ctx.emit({
+        phase: "P0 · Routing",
+        label: `Registry token belongs to a different X account · $${namesake.symbol}`,
+        detail: `CoinGecko lists ${namesake.name} ($${namesake.symbol}) with its homepage on this profile's declared domain, but names ${namesake.officialX}, not ${ctx.handle}, as the project's official X account. The domain link alone cannot bind that token here; this is a namesake or impersonation lead for the analyst, not a binding.`,
+        source: "coingecko",
+        tone: "warn",
+      });
+    }
+    const namesakeNote = namesake
+      ? ` CoinGecko's ${namesake.name} ($${namesake.symbol}) record links this profile's declared domain but names ${namesake.officialX} as the official X account, so it was refused as a namesake or impersonation lead.`
+      : "";
     ctx.recordCheck?.({
       id: "project-token-identity",
       status: "finding",
       note: alikeCount > 0
-        ? `assessed token identity: CoinGecko and DexScreener searches completed. ${alikeCount} token${alikeCount === 1 ? " trades" : "s trade"} under a matching name (${alikeSamples.join(", ")}${alikeCount > alikeSamples.length ? ", and more" : ""}), and none links back to the official X account or website domain, so no official token was recorded. A null result on this axis, not adverse conduct evidence.`
-        : "assessed token identity: CoinGecko and DexScreener searches completed and found no token under a matching name. A null result on this axis, not adverse conduct evidence.",
+        ? `assessed token identity: CoinGecko and DexScreener searches completed. ${alikeCount} token${alikeCount === 1 ? " trades" : "s trade"} under a matching name (${alikeSamples.join(", ")}${alikeCount > alikeSamples.length ? ", and more" : ""}), and none links back to the official X account or website domain, so no official token was recorded.${namesakeNote} A null result on this axis, not adverse conduct evidence.`
+        : `assessed token identity: CoinGecko and DexScreener searches completed and found no token under a matching name.${namesakeNote} A null result on this axis, not adverse conduct evidence.`,
       provider: "coingecko/dexscreener",
     });
     return {

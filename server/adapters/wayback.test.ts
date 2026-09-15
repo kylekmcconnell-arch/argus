@@ -275,3 +275,35 @@ describe("archive corroboration labels", () => {
     expect(archiveCorroborationLabels(result!)).toEqual(["archived team page (2024)"]);
   });
 });
+
+describe("a display-name match alone never binds the audited account (ID-7)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("reports handleBound=false when the archived team page names a namesake without the account", async () => {
+    vi.stubGlobal("fetch", archive({ "example.org/team": ["20240301120000"] }, { "20240301120000": roster }));
+    const result = await withCostLedger(() => archivedAffiliation("example.org", "Kyle McConnell", "Example", "@kylemcconnell_dev"));
+    expect(result).toMatchObject({ where: "team", year: "2024", handleBound: false });
+  });
+
+  it("reports handleBound=true when the page also carries the exact @handle or bare profile link", async () => {
+    const withHandle = `${roster}<a href="https://x.com/kylemcconnell_dev">X</a>`;
+    vi.stubGlobal("fetch", archive({ "example.org/team": ["20240301120000"] }, { "20240301120000": withHandle }));
+    expect(await withCostLedger(() => archivedAffiliation("example.org", "Kyle McConnell", "Example", "@kylemcconnell_dev")))
+      .toMatchObject({ handleBound: true });
+
+    const withMention = `${roster} (@kylemcconnell_dev)`;
+    vi.stubGlobal("fetch", archive({ "example.org/team": ["20240301120000"] }, { "20240301120000": withMention }));
+    expect(await withCostLedger(() => archivedAffiliation("example.org", "Kyle McConnell", "Example", "@kylemcconnell_dev")))
+      .toMatchObject({ handleBound: true });
+  });
+
+  it("does not count a tweet link or a longer handle as the account's profile", async () => {
+    const tweetOnly = `${roster}<a href="https://x.com/kylemcconnell_dev/status/123">post</a> @kylemcconnell_devs`;
+    vi.stubGlobal("fetch", archive({ "example.org/team": ["20240301120000"] }, { "20240301120000": tweetOnly }));
+    expect(await withCostLedger(() => archivedAffiliation("example.org", "Kyle McConnell", "Example", "@kylemcconnell_dev")))
+      .toMatchObject({ handleBound: false });
+  });
+});
