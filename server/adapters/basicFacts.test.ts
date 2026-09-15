@@ -5718,9 +5718,9 @@ describe("a venture's model-supplied domain is never an official counterparty sc
       discover: async () => [advisorLead(sourceUrl)],
       fetchSource: fetchDocuments({ [sourceUrl]: advisorPage(sourceUrl, "acme-lookalike.example") }),
     });
-    const verified = evidence.basicFacts.filter((fact) => fact.status === "verified" || fact.status === "corroborated");
+    const verified = (evidence.basicFacts ?? []).filter((fact) => fact.status === "verified" || fact.status === "corroborated");
     expect(verified).toEqual([]);
-    expect(evidence.basicFacts.flatMap((fact) => fact.sources).some((source) => source.sourceClass === "official_counterparty")).toBe(false);
+    expect((evidence.basicFacts ?? []).flatMap((fact) => fact.sources).some((source) => source.sourceClass === "official_counterparty")).toBe(false);
   });
 
   it("applies the venture identity check to a deterministic domain that names somebody else", async () => {
@@ -5745,7 +5745,7 @@ describe("a venture's model-supplied domain is never an official counterparty sc
       discover: async () => [advisorLead(sourceUrl)],
       fetchSource: fetchDocuments({ [sourceUrl]: advisorPage(sourceUrl, "unrelated-press.example") }),
     });
-    expect(evidence.basicFacts.flatMap((fact) => fact.sources).some((source) => source.sourceClass === "official_counterparty")).toBe(false);
+    expect((evidence.basicFacts ?? []).flatMap((fact) => fact.sources).some((source) => source.sourceClass === "official_counterparty")).toBe(false);
   });
 });
 
@@ -5876,7 +5876,7 @@ describe("knowledge-base reuse requires the live account to still be the stored 
       fetchSource: vi.fn(),
     });
     expect(discoveredIds).toContain("person.founder");
-    expect(evidence.basicFacts.some((fact) => fact.predicate === "founder" && fact.status === "verified")).toBe(false);
+    expect((evidence.basicFacts ?? []).some((fact) => fact.predicate === "founder" && fact.status === "verified")).toBe(false);
     expect(ctx.emit).toHaveBeenCalledWith(expect.objectContaining({ label: "Stored facts belong to a different account" }));
   });
 });
