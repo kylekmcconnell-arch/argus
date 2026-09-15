@@ -3777,11 +3777,31 @@ export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Em
     if (!name) continue;
     const existing = webTeam.find((member) => norm(member.name) === norm(name));
     if (existing) {
+      // The display name is the only thing Monid and the existing row share.
+      // A name match corroborates the person's role, title and LinkedIn; it
+      // never verifies an X handle, GitHub, or developer profile the model
+      // guessed for that name. Those survive only when the identity link was
+      // already deterministic before this merge (first-party bound), so a
+      // verified row can never carry a model-lead handle into the trust graph.
+      const identityAlreadyDeterministic = existing.identity_link_evidence_origin === "deterministic"
+        || existing.handleProvenance === "subject_first_party";
+      if (!identityAlreadyDeterministic) {
+        delete existing.handle;
+        delete existing.github;
+        delete existing.developerProfiles;
+        delete existing.avatarUrl;
+        delete existing.linkedin;
+      }
+      // With model-guessed links stripped, Monid's LinkedIn is the row's only
+      // identity link, so it may carry the deterministic origin on its own.
       if (!existing.linkedin && person.linkedin) {
         existing.linkedin = person.linkedin;
         existing.identity_link_evidence_origin = "deterministic";
       }
       if ((!existing.role || /^team$/i.test(existing.role)) && person.title) existing.role = person.title;
+      if (!existing.evidence && person.priorCompanies?.length) {
+        existing.evidence = `prior: ${person.priorCompanies.slice(0, 3).join(", ")}`;
+      }
       if (existing.artifact_verified !== true) {
         existing.evidence_origin = "deterministic";
         existing.artifact_verified = true;

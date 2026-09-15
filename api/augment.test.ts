@@ -151,6 +151,21 @@ describe("atomic augmentation API", () => {
     });
   });
 
+  it("reads legacy display-keyed rows only when the label is the subject's own canonical key", async () => {
+    // Regression for INT-20: a caller-supplied display label ("John Smith")
+    // pulled a namesake's legacy augmentations into this subject.
+    requireArgusAuth.mockResolvedValue(auth("viewer"));
+    const fetchMock = vi.fn().mockImplementation(async () => json([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await handler(request("GET", undefined, { subject: "John Smith", subjectKind: "person", canonicalRef: "jsmith_real" }), response().res as never);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("subject_kind=eq.legacy"))).toBe(false);
+
+    fetchMock.mockClear();
+    await handler(request("GET", undefined, { subject: "@JSmith_Real", subjectKind: "person", canonicalRef: "jsmith_real" }), response().res as never);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("subject_kind=eq.legacy"))).toBe(true);
+  });
+
   it("lists only pending rows for an owner organization", async () => {
     requireArgusAuth.mockResolvedValue(auth("owner"));
     const fetchMock = vi.fn().mockResolvedValue(json([augmentationRow()]));

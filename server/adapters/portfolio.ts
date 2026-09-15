@@ -396,12 +396,11 @@ export function portfolioEntityForLead(
     .filter((value): value is string => Boolean(value?.trim()));
   const requested = lead.investorEntityName?.trim();
   const requestedHandle = lead.investorEntityHandle?.replace(/^@/, "").toLowerCase();
-  const matches = (values: Array<string | undefined>) => values.some((value) => {
-    if (!value || !requested) return false;
-    const left = compact(value);
-    const right = compact(requested);
-    return left === right || (left.length >= 5 && right.length >= 5 && (left.includes(right) || right.includes(left)));
-  });
+  // Exact identity only. A substring or token-prefix match would let a
+  // namesake or regional affiliate ("Sequoia Capital China", "Pantera Capital
+  // Management") lend its fund scale and portfolio to the audited subject.
+  const matches = (values: Array<string | undefined>) => values.some((value) =>
+    Boolean(value && requested && sameEntityName(value, requested)));
 
   if (!requested || matches(directAliases) || requestedHandle === ctx.handle.replace(/^@/, "").toLowerCase()) {
     const directDomainScope = likelyIndividualSubject(ctx)
@@ -601,6 +600,128 @@ function containsEntity(text: string, entity: string): boolean {
   return entitySpans(normalized(text), entity).length > 0;
 }
 
+const LEGAL_FORM_SUFFIXES = new Set([
+  "inc", "incorporated", "llc", "llp", "lp", "ltd", "limited", "plc", "corp", "corporation",
+  "co", "gmbh", "ag", "sa", "pte", "pty", "nv", "bv",
+]);
+
+/**
+ * Identity key for an entity name: normalized words, ignoring only a leading
+ * article and trailing legal-form suffixes. Any other extra token is a
+ * different entity ("Sequoia Capital China" is not "Sequoia Capital").
+ */
+export function entityIdentityKey(value?: string): string {
+  if (!value) return "";
+  const words = entityWords(value);
+  for (;;) {
+    if (words.length > 1 && LEGAL_FORM_SUFFIXES.has(words[words.length - 1])) {
+      words.pop();
+      continue;
+    }
+    // "L.P." / "L.L.C." normalize to separate single letters.
+    if (words.length > 2 && ["lp", "llc", "llp", "plc"].includes(words.slice(-2).join(""))) {
+      words.splice(-2, 2);
+      continue;
+    }
+    if (words.length > 3 && words.slice(-3).join("") === "llc") {
+      words.splice(-3, 3);
+      continue;
+    }
+    break;
+  }
+  if (words.length > 1 && words[0] === "the") words.shift();
+  return words.join(" ");
+}
+
+/** Exact entity-name equality; never substring, never a token prefix. */
+export function sameEntityName(left?: string, right?: string): boolean {
+  const a = entityIdentityKey(left);
+  const b = entityIdentityKey(right);
+  return Boolean(a && b && a === b);
+}
+
+const HEADLINE_WORDS = new Set([
+  "raises", "raised", "raise", "closes", "closed", "close", "announces", "announced", "launches", "launched",
+  "completes", "completed", "secures", "secured", "files", "filed", "reports", "reported", "says", "said",
+  "seeks", "targets", "hits", "tops", "nears", "eyes", "plans", "unveils", "wraps", "lands", "bags", "nabs",
+  "grabs", "scores", "adds", "sets", "gets", "has", "is", "will", "to", "and", "of", "in", "for", "with", "at",
+  "on", "its", "the", "a", "an", "by", "as", "from", "after", "amid", "over", "up", "now", "today", "led", "leads",
+  "backs", "backed", "invests", "invested", "joins", "joined", "manages", "managed", "holds", "held", "reaches",
+  "reached", "crosses", "crossed", "surpasses", "surpassed", "exceeds", "exceeded", "oversees", "confirms",
+  "confirmed", "aims", "looks", "expected", "expects", "reportedly", "officially", "just", "finally", "also",
+]);
+
+const VEHICLE_CONTINUATION = new RegExp(
+  "^\\s*(?:(?:Venture|Ventures|Growth|Seed|Opportunity|Opportunities|Crypto|Digital|Web3|Early[- ]Stage|Late[- ]Stage"
+  + "|Select|Special Situations|Credit|Liquid|Token|Ecosystem|Innovation|Strategic|Flagship|Core|Secondary|Secondaries"
+  + "|Expansion|Scout)\\s+){0,2}(?:Fund\\b|(?:[IVXL]{1,6}|\\d{1,3})(?=$|[^A-Za-z0-9]))",
+);
+
+function titleCaseSegment(segment: string): boolean {
+  const words = segment.split(/\s+/).map((word) => word.replace(/[^A-Za-z]/g, "")).filter((word) => word.length >= 3);
+  if (words.length < 4) return false;
+  const capitalised = words.filter((word) => /^[A-Z]/.test(word)).length;
+  return capitalised / words.length >= 0.6;
+}
+
+export interface ExactEntityMention {
+  start: number;
+  end: number;
+  /** The name exactly as the page printed it. */
+  text: string;
+}
+
+/**
+ * Mentions of `entity` in the original-case `segment` that are not part of a
+ * longer capitalised phrase. "Sequoia Capital China completed..." is a mention
+ * of Sequoia Capital China, not of Sequoia Capital, so the alias is rejected
+ * there. Legal-form suffixes ("Paradigm LLC") do not count as qualifiers. A
+ * title-case headline cannot be read that way, so only vocabulary that is
+ * never part of a name is permitted after the alias in a headline.
+ */
+export function exactEntityMentions(segment: string, entity: string): ExactEntityMention[] {
+  const words = entityWords(entity);
+  const pattern = entityPattern(entity, true);
+  if (!pattern || !words.length) return [];
+  const shortSingleWord = words.length === 1 && words[0].length <= 4;
+  const headline = titleCaseSegment(segment);
+  const mentions: ExactEntityMention[] = [];
+  for (const match of segment.matchAll(pattern)) {
+    const phrase = match[1] ?? "";
+    if (shortSingleWord && phrase !== entity.trim().replace(/^@/, "")) continue;
+    const start = (match.index ?? 0) + match[0].lastIndexOf(phrase);
+    const end = start + phrase.length;
+    const after = segment.slice(end);
+    const before = segment.slice(0, start);
+    const next = after.match(/^\s*([A-Z][A-Za-z0-9&'’.-]*)/);
+    if (next) {
+      const word = next[1].toLowerCase().replace(/[^a-z]/g, "");
+      const legalSuffix = LEGAL_FORM_SUFFIXES.has(word);
+      const permittedHeadlineWord = headline && HEADLINE_WORDS.has(word);
+      // "Paradigm Fund III" / "Paradigm Venture Fund III" names a vehicle of
+      // the entity; a geography or other qualifier ("China") names another.
+      const vehicleContinuation = VEHICLE_CONTINUATION.test(after);
+      if (!legalSuffix && !permittedHeadlineWord && !vehicleContinuation) continue;
+    }
+    if (!headline) {
+      const previous = before.match(/(?:^|\s)([A-Z][A-Za-z0-9&'’.-]*)\s+$/);
+      const previousIsSegmentStart = Boolean(previous) && before.trim() === previous![1];
+      if (previous && !previousIsSegmentStart && !HEADLINE_WORDS.has(previous[1].toLowerCase().replace(/[^a-z]/g, ""))) continue;
+    }
+    mentions.push({ start, end, text: phrase });
+  }
+  return mentions;
+}
+
+/** First exact mention of any alias in the segment, with the alias the page used. */
+export function firstExactEntityMention(segment: string, aliases: readonly string[]): ExactEntityMention | null {
+  for (const alias of aliases) {
+    const mention = exactEntityMentions(segment, alias)[0];
+    if (mention) return mention;
+  }
+  return null;
+}
+
 function ambiguousSingleWord(entity: string): boolean {
   const words = entityWords(entity);
   return words.length === 1 && words[0].length <= 4;
@@ -738,7 +859,7 @@ export function supportsPortfolioRelationship(input: {
   // predicate, and project in the same sentence/card. A page-level bag of words
   // is not relationship evidence.
   const supportedSegment = projectSegments.find((segment) =>
-    input.subjectAliases.some((alias) => containsEntity(segment, alias))
+    firstExactEntityMention(segment, input.subjectAliases)
     && RELATION.test(segment)
     && !NEGATED.test(segment));
   if (!supportedSegment) return { supported: false };

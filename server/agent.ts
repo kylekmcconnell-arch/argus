@@ -1670,7 +1670,7 @@ const SOURCE_ARTIFACT_FIELDS = [
   "investorDomainSourceContentHash", "investorDomainCapturedAt", "investorDomainSourceKind",
   "investorDomainProfileName", "investorDomainProfileWebsite", "fundName", "fundSizeUsd",
   "fundVehicle", "fundScaleMetric", "fundAmountQualifier", "fundScaleBasis", "fundScaleAsOf",
-  "fundScaleTemporalState", "fundScaleSourceCount", "fundScaleClaimId",
+  "fundScaleTemporalState", "fundScaleSourceCount", "fundScaleClaimId", "attributedEntityName",
 ] as const;
 
 const compactSourceArtifact = (value: unknown): Record<string, unknown> | undefined => {

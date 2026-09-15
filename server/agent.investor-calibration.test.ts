@@ -62,6 +62,7 @@ const fundScale = (): SourceArtifact => ({
   attribution: "direct_subject",
   sourceClass: "first_party_subject",
   fundName: "Subject Capital",
+  attributedEntityName: "Subject Capital",
   fundSizeUsd: 500_000_000,
   fundVehicle: "Subject Venture Fund I",
   fundScaleMetric: "fund_vehicle",

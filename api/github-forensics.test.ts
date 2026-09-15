@@ -90,6 +90,44 @@ describe("GitHub forensics provider completeness", () => {
     expect(String(captured.body?.note)).not.toContain("privacy");
   });
 
+  it("never mines upstream commit authors from forks and resolves the fork parent", async () => {
+    // Regression for INT-6: five forks of an upstream would have recorded the
+    // upstream maintainers' personal emails as this account's hard identity ties.
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/users/alice/repos")) {
+        return Promise.resolve(json([
+          { name: "v2-core", full_name: "alice/v2-core", fork: true },
+          { name: "own-tool", full_name: "alice/own-tool", fork: false },
+        ]));
+      }
+      if (url.endsWith("/repos/alice/v2-core")) {
+        return Promise.resolve(json({ full_name: "alice/v2-core", fork: true, parent: { full_name: "Uniswap/v2-core" } }));
+      }
+      if (url.includes("/repos/alice/v2-core/commits")) {
+        return Promise.resolve(json([{ commit: { author: { name: "Upstream Dev", email: "upstream.dev@gmail.com" } }, author: { login: "upstreamdev" } }]));
+      }
+      if (url.includes("/repos/alice/own-tool/commits")) {
+        return Promise.resolve(json([{ commit: { author: { name: "Alice", email: "alice.real@gmail.com" } }, author: { login: "alice" } }]));
+      }
+      return Promise.resolve(new Response("unexpected", { status: 500 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request() as never, res as never);
+
+    expect(captured.body).toMatchObject({
+      available: true,
+      reposScanned: ["alice/own-tool"],
+      forks: [{ repo: "alice/v2-core", parent: "Uniswap/v2-core" }],
+    });
+    const leaks = captured.body?.emailLeaks as Array<{ email: string }>;
+    expect(leaks.map((leak) => leak.email)).toEqual(["alice.real@gmail.com"]);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/repos/alice/v2-core/commits"))).toBe(false);
+    expect(String(captured.body?.note)).toContain("forked history was not mined");
+  });
+
   it("preserves a completed empty commit list as no recovered metadata", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(json([{ name: "repo", full_name: "alice/repo", fork: false }]))

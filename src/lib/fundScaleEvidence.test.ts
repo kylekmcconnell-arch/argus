@@ -30,6 +30,7 @@ const base = (overrides: Record<string, unknown> = {}): Record<string, unknown> 
   fundScaleTemporalState: "fixed_historical",
   fundScaleSourceCount: 1,
   fundScaleClaimId: "fund_scale_claim_v1_subject_venture_i",
+  attributedEntityName: "Subject",
   ...overrides,
 });
 
@@ -55,6 +56,24 @@ describe("isStrictFundScaleArtifact", () => {
     expect(canonicalOfficialWebsite("https://ipfs.io/ipfs/bafy-profile")).toBeNull();
     expect(canonicalOfficialWebsite("https://co.uk")).toBeNull();
   });
+  it("requires the page to name the bound fund itself, never a namesake or affiliate", () => {
+    // Regression for INT-1: an artifact minted with the subject's name from a
+    // page about "Subject China" must not pass the strict gate.
+    expect(isStrictFundScaleArtifact(press({ attributedEntityName: "Subject China" }), [press(), press({
+      sourceUrl: "https://ft.com/content/subject-fund-i",
+      sourceContentHash: "d".repeat(64),
+      contentHash: "e".repeat(64),
+      excerpt: "The Financial Times says Subject closed its first venture vehicle with $500 million.",
+    })])).toBe(false);
+    expect(isStrictFundScaleArtifact(press({ attributedEntityName: undefined }), [press()])).toBe(false);
+    expect(isStrictFundScaleArtifact(base({ attributedEntityName: "Subject China" }))).toBe(false);
+    // First-person copy on the verified manager domain may omit the name.
+    expect(isStrictFundScaleArtifact(base({ attributedEntityName: undefined }))).toBe(true);
+    // The exact handle is an acceptable spelling of the same entity.
+    expect(isStrictFundScaleArtifact(base({ attributedEntityName: "subject" }))).toBe(true);
+    expect(isStrictFundScaleArtifact(base({ subjectHandle: "@subjectvc", attributedEntityName: "subjectvc" }))).toBe(true);
+  });
+
   it("accepts a content-addressed, entity-bound first-party vehicle claim", () => {
     expect(isStrictFundScaleArtifact(base())).toBe(true);
     expect(isStrictFundScaleArtifact(base({ subjectName: "NotSubjectScam" }))).toBe(false);
@@ -102,6 +121,7 @@ describe("isStrictFundScaleArtifact", () => {
       subjectHandle: "@alice",
       investorEntityName: "Subject Capital",
       fundName: "Subject Capital",
+      attributedEntityName: "Subject Capital",
       sourceUrl: "https://www.sec.gov/Archives/edgar/data/123456/000012345626000001/adv.html",
       attribution: "affiliated_fund",
       sourceClass: "public_primary",
@@ -209,6 +229,7 @@ describe("isStrictFundScaleArtifact", () => {
       investorEntityHandle: "@subjectcapital",
       investorEntityDomain: "subjectcapital.example",
       fundName: "Subject Capital",
+      attributedEntityName: "Subject Capital",
       sourceUrl: "https://subjectcapital.example/funds/venture-i",
       attribution: "affiliated_fund",
       sourceClass: "first_party_investor",

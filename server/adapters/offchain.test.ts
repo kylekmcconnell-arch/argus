@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
+import { PersonCheckTracker } from "../checks";
 import type { CheckObservation, CollectContext } from "./types";
 import {
   offchainAdapter,
@@ -278,6 +279,61 @@ describe("frozen off-chain diligence adapter", () => {
       expect.objectContaining({ kind: "press", sourceUrl: "https://example.com/stani-aave" }),
       expect.objectContaining({ kind: "sanctions_screen" }),
     ]));
+  });
+
+  it("supersedes the earlier name's screens when the refresh runs for a different resolved name", async () => {
+    // Regression for INT-2 / INT-17: a checked-empty OFAC screen for the display
+    // name must not survive an unavailable refresh for the resolved real name,
+    // and a hit for the new name must not be deduplicated against the old no-match.
+    let ofacStatus = 200;
+    let ofacCsv = validOfacCsv();
+    const fetcher = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("https://news.google.com/")) return Promise.resolve(new Response("<rss><channel></channel></rss>", { status: 200 }));
+      if (url.startsWith("https://www.courtlistener.com/")) return Promise.resolve(json({ count: 0, results: [] }));
+      if (url.startsWith("https://data.opensanctions.org/")) {
+        return Promise.resolve(new Response(ofacStatus === 200 ? ofacCsv : "unavailable", { status: ofacStatus }));
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const tracker = new PersonCheckTracker();
+    const { ctx } = context();
+    ctx.recordCheck = (observation) => tracker.record(observation as never);
+    ctx.evidence.profile.display_name = "Alice Smith";
+    ctx.evidence.profile.identity_confidence = "Confirmed";
+    await offchainAdapter.run(ctx);
+    const before = tracker.snapshot(["FOUNDER"], { resolvedRealName: true });
+    expect(before.find((check) => check.checkId === "ofac-sanctions-name")).toMatchObject({ status: "checked-empty", sourceCount: 1 });
+    expect(ctx.evidence.sourceArtifacts.filter((artifact) => artifact.kind === "sanctions_screen" && artifact.subjectName === "Alice Smith")).toHaveLength(2);
+
+    // Repro A: the refresh for the resolved name is unavailable.
+    ctx.evidence.profile.resolved_name = "Bob Jones";
+    ofacStatus = 503;
+    const unavailable = await refreshResolvedNameOffchain(ctx);
+    expect(unavailable.state).not.toBe("executed");
+    const afterOutage = tracker.snapshot(["FOUNDER"], { resolvedRealName: true });
+    expect(afterOutage.find((check) => check.checkId === "ofac-sanctions-name")).toMatchObject({ status: "unavailable" });
+    expect(afterOutage.find((check) => check.checkId === "ofac-sanctions-name")?.sourceCount).toBeUndefined();
+    expect(afterOutage.find((check) => check.checkId === "us-legal-history")?.sourceCount).toBeUndefined();
+    expect(ctx.evidence.sourceArtifacts.filter((artifact) => artifact.kind === "sanctions_screen" && artifact.subjectName === "Alice Smith")).toHaveLength(0);
+
+    // Repro B: the refresh succeeds and the resolved name is listed.
+    ofacStatus = 200;
+    ofacCsv = [validOfacCsv(), '9999,"Person","Bob Jones",""'].join("\n");
+    const hit = await refreshResolvedNameOffchain(ctx);
+    expect(hit.state).toBe("executed");
+    const afterHit = tracker.snapshot(["FOUNDER"], { resolvedRealName: true });
+    expect(afterHit.find((check) => check.checkId === "ofac-sanctions-name")).toMatchObject({ status: "finding", sourceCount: 1 });
+    const sanctions = ctx.evidence.sourceArtifacts.filter((artifact) => artifact.kind === "sanctions_screen");
+    expect(sanctions.every((artifact) => artifact.subjectName === "Bob Jones")).toBe(true);
+    expect(sanctions).toContainEqual(expect.objectContaining({
+      title: "US Treasury OFAC SDN exact-name screen",
+      match: "exact_name",
+      excerpt: expect.stringContaining("Bob Jones"),
+    }));
+    expect(sanctions.some((artifact) => artifact.excerpt?.includes("Alice Smith"))).toBe(false);
+    expect(ctx.evidence.findings).toContainEqual(expect.objectContaining({ finding_type: "SanctionsNameLead", claim: expect.stringContaining("Bob Jones") }));
   });
 
   it("does not treat a two-word pseudonym as a resolved legal identity", async () => {

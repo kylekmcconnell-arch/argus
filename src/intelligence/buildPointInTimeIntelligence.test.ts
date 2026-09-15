@@ -1591,6 +1591,52 @@ describe("buildPointInTimeIntelligence", () => {
     expect(gap?.finding).toContain("108.1667 hours");
   });
 
+  it("reports, rather than measures, a domain whose only measurements are reported context", () => {
+    // Regression for INT-12: one analyst contradiction row made identity "measured".
+    const evidence = projectEvidence();
+    evidence.contradictions = [{ claim: "Founded in 2019", conflict: "Registry shows 2022", severity: "medium", confidence: "low" }];
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    expect(snapshot?.measurements.find((measurement) => measurement.id === "analyst_contradiction_lead_count")?.evidenceState)
+      .toBe("reported_context");
+    const identity = snapshot?.coverage.find((domain) => domain.domain === "identity");
+    expect(identity?.state).toBe("reported");
+  });
+
+  it("orders indexed rounds by precision-aware intervals and never fakes a day count from a year", () => {
+    // Regression for INT-11: "2024" parsed as 1 January, so a March 2024 seed
+    // outranked a 2024 Series B and a lone "2024" read as 947.5 days ago.
+    const evidence = projectEvidence();
+    addCanonicalToken(evidence);
+    evidence.protocolFunding = {
+      slug: "fixture",
+      name: "Fixture",
+      geckoId: "fixture",
+      rounds: [
+        { date: "2024", round: "Series B", amountUsd: 50_000_000, leadInvestors: ["Growth Fund"], otherInvestors: [], valuationUsd: null },
+        { date: "2024-03-01", round: "Seed", amountUsd: 2_000_000, leadInvestors: ["Seed Fund"], otherInvestors: [], valuationUsd: null },
+        { date: "Q1 2024", round: "Angel", amountUsd: 500_000, leadInvestors: [], otherInvestors: [], valuationUsd: null },
+        { date: "sometime in 2023", round: "Pre-seed", amountUsd: 100_000, leadInvestors: [], otherInvestors: [], valuationUsd: null },
+      ],
+      totalRaisedUsd: 52_600_000,
+      leadInvestors: ["Growth Fund", "Seed Fund"],
+      sourceUrl: "https://defillama.example.test/raises/fixture",
+      capturedAt: "2026-08-01T00:00:00.000Z",
+    };
+
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    const measurement = (id: string) => snapshot?.measurements.find((candidate) => candidate.id === id);
+
+    expect(measurement("latest_funding_round_type")?.value).toBe("Series B");
+    expect(measurement("latest_funding_round_date")?.value).toBe("2024");
+    expect(measurement("latest_funding_round_date_precision")?.value).toBe("year");
+    expect(measurement("days_since_latest_funding_round")).toBeUndefined();
+    expect(measurement("funding_round_unparseable_date_count")?.value).toBe(1);
+
+    evidence.protocolFunding!.rounds = [{ date: "2024-03-01", round: "Seed", amountUsd: 2_000_000, leadInvestors: [], otherInvestors: [], valuationUsd: null }];
+    const dayPrecision = buildPointInTimeIntelligence(evidence);
+    expect(dayPrecision?.measurements.find((candidate) => candidate.id === "days_since_latest_funding_round")?.value).toBe(883);
+  });
+
   it("withholds stale fee-to-TVL, fee-trend, and fee-to-funding comparisons independently", () => {
     const evidence = projectEvidence();
     addCanonicalToken(evidence);
@@ -1767,6 +1813,77 @@ describe("buildPointInTimeIntelligence", () => {
     expect(question).toMatchObject({ state: "unavailable" });
     expect(question?.basis).toContain("failed");
     expect(question?.basis).toContain("no negative claim");
+  });
+
+  it("does not let a zero-count measurement move an unavailable or unresolved question to partial", () => {
+    // Regression for INT-10: an empty audit scan emitted audit_lead_count = 0,
+    // which turned a failed (unavailable) audit ledger question into partial.
+    const evidence = projectEvidence();
+    evidence.securityAudits = {
+      securityPageUrl: "https://fixture.example.test/security",
+      selfAttested: [],
+      attestations: [],
+      corroborated: [],
+      capturedAt: "2026-08-05T12:40:00.000Z",
+    };
+    evidence.basicFactQuestionLedger = [{
+      questionId: "project.audit",
+      audience: "project",
+      batch: "structure_risk",
+      predicate: "audit",
+      question: "Which audits exist?",
+      critical: true,
+      status: "unanswered",
+      answerRefs: [],
+      providerRuns: [{ phase: "primary", provider: "grounded", state: "failed" }],
+    }];
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    expect(snapshot?.measurements.find((measurement) => measurement.id === "audit_lead_count")?.value).toBe(0);
+    expect(snapshot?.questions.find((candidate) => candidate.id === "project.audit")?.state).toBe("unavailable");
+
+    evidence.basicFactQuestionLedger[0] = { ...evidence.basicFactQuestionLedger[0], providerRuns: [{ phase: "primary", provider: "grounded", state: "completed_empty" }] };
+    expect(buildPointInTimeIntelligence(evidence)?.questions.find((candidate) => candidate.id === "project.audit")?.state).toBe("unresolved");
+  });
+
+  it("keeps deterministic collector answer references through the integrity gate", () => {
+    // Regression for INT-8: profile:/project-token:/team: answer refs were
+    // stripped as lost lineage, rewriting a resolved identity to partial and
+    // raising a spurious high integrity gap on every resolved project.
+    const evidence = projectEvidence();
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-05T09:00:00.000Z";
+    const identity = strictFact("@argusfixture is the official account", {
+      factId: "identity-1",
+      predicate: "official_identity",
+      questionId: "project.identity",
+    });
+    evidence.basicFacts = [identity];
+    evidence.basicFactQuestionLedger = [{
+      questionId: "project.identity",
+      audience: "project",
+      batch: "identity",
+      predicate: "official_identity",
+      question: "Which exact identity is official?",
+      critical: true,
+      status: "answered",
+      answerRefs: ["identity-1", "profile:twitterapi:argusfixture"],
+      providerRuns: [{ phase: "primary", provider: "test", state: "succeeded" }],
+    }];
+
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    const question = snapshot?.questions.find((candidate) => candidate.id === "project.identity");
+
+    expect(question).toMatchObject({ state: "resolved" });
+    expect(question?.answerRefs).toEqual(expect.arrayContaining(["identity-1", "profile:twitterapi:argusfixture"]));
+    expect(question?.basis).not.toContain("integrity gate");
+    expect(snapshot?.signals.find((signal) => signal.id === "intelligence_integrity_gap")).toBeUndefined();
+
+    // A profile reference for a different handle, or an unresolved profile, still fails.
+    evidence.basicFactQuestionLedger[0] = { ...evidence.basicFactQuestionLedger[0], answerRefs: ["identity-1", "profile:twitterapi:someoneelse"] };
+    const foreign = buildPointInTimeIntelligence(evidence)?.questions.find((candidate) => candidate.id === "project.identity");
+    expect(foreign?.answerRefs).toEqual(["identity-1"]);
+    expect(foreign?.basis).toContain("integrity gate");
   });
 
   it("retains canonical fact-prefixed question answer references", () => {
@@ -2636,6 +2753,7 @@ describe("buildPointInTimeIntelligence", () => {
       investorEntityName: "Argus Fixture",
       investorEntityDomain: "fund.example",
       fundName: "Argus Fixture",
+      attributedEntityName: "Argus Fixture",
       fundSizeUsd: 125_000_000,
       fundVehicle: "Fund I",
       fundScaleMetric: "final_close",
@@ -2689,6 +2807,7 @@ describe("buildPointInTimeIntelligence", () => {
       investorEntityName: "Argus Fixture",
       investorEntityDomain: "fund.example",
       fundName: "Argus Fixture",
+      attributedEntityName: "Argus Fixture",
       fundSizeUsd: 125_000_000,
       fundVehicle: "Fund I",
       fundScaleMetric: "regulatory_aum",
