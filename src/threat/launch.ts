@@ -188,9 +188,9 @@ const VENUES: Venue[] = [
     // /api/launch via Blockscout. No client-side fingerprint exists.
     dexIds: [],
     lpOnGraduation: "locked",
-    lpNote: "the liquidity position is transferred to the Pons launch locker at launch (PonsLaunchLocker on v1, PonsV2LaunchLocker on v2) - permanent custody, no unlock path for principal",
+    lpNote: "the liquidity position is transferred to the Pons launch locker at launch (PonsLaunchLocker on v1, PonsV2LaunchLocker on v2) - permanent custody, no unlock path for principal. On v2 the curve sells 71.4% of supply, graduation moves 20.4% plus the curve proceeds into a Uniswap v4 pool and 8.16% into the locker (verified 2026-09-12)",
     platformPaysCreator: true,
-    feeNote: "1% pool fee split ~70% creator / 30% protocol, accruing inside the locked position; the creator claims through the locker",
+    feeNote: "v1: 1% pool fee split ~70% creator / 30% protocol inside the locked position. v2: the PonsV2MemeHook takes 5% on sells and 100% on sells by launch-block buyers, and both accrue as creator tax the deployer claims from PonsV2FeeEscrow - so a deployer who snipes their own launch recycles the tax; watch claim cadence and where the claimed ETH/USDG goes (RESEARCH.md, Pons V2 launch farms)",
   },
   {
     name: "four.meme",

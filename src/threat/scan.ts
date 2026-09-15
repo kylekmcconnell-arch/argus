@@ -24,6 +24,7 @@ import {
 import { crossChain } from "./crosschain";
 import { migrationCheck } from "./migration";
 import { launchProvenance } from "./launch";
+import { describeCabalHit, findCabalLaunch, findCabalWallet } from "../data/cabals";
 import { registryVerification } from "./verification";
 import { sellStructure } from "./sellers";
 import { siteSafety } from "./sitesafety";
@@ -222,6 +223,36 @@ async function deployerRep(d: TokenDossier): Promise<DeployerRep> {
 // ---- the judge: additive risk points + tiered plain-English strings ----
 // Wording rules (deliberate): second person, the scary word in CAPS, one
 // sentence per finding, no jargon without a translation.
+/**
+ * Which of the wallets selling on the recent 24h tape are tied to the launch:
+ * launch-block snipers and deployer-seeded wallets from the sell history, the
+ * deployer/creator itself, and wallets curated as farm or snipe-ring members.
+ * Exported for unit tests.
+ */
+export function clusterSelling(sellers: SellStructure | null, chain: string): { wallets: number; usd: number; kinds: string[] } {
+  const tape = sellers?.recentTape;
+  if (!sellers || !tape || !tape.topSellers.length) return { wallets: 0, usd: 0, kinds: [] };
+  const byWallet = new Map(sellers.topSellers.map((s) => [s.wallet.toLowerCase(), s]));
+  const kinds = new Set<string>();
+  let wallets = 0;
+  let usd = 0;
+  for (const t of tape.topSellers) {
+    const w = t.wallet.toLowerCase();
+    const h = byWallet.get(w);
+    const reg = findCabalWallet(chain, w);
+    const tied: string[] = [];
+    if (t.isDeployer || t.isCreator || h?.isDeployer) tied.push("deployer");
+    if (h?.sameBlockSniper) tied.push("launch-block sniper");
+    if (h?.deployerSeeded) tied.push("deployer-seeded");
+    if (reg && (reg.wallet.role === "sniper" || reg.wallet.role === "farm" || reg.wallet.role === "hub")) tied.push(`${reg.cabal.kind.replace(/-/g, " ")} wallet`);
+    if (!tied.length) continue;
+    wallets += 1;
+    usd += t.usd;
+    tied.forEach((k) => kinds.add(k));
+  }
+  return { wallets, usd, kinds: [...kinds] };
+}
+
 export function judge( // exported for unit tests only
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
@@ -364,6 +395,28 @@ export function judge( // exported for unit tests only
   if (s.serialScammerCreator) { add(45); flags.push("The deployer has shipped HONEYPOTS before - a serial scammer's wallet"); }
   if (dep.priorRugs > 0) { add(30); flags.push(`This deployer already has ${dep.priorRugs} flagged token${dep.priorRugs === 1 ? "" : "s"} in our ledger - a rug factory pattern`); }
   else if (dep.priorScans.length > 0) warnings.push(`Deployer seen before: ${dep.priorScans.length} prior scan${dep.priorScans.length === 1 ? "" : "s"} in the ledger, none flagged`);
+  // Curated cluster knowledge (src/data/cabals.ts): a deployer or a top seller
+  // that is a hand-traced farm wallet is the strongest prior the scanner has,
+  // stronger than the ledger, because the trace already established the
+  // operator's method. A benign promo ring is a disclosure, never a penalty.
+  const cabalDeployer = findCabalWallet(d.chain, dep.address);
+  const cabalToken = findCabalLaunch(d.chain, d.address);
+  const cabalSellers = (sellers?.topSellers ?? [])
+    .map((s) => findCabalWallet(d.chain, s.wallet))
+    .filter((h): h is NonNullable<typeof h> => h != null && h.cabal.intent === "nefarious");
+  if (cabalToken && cabalToken.cabal.intent === "nefarious") {
+    add(30); flags.push(`This contract is an indexed ${cabalToken.launch.outcome.replace(/-/g, " ")} launch by the ${cabalToken.cabal.name} - ${cabalToken.launch.note}`);
+  } else if (cabalToken) {
+    warnings.push(`Indexed as a token pushed by the ${cabalToken.cabal.name} (${cabalToken.cabal.kind.replace(/-/g, " ")}, read as ${cabalToken.cabal.intent}) - ${cabalToken.launch.note}`);
+  }
+  if (cabalDeployer && cabalDeployer.cabal.intent === "nefarious") {
+    add(30); flags.push(`The deployer is a known ${describeCabalHit(cabalDeployer)} - the same operation has been traced end to end`);
+  } else if (cabalDeployer) {
+    warnings.push(`The deployer is a ${describeCabalHit(cabalDeployer)}`);
+  }
+  if (cabalSellers.length && !(cabalDeployer && cabalDeployer.cabal.intent === "nefarious")) {
+    add(20); flags.push(`${cabalSellers.length} top seller${cabalSellers.length === 1 ? " is" : "s are"} known launch-farm wallets (${[...new Set(cabalSellers.map((h) => h.cabal.name))].join("; ")}) - a professional sniping operation is in this token`);
+  }
 
   // --- code review (the ARGUS engine) ---
   if (code.verified) {
@@ -494,6 +547,17 @@ export function judge( // exported for unit tests only
     else if (seeded.length === 1) { add(8); warnings.push("A wallet the deployer funded directly has sold into the pool"); }
     const sniperExits = sellers.topSellers.filter((s) => s.sameBlockSniper && s.realizedExitPct >= 80 && !s.isDeployer && !s.deployerSeeded);
     if (sniperExits.length >= 3 && !established) { add(8); warnings.push(`${sniperExits.length} launch-block snipers have exited ~all of their position - early coordinated money is leaving`); }
+    // Ongoing selling by launch-connected wallets. A launch-block sniper or a
+    // deployer-seeded wallet that is STILL selling on the recent tape, days
+    // after launch, means the launch cluster never left: it is feeding supply
+    // into every bid. Measured, not concluded: the count and USD are the claim.
+    const cs = clusterSelling(sellers, d.chain);
+    if (cs.wallets >= 2 && cs.usd >= 250 && !established) {
+      add(12);
+      flags.push(`Launch cluster still selling: ${cs.wallets} wallet${cs.wallets === 1 ? "" : "s"} tied to the launch (${cs.kinds.join(", ")}) sold ~$${Math.round(cs.usd).toLocaleString()} in the last 24h - the early coordinated money is exiting into current buyers`);
+    } else if (cs.wallets >= 1 && cs.usd >= 50) {
+      warnings.push(`${cs.wallets} launch-connected wallet${cs.wallets === 1 ? "" : "s"} (${cs.kinds.join(", ")}) sold ~$${Math.round(cs.usd).toLocaleString()} in the last 24h`);
+    }
     // Recent-tape demand read: sustained selling with no bids on a non-established
     // token is a dying market (holders exiting, nobody buying).
     const tp = sellers.recentTape;
@@ -700,6 +764,37 @@ function buildChecks(
     chk("authenticity", "authority", "Authenticity",
       meta == null ? "na" : meta.fakeToken || meta.airdropScam ? "fail" : meta.trustListed ? "pass" : "pass",
       meta == null ? (sol ? "n/a on Solana" : "Unchecked") : meta.fakeToken ? "Counterfeit of an established token" : meta.airdropScam ? "Airdrop-scam pattern" : meta.trustListed ? "On GoPlus trust list" : "No counterfeit signal"),
+    chk("cluster-selling", "market", "Launch cluster still selling",
+      (() => {
+        if (!sellers?.recentTape) return "na";
+        const cs = clusterSelling(sellers, d.chain);
+        return cs.wallets >= 2 && cs.usd >= 250 ? "fail" : cs.wallets >= 1 ? "warn" : "pass";
+      })(),
+      (() => {
+        if (!sellers?.recentTape) return "No 24h trade tape available for this pair";
+        const cs = clusterSelling(sellers, d.chain);
+        return cs.wallets
+          ? `${cs.wallets} launch-connected wallet${cs.wallets === 1 ? "" : "s"} (${cs.kinds.join(", ")}) sold ~$${Math.round(cs.usd).toLocaleString()} in the last 24h`
+          : `None of the ${sellers.recentTape.distinctSellers} wallets selling in the last 24h is a launch-block sniper, deployer-seeded, the deployer, or a curated farm wallet`;
+      })()),
+    chk("cluster", "deployer", "Known launch cluster",
+      (() => {
+        const dh = findCabalWallet(d.chain, dep.address);
+        const th = findCabalLaunch(d.chain, d.address);
+        const sh = (sellers?.topSellers ?? []).some((s) => findCabalWallet(d.chain, s.wallet)?.cabal.intent === "nefarious");
+        if ((dh && dh.cabal.intent === "nefarious") || (th && th.cabal.intent === "nefarious") || sh) return "fail";
+        if (dh || th) return "warn";
+        return "pass";
+      })(),
+      (() => {
+        const dh = findCabalWallet(d.chain, dep.address);
+        const th = findCabalLaunch(d.chain, d.address);
+        if (th) return `${th.cabal.name} · ${th.launch.outcome.replace(/-/g, " ")}`;
+        if (dh) return describeCabalHit(dh);
+        const sh = (sellers?.topSellers ?? []).map((s) => findCabalWallet(d.chain, s.wallet)).filter((h) => h?.cabal.intent === "nefarious");
+        if (sh.length) return `${sh.length} top seller${sh.length === 1 ? "" : "s"} in a traced launch farm`;
+        return "No deployer, seller or contract match in the curated cluster registry";
+      })()),
     chk("deployer", "deployer", "Deployer history",
       s.serialScammerCreator || dep.priorRugs > 0 ? "fail" : dep.address ? "pass" : "na",
       s.serialScammerCreator ? "Has shipped honeypots before" : dep.priorRugs > 0 ? `${dep.priorRugs} flagged tokens in ledger` : dep.address ? "No adverse history found" : "Deployer not resolvable"),
