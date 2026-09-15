@@ -66,6 +66,80 @@ export interface ShippingRepo {
   hasTests?: boolean;
   openIssues?: number;
   openPullRequests?: number;
+  /** State of the newest default-branch commit's checks, when the provider exposed it. */
+  ciState?: "success" | "failure" | "pending" | "unknown";
+  /** An audits/ or audit/ directory, or an audit report file, exists in the tree. */
+  hasAudit?: boolean;
+  /** Last commit that touched a lockfile (package-lock, pnpm-lock, yarn.lock, Cargo.lock, foundry.lock). */
+  lockfileUpdatedAt?: string;
+  /** `name` from package.json at HEAD, when present and public. */
+  packageName?: string;
+  /** Pull requests sampled newest-first with the author's association to the repository. */
+  pullRequestsSampled?: number;
+  externalPullRequests?: number;
+  issuesSampled?: number;
+  externalIssues?: number;
+  /** Forks by others that were pushed to inside the window. */
+  activeForks?: number;
+  /** Weekly commit counts for the last year (provider stats), oldest first. */
+  weeklyCommits?: { weekStart: string; commits: number }[];
+}
+
+/** What GitHub says about a committer's account, joined onto the roster. */
+export interface ShippingIdentity {
+  login: string;
+  name?: string;
+  twitter?: string;
+  company?: string;
+  website?: string;
+  orgs?: string[];
+  followers?: number;
+  createdAt?: string;
+}
+
+/** An on-chain deployment or upgrade by the project's deployer: the code going live. */
+export interface ShippingDeploy {
+  date: string;
+  address: string;
+  verified?: boolean;
+  kind?: "create" | "upgrade";
+  label?: string;
+}
+
+/** A published package from a public registry. */
+export interface ShippingPackage {
+  name: string;
+  registry: "npm" | "pypi" | "crates";
+  versions: { version: string; date: string }[];
+  downloadsLastMonth?: number;
+}
+
+/** The compact, frozen form written into a saved report and compared across versions. */
+export interface ShippingSummary {
+  version: 1;
+  target: string;
+  capturedAt: string;
+  windowDays: number;
+  grade: ShippingGrade;
+  headline: string;
+  cadenceStatus: CadenceStatus;
+  totalCommits: number;
+  activeWeeks: number;
+  distinctHuman: number;
+  concentration: Concentration;
+  authorship: AuthorshipVerdict;
+  origin: OriginVerdict;
+  stars: StarVerdict;
+  market: MarketRead;
+  claimsSupported: number;
+  claimsUnsupported: number;
+  live: LiveVerdict;
+  adoption: AdoptionVerdict;
+  health: HealthVerdict;
+  leadDeparted: boolean;
+  reposRead: number;
+  commitsRead: number;
+  releasesInWindow: number;
 }
 
 export interface ShippingStargazer {
@@ -126,6 +200,33 @@ export interface ShippingInput {
   priceSeries?: ShippingPricePoint[];
   claims?: ShippingClaim[];
   peers?: ShippingPeers;
+  /** Account details for committer logins, keyed by lower-cased login. */
+  identities?: Record<string, ShippingIdentity>;
+  deploys?: ShippingDeploy[];
+  packages?: ShippingPackage[];
+  /** Roadmap or docs text with dated promises, for the roadmap read. */
+  docsText?: string;
+  docsSource?: string;
+  /** The frozen summary from the previous saved report, for deltas. */
+  previous?: ShippingSummary;
+  /** A stage cohort computed elsewhere: same chain and cap band, similar age. */
+  cohort?: ShippingCohort;
+  /** How much of the account the provider actually read; surfaced verbatim. */
+  readNotes?: string[];
+  /** Repositories the owner has in total, when the provider reported it. */
+  reposTotal?: number;
+}
+
+export interface ShippingCohort {
+  label: string;
+  size: number;
+  medianCommits: number;
+  medianAuthors: number;
+  /** Subject's percentile within the cohort, 0-100. */
+  percentileCommits?: number;
+  percentileAuthors?: number;
+  /** Share of the cohort whose grade is shipping (team or solo). */
+  shippingSharePct?: number;
 }
 
 export type CadenceStatus = "shipping" | "active" | "quiet" | "dormant" | "unknown";
@@ -138,6 +239,11 @@ export type ClaimGrade = "supported" | "context" | "unsupported";
 export type PeerPosition = "below" | "within" | "above" | "unknown";
 export type HygieneVerdict = "maintained" | "partial" | "neglected" | "unknown";
 export type ShippingGrade = "shipping-team" | "shipping-solo" | "thin" | "stalled" | "unknown";
+export type LiveVerdict = "live" | "committed-only" | "deploys-without-code" | "unknown";
+export type AdoptionVerdict = "used" | "noticed" | "unused" | "unknown";
+export type HealthVerdict = "sound" | "mixed" | "poor" | "unknown";
+export type LicenseClass = "permissive" | "copyleft" | "source-available" | "none" | "unknown";
+export type RoadmapGrade = "met" | "missed" | "pending" | "unclear";
 
 export interface CadenceWeek {
   weekStart: string;
@@ -154,6 +260,13 @@ export interface ShippingCommitter {
   accountCreatedAt?: string;
   /** Account created inside the window: a fresh identity, not necessarily a fresh person. */
   freshAccount: boolean;
+  /** Commits in the last 30 days and in the 60 days before that. */
+  last30: number;
+  prior60: number;
+  twitter?: string;
+  company?: string;
+  orgs?: string[];
+  website?: string;
 }
 
 export interface ShippingAssessment {
@@ -182,6 +295,17 @@ export interface ShippingAssessment {
     mirrorSharePct: number;
     hhi: number;
     roster: ShippingCommitter[];
+    churn: {
+      leadLogin?: string;
+      leadName?: string;
+      leadPriorSharePct: number;
+      leadLast30: number;
+      /** The prior-60-day lead stopped committing while the repository carried on. */
+      departed: boolean;
+      /** Human committers active in the prior 60 days who have no commits in the last 30. */
+      goneQuiet: string[];
+      detail: string;
+    };
   };
   substance: {
     measuredCommits: number;
@@ -254,6 +378,72 @@ export interface ShippingAssessment {
     rows: ShippingPeerRepo[];
     detail: string;
   };
+  cohort?: ShippingCohort & { detail: string };
+  live: {
+    verdict: LiveVerdict;
+    deploysInWindow: number;
+    verifiedDeploys: number;
+    publishesInWindow: number;
+    /** Deploys or publishes that followed a release or a burst of commits within 14 days. */
+    codeToChain: number;
+    detail: string;
+  };
+  adoption: {
+    verdict: AdoptionVerdict;
+    externalPrSharePct?: number;
+    externalIssueSharePct?: number;
+    externalPrs: number;
+    externalIssues: number;
+    activeForks: number;
+    packageDownloadsLastMonth?: number;
+    packages: string[];
+    detail: string;
+  };
+  health: {
+    verdict: HealthVerdict;
+    ci: "success" | "failure" | "pending" | "unknown";
+    license: LicenseClass;
+    licenseId?: string;
+    auditInTree: boolean;
+    lockfileAgeDays?: number;
+    detail: string;
+  };
+  trend: {
+    /** Up to 52 weeks, oldest first; price is the week's median close when a series was supplied. */
+    weeks: { weekStart: string; commits: number; price?: number; releases: number; deploys: number }[];
+    lifeCommits: number;
+    activeWeeksLife: number;
+    source: "provider-weekly" | "window-commits" | "none";
+    detail: string;
+  };
+  roadmap: {
+    claims: { text: string; due: string; grade: RoadmapGrade; evidence: string }[];
+    met: number;
+    missed: number;
+    pending: number;
+    detail: string;
+  };
+  delta?: {
+    capturedAt: string;
+    grade: { from: ShippingGrade; to: ShippingGrade };
+    commits: { from: number; to: number; changePct?: number };
+    humans: { from: number; to: number };
+    cadence: { from: CadenceStatus; to: CadenceStatus };
+    stalled: boolean;
+    detail: string;
+  };
+  coverage: {
+    reposTotal?: number;
+    reposRead: number;
+    historyRepos: number;
+    commitsCounted: number;
+    commitsRead: number;
+    starHistoryDays: number;
+    weeklyStatsRead: boolean;
+    identitiesRead: number;
+    windowDays: number;
+    notes: string[];
+  };
 }
 
 const DAY = 864e5;
@@ -265,6 +455,12 @@ const GENERIC_HEADLINE = /^(update|updates|updated|fix|fixes|fixed|wip|changes|c
 const DOCS_HEADLINE = /\b(docs?|readme|typo|changelog|license|comment(s)?)\b/i;
 const AI_TRAILER = /co-authored-by:[^\n]*\b(claude|copilot|chatgpt|openai|cursor|codex|devin|gemini|aider|sweep|windsurf)\b|generated with \[?claude|🤖 generated with|made with (cursor|copilot)/i;
 const SHIP_CLAIM = /\b(launch(ed|ing|es)?|releas(ed|e|es|ing)|shipp(ed|ing)|v\d+(\.\d+)+|mainnet|is live|now live|went live|deploy(ed|ing)|beta|alpha|new version|update is (out|live)|rolled out|rolling out)\b/i;
+
+const PERMISSIVE = /^(MIT|Apache-2\.0|BSD-[23]-Clause|ISC|MPL-2\.0|Unlicense|CC0-1\.0|0BSD|Zlib)$/i;
+const COPYLEFT = /^(GPL|AGPL|LGPL)/i;
+const SOURCE_AVAILABLE = /^(BUSL|BSL|SSPL|Elastic|Commons-Clause)/i;
+const MONTHS = "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec";
+const ROADMAP_RE = new RegExp(`\\b(Q[1-4]\\s*['’]?(?:20)?\\d{2}|H[12]\\s*['’]?(?:20)?\\d{2}|(?:${MONTHS})\\.?\\s+20\\d{2}|(?:end of|by|before|in)\\s+20\\d{2})\\b`, "gi");
 
 const BULK_LINES = 1500;
 const BULK_FILES = 15;
@@ -303,6 +499,53 @@ function statusFromDays(days?: number): CadenceStatus {
   return "dormant";
 }
 
+function licenseClass(id?: string): LicenseClass {
+  if (!id) return "none";
+  if (PERMISSIVE.test(id)) return "permissive";
+  if (COPYLEFT.test(id)) return "copyleft";
+  if (SOURCE_AVAILABLE.test(id)) return "source-available";
+  return "unknown";
+}
+
+/** Turn a roadmap phrase into the last day of the period it names. */
+export function roadmapDue(phrase: string, fallbackYearFrom?: string): number {
+  const p = phrase.trim().toLowerCase().replace(/['’]/g, "");
+  const year = (y: string) => (y.length === 2 ? 2000 + Number(y) : Number(y));
+  let m = p.match(/^q([1-4])\s*(\d{2,4})$/);
+  if (m) return Date.UTC(year(m[2]), Number(m[1]) * 3, 0, 23, 59, 59);
+  m = p.match(/^h([12])\s*(\d{2,4})$/);
+  if (m) return Date.UTC(year(m[2]), Number(m[1]) * 6, 0, 23, 59, 59);
+  m = p.match(new RegExp(`^(${MONTHS})\\.?\\s+(\\d{4})$`));
+  if (m) {
+    const idx = "jan feb mar apr may jun jul aug sep oct nov dec".split(" ").indexOf(m[1].slice(0, 3));
+    return Date.UTC(Number(m[2]), idx + 1, 0, 23, 59, 59);
+  }
+  m = p.match(/(\d{4})$/);
+  if (m) return Date.UTC(Number(m[1]), 12, 0, 23, 59, 59);
+  return fallbackYearFrom ? parse(fallbackYearFrom) : NaN;
+}
+
+/** Dated promises in roadmap or docs text: the phrase, the sentence it sits in, and its due date. */
+export function extractRoadmapClaims(text: string | undefined, max = 12): { text: string; due: string }[] {
+  if (!text) return [];
+  const out: { text: string; due: string }[] = [];
+  const seen = new Set<string>();
+  const sentences = text.replace(/\s+/g, " ").split(/(?<=[.!?•\n])\s+|\s{2,}|\s[-–—]\s/);
+  for (const sentence of sentences) {
+    const hits = sentence.match(ROADMAP_RE);
+    if (!hits) continue;
+    const due = roadmapDue(hits[0]);
+    if (!Number.isFinite(due)) continue;
+    const clean = sentence.trim().slice(0, 160);
+    const key = `${hits[0].toLowerCase()}|${clean.toLowerCase().slice(0, 60)}`;
+    if (seen.has(key) || clean.length < 12) continue;
+    seen.add(key);
+    out.push({ text: clean, due: new Date(due).toISOString() });
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 export function assessShipping(input: ShippingInput): ShippingAssessment {
   const nowMs = parse(input.now);
   const windowMs = input.windowDays * DAY;
@@ -338,6 +581,9 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
 
   // ---- committers ------------------------------------------------------
   const roster = new Map<string, ShippingCommitter>();
+  const last30Start = nowMs - 30 * DAY;
+  const prior60Start = nowMs - 90 * DAY;
+  const identities = input.identities ?? {};
   for (const c of commits) {
     const kind = committerKind(c);
     const key = kind === "mirror" ? `mirror:${c.authorKey}` : c.authorKey;
@@ -353,11 +599,26 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
         kind,
         accountCreatedAt: c.authorAccountCreatedAt,
         freshAccount: Number.isFinite(createdMs) && createdMs >= windowStart,
+        last30: 0,
+        prior60: 0,
       };
       roster.set(key, row);
     }
     row.commits++;
+    const t = parse(c.date);
+    if (t >= last30Start) row.last30++;
+    else if (t >= prior60Start) row.prior60++;
     if (!row.login && c.authorLogin) row.login = c.authorLogin;
+  }
+  for (const row of roster.values()) {
+    const id = row.login ? identities[row.login.toLowerCase()] : undefined;
+    if (!id) continue;
+    if (id.twitter) row.twitter = id.twitter.replace(/^@/, "");
+    if (id.company) row.company = id.company;
+    if (id.website) row.website = id.website;
+    if (id.orgs?.length) row.orgs = id.orgs.slice(0, 5);
+    if (id.name && (!row.name || row.name === row.login)) row.name = id.name;
+    if (id.createdAt && !row.accountCreatedAt) { row.accountCreatedAt = id.createdAt; row.freshAccount = parse(id.createdAt) >= windowStart; }
   }
   const rows = [...roster.values()].sort((a, b) => b.commits - a.commits);
   const total = commits.length;
@@ -377,6 +638,23 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
   else if (top1SharePct >= 85) concentration = "single-author";
   else if (top1SharePct >= 50) concentration = "lead-plus";
   else concentration = "team";
+
+  // Churn: who carried the prior 60 days, and are they still here? A lead who
+  // stops while the repository carries on is the strongest departure signal a
+  // public repo gives; a lead who stops with everyone else is just a stall.
+  const priorLead = [...humans].sort((a, b) => b.prior60 - a.prior60)[0];
+  const priorTotal = humans.reduce((n, r) => n + r.prior60, 0);
+  const recentTotal = humans.reduce((n, r) => n + r.last30, 0);
+  const leadPriorSharePct = priorLead && priorTotal ? pct(priorLead.prior60, priorTotal) : 0;
+  const departed = !!priorLead && priorLead.prior60 >= 5 && priorLead.last30 === 0 && recentTotal >= 3;
+  const goneQuiet = humans.filter((h) => h.prior60 >= 3 && h.last30 === 0).map((h) => h.login ? `@${h.login}` : h.name);
+  const churnDetail = !priorLead || priorTotal === 0
+    ? "Not enough history before the last 30 days to read committer churn."
+    : departed
+      ? `${priorLead.login ? `@${priorLead.login}` : priorLead.name} wrote ${leadPriorSharePct}% of the prior 60 days' commits and none in the last 30 while ${recentTotal} commits landed from others: the lead has stopped and the repository has not.`
+      : goneQuiet.length
+        ? `${goneQuiet.length} committer${goneQuiet.length === 1 ? "" : "s"} active in the prior 60 days ${goneQuiet.length === 1 ? "has" : "have"} no commits in the last 30 (${goneQuiet.slice(0, 3).join(", ")}).`
+        : `${priorLead.login ? `@${priorLead.login}` : priorLead.name} carried ${leadPriorSharePct}% of the prior 60 days and is still committing (${priorLead.last30} in the last 30).`;
 
   // ---- substance -------------------------------------------------------
   const measured = commits.filter((c) => c.additions != null && c.deletions != null);
@@ -631,6 +909,131 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
     };
   }
 
+  // ---- live: is the code reaching the chain? ---------------------------
+  const deploys = (input.deploys ?? []).filter((d) => Number.isFinite(parse(d.date)) && parse(d.date) >= windowStart);
+  const publishes = (input.packages ?? []).flatMap((pk) => pk.versions.filter((v) => Number.isFinite(parse(v.date)) && parse(v.date) >= windowStart).map((v) => ({ ...v, name: pk.name })));
+  const releaseTimes = input.repos.flatMap((r) => r.releases.map((rel) => parse(rel.publishedAt))).filter(Number.isFinite);
+  const followsCode = (t: number) => releaseTimes.some((r) => t >= r && t - r <= 14 * DAY) || commits.filter((c) => parse(c.date) <= t && t - parse(c.date) <= 14 * DAY).length >= 3;
+  const codeToChain = [...deploys.map((d) => parse(d.date)), ...publishes.map((p) => parse(p.date))].filter(followsCode).length;
+  const verifiedDeploys = deploys.filter((d) => d.verified).length;
+  let liveVerdict: LiveVerdict;
+  if (!input.deploys && !input.packages) liveVerdict = "unknown";
+  else if ((deploys.length || publishes.length) && codeToChain > 0) liveVerdict = "live";
+  else if (deploys.length || publishes.length) liveVerdict = "deploys-without-code";
+  else liveVerdict = total > 0 ? "committed-only" : "unknown";
+  const liveDetail =
+    liveVerdict === "unknown" ? "No deployer history or package registry was read, so whether the code reached production is not known."
+      : liveVerdict === "live" ? `${deploys.length} on-chain deploy${deploys.length === 1 ? "" : "s"}${verifiedDeploys ? ` (${verifiedDeploys} verified)` : ""} and ${publishes.length} package publish${publishes.length === 1 ? "" : "es"} in the window; ${codeToChain} followed a release or a burst of commits within two weeks, so the public code is what is going live.`
+        : liveVerdict === "deploys-without-code" ? `${deploys.length} deploy${deploys.length === 1 ? "" : "s"} and ${publishes.length} publish${publishes.length === 1 ? "" : "es"} in the window with no matching activity in the public repositories: the shipping happens somewhere this read cannot see.`
+          : `${total} commits in the window and no on-chain deploy or package publish: work committed, nothing visibly shipped to users yet.`;
+
+  // ---- adoption: is anyone outside the team using it? --------------------
+  const prsSampled = input.repos.reduce((n, r) => n + (r.pullRequestsSampled ?? 0), 0);
+  const externalPrs = input.repos.reduce((n, r) => n + (r.externalPullRequests ?? 0), 0);
+  const issuesSampled = input.repos.reduce((n, r) => n + (r.issuesSampled ?? 0), 0);
+  const externalIssues = input.repos.reduce((n, r) => n + (r.externalIssues ?? 0), 0);
+  const activeForks = input.repos.reduce((n, r) => n + (r.activeForks ?? 0), 0);
+  const packageDownloads = (input.packages ?? []).reduce<number | undefined>((n, pk) => (pk.downloadsLastMonth == null ? n : (n ?? 0) + pk.downloadsLastMonth), undefined);
+  const externalPrSharePct = prsSampled ? pct(externalPrs, prsSampled) : undefined;
+  const externalIssueSharePct = issuesSampled ? pct(externalIssues, issuesSampled) : undefined;
+  let adoptionVerdict: AdoptionVerdict = "unknown";
+  const adoptionRead = prsSampled > 0 || issuesSampled > 0 || input.repos.some((r) => r.activeForks != null) || packageDownloads != null;
+  if (adoptionRead) {
+    const strong = externalPrs >= 3 || (packageDownloads ?? 0) >= 1000 || activeForks >= 5;
+    const some = externalPrs >= 1 || externalIssues >= 3 || (packageDownloads ?? 0) >= 100 || activeForks >= 1;
+    adoptionVerdict = strong ? "used" : some ? "noticed" : "unused";
+  }
+  const adoptionDetail = !adoptionRead
+    ? "No pull-request, issue, fork or download data was read."
+    : `${externalPrs} of ${prsSampled} sampled pull requests and ${externalIssues} of ${issuesSampled} sampled issues came from outside the team; ${activeForks} fork${activeForks === 1 ? "" : "s"} pushed to in the window${packageDownloads != null ? `; ${packageDownloads.toLocaleString("en-US")} package downloads last month` : ""}. ${adoptionVerdict === "used" ? "Outsiders are contributing, which is the hardest attention signal to fake." : adoptionVerdict === "noticed" ? "Some outside attention, not yet outside contribution." : "Nobody outside the team is contributing, filing or forking."}`;
+
+  // ---- health: the questions a fund's diligence checklist asks -----------
+  const flagshipForHealth = flagship ?? input.repos[0];
+  const ci = flagshipForHealth?.ciState ?? "unknown";
+  const licenseId = flagshipForHealth?.license;
+  const license = flagshipForHealth ? licenseClass(licenseId) : "unknown";
+  const auditInTree = input.repos.some((r) => r.hasAudit);
+  const lockfileAgeDays = flagshipForHealth?.lockfileUpdatedAt && Number.isFinite(parse(flagshipForHealth.lockfileUpdatedAt)) ? Math.max(0, Math.round((nowMs - parse(flagshipForHealth.lockfileUpdatedAt)) / DAY)) : undefined;
+  let healthVerdict: HealthVerdict = "unknown";
+  if (input.repos.length) {
+    let good = 0;
+    let bad = 0;
+    if (ci === "success") good++; else if (ci === "failure") bad++;
+    if (license === "permissive") good++; else if (license === "none") bad++;
+    if (auditInTree) good++;
+    if (lockfileAgeDays != null) { if (lockfileAgeDays <= 90) good++; else if (lockfileAgeDays > 365) bad++; }
+    healthVerdict = bad === 0 && good >= 2 ? "sound" : bad >= 2 ? "poor" : "mixed";
+  }
+  const healthDetail = !input.repos.length ? "No repository to assess." : [
+    ci === "success" ? "Latest default-branch checks pass" : ci === "failure" ? "Latest default-branch checks FAIL" : ci === "pending" ? "Latest checks still running" : "No check status exposed",
+    license === "permissive" ? `${licenseId} licence (permissive)` : license === "copyleft" ? `${licenseId} licence (copyleft; derivative work must be shared)` : license === "source-available" ? `${licenseId} (source-available, not open source)` : license === "none" ? "no licence file, so the code cannot legally be reused" : `${licenseId ?? "unrecognised"} licence`,
+    auditInTree ? "an audit report is in the tree" : "no audit report in the tree",
+    lockfileAgeDays != null ? `dependencies last locked ${lockfileAgeDays} days ago` : "no lockfile read",
+  ].join("; ") + ".";
+
+  // ---- trend: the whole life, not the window ------------------------------
+  const weeklyMap = new Map<string, number>();
+  let trendSource: ShippingAssessment["trend"]["source"] = "none";
+  for (const r of input.repos) for (const w of r.weeklyCommits ?? []) { weeklyMap.set(w.weekStart, (weeklyMap.get(w.weekStart) ?? 0) + w.commits); trendSource = "provider-weekly"; }
+  if (trendSource === "none" && commits.length) {
+    for (const w of weeks) weeklyMap.set(w.weekStart, w.commits);
+    trendSource = "window-commits";
+  }
+  const trendKeys = [...weeklyMap.keys()].sort().slice(-52);
+  const weekOf = (t: number) => trendKeys.find((k, i) => t >= parse(k) && (i === trendKeys.length - 1 || t < parse(trendKeys[i + 1])));
+  const priceByWeek = new Map<string, number[]>();
+  for (const pt of input.priceSeries ?? []) { const k = weekOf(parse(pt.date)); if (k) { priceByWeek.set(k, [...(priceByWeek.get(k) ?? []), pt.close]); } }
+  const releasesByWeek = new Map<string, number>();
+  for (const t of releaseTimes) { const k = weekOf(t); if (k) releasesByWeek.set(k, (releasesByWeek.get(k) ?? 0) + 1); }
+  const deploysByWeek = new Map<string, number>();
+  for (const d of input.deploys ?? []) { const k = weekOf(parse(d.date)); if (k) deploysByWeek.set(k, (deploysByWeek.get(k) ?? 0) + 1); }
+  const trendWeeks = trendKeys.map((k) => ({ weekStart: k, commits: weeklyMap.get(k) ?? 0, price: median(priceByWeek.get(k) ?? []), releases: releasesByWeek.get(k) ?? 0, deploys: deploysByWeek.get(k) ?? 0 }));
+  const lifeCommits = trendWeeks.reduce((n, w) => n + w.commits, 0);
+  const activeWeeksLife = trendWeeks.filter((w) => w.commits > 0).length;
+  const trendDetail = trendSource === "none" ? "No weekly history was read." : `${lifeCommits} commits across ${activeWeeksLife} of the last ${trendWeeks.length} weeks${trendSource === "window-commits" ? " (window only; the provider's yearly statistics were not available)" : ""}.`;
+
+  // ---- roadmap: dated promises against what happened -----------------------
+  const roadmapClaims = extractRoadmapClaims(input.docsText).map((c) => {
+    const due = parse(c.due);
+    const from = due - 30 * DAY;
+    const to = due + 30 * DAY;
+    const rel = releaseTimes.filter((t) => t >= from && t <= to).length;
+    const dep = deploys.filter((d) => parse(d.date) >= from && parse(d.date) <= to).length;
+    const com = commits.filter((c2) => parse(c2.date) >= from && parse(c2.date) <= to).length;
+    const weekly = trendWeeks.filter((w) => parse(w.weekStart) >= from - 7 * DAY && parse(w.weekStart) <= to).reduce((n, w) => n + w.commits, 0);
+    let grade: RoadmapGrade;
+    let evidence: string;
+    if (due > nowMs) { grade = "pending"; evidence = `Due ${c.due.slice(0, 10)}; not yet reached.`; }
+    else if (rel || dep) { grade = "met"; evidence = `${rel} release${rel === 1 ? "" : "s"} and ${dep} deploy${dep === 1 ? "" : "s"} within a month of ${c.due.slice(0, 10)}.`; }
+    else if (com >= 5 || weekly >= 10) { grade = "met"; evidence = `${Math.max(com, weekly)} commits within a month of ${c.due.slice(0, 10)}; no tagged release or deploy to name.`; }
+    else if (due < windowStart - 30 * DAY && trendSource !== "provider-weekly") { grade = "unclear"; evidence = `Due ${c.due.slice(0, 10)}, before this read's history begins.`; }
+    else { grade = "missed"; evidence = `Nothing in the repositories within a month of ${c.due.slice(0, 10)}.`; }
+    return { text: c.text, due: c.due, grade, evidence };
+  });
+  const roadmapMet = roadmapClaims.filter((c) => c.grade === "met").length;
+  const roadmapMissed = roadmapClaims.filter((c) => c.grade === "missed").length;
+  const roadmapPending = roadmapClaims.filter((c) => c.grade === "pending").length;
+  const roadmapDetail = !input.docsText ? "No roadmap or docs text was read." : !roadmapClaims.length ? "The docs carry no dated promises to check." : `${roadmapClaims.length} dated promise${roadmapClaims.length === 1 ? "" : "s"} in the docs: ${roadmapMet} met, ${roadmapMissed} missed, ${roadmapPending} still ahead.`;
+
+  // ---- cohort: like against like ------------------------------------------
+  const cohort = input.cohort && input.cohort.size > 0 ? {
+    ...input.cohort,
+    detail: `Among ${input.cohort.size} ${input.cohort.label}: ${total} commits sits ${input.cohort.percentileCommits != null ? `at the ${Math.round(input.cohort.percentileCommits)}th percentile` : `against a median of ${Math.round(input.cohort.medianCommits)}`}, ${humans.length} human author${humans.length === 1 ? "" : "s"} ${input.cohort.percentileAuthors != null ? `at the ${Math.round(input.cohort.percentileAuthors)}th` : `against a median of ${Math.round(input.cohort.medianAuthors)}`}${input.cohort.shippingSharePct != null ? `; ${Math.round(input.cohort.shippingSharePct)}% of the cohort is still shipping` : ""}.`,
+  } : undefined;
+
+  // ---- coverage: what this read actually saw --------------------------------
+  const commitsCounted = input.repos.reduce((n, r) => n + (r.commitsInWindow ?? 0), 0);
+  const historyRepos = new Set(commits.map((c) => c.repo)).size;
+  const coverageNotes = [...(input.readNotes ?? [])];
+  if (input.reposTotal != null && input.reposTotal > input.repos.length) coverageNotes.push(`${input.repos.length} of ${input.reposTotal} repositories reviewed (most recently pushed first).`);
+  if (commitsCounted > total) coverageNotes.push(`${total} of ${commitsCounted} window commits read in detail; cadence and authorship come from the read set, the count from the provider.`);
+  if (!input.starHistory?.length && starTotal > 0) coverageNotes.push("No star history was read; the star read is proportional.");
+  if (!input.identities) coverageNotes.push("Committer accounts were not resolved to X handles or employers.");
+  if (!input.deploys && !input.packages) coverageNotes.push("No on-chain deployer history or package registry was joined.");
+  if (!input.priceSeries?.length) coverageNotes.push("No price series was joined; the chart-versus-commits read is empty.");
+  if (!input.claims?.length) coverageNotes.push("No project posts were joined; shipping claims were not graded.");
+  if (!input.docsText) coverageNotes.push("No roadmap or docs text was joined.");
+
   // ---- grade + headline --------------------------------------------------
   let grade: ShippingGrade;
   if (status === "unknown") grade = "unknown";
@@ -652,6 +1055,29 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
           : grade === "shipping-team" ? `Shipping as a team: ${total} commits in ${input.windowDays} days from ${who}.`
             : `Shipping, but it is ${who}: ${total} commits in ${input.windowDays} days.`;
 
+  // ---- delta against the previous saved report -----------------------------
+  let delta: ShippingAssessment["delta"];
+  if (input.previous) {
+    const prev = input.previous;
+    const changePct = prev.totalCommits > 0 ? round1(((total - prev.totalCommits) / prev.totalCommits) * 100) : undefined;
+    const stalled = (prev.grade === "shipping-team" || prev.grade === "shipping-solo") && (grade === "stalled" || grade === "thin" || status === "quiet" || status === "dormant");
+    const parts: string[] = [];
+    if (prev.grade !== grade) parts.push(`grade ${shippingGradeLabel(prev.grade).toLowerCase()} → ${shippingGradeLabel(grade).toLowerCase()}`);
+    if (changePct != null) parts.push(`commits ${prev.totalCommits} → ${total} (${changePct >= 0 ? "+" : ""}${changePct}%)`);
+    else if (prev.totalCommits !== total) parts.push(`commits ${prev.totalCommits} → ${total}`);
+    if (prev.distinctHuman !== humans.length) parts.push(`human committers ${prev.distinctHuman} → ${humans.length}`);
+    if (prev.cadenceStatus !== status) parts.push(`cadence ${prev.cadenceStatus} → ${status}`);
+    delta = {
+      capturedAt: prev.capturedAt,
+      grade: { from: prev.grade, to: grade },
+      commits: { from: prev.totalCommits, to: total, changePct },
+      humans: { from: prev.distinctHuman, to: humans.length },
+      cadence: { from: prev.cadenceStatus, to: status },
+      stalled,
+      detail: parts.length ? `Since the report of ${prev.capturedAt.slice(0, 10)}: ${parts.join("; ")}.${stalled ? " The project was shipping then and is not now." : ""}` : `Unchanged since the report of ${prev.capturedAt.slice(0, 10)}.`,
+    };
+  }
+
   evidence.push(`${total} commits across ${activeWeeks} of ${weekCount} weeks; last activity ${lastCommitDaysAgo != null ? `${lastCommitDaysAgo} day${lastCommitDaysAgo === 1 ? "" : "s"} ago` : "unknown"}${longestGapDays != null ? `; longest gap ${longestGapDays} days` : ""}.`);
   if (rows.length) evidence.push(`${humans.length} human committer${humans.length === 1 ? "" : "s"}${botCommits ? `, ${pct(botCommits, total)}% bot commits` : ""}${mirrorCommits ? `, ${mirroredSharePct}% mirrored` : ""}; top author holds ${top1SharePct}% of attributable commits.`);
   if (substance.medianLinesChanged != null) evidence.push(`Median commit changes ${substance.medianLinesChanged} lines${substance.medianFiles != null ? ` across ${substance.medianFiles} files` : ""}; ${substance.trivialSharePct}% are trivial (${TRIVIAL_LINES} lines or fewer).`);
@@ -660,6 +1086,12 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
   if (bulkImports.length) evidence.push(`${bulkImports.length} repositor${bulkImports.length === 1 ? "y opens" : "ies open"} with a bulk code drop rather than incremental history: ${bulkImports.join(", ")}.`);
   evidence.push(...authorshipEvidence);
   if (starVerdict === "suspect") evidence.push(`Star authenticity is suspect: ${starEvidence[0]}`);
+  if (departed) evidence.push(churnDetail);
+  if (liveVerdict === "live" || liveVerdict === "deploys-without-code") evidence.push(liveDetail);
+  if (adoptionVerdict === "used") evidence.push(adoptionDetail);
+  if (roadmapMissed) evidence.push(`${roadmapMissed} dated roadmap promise${roadmapMissed === 1 ? "" : "s"} passed with nothing in the repositories to show for ${roadmapMissed === 1 ? "it" : "them"}.`);
+  if (ci === "failure") evidence.push("The latest default-branch checks fail.");
+  if (delta?.stalled) evidence.push(delta.detail);
   const fresh = humans.filter((h) => h.freshAccount);
   if (fresh.length) caveats.push(`${fresh.length} committer account${fresh.length === 1 ? " was" : "s were"} created inside the window; new accounts are not new people, but they carry no history to check.`);
   if (authorship === "mirrored") caveats.push("A mirrored repository can hide a real team or a single contractor equally well; ask for the private repository's contributor list.");
@@ -683,6 +1115,7 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
       mirrorSharePct: mirroredSharePct,
       hhi,
       roster: rows.slice(0, 25),
+      churn: { leadLogin: priorLead?.login, leadName: priorLead?.name, leadPriorSharePct, leadLast30: priorLead?.last30 ?? 0, departed, goneQuiet, detail: churnDetail },
     },
     substance,
     authorship: { verdict: authorship, aiTrailerCount, genericMessageSharePct: total ? pct(generic, total) : undefined, bulkDropCount: bulkDrops.length, mirroredSharePct, evidence: authorshipEvidence },
@@ -692,6 +1125,44 @@ export function assessShipping(input: ShippingInput): ShippingAssessment {
     market: { read: marketRead, priceChangePct, commitTrendPct, detail: marketDetail },
     claims: { graded, supported, context, unsupported, detail: claimDetail },
     ...(peers ? { peers } : {}),
+    ...(cohort ? { cohort } : {}),
+    live: { verdict: liveVerdict, deploysInWindow: deploys.length, verifiedDeploys, publishesInWindow: publishes.length, codeToChain, detail: liveDetail },
+    adoption: { verdict: adoptionVerdict, externalPrSharePct, externalIssueSharePct, externalPrs, externalIssues, activeForks, packageDownloadsLastMonth: packageDownloads, packages: (input.packages ?? []).map((pk) => `${pk.registry}:${pk.name}`), detail: adoptionDetail },
+    health: { verdict: healthVerdict, ci, license, licenseId, auditInTree, lockfileAgeDays, detail: healthDetail },
+    trend: { weeks: trendWeeks, lifeCommits, activeWeeksLife, source: trendSource, detail: trendDetail },
+    roadmap: { claims: roadmapClaims, met: roadmapMet, missed: roadmapMissed, pending: roadmapPending, detail: roadmapDetail },
+    ...(delta ? { delta } : {}),
+    coverage: { reposTotal: input.reposTotal, reposRead: input.repos.length, historyRepos, commitsCounted, commitsRead: total, starHistoryDays: input.starHistory?.length ?? 0, weeklyStatsRead: trendSource === "provider-weekly", identitiesRead: Object.keys(identities).length, windowDays: input.windowDays, notes: coverageNotes },
+  };
+}
+
+/** The compact form frozen into a saved report and compared on the next scan. */
+export function summarizeShipping(a: ShippingAssessment, capturedAt: string): ShippingSummary {
+  return {
+    version: 1,
+    target: a.target,
+    capturedAt,
+    windowDays: a.windowDays,
+    grade: a.grade,
+    headline: a.headline,
+    cadenceStatus: a.cadence.status,
+    totalCommits: a.cadence.totalCommits,
+    activeWeeks: a.cadence.activeWeeks,
+    distinctHuman: a.committers.distinctHuman,
+    concentration: a.committers.concentration,
+    authorship: a.authorship.verdict,
+    origin: a.origin.verdict,
+    stars: a.stars.verdict,
+    market: a.market.read,
+    claimsSupported: a.claims.supported,
+    claimsUnsupported: a.claims.unsupported,
+    live: a.live.verdict,
+    adoption: a.adoption.verdict,
+    health: a.health.verdict,
+    leadDeparted: a.committers.churn.departed,
+    reposRead: a.coverage.reposRead,
+    commitsRead: a.coverage.commitsRead,
+    releasesInWindow: a.cadence.releasesInWindow,
   };
 }
 

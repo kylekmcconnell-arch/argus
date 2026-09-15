@@ -1,0 +1,8 @@
+[
+  { "label": "HEY", "target": "hey-research-lab", "kind": "org", "chain": "robinhood", "address": "0xB33eb16782776b4D738c0Fd643577cb0284Db610", "asOf": "2026-09-15", "note": "one-account sync mirror, four days old at the read; forward window still open" },
+  { "label": "UNI", "target": "Uniswap", "kind": "org", "chain": "ethereum", "address": "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984", "asOf": "2026-06-01", "note": "control: large team, established token" },
+  { "label": "AERO", "target": "aerodrome-finance", "kind": "org", "chain": "base", "address": "0x940181a94A35A4569E4529A3CDfB74e38FD98631", "asOf": "2026-06-01", "note": "control: small team, live DEX" },
+  { "label": "GMX", "target": "gmx-io", "kind": "org", "chain": "arbitrum", "address": "0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a", "asOf": "2026-06-01", "note": "control: perps, mid-size team" },
+  { "label": "ELIZA", "target": "elizaOS", "kind": "org", "chain": "solana", "address": "HeLp6NuQkmYB4pYWo2zYs22mESHXPQYzXbB8n4V98jwC", "asOf": "2026-06-01", "note": "AI-agent framework with a token; large contributor base" },
+  { "label": "VIRTUAL", "target": "Virtual-Protocol", "kind": "org", "chain": "base", "address": "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b", "asOf": "2026-06-01", "note": "launchpad; compare adoption against commit cadence" }
+]

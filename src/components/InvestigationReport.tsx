@@ -2515,7 +2515,7 @@ export function InvestigationReport({
             intelligence, and GitHub forensics — the same cluster every report uses */}
         {showCurrentIntelligence && (
           <div className="mt-3">
-            <ProjectResearch name={token.name} symbol={token.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${token.symbol}`} newsHandle={projectX} record={canRecordCurrentIntelligence} sectorText={recon?.title ?? null} token={{ address: token.address, chain: token.chain }} {...(panelCostToken ? { panelCostToken } : {})} />
+            <ProjectResearch name={token.name} symbol={token.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${token.symbol}`} newsHandle={projectX} record={canRecordCurrentIntelligence} sectorText={[recon?.title, recon?.retrieval?.description].filter(Boolean).join(" · ") || null} docsText={recon?.retrieval?.content ?? null} token={{ address: token.address, chain: token.chain, deployer: token.deployer, mcap: token.mcap ?? undefined, ageDays: token.ageDays ?? undefined }} projectHandle={projectX} previousShipping={token.reportDelta?.category === "development" ? token.reportDelta.previousShipping ?? null : null} {...(panelCostToken ? { panelCostToken } : {})} />
           </div>
         )}
 

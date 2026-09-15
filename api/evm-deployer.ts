@@ -74,17 +74,23 @@ async function fundingSource(chainid: number, wallet: string, key: string, usage
 // How many contracts this wallet has DEPLOYED, from its tx history (creation txs
 // have an empty `to` and a populated contractAddress). A wallet that has minted
 // many contracts is a serial launcher on its own.
-async function deploymentsBy(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<number> {
+// The list itself (address + time) is what the shipping read joins commits to:
+// a deploy that follows a release is the code going live.
+export interface DeploymentRecord { address: string; at: string }
+async function deploymentsBy(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<DeploymentRecord[]> {
   const d = await es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "10000", sort: "asc" }, key, usage);
   const txs = arr(rec(d).result);
-  const created = new Set<string>();
+  const created = new Map<string, string>();
   for (const value of txs) {
     const tx = rec(value);
     const to = str(tx.to);
     const contractAddress = str(tx.contractAddress);
-    if (!to && contractAddress && isAddr(contractAddress) && lc(str(tx.from)) === lc(wallet)) created.add(lc(contractAddress));
+    const ts = Number(str(tx.timeStamp));
+    if (!to && contractAddress && isAddr(contractAddress) && lc(str(tx.from)) === lc(wallet) && !created.has(lc(contractAddress))) {
+      created.set(lc(contractAddress), Number.isFinite(ts) && ts > 0 ? new Date(ts * 1000).toISOString() : "");
+    }
   }
-  return created.size;
+  return [...created.entries()].map(([address, at]) => ({ address, at }));
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -132,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const funderAddr = fund.funder;
     const cexLabel = funderAddr ? CEX[lc(funderAddr)] ?? null : null;
     const walletAgeDays = fund.firstTs ? Math.max(0, Math.round((Date.now() / 1000 - fund.firstTs) / 86400)) : null;
-    const serialDeployer = deployments >= 5;
+    const serialDeployer = deployments.length >= 5;
 
     const note = !funderAddr
       ? "No clear funding source found for the deployer in its earliest transactions."
@@ -145,7 +151,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       deployer,
       funder: funderAddr ? { address: funderAddr, label: cexLabel, kind: cexLabel ? "cex" : "wallet" } : null,
       terminatesAtCex: !!cexLabel,
-      deployments,
+      deployments: deployments.length,
+      // Newest fifty creations with their times, for the shipping read's
+      // code-to-chain join. Older history only inflates the count above.
+      deploymentList: deployments.slice(-50),
       serialDeployer,
       walletAgeDays,
       firstActivity: fund.firstTs ? new Date(fund.firstTs * 1000).toISOString().slice(0, 10) : null,

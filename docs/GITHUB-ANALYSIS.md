@@ -167,28 +167,57 @@ told from a launch push. That is the right read and it is what the test
 
 ---
 
-## 4. Still open
+## 4. From diagnostic to decision (second pass, 2026-09-15)
 
-1. **Own-post corpus for claim grading.** The panel accepts `claims` but no
-   report currently carries the project's own X timeline (the social-activity
-   snapshot holds mentions of the subject, not its posts). Feeding the
-   project-account posts collected during the audit into `ProjectResearch` turns
-   the claims block on with no other change.
-2. **Committer → X bridge.** For each human login in the roster, call the
-   existing `/api/resolve-github` in reverse (GitHub `twitter_username`, bio
-   handle) and show the X handle beside the login; the org-member path in
-   `api/recon-team.ts` already does this for public org members.
-3. **Scan-time lane.** The panel is paid and on-click. A cheap scan-time version
-   (one GraphQL call: repos with `history(since).totalCount`) can close the
-   `github-forensics` checklist row that today is never produced, and let the
-   engine penalise "price without shipping" the way it penalises other
-   contradictions. That needs the five-file check registration described in
-   `server/checks.ts` and must leave the frozen check arrays untouched.
-4. **Downloads and usage.** npm / PyPI / crates download counts and GitHub
-   dependents for the project's packages, against social mention volume, to
-   answer "who is using them versus who is talking about them".
-5. **Cabal registry.** Add the 2022 Ethereum HEY lineage to `rh-snipe-ring-hey`
+The first pass was a paid on-click panel that reached nothing else. This pass
+makes the read count, shows the trend, names the people, grades the words,
+proves the code is live, compares like with like, measures use, checks repo
+health, discloses coverage and backtests the grades.
+
+| # | What an investor needed | Where it now lives |
+| --- | --- | --- |
+| 1 | The read reaches the verdict, the checklist and the saved report | `api/shipping-summary.ts` (scan-time lane, middleware-gated, six-hour cache) → `TokenDossier.shipping: ShippingSummary` frozen by `src/token/audit.ts` (Corroborate · Development) → `judge()` in `src/threat/scan.ts` scores it class-aware (stalled or thin utility: soft 10 / 6; rally without shipping: 8; departed lead: 6; unbacked claims: 6; suspect stars: 5; poor health: 3; team shipping, live code and outside use as positives; memes never penalised for thin development; absence never penalised) → `shippingCheck()` in `src/lib/scanChecklist.ts` closes the `github-forensics` row (confirmed / finding / unavailable / honest unknown) → `ShippingScorecard` prints the frozen read in the report and the PDF (`#development`). The sweep (`server/sweep.ts`) injects the same collector so watched tokens carry it too. |
+| 2 | Trend, deltas and a stall alert | `trend` in the assessment: 52 weeks of provider commit statistics per repo (`stats/commit_activity`), price per week, releases and deploys as ticks, drawn by `TrendChart` in the panel with the 90-day window shaded. `developmentDelta()` in `src/lib/reportDelta.ts` is a new material-delta category computed at save time from the prior report (stalled, halved, team halved, lead departed, resumed) and carries `previousShipping` so the panel can print the delta line. The sweep emits a `stall` alert when a watched token that was shipping reads stalled, thin, halved or lead-departed. |
+| 3 | Who, and whether they are still there | Committer accounts are resolved in one GraphQL query (`readIdentities`): X handle, employer, public orgs, account age, joined onto the roster. `committers.churn` reads the prior-60-day lead against the last 30: `departed` when the lead stopped and others continued; `goneQuiet` lists everyone who did. Rendered as "Still there?" and per-person 30/60-day counts with links to GitHub and X. |
+| 4 | Claims against the project's own words | `api/x-posts.ts` returns the project account's last 60 posts (twitterapi.io `last_tweets`, panel-metered); the panel joins them on click and `claims` grades every shipping claim against releases and commit bursts. `extractRoadmapClaims()` finds dated promises ("Q3 2026: mainnet", "H1 2026", "March 2026") in docs text and grades them met / missed / pending against releases, deploys and weekly commits; investigations pass the site's retrieved text. |
+| 5 | Proof the code is live | `api/evm-deployer.ts` now returns `deploymentList` (address, time); the panel fetches it on click and `live` reads deploys and npm publishes (registry `time` map, keyless) that follow a release or a burst of commits within 14 days: live / committed-only / deploys-without-code. No public repo reads as unknown, and the checklist says private builders are read through on-chain deploys. |
+| 6 | Like against like | `api/shipping-cohort.ts` builds the stage cohort from the workspace's own saved token reports: same chain, a quarter-to-four-times cap band, half-to-double age band, at least five members, subject percentile on commits and human authors, share still shipping. The sector leaders stay in the panel labelled "the ceiling, not the yardstick". |
+| 7 | Adoption, not attention | `adoption` from pull-request and issue `authorAssociation` (OWNER / MEMBER / COLLABORATOR are insiders; everyone else is outside), forks pushed to inside the window, npm downloads last month: used / noticed / unused. |
+| 8 | Repo health | `health` from the default branch's `statusCheckRollup`, licence class (permissive / copyleft / source-available / none), an `audits/` or `audit/` directory, and the last commit touching a lockfile: sound / mixed / poor. |
+| 9 | Coverage and backtest | `coverage` on every assessment (repos read of total, commits read of counted, star-history days, whether yearly stats and identities were read, verbatim read notes such as the stargazer restriction) shown as "What this read saw". `scripts/backtest-shipping.ts` takes `eval/shipping-backtest.json`, reads each subject as of a past date (`collectShipping` with `now` and `until`), grades it with the same pure function, and pairs the grade with the forward return from GeckoTerminal daily candles; output is the grade distribution against outcomes. |
+
+Tests added: `src/threat/shipping.decision.test.ts` (14), `src/threat/scan.shipping.test.ts` (6),
+`api/shipping-cohort.test.ts` (3), `api/shipping-summary.test.ts` (3), plus development
+cases in `src/lib/reportDelta.test.ts` and `src/lib/scanChecklist.test.ts`, and the
+rewritten `api/github-shipping.test.ts` (12) with a URL-routed fetch.
+
+**Backtest, first run.** The harness works end to end: HEY reads as shipping-solo /
+mirrored / bulk-imported at 2026-09-15 and Aerodrome as shipping-team with six human
+authors at 2026-06-01. Two limits showed up and are recorded rather than hidden: GitHub's
+edge times the wide repository query out on very large organisations (Uniswap, gmx-io,
+elizaOS, Virtual-Protocol returned 502/504), so the collector now retries with the five
+most recently pushed repositories and says so in the coverage notes; and GeckoTerminal
+serves 200 daily candles, so forward returns need subjects whose as-of date is inside
+that window. The seed file is six controls; the set that would let the grades be
+reweighted with any confidence is a few dozen tokens with known outcomes, which is a
+data-entry task, not an engineering one.
+
+## 5. Still open
+
+1. **A backtest set worth trusting.** `eval/shipping-backtest.json` holds six
+   controls. Reweighting the engine's development penalties needs a few dozen
+   tokens with known outcomes and as-of dates inside GeckoTerminal's 200-day
+   candle window; until then the penalties are judgement, and the doc says so.
+2. **Robinhood Chain deploy trail.** `api/evm-deployer.ts` reads Etherscan v2,
+   which has no chain 4663 entry, so Robinhood Chain tokens get no deploy list
+   and the live read stays "unknown" there. A Blockscout creation reader
+   (the `getcontractcreation` call in `api/launch.ts` is the precedent) closes it.
+3. **PyPI and crates.** Only npm is read for publishes and downloads; Rust and
+   Python projects show no package signal.
+4. **Cabal registry.** Add the 2022 Ethereum HEY lineage to `rh-snipe-ring-hey`
    on the cabal branch once it merges.
-6. **Star lists.** Only a repository admin can read who starred. If a project
+5. **Star lists.** Only a repository admin can read who starred. If a project
    under review grants collaborator access, the stargazer sample input already
    runs the account-level StarScout read.
+6. **Cohort index.** The cohort query filters `payload->>chain` with no index;
+   fine at hundreds of reports, worth a GIN index at tens of thousands.
