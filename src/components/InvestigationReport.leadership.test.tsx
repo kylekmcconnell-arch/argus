@@ -428,3 +428,45 @@ describe("leadership currency on the team card", () => {
     expect(container.querySelector('[aria-label="Leadership currency"]')).toBeNull();
   });
 });
+
+describe("site-named team provenance", () => {
+  const siteFounders = [{ name: "Alice Namesake", handle: null, source: "site" as const }];
+
+  it("publishes a bound site's named people as the project's own claim", () => {
+    render(investigation({
+      webTeam: [],
+      projectAccount: projectAccount({ webTeam: [], leaderDepartures: undefined }),
+      founders: siteFounders,
+      siteUrlOrigin: "token-sources",
+      founderNote: "Named on the project site: Alice Namesake.",
+    }));
+    expect(container.textContent).toContain("People named by the project (1)");
+    expect(teamText()).toContain("Alice Namesake");
+  });
+
+  it("never turns an unbound model-suggested site's names into project claims", () => {
+    render(investigation({
+      webTeam: [],
+      projectAccount: projectAccount({ webTeam: [], leaderDepartures: undefined }),
+      founders: siteFounders,
+      siteUrl: "https://namesake-project.example",
+      siteUrlOrigin: "model_lead",
+      siteBinding: { origin: "model_lead", status: "unbound", note: "The suggested site does not publish this contract." },
+      recon: {
+        retrieval: { status: "ok", content: "Meet the team: Alice Namesake." },
+        title: "Namesake Project",
+        team: { state: "named", names: ["Alice Namesake"], note: "" },
+        socials: [],
+        funding: [],
+        tokenSignals: [],
+        findings: [],
+        identityLine: "Namesake Project names a one-person team.",
+      } as unknown as Investigation["recon"],
+      founderNote: "A model-suggested site (namesake-project.example, unverified) names Alice Namesake, but it does not publish this contract.",
+    }));
+    expect(container.textContent).not.toContain("People named by the project");
+    expect(container.textContent).not.toContain("names Alice Namesake as Founder");
+    expect(teamText()).not.toContain("Namesake Project names a one-person team.");
+    expect(teamText()).toContain("model-suggested site");
+  });
+});

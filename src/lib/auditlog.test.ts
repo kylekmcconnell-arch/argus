@@ -107,6 +107,54 @@ describe("reconcileAuditOutcome (chip vs active-report truth)", () => {
     expect(store.get("argus:auditlog")).toBe(before);
   });
 
+  it("reconciles a bare-address token row from the server's chain-qualified ref", () => {
+    const address = "0xAbCdEf0000000000000000000000000000000001";
+    const rows = [
+      { id: "tok-new", ts: 2, kind: "token", query: "$MEME", ref: address, verdict: "CAUTION", score: 72, coverage: "provisional", summary: "rescan" },
+      { id: "tok-old", ts: 1, kind: "token", query: "$MEME", ref: address, verdict: "PASS", score: 85, coverage: "complete", summary: "older" },
+      { id: "other-chain", ts: 3, kind: "token", query: "$MEME", ref: `base:${address}`, verdict: "PASS", score: 50, coverage: "complete", summary: "base twin" },
+    ];
+    const store = new Map<string, string>([["argus:auditlog", JSON.stringify(rows)]]);
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+
+    // The active server projection for the ethereum case is the complete 85.
+    reconcileAuditOutcome(`ethereum:${address.toLowerCase()}`, "token", { verdict: "PASS", score: 85, coverage: "complete" }, { persist: false });
+
+    const after = JSON.parse(store.get("argus:auditlog")!) as Array<{ id: string; score: number; coverage: string }>;
+    // Only the newest bare row for this address is folded; the same address
+    // on another chain is a different subject and the history stays as it was.
+    expect(after.find((r) => r.id === "tok-new")).toMatchObject({ score: 85, coverage: "complete" });
+    expect(after.find((r) => r.id === "other-chain")).toMatchObject({ score: 50 });
+    expect(after.find((r) => r.id === "tok-old")).toMatchObject({ score: 85, coverage: "complete" });
+  });
+
+  it("folds the active projection into a bare-address row when no qualified row exists", () => {
+    const address = "0xabcdef0000000000000000000000000000000002";
+    const rows = [
+      { id: "tok-new", ts: 2, kind: "token", query: "$MEME", ref: address, verdict: "CAUTION", score: 72, coverage: "provisional", summary: "rescan" },
+      { id: "tok-old", ts: 1, kind: "token", query: "$MEME", ref: address, verdict: "PASS", score: 60, coverage: "complete", summary: "older" },
+    ];
+    const store = new Map<string, string>([["argus:auditlog", JSON.stringify(rows)]]);
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+
+    reconcileAuditOutcome(`ethereum:${address}`, "token", { verdict: "PASS", score: 85, coverage: "complete" }, { persist: false });
+
+    const after = JSON.parse(store.get("argus:auditlog")!) as Array<{ id: string; score: number; coverage: string }>;
+    expect(after.find((r) => r.id === "tok-new")).toMatchObject({ score: 85, coverage: "complete" });
+    // Older rows are the historical record.
+    expect(after.find((r) => r.id === "tok-old")).toMatchObject({ score: 60 });
+  });
+
   it("can reconcile a hydrated projection without writing historical rows back", async () => {
     const store = stubStorage();
     const fetchMock = vi.mocked(fetch);
