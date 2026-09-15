@@ -461,8 +461,11 @@ export function reconcileVerdict(handle: string, contributions: GraphContributio
   const bad = subjectConnections(handle, authoritative, 24)
     .filter((connection) => connection.otherVerdict && BAD_VERDICTS.has(connection.otherVerdict));
   const strongestOf = (c: SubjectConnection): "hard" | "medium" | "weak" => {
-    if (c.direct) return "hard"; // the flagged subject IS an entity this audit surfaced
-    let best: "hard" | "medium" | "weak" = "weak";
+    // A direct mention (this audit surfaced the flagged subject's key) is as
+    // strong as that key, matching the server trust graph: listing @mallory
+    // as an associate is a medium tie, not byte-identical infrastructure.
+    let best: "hard" | "medium" | "weak" = c.direct ? tieStrength(c.other) : "weak";
+    if (best === "hard") return "hard";
     for (const t of c.ties) { const s = tieStrength(t.key); if (s === "hard") return "hard"; if (s === "medium") best = "medium"; }
     return best;
   };

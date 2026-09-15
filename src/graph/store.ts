@@ -215,8 +215,12 @@ export function tokenContribution(symbol: string, verdict: string, nodes: Panopt
 // or of another person tied to it, bridges to them automatically. Affiliation
 // edges become the connective tissue of the network.
 export function personContribution(d: Dossier): GraphContribution {
-  const reportVersionId = d.versionContext?.reportVersionId
-    ?? (d.persistence?.state === "persisted" ? d.persistence.reportVersionId ?? undefined : undefined);
+  // Only a complete persisted version is server-collected authority. A partial
+  // version (which the server refuses to publish) stays research context.
+  const reportVersionId = d.completeness_state === "complete"
+    ? d.versionContext?.reportVersionId
+      ?? (d.persistence?.state === "persisted" ? d.persistence.reportVersionId ?? undefined : undefined)
+    : undefined;
   return {
     handle: d.handle,
     verdict: d.report.composite_verdict,

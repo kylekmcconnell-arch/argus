@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildNetwork, reconcileVerdict, tieStrength } from "./network";
 import type { GraphContribution } from "./network";
+import { personContribution } from "./store";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 
 // Two audits that share an on-chain entity. The subject ($GOOD) links to a wallet
@@ -38,6 +39,28 @@ describe("tieStrength", () => {
     expect(tieStrength("ticker:pepe")).toBe("weak");
     expect(tieStrength("$pepe")).toBe("weak");
     expect(tieStrength("token:evm:0x1111111111111111111111111111111111111111")).toBe("hard");
+  });
+});
+
+describe("client reconcile authority", () => {
+  it("rates a direct mention by its key strength and only trusts complete versions", () => {
+    // Regression for INT-15: listing @mallory (a FAIL) as an associate forced
+    // AVOID on the client, and a partial version counted as server_collected.
+    const g = authoritative([
+      { handle: "@alice", verdict: "PASS", nodes: [N("Person", "@alice", { subject: true }), N("Person", "@mallory")], edges: [E("@alice", "@mallory", "ASSOCIATES_WITH")] },
+      { handle: "@mallory", verdict: "FAIL", nodes: [N("Person", "@mallory", { subject: true })], edges: [] },
+    ]);
+    expect(reconcileVerdict("@alice", g)?.severity).toBe("caution");
+
+    const dossier = (completeness: "complete" | "partial") => ({
+      handle: "@mallory",
+      report: { composite_verdict: "FAIL" },
+      graph: { nodes: [], edges: [] },
+      completeness_state: completeness,
+      versionContext: { reportVersionId: "00000000-0000-4000-8000-000000000009" },
+    }) as never;
+    expect(personContribution(dossier("partial")).provenanceState).toBe("client_submitted");
+    expect(personContribution(dossier("complete")).provenanceState).toBe("server_collected");
   });
 });
 
