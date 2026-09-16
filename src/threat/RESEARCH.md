@@ -391,3 +391,56 @@ Neither is Pons, and both read as plain "uniswap" on DexScreener.
 
 Both belong in the `VENUES` table once a second token per venue confirms
 the fingerprint; recorded in `src/data/cabals.ts` (`altcoinist-ring`) for now.
+
+## PumpSwap drained-pool factory behind a pump.fun launch ($PARK, Solana, read 2026-09-16)
+
+$PARK / STONKS PARK (`7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5`, a Token-2022
+pump.fun mint created 2026-09-15 14:41:13 UTC, graduated to PumpSwap after 22
+hours with the LP burned) looked like a content project: daily animated
+episodes, a website, $598 of DexScreener ads. The wallet trail says otherwise.
+Curated in `src/data/cabals.ts` (`sol-park-pumpswap-pool-factory`).
+
+- **The creator wallet is a fee sink for other people's pools.** On PumpSwap,
+  `create_pool` takes a `coin_creator` account (account index 21 in the
+  current instruction layout) that receives the creator share of every swap
+  fee. Ten throwaway wallets (each alive for under an hour) opened pools
+  between 14:50 and 21:32 UTC on launch day depositing 191 to 451 SOL each
+  (3,781 SOL in total), all naming the PARK creator `CBbRS6xr…` as
+  `coin_creator`. Each pool drew 61 to 345 trades in 2 to 26 minutes and was
+  then drained to 0.00 SOL. The base tokens carry fake launchpad address
+  suffixes (`…pump`, `…bonk`, `…moon`, `…BAGS`) and generated names, and
+  DexScreener still quotes multi-million market caps for them on zero
+  liquidity. Ten further pools traded on 09-16 paying fees to the same vault.
+  Nobody routes creator fees to a stranger: the factory and the "dev" are one
+  operator.
+- **Detection recipe.** Pull `getSignaturesForAddress` for the token creator
+  and decode every transaction that touches the PumpSwap program
+  (`pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA`) but was not signed by the
+  creator. A creator that appears as an account in `create_pool` or swap
+  transactions for other mints is a coin-creator fee sink; check those pools'
+  WSOL vaults (`getTokenAccountsByOwner(pool, WSOL)`) for the drained-to-zero
+  signature. The pump.fun API returns 404 for these mints because they never
+  had a curve.
+- **Launch bundle.** The bonding-curve account
+  (`7fQP9eZk6xPVULLETYEfcHFQYSA1sbYQnd3BxJWMeD6C`) is the cheap history
+  source (3,880 txs versus 40,000+ on the mint after graduation). 43 buys in
+  the first 20 slots took 44.65% of supply. Eight fresh wallets (5 to 9 txs
+  each) were funded about 1.05 SOL apiece from five high-throughput hubs
+  between 09:42 and 10:01 UTC, five hours before the 14:41 launch; five of
+  them bought an identical 0.811% in slot +13 and all but one exited by slot
+  +20. Fresh-from-hub funding plus identical sizing in one slot is the bundle
+  fingerprint; the hubs themselves (300 to 54,000 SOL, seeding wallets every
+  minute) read as exchange or bot-service hot wallets and do not identify the
+  operator on their own.
+- **Recycled X handle.** GMGN's rename history for @stonkspark lists 13
+  renames: twelve 2024 Solana memecoin handles and 3 deleted tweets, on an
+  account that joined May 2024 with 331 followers. A project account whose
+  previous names were all dead memecoins is a serial-launch tell independent
+  of the chain read.
+- **Tape.** 35,298 transactions in the first hour after graduation on about
+  920 holders and $26k of liquidity is bot volume; 24-hour volume of $690k
+  against a $110k market cap is the same signal in DexScreener terms.
+
+Public Solana RPCs reject `getTokenLargestAccounts` for Token-2022 mints and
+cap `getSignaturesForAddress` pagination in practice; use the bonding-curve
+account for the launch window and Solscan's holder page for the snapshot.
