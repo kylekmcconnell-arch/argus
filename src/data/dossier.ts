@@ -1,4 +1,5 @@
 import { isOrganizationAccount } from "../lib/investorSubject";
+import { cabalEvidenceForSubject } from "./cabals";
 // Dossier — the rendered report payload. Both the local fixture path and the
 // live server path produce a Dossier, so <Report> renders identically for each.
 
@@ -387,7 +388,21 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     a.addAssociate(typedAssociate);
     if (governingEligible(typedAssociate)) graphAudit.addAssociate(typedAssociate);
   });
+  // Curated cabal registry (src/data/cabals.ts): a subject recorded in a traced
+  // cluster gets its cabal-mates as `in_cabal_kb` associates so the trust graph
+  // forms the cabal without a second audited subject, and one finding per
+  // nefarious cluster so the membership reads in the report. Collected
+  // associates win on a handle collision; the registry never overwrites live
+  // evidence, it only fills what collection could not know.
+  const registry = cabalEvidenceForSubject(ev.profile.handle);
+  const collectedAssociateKeys = new Set(ev.associates.map((x) => x.associate_handle.replace(/^@/, "").toLowerCase()));
+  for (const associate of registry.associates) {
+    if (collectedAssociateKeys.has(associate.associate_handle.replace(/^@/, "").toLowerCase())) continue;
+    a.addAssociate(associate);
+    graphAudit.addAssociate(associate);
+  }
   ev.findings.forEach((f) => { a.addFinding(f); if (governingEligible(f)) graphAudit.addFinding(f); });
+  for (const finding of registry.findings) { a.addFinding(finding); graphAudit.addFinding(finding); }
   ev.axes.forEach((ax) => {
     try {
       a.setAxis(ax.axis, ax.score, ax.rationale, {
