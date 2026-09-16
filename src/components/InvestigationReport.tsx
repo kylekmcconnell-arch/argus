@@ -42,6 +42,7 @@ import { TokenSnapshotVisuals } from "./TokenSnapshotVisuals";
 import { LpCustody } from "./LpCustody";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { DeepLaunchPanel } from "./DeepLaunchPanel";
+import { ShippingScorecard } from "./ShippingScorecard";
 import { marketSizeBand } from "../lib/marketPosition";
 import { UsageVisuals } from "./UsageVisuals";
 import { EntityContinuityTimeline } from "./EntityContinuityTimeline";
@@ -2510,6 +2511,10 @@ export function InvestigationReport({
             <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} panelCostToken={panelCostToken} onAudit={onAudit} />
           </div>
         )}
+
+        {/* frozen development read: scored by the engine, closed on the checklist,
+            printed with the PDF; the same saved fact the token report shows */}
+        <ShippingScorecard shipping={token.shipping} delta={token.reportDelta} githubOrg={ghOrg} id="investigation-development" />
 
         {/* unified project research: news & press, documents & resources, domain
             intelligence, and GitHub forensics — the same cluster every report uses */}
