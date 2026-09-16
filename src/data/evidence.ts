@@ -389,6 +389,47 @@ export interface ProtocolFundingSnapshot {
 }
 
 /**
+ * Frozen CryptoRank funding record: the second crypto-native raises index next
+ * to the DeFiLlama record above. The binding that admitted the record is
+ * frozen with it (exact contract-address join to the verified canonical token,
+ * or the record's own official X handle / official domain), and projection
+ * re-validates that binding before the record can feed a fact. The `access`
+ * block records which plan-tiered detail endpoints the configured key
+ * answered, so a plan gate is auditable rather than silent.
+ */
+export interface CryptoRankFundingSnapshot {
+  currencyId: number;
+  /** CryptoRank's URL key for the record. */
+  key: string;
+  name: string;
+  symbol: string | null;
+  binding:
+    | { method: "canonical_token_address"; address: string; platform: string | null }
+    | { method: "official_identity"; officialTwitter: string | null; officialUrl: string | null };
+  /** Provider flag on the bound record; true even when the rounds detail endpoint is plan-gated. */
+  hasFundingRounds: boolean;
+  rounds: Array<{
+    stage: string;
+    /** "YYYY-MM-DD", or a bare "YYYY" when the provider only knows the year. */
+    date: string | null;
+    amountUsd: number | null;
+    valuationUsd: number | null;
+    leadInvestors: string[];
+    otherInvestors: string[];
+    announcementUrl: string | null;
+  }>;
+  totalRaisedUsd: number | null;
+  /** Named backer funds from full-metadata when the rounds detail is plan-gated. */
+  funds: Array<{ name: string; isLead: boolean }>;
+  access: {
+    fundingRounds: "ok" | "plan_gated" | "unavailable";
+    fullMetadata: "ok" | "plan_gated" | "unavailable" | "not_needed";
+  };
+  sourceUrl: string;
+  capturedAt: string;
+}
+
+/**
  * Frozen on-chain usage record for a project (total value locked). Mirrors the
  * DeFiLlama `ProtocolTvl` value plus the capture timestamp.
  */
@@ -1136,6 +1177,8 @@ export interface CollectedEvidence {
   evmControlReality?: EvmControlRealitySnapshot;
   /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */
   protocolFunding?: ProtocolFundingSnapshot;
+  /** Frozen CryptoRank funding record; the second raises index, used when the DeFiLlama record is absent. Feeds P4 at reported tier. */
+  cryptoRankFunding?: CryptoRankFundingSnapshot;
   /** Frozen public X conversation breadth and volume. Never affects safety scoring. */
   socialActivity?: SocialActivitySnapshot;
   /**

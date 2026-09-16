@@ -90,6 +90,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     configuredService("pdl", "People Data Labs (employment history)", process.env.PDL_API_KEY, "configure PDL_API_KEY"),
     configuredService("github", "GitHub (code footprint)", process.env.GITHUB_TOKEN, "configure GITHUB_TOKEN"),
     configuredService("coingecko", "CoinGecko (listings + market data)", process.env.COINGECKO_API_KEY, "configure COINGECKO_API_KEY"),
+    configuredService("cryptorank", "CryptoRank (funding rounds index)", process.env.CRYPTORANK_API_KEY, "configure CRYPTORANK_API_KEY"),
     retiredService("crunchbase", "Crunchbase (company funding)", "DeFiLlama and Monid/Akta cover funding and backing"),
     retiredService("reddit", "Reddit (community signal)", "Reddit API access was not approved"),
     configuredService("gmgn", "GMGN (holder cost basis + wallet tags)", process.env.GMGN_API_KEY, "configure GMGN_API_KEY (apply at https://gmgn.ai/ai)"),
