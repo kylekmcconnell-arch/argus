@@ -26,7 +26,7 @@ it says who is committing, whether the lead has stopped, whether the stars are
 bought, whether the marketing claims are true, and how the project compares
 with its sector and with tokens at the same stage.
 
-## The five merges
+## The seven merges
 
 | PR | Commit | What it does |
 | --- | --- | --- |
@@ -35,6 +35,8 @@ with its sector and with tokens at the same stage.
 | [#429](https://github.com/kylekmcconnell-arch/argus/pull/429) | `5689bd1` | The frozen read joins the token's daily price series and the deployer's contract creations (`src/threat/deployTrail.ts`, keyless on Blockscout chains, keyed on Etherscan chains), so the saved card says "shipping into weakness" and "live" without a click; `scripts/backtest-from-reports.ts` grows the backtest set from saved reports; development signals in the noticed rail; a development line in the plain-text export. |
 | [#430](https://github.com/kylekmcconnell-arch/argus/pull/430) | `46f805c` | Backtest set grown to 49 subjects with verified small caps. |
 | [#414](https://github.com/kylekmcconnell-arch/argus/pull/414) | `57dbb32` | Robinhood Chain launch-farm learnings and the curated cabal registry (earlier work, brought current with main and merged; the snipe-ring entry for the reviewed product's token is keyed by contract address with the name withheld). |
+| [#433](https://github.com/kylekmcconnell-arch/argus/pull/433) | `4a8fd43` | Merged after this handoff was first written: the o1 Launchpad (o1.exchange) becomes a launch venue in `src/threat/launch.ts` with server-side detection from its current and historical Robinhood factories, and the $WRESTLER registry record is retagged from "RWAERC20LaunchpadFactory" to o1, which o1's own contract registry identifies as its Robinhood Launch Factory. `RESEARCH.md` gains the o1 fee mechanics and a creator fee-farm read from Base. |
+| [#435](https://github.com/kylekmcconnell-arch/argus/pull/435) | `fffa6fb` | Merged after this handoff was first written: the first Solana entry in the cabal registry, a pump.fun launch whose creator wallet is the coin-creator fee sink of ten PumpSwap pools that throwaway wallets opened with 191 to 451 SOL each and drained within minutes. Registry tests accept base58 addresses; `RESEARCH.md` carries the detection recipe. |
 
 ## What a reader now sees
 
