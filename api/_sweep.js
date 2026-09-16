@@ -65,7 +65,7 @@ var CAP_BOUNDARIES = {
     evidenceArea: "contract"
   },
   cannot_sell_all: {
-    ceiling: 15,
+    ceiling: 10,
     controllingFact: "The contract does not allow a holder to sell their full balance.",
     unlockCondition: "A fresh trade receipt must show a full-balance sell succeeds and the contract restriction no longer applies.",
     evidenceArea: "contract"
@@ -1307,6 +1307,25 @@ function sameWalletAddress(a, b) {
   return a === b;
 }
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
+var FACTORY_ATTRIBUTION_METHOD = "contract factory";
+function deployerWalletAddress(d) {
+  if (!d.deployer) return null;
+  if (d.deployerAttribution?.method === FACTORY_ATTRIBUTION_METHOD) return null;
+  return d.deployer;
+}
+async function resolveEvmCreatorKind(chain, creator, fetchImpl2 = fetch) {
+  const origin = globalThis.location?.origin;
+  if (!origin) return "unknown";
+  try {
+    const r = await fetchImpl2(`/api/bytecode?address=${encodeURIComponent(creator)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(12e3) });
+    if (!r.ok) return "unknown";
+    const d = await r.json();
+    if (d?.available !== true || typeof d.isContract !== "boolean") return "unknown";
+    return d.isContract ? "contract" : "wallet";
+  } catch {
+    return "unknown";
+  }
+}
 async function screenDeployerRisk(address, fetchImpl2 = fetch) {
   if (!arkhamProviderEnabled()) return void 0;
   if (!address || address.length < 8) return void 0;
@@ -1408,6 +1427,10 @@ function evmSafety(gp, sim) {
   }
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
   const creatorShare = num2(gp?.creator_percent);
+  const ownerAddressReported = typeof gp?.owner_address === "string";
+  const ownerAddress = (gp?.owner_address ?? "").trim();
+  const hiddenOwner = t1(gp?.hidden_owner);
+  const takeBack = t1(gp?.can_take_back_ownership);
   return {
     available: !!gp && Object.values(gp).some((v) => v != null && v !== "") || simulationCompleted,
     contractPropertiesAssessed: !!gp && [gp.is_open_source, gp.is_mintable, gp.transfer_pausable, gp.selfdestruct].every((v) => v === "0" || v === "1") && typeof gp.owner_address === "string",
@@ -1422,9 +1445,16 @@ function evmSafety(gp, sim) {
     mintable: t1(gp?.is_mintable),
     freezable: false,
     nonTransferable: false,
-    ownerRenounced: !gp?.owner_address || /^0x0+$/.test(gp.owner_address || "") || gp.owner_address === "",
-    takeBack: t1(gp?.can_take_back_ownership),
-    hiddenOwner: t1(gp?.hidden_owner),
+    // GoPlus omits owner_address when it cannot detect an owner (unmeasured,
+    // not renounced), reports the visible 0x0 while hidden_owner says a
+    // concealed controller survives the renounce, and can_take_back_ownership
+    // says the renounce is reversible. "Renounced" is only true when the owner
+    // was measured AND no owner power survives; every other case leaves the
+    // owner-power vectors (balance rewrite, blacklist, tax change) live.
+    ownerAssessed: ownerAddressReported,
+    ownerRenounced: ownerAddressReported && (ownerAddress === "" || /^0x0+$/.test(ownerAddress)) && !hiddenOwner && !takeBack,
+    takeBack,
+    hiddenOwner,
     selfdestruct: t1(gp?.selfdestruct),
     pausable: t1(gp?.transfer_pausable),
     openSource: t1(gp?.is_open_source),
@@ -1491,6 +1521,7 @@ function solanaSafety(sol) {
     mintable,
     freezable,
     nonTransferable: sol?.non_transferable === "1",
+    ownerAssessed: [sol?.mintable?.status, sol?.freezable?.status].every((v) => v === "0" || v === "1"),
     ownerRenounced: !mintable && !freezable,
     // both authorities revoked
     takeBack: false,
@@ -1572,7 +1603,7 @@ var CACHE_TTL = 6e4;
 async function auditToken(input, emit, opts) {
   if (input.kind !== "token") return null;
   const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
-  const key = `${opts?.chain ?? ""}:${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}:${opts?.collectShipping ? 1 : 0}`;
+  const key = `${opts?.chain ?? input.chain ?? ""}:${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}:${opts?.collectShipping ? 1 : 0}`;
   const hit = opts?.force ? void 0 : _cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
   const signal = opts?.deadlineAt != null ? AbortSignal.any([...opts.signal ? [opts.signal] : [], AbortSignal.timeout(Math.max(0, opts.deadlineAt - Date.now()))]) : opts?.signal;
@@ -1706,7 +1737,17 @@ async function runTokenAudit(input, emit, opts) {
     safety = recordObservedTradeability(safety, { buys24h: buys, sells24h: sells, liquidityUsd });
     const evmCreator = gp?.creator_address?.trim();
     const evmOwner = gp?.owner_address?.trim();
-    deployerAttribution = evmCreator ? { address: evmCreator, source: "goplus", method: "contract creator", kind: "deployer" } : evmOwner && !/^0x0+$/.test(evmOwner) ? { address: evmOwner, source: "goplus", method: "current owner", kind: "attributed" } : null;
+    const creatorKind = evmCreator && !sameWalletAddress(evmCreator, address) ? await resolveEvmCreatorKind(chain, evmCreator, fetcher) : "unknown";
+    deployerAttribution = evmCreator ? creatorKind === "contract" ? { address: evmCreator, source: "goplus", method: FACTORY_ATTRIBUTION_METHOD, kind: "attributed" } : { address: evmCreator, source: "goplus", method: "contract creator", kind: "deployer" } : evmOwner && !/^0x0+$/.test(evmOwner) ? { address: evmOwner, source: "goplus", method: "current owner", kind: "attributed" } : null;
+    if (creatorKind === "contract") {
+      step({
+        phase: "Contract",
+        label: "Factory-minted",
+        detail: `The creator record ${evmCreator.slice(0, 10)}\u2026 is a contract (a launchpad factory), not a wallet. Deployer history, sell-structure and funding-trace checks are not attributed to it.`,
+        source: "goplus",
+        tone: "neutral"
+      });
+    }
     if (explorerHolders?.length) {
       safety = { ...safety, topHolderPct: explorerHolders[0].percent };
     } else if (GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain)) {
@@ -1736,7 +1777,7 @@ async function runTokenAudit(input, emit, opts) {
         findings.push({ claim: s.nonTransferable ? "Non-transferable token: holders cannot move it." : "Honeypot: the contract blocks selling.", tone: "bad", source: s.honeypotOnchain ? "goplus" : "sim" });
       }
     }
-    if (s.cannotSellAll) caps.push([15, "cannot_sell_all"]);
+    if (s.cannotSellAll) caps.push([10, "cannot_sell_all"]);
     const cexN = cg?.cexCount ?? 0;
     const mcap = fdv;
     const established = cexN >= 5 || cexN >= 3 && mcap >= 1e7 || cexN >= 1 && mcap >= 1e8;
@@ -1771,20 +1812,21 @@ async function runTokenAudit(input, emit, opts) {
     }
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });
     if (s.simChecked && !s.honeypot) findings.push({ claim: `Buying and selling worked in the test (${s.buyTax.toFixed(0)}% buy fee / ${s.sellTax.toFixed(0)}% sell fee).`, tone: "good", source: "honeypot.is" });
-    if (s.ownerRenounced && !s.mintable && !s.takeBack && !s.freezable) findings.push({ claim: chain === "solana" ? "Mint and freeze authority revoked." : "Ownership renounced; no mint or take-back.", tone: "good", source: "goplus" });
-    const ownerActive = !s.ownerRenounced;
+    if (s.ownerAssessed !== false && s.ownerRenounced && !s.hiddenOwner && !s.mintable && !s.takeBack && !s.freezable) findings.push({ claim: chain === "solana" ? "Mint and freeze authority revoked." : "Ownership renounced; no mint or take-back.", tone: "good", source: "goplus" });
+    const ownerActive = !s.ownerRenounced || s.hiddenOwner || s.takeBack;
+    const ownerNote = s.ownerAssessed === false ? " The owner could not be identified, so this control is treated as live." : "";
     if (s.ownerChangeBalance && ownerActive) {
       if (broadlyTraded) {
         findings.push({ claim: "GoPlus flags an owner-modify-balance capability, but broad CEX listing and deep liquidity indicate it is a governance/upgrade artifact, not an active threat.", tone: "warn", source: "argus" });
       } else {
         caps.push([20, "owner_can_modify_balance"]);
-        findings.push({ claim: "Owner can modify holder balances directly; they can zero your wallet.", tone: "bad", source: "goplus" });
+        findings.push({ claim: `Owner can modify holder balances directly; they can zero your wallet.${ownerNote}`, tone: "bad", source: "goplus" });
       }
     }
-    if (s.proxy) findings.push({ claim: ownerActive ? "Upgradeable proxy with an active owner: the contract logic can be swapped out from under holders." : "Upgradeable proxy contract (logic is replaceable), though ownership is renounced.", tone: ownerActive ? "bad" : "warn", source: "goplus" });
-    if (s.slippageModifiable && ownerActive) findings.push({ claim: "Tax is modifiable: a low tax now can be raised toward 100% after you buy.", tone: "bad", source: "goplus" });
-    if (s.blacklist && ownerActive) findings.push({ claim: "Owner can blacklist addresses, so your wallet can be blocked from selling.", tone: "warn", source: "goplus" });
-    if (s.tradingCooldown && ownerActive) findings.push({ claim: "Trading cooldown is enforceable, so sells can be delayed.", tone: "warn", source: "goplus" });
+    if (s.proxy) findings.push({ claim: ownerActive ? `Upgradeable proxy with an active owner: the contract logic can be swapped out from under holders.${ownerNote}` : "Upgradeable proxy contract (logic is replaceable), though ownership is renounced.", tone: ownerActive ? "bad" : "warn", source: "goplus" });
+    if (s.slippageModifiable && ownerActive) findings.push({ claim: `Tax is modifiable: a low tax now can be raised toward 100% after you buy.${ownerNote}`, tone: "bad", source: "goplus" });
+    if (s.blacklist && ownerActive) findings.push({ claim: `Owner can blacklist addresses, so your wallet can be blocked from selling.${ownerNote}`, tone: "warn", source: "goplus" });
+    if (s.tradingCooldown && ownerActive) findings.push({ claim: `Trading cooldown is enforceable, so sells can be delayed.${ownerNote}`, tone: "warn", source: "goplus" });
     if (s.externalCall) findings.push({ claim: "Contract makes external calls, so behavior can change via an external dependency.", tone: "warn", source: "goplus" });
     const creatorHolder = deployerAttribution && deployerAttribution.kind !== "deployer" ? "The creator or authority wallet" : "Creator";
     if (s.creatorPercent >= 5) findings.push({ claim: `${creatorHolder} still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: chain === "solana" ? "rugcheck" : "goplus" });
@@ -1884,7 +1926,7 @@ async function runTokenAudit(input, emit, opts) {
   const topSum = eoaHolders.slice(0, 15).reduce((a, h) => a + Number(h.percent) * 100, 0);
   const holdersReliable = rawHolders.length > 0 && topSum <= 101;
   const topWalletPct = eoaHolders.length ? Number(eoaHolders[0].percent) * 100 : null;
-  const concentrationTopPct = topWalletPct ?? s.topHolderPct;
+  const concentrationTopPct = topWalletPct;
   const insiderPct = holdersReliable ? Math.round(topSum) : 0;
   const materialWalletPcts = holdersReliable ? eoaHolders.map((h) => Number(h.percent) * 100).filter((pct2) => Number.isFinite(pct2) && pct2 >= 1).sort((a, b) => b - a) : [];
   const bundleCount = materialWalletPcts.length;
@@ -2075,12 +2117,14 @@ async function runTokenAudit(input, emit, opts) {
     tone: "neutral"
   });
   opts?.signal?.throwIfAborted();
+  const deployerWallet = deployerWalletAddress({ deployer, deployerAttribution: deployerAttribution ?? void 0 });
   const [sanctionsScreen, deployerRisk, priceHistory] = await Promise.all([
     screenFn(chain, [deployer, ...topHolders.map((h) => h.address)], fetcher, opts?.signal),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
-    // Contract-as-wallet gate: do not Arkham-risk the token mint/CA as if it were a team wallet.
-    deployer && deployerRiskEnabled && !sameWalletAddress(deployer, address) ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0),
+    // Contract-as-wallet gate: do not Arkham-risk the token mint/CA, or the
+    // factory that minted it, as if it were a team wallet.
+    deployerWallet && deployerRiskEnabled && !sameWalletAddress(deployerWallet, address) ? deployerRiskFn(deployerWallet).catch(() => void 0) : Promise.resolve(void 0),
     fetchPriceHistory(address, chain, pair.pairAddress, fetcher).catch(() => null)
   ]);
   if (deployerRisk?.available && deployerRisk.paths.length) {
@@ -2563,7 +2607,7 @@ function tokenChecks(dossier) {
     } : evm ? safety.available ? { checkId: "buy-sell-simulation", decisionCritical: true, label: "Tradeability check", status: "unknown", note: outcomeNotRecorded } : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Tradeability check", status: "unavailable", note: `no tradeability provider or two-sided market receipt covers ${chainDisplayName(dossier.chain)}` } : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Tradeability check", status: "not-applicable", note: "Solana: static flags only" }
   );
   const holderCount = safety.holderCount || dossier.topHolders.length;
-  const topHolderPct = safety.topHolderPct ?? dossier.topHolders[0]?.percent ?? null;
+  const topHolderPct = safety.topHolderPct ?? dossier.topHolders.find((h) => !h.isContract)?.percent ?? null;
   checks.push(
     holderCount > 0 ? {
       checkId: "holder-distribution",

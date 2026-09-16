@@ -932,6 +932,109 @@ describe("source-backed fund-scale collection", () => {
     expect(evidence.sourceArtifacts.every((artifact) => isStrictFundScaleArtifact(artifact, evidence.sourceArtifacts))).toBe(true);
   });
 
+  it("never binds a namesake or regional affiliate's fund to the subject", async () => {
+    // Regression for INT-1: HongShan's $9B fund must not become Sequoia Capital's.
+    const { ctx, evidence } = context("@sequoia", "Sequoia Capital");
+    const sources = [
+      { url: "https://reuters.com/technology/sequoia-china-fund" },
+      { url: "https://bloomberg.com/news/sequoia-china-fund" },
+    ];
+    const page = (url: string) => document({
+      url,
+      host: new URL(url).hostname,
+      contentHash: url.includes("reuters") ? "b".repeat(64) : "a".repeat(64),
+      text: url.includes("reuters")
+        ? "Sequoia Capital China completed fundraising for its ninth venture fund at $9 billion."
+        : "Sequoia Capital China announced Venture Fund IX, a new $9.05 billion venture fund.",
+    });
+    const affiliateLead = await collectFundScale(ctx, {
+      discover: async () => [lead({ fundName: "Sequoia Capital China", fundHandle: undefined, sources })],
+      fetchSource: async (url) => page(url),
+      resolveInvestorDomain: async () => undefined,
+      now: () => NOW,
+    });
+    expect(affiliateLead.state).not.toBe("executed");
+    expect(evidence.sourceArtifacts.filter((artifact) => artifact.kind === "fund_scale")).toHaveLength(0);
+
+    // Even when the model names the subject, a page about the affiliate cannot verify it.
+    const subjectLead = await collectFundScale(ctx, {
+      discover: async () => [lead({ fundName: "Sequoia Capital", fundHandle: "@sequoia", sources })],
+      fetchSource: async (url) => page(url),
+      resolveInvestorDomain: async () => undefined,
+      now: () => NOW,
+    });
+    expect(subjectLead.state).not.toBe("executed");
+    expect(evidence.sourceArtifacts.filter((artifact) => artifact.match === "fund_scale_confirmed")).toHaveLength(0);
+    expect(evidence.sourceArtifacts.every((artifact) => !isStrictFundScaleArtifact(artifact, evidence.sourceArtifacts))).toBe(true);
+  });
+
+  it("freezes the page's own spelling of the fund on the artifact", async () => {
+    const { ctx, evidence } = context();
+    const sources = [
+      { url: "https://techcrunch.com/paradigm-fund" },
+      { url: "https://reuters.com/technology/paradigm-fund" },
+    ];
+    await collectFundScale(ctx, {
+      discover: async () => [lead({ sources })],
+      fetchSource: async (url) => document({
+        url,
+        host: new URL(url).hostname,
+        contentHash: url.includes("reuters") ? "b".repeat(64) : "a".repeat(64),
+        text: url.includes("reuters")
+          ? "Paradigm completed fundraising for its third venture fund at $855 million."
+          : "Paradigm announced Venture Fund III, a new $850 million venture fund.",
+      }),
+      resolveInvestorDomain: async () => undefined,
+      now: () => NOW,
+    });
+    const confirmed = evidence.sourceArtifacts.filter((artifact) => artifact.match === "fund_scale_confirmed");
+    expect(confirmed).toHaveLength(2);
+    expect(confirmed.every((artifact) => artifact.attributedEntityName === "Paradigm")).toBe(true);
+    expect(isStrictFundScaleArtifact({ ...confirmed[0], attributedEntityName: "Paradigm China" }, evidence.sourceArtifacts)).toBe(false);
+  });
+
+  it("counts one page cited under several URL spellings as one source", async () => {
+    // Regression for INT-9: /fund, /fund/ and /fund?utm_source=x are the same document.
+    const { ctx, evidence } = context();
+    const sources = [
+      { url: "https://paradigm.xyz/2024/fund" },
+      { url: "https://paradigm.xyz/2024/fund/" },
+      { url: "https://paradigm.xyz/2024/fund?utm_source=x" },
+    ];
+    const fetchSource = vi.fn(async (url: string) => document({ url }));
+    const result = await collectFundScale(ctx, {
+      discover: async () => [lead({ sources })],
+      fetchSource,
+      now: () => NOW,
+    });
+    expect(result.state).toBe("executed");
+    expect(fetchSource).toHaveBeenCalledTimes(1);
+    const scale = evidence.sourceArtifacts.filter((artifact) => artifact.kind === "fund_scale");
+    expect(scale).toHaveLength(1);
+    expect(scale[0]?.fundScaleSourceCount).toBe(1);
+  });
+
+  it("does not let two URL spellings of one press page corroborate each other", async () => {
+    const { ctx, evidence } = context();
+    const sources = [
+      { url: "https://reuters.com/technology/paradigm-fund" },
+      { url: "https://www.reuters.com/technology/paradigm-fund/?utm_source=x" },
+    ];
+    await collectFundScale(ctx, {
+      discover: async () => [lead({ sources })],
+      fetchSource: async (url) => document({
+        url,
+        host: "reuters.com",
+        contentHash: "b".repeat(64),
+        text: "Paradigm completed fundraising for its third venture fund at $855 million.",
+      }),
+      resolveInvestorDomain: async () => undefined,
+      now: () => NOW,
+    });
+    expect(evidence.sourceArtifacts.filter((artifact) => artifact.match === "fund_scale_confirmed")).toHaveLength(0);
+    expect(evidence.sourceArtifacts.filter((artifact) => artifact.kind === "fund_scale")).toHaveLength(1);
+  });
+
   it("does not corroborate identical syndicated prose or conflicting amounts", async () => {
     for (const mode of ["identical", "conflicting"] as const) {
       const { ctx, evidence } = context();

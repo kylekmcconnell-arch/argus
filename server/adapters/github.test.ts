@@ -49,6 +49,78 @@ describe("GitHub evidence provenance", () => {
     }));
   });
 
+  it("records outages on the repos and orgs lists as unavailable, never as an empty account", async () => {
+    // Regression for INT-5: a 403 on /repos rendered "no public repositories";
+    // a 403 on /orgs rendered affiliations checked-empty.
+    vi.stubEnv("GITHUB_TOKEN", "github-test-key");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/search/users")) return json({ items: [{ login: "subject" }] });
+      if (url.endsWith("/users/subject")) return json({ login: "subject", twitter_username: "subject", public_repos: 40 });
+      if (url.endsWith("/users/subject/orgs")) return new Response("forbidden", { status: 403 });
+      if (url.includes("/users/subject/repos")) return new Response("forbidden", { status: 403 });
+      throw new Error(`unexpected GitHub URL: ${url}`);
+    }));
+    const evidence = emptyEvidence("@subject");
+    evidence.profile.display_name = "";
+    evidence.profile.bio = "founder and builder: github.com/subject";
+    const recordCheck = vi.fn();
+    const emit = vi.fn();
+    await githubAdapter.run({ handle: evidence.profile.handle, evidence, emit, recordCheck });
+
+    const assessment = evidence.profile.githubAssessment;
+    expect(assessment).toMatchObject({ login: "subject", repoSampleState: "unavailable", publicRepos: 40 });
+    expect(assessment?.claimChecks.some((check) => /no public repositories/i.test(check.observation))).toBe(false);
+    expect(assessment?.claimChecks.some((check) => check.grade === "unsupported" || check.grade === "contradicted")).toBe(false);
+    expect(assessment?.summary).toContain("unavailable");
+    expect(recordCheck).toHaveBeenCalledWith(expect.objectContaining({ id: "affiliations-associates", status: "unavailable" }));
+    expect(recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "affiliations-associates", status: "checked-empty" }));
+    expect(emit).not.toHaveBeenCalledWith(expect.objectContaining({ label: "No public orgs" }));
+  });
+
+  it("records a provider failure during resolution as unavailable rather than no match", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "github-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("rate limited", { status: 429 })));
+    const evidence = emptyEvidence("@subject");
+    evidence.profile.display_name = "Subject Name";
+    const recordCheck = vi.fn();
+    await githubAdapter.run({ handle: evidence.profile.handle, evidence, emit: vi.fn(), recordCheck });
+    expect(recordCheck).toHaveBeenCalledWith(expect.objectContaining({ id: "code-footprint-github", status: "unavailable" }));
+    expect(recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "code-footprint-github", status: "checked-empty" }));
+  });
+
+  it("labels a truncated repository window as a sample and withholds ratio grades", async () => {
+    // Regression for INT-16: 30 most-recently-pushed forks of a 200-repo
+    // account are not the account's fork ratio.
+    vi.stubEnv("GITHUB_TOKEN", "github-test-key");
+    const forks = Array.from({ length: 30 }, (_, index) => ({
+      name: `fork-${index}`,
+      html_url: `https://github.com/subject/fork-${index}`,
+      owner: { login: "subject", type: "User" },
+      fork: true,
+      pushed_at: "2026-07-01T00:00:00Z",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/search/users")) return json({ items: [{ login: "subject" }] });
+      if (url.endsWith("/users/subject")) return json({ login: "subject", twitter_username: "subject", public_repos: 200 });
+      if (url.endsWith("/users/subject/orgs")) return json([]);
+      if (url.includes("/users/subject/repos")) return json(forks);
+      throw new Error(`unexpected GitHub URL: ${url}`);
+    }));
+    const evidence = emptyEvidence("@subject");
+    evidence.profile.display_name = "";
+    evidence.profile.bio = "founder and builder: github.com/subject";
+    const emit = vi.fn();
+    await githubAdapter.run({ handle: evidence.profile.handle, evidence, emit, recordCheck: vi.fn() });
+
+    const assessment = evidence.profile.githubAssessment;
+    expect(assessment).toMatchObject({ repoSampleState: "sample", sampledRepos: 30, publicRepos: 200, forkCount: 30 });
+    expect(assessment?.summary).toContain("30 most recently pushed of 200");
+    expect(assessment?.claimChecks.every((check) => check.grade !== "contradicted" && check.grade !== "unsupported")).toBe(true);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({ label: "GitHub assessment", tone: "neutral" }));
+  });
+
   it("treats a one-directional twitter_username claim as a lead and attributes nothing", async () => {
     vi.stubEnv("GITHUB_TOKEN", "github-test-key");
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {

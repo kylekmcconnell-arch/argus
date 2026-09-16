@@ -21,6 +21,13 @@ const RESERVED = /^(orgs|sponsors|topics|features|about|marketplace|explore|pric
 type GhUser = { login: string; name?: string | null; twitter_username?: string | null; followers?: number; public_repos?: number; bio?: string | null; html_url?: string };
 interface CallCounter { calls: number; succeeded: number }
 
+const comparableName = (value: string): string => value
+  .normalize("NFKD")
+  .replace(/[̀-ͯ]/g, "")
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, " ")
+  .trim();
+
 async function ghUser(login: string, key: string, usage: CallCounter): Promise<GhUser | null> {
   usage.calls += 1;
   try {
@@ -61,7 +68,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = process.env.GITHUB_TOKEN;
   if (!key) { res.status(200).json({ available: false, note: "GitHub not configured (no GITHUB_TOKEN)." }); return; }
 
-  const ck = `ghresolve:${handle.toLowerCase()}:${name.toLowerCase()}:v2`;
+  // v3: a cached v2 row could carry a medium-confidence, GitHub-side-only match.
+  const ck = `ghresolve:${handle.toLowerCase()}:${name.toLowerCase()}:v3`;
   const cached = await cacheGetJson<Record<string, unknown>>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
@@ -76,11 +84,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const e = entry(login); e.score += pts; e.why.push(why);
     };
 
-    // 1. A github.com/<login> link in the X bio — strongest: the audited X account
-    // itself points to it (the other direction, a GitHub claiming an X handle, is
-    // spoofable by an impersonator, so it's weighted lower below).
+    // 1. A github.com/<login> link in the X bio — the only subject-side proof
+    // available here: the audited X account itself points to it. Everything
+    // the GitHub side declares (twitter_username, the handle in a GitHub bio)
+    // is self-asserted and forgeable by an impersonator, so on its own it is a
+    // lead, never a resolution that feeds commit-email ties into the graph.
     const bioLink = bio.match(/github\.com\/([A-Za-z0-9-]{1,39})/i)?.[1];
     if (bioLink) bump(bioLink, 4, "linked from the X bio");
+    const subjectLinksBack = (login: string) => Boolean(bioLink && bioLink.toLowerCase() === login.toLowerCase());
 
     // 2. Candidates: same-username, the bio-link login, and a bio-search for the handle.
     const candidates = new Set<string>([handle, bioLink, ...(handle ? await searchBio(handle, key, usage) : [])].filter(Boolean) as string[]);
@@ -91,17 +102,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (u.login.toLowerCase() === hlow) bump(u.login, 1, "same username as the X handle");
       // Self-declared on the GitHub side, so spoofable — corroborating, not proof.
       if (u.twitter_username && u.twitter_username.toLowerCase().replace(/^@/, "") === hlow) bump(u.login, 2, "GitHub profile links to the same X account");
-      if (nlow && u.name && (u.name.toLowerCase().includes(nlow) || nlow.includes(u.name.toLowerCase()))) bump(u.login, 1, "name matches");
+      // Full-name equality only: "Li" is not "Alice Li".
+      if (nlow && u.name && comparableName(u.name) === comparableName(nlow)) bump(u.login, 1, "name matches");
       if (bio && u.bio && handle && u.bio.toLowerCase().includes(hlow)) bump(u.login, 2, "X handle appears in the GitHub bio");
       entry(u.login).user = u; // attach the fetched profile to whatever entry exists
     }
 
-    // Pick the strongest candidate that clears the corroboration bar (>=2 = a strong
-    // signal, or two weak ones — never a same-username coincidence alone).
-    const best = [...scores.values()].filter((v) => v.score >= 2 && v.user).sort((a, b) => b.score - a.score)[0];
+    // Resolution requires the subject's own back-link. GitHub-side claims rank
+    // the leads but never resolve an account by themselves.
+    const ranked = [...scores.values()].filter((v) => v.user).sort((a, b) => b.score - a.score);
+    const best = ranked.find((v) => v.score >= 4 && subjectLinksBack(v.user!.login));
+    const lead = !best ? ranked.find((v) => v.score >= 2) : undefined;
     const out = best?.user
-      ? { available: true, login: best.user.login, name: best.user.name ?? null, followers: best.user.followers ?? 0, repos: best.user.public_repos ?? 0, url: best.user.html_url ?? `https://github.com/${best.user.login}`, why: [...new Set(best.why)], confidence: best.score >= 4 ? "high" : "medium" }
-      : { available: false, note: "No GitHub account could be confidently matched to this person." };
+      ? { available: true, login: best.user.login, name: best.user.name ?? null, followers: best.user.followers ?? 0, repos: best.user.public_repos ?? 0, url: best.user.html_url ?? `https://github.com/${best.user.login}`, why: [...new Set(best.why)], confidence: "high" as const }
+      : lead?.user
+        ? { available: false, lead: { login: lead.user.login, why: [...new Set(lead.why)] }, note: `github.com/${lead.user.login} claims this person, but nothing on the subject's side links back to it. Unconfirmed, not attributed.` }
+        : { available: false, note: "No GitHub account could be confidently matched to this person." };
     await cacheSetJson(ck, out);
     res.status(200).json(out);
   } catch (e) {

@@ -58,6 +58,85 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function namesakeRecon(content: string) {
+  return {
+    retrieval: { status: "ok", content, title: "Namesake Project" },
+    title: "Namesake Project",
+    team: { state: "named", names: ["Alice Namesake", "Bob Namesake"], note: "Team page named two people." },
+    socials: [{ label: "x", url: "https://x.com/alice_namesake" }],
+    funding: [],
+    tokenSignals: [],
+    findings: [],
+    identityLine: "Namesake Project names a two-person team.",
+  };
+}
+
+function modelLeadFetch(website: string) {
+  return vi.fn(async (input: string | URL | Request) => {
+    if (String(input).startsWith("/api/token-identity?")) {
+      return new Response(JSON.stringify({ available: true, website, x_handle: null, founder: null, founder_handle: null, confidence: "low" }), { status: 200 });
+    }
+    return new Response(null, { status: 404 });
+  });
+}
+
+async function runInvestigation(): Promise<{ result: Investigation; steps: string[] }> {
+  const steps: string[] = [];
+  const result = await new Promise<Investigation>((resolve, reject) => {
+    streamInvestigation({ kind: "token", via: "evm", ref: MEME_ADDRESS }, {
+      onStep: (step) => steps.push(`${step.label}: ${step.detail}`),
+      onHop: () => {},
+      onDone: resolve,
+      onError: reject,
+    });
+  });
+  return { result, steps };
+}
+
+describe("model-suggested site provenance", () => {
+  it("keeps a model-suggested site as an unverified lead: no founders, no project claims, no paid team search", async () => {
+    vi.stubGlobal("fetch", modelLeadFetch("https://namesake-project.example"));
+    harness.runRecon.mockResolvedValue(namesakeRecon("Namesake Project. Meet the team: Alice Namesake, Bob Namesake."));
+
+    const { result, steps } = await runInvestigation();
+
+    expect(harness.runRecon).toHaveBeenCalledWith("https://namesake-project.example", expect.any(Function), expect.any(Function));
+    expect(result.siteUrl).toBe("https://namesake-project.example");
+    expect(result.siteUrlOrigin).toBe("model_lead");
+    expect(result.siteBinding).toMatchObject({ origin: "model_lead", status: "unbound" });
+    expect(result.founders).toEqual([]);
+    expect(result.founderNote).toContain("model-suggested site");
+    expect(result.founderNote).toContain("unverified");
+    expect(result.founderNote).not.toContain("Named on the project site");
+    expect(steps.join("\n")).toContain("Step 2b · Deep team search: Not scheduled");
+    expect(steps.join("\n")).toContain("Step 2 · Recon a model-suggested site (unverified)");
+  });
+
+  it("binds a model-suggested site that publishes the scanned contract and only then names its team", async () => {
+    vi.stubGlobal("fetch", modelLeadFetch("https://real-project.example"));
+    harness.runRecon.mockResolvedValue(namesakeRecon(`Contract: ${MEME_ADDRESS.toUpperCase().replace("0X", "0x")} - Meet the team: Alice Namesake, Bob Namesake.`));
+
+    const { result, steps } = await runInvestigation();
+
+    expect(result.siteUrlOrigin).toBe("model_lead");
+    expect(result.siteBinding).toMatchObject({ origin: "model_lead", status: "bound", via: "contract-on-page" });
+    expect(result.founders.map((f) => f.name)).toEqual(["Alice Namesake", "Bob Namesake", "@alice_namesake"]);
+    expect(result.founderNote).toContain("Named on the project site: Alice Namesake, Bob Namesake");
+    expect(steps.join("\n")).toContain("Step 2b · Deep team search: Scheduled after the immutable investigation version is saved.");
+  });
+
+  it("records a listing-published site as bound by its token sources", async () => {
+    harness.auditToken.mockResolvedValue({ ...thinMemecoin(), socials: [{ label: "website", url: "https://listed-site.example" }] });
+    harness.runRecon.mockResolvedValue(namesakeRecon("Listed site. Meet the team: Alice Namesake, Bob Namesake."));
+
+    const { result } = await runInvestigation();
+
+    expect(result.siteUrlOrigin).toBe("token-sources");
+    expect(result.siteBinding).toMatchObject({ origin: "token-sources", status: "bound", via: "token-sources" });
+    expect(result.founders.map((f) => f.name)).toContain("Alice Namesake");
+  });
+});
+
 describe("combined token investigation fallback", () => {
   it.each(["mismatch", "unavailable", "unknown"])("does not audit or embed an account whose token binding is %s", async (status) => {
     harness.auditToken.mockResolvedValue({ ...thinMemecoin(), projectX: "@unrelated" });

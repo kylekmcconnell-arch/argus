@@ -2,6 +2,7 @@ import type {
   IntelligenceDomain,
   IntelligenceEvidenceState,
   IntelligenceMeasurement,
+  IntelligenceQuestion,
   IntelligenceQuestionState,
   IntelligenceSpineSnapshot,
 } from "./types";
@@ -142,13 +143,33 @@ function rowFor(measurement: IntelligenceMeasurement, entityKey: string, role: E
   };
 }
 
+/**
+ * An axis bundles several constituent domains ("Governance and adverse record"
+ * = governance + control + legal + reputation). It is established only when
+ * every constituent domain is covered by a deterministic measurement or by
+ * resolved questions and no critical constituent question remains open; one
+ * verified legal-entity fact never establishes the adverse record.
+ */
 function axisState(
+  domains: readonly IntelligenceDomain[],
   measurements: readonly IntelligenceMeasurement[],
-  questionStates: readonly IntelligenceQuestionState[],
+  questions: readonly Pick<IntelligenceQuestion, "domain" | "materiality" | "state">[],
 ): EntityScorecardAxis["state"] {
-  if (measurements.some((measurement) => measurement.evidenceState === "verified")) return "established";
+  const closed = (state: IntelligenceQuestionState) => state === "resolved" || state === "not_applicable";
+  const verified = measurements.some((measurement) => measurement.evidenceState === "verified");
+  const openCritical = questions.some((question) => question.materiality === "critical" && !closed(question.state));
+  // A constituent domain with a tracked decision question must be closed or
+  // deterministically measured. A domain with no tracked question and no
+  // measurement is outside this snapshot's contract and does not block.
+  const covered = (domain: IntelligenceDomain): boolean => {
+    const domainQuestions = questions.filter((question) => question.domain === domain);
+    if (domainQuestions.length === 0) return true;
+    return domainQuestions.every((question) => closed(question.state))
+      || measurements.some((measurement) => measurement.domain === domain && measurement.evidenceState !== "reported_context");
+  };
+  if (verified && !openCritical && domains.every(covered)) return "established";
   if (measurements.length > 0) return "partial";
-  if (questionStates.some((state) => state !== "not_collected")) return "open";
+  if (questions.some((question) => question.state !== "not_collected")) return "open";
   return "not_collected";
 }
 
@@ -175,7 +196,7 @@ export function buildEntityScorecards(
     return {
       id: definition.id,
       label: definition.label,
-      state: axisState(measurements, questions.map((question) => question.state)),
+      state: axisState(definition.domains, measurements, questions),
       ledgerRowIds: rows.map((row) => row.id),
       measurementRefs: measurements.map((measurement) => measurement.id),
       sourceRefs: [...new Set(measurements.flatMap((measurement) => measurement.sourceRefs))],

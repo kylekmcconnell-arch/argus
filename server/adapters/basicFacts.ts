@@ -1108,11 +1108,18 @@ function literalOfficialSiteIdentity(
   return identityMatch?.[0]?.replace(/[_-]+/g, " ").trim() || null;
 }
 
+/**
+ * The page must LINK the account's bare profile: the URL must sit in an
+ * attribute or JSON string value (href="...", "sameAs":["..."]) or a
+ * markdown link target, and must be the profile itself, not a tweet under it
+ * (x.com/<handle>/status/... is a citation of a post, which any page can
+ * embed, not a claim of ownership).
+ */
 function documentLinksExactHandle(document: PublicTextDocument, handle: string): boolean {
   const normalized = document.text.replace(/\\\//g, "/");
   const account = escapedPattern(handle.replace(/^@/, ""));
   return new RegExp(
-    `(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${account}(?:[/?#"'\\s<]|$)`,
+    `(?:["']|\\]\\()\\s*(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${account}/?(?=[?#"'\\s)]|$)`,
     "i",
   ).test(normalized);
 }
@@ -3910,10 +3917,13 @@ function evidenceUrlMatchesVentureIdentity(
 function verifiedVentureOfficialScopes(
   venture: CollectContext["evidence"]["ventures"][number],
 ): string[] {
-  const domainScope = safeVentureScope(venture.domain);
+  // `domain` gets the same identity check `evidence_url` gets, and a model-
+  // supplied domain never qualifies at all: a verified employment record
+  // proves the employer, not that the model named the employer's real site.
+  const domainScope = venture.domain_evidence_origin === "model_lead" ? null : safeVentureScope(venture.domain);
   const evidenceScope = safeVentureScope(venture.evidence_url);
   return [...new Set([
-    ...(domainScope ? [domainScope] : []),
+    ...(domainScope && evidenceUrlMatchesVentureIdentity(domainScope, venture) ? [domainScope] : []),
     ...(evidenceScope && evidenceUrlMatchesVentureIdentity(evidenceScope, venture)
       ? [evidenceScope]
       : []),
@@ -4549,6 +4559,39 @@ function cachedFactClosesDiscovery(
   return deterministicQuestionAnswerRefs(ctx, question, facts).length > 0;
 }
 
+/**
+ * The knowledge base is keyed by @handle, and X releases handles: a new
+ * project can register the handle a renamed project gave up. A stored row
+ * that recorded the account's identity must still describe the LIVE account
+ * before any of its facts are reused: same X user id and creation time when
+ * both sides have them, and display-name or website continuity when the
+ * live profile resolved. Rows stored before identity was recorded are
+ * accepted as before.
+ */
+export function storedEntityIdentityMatchesProfile(
+  stored: unknown,
+  profile: CollectContext["evidence"]["profile"],
+): boolean {
+  if (!stored || typeof stored !== "object") return true;
+  const identity = stored as { xUserId?: unknown; accountCreatedAt?: unknown; displayName?: unknown; websiteDomain?: unknown };
+  const storedId = typeof identity.xUserId === "string" ? identity.xUserId.trim() : "";
+  if (storedId && profile.x_user_id && storedId !== profile.x_user_id.trim()) return false;
+  const storedCreated = typeof identity.accountCreatedAt === "string" ? Date.parse(identity.accountCreatedAt) : NaN;
+  const liveCreated = Date.parse(profile.account_created_at ?? "");
+  if (Number.isFinite(storedCreated) && Number.isFinite(liveCreated) && storedCreated !== liveCreated) return false;
+  if (profile.profile_collection_state !== "resolved") return true;
+  const key = (value: unknown) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const host = (value: unknown) => {
+    try { return new URL(String(value ?? "")).hostname.replace(/^www\./i, "").toLowerCase(); } catch { return ""; }
+  };
+  const storedName = key(identity.displayName);
+  const storedHost = typeof identity.websiteDomain === "string" ? identity.websiteDomain.replace(/^www\./i, "").toLowerCase() : "";
+  if (!storedName && !storedHost) return true;
+  const liveName = key(profile.display_name);
+  const liveHost = host(profile.website);
+  return (Boolean(storedName) && storedName === liveName) || (Boolean(storedHost) && storedHost === liveHost);
+}
+
 async function loadReusableBasicFacts(ctx: CollectContext): Promise<BasicFact[]> {
   if (env("ARGUS_ENTITY_REUSE") !== "on") return [];
   const rec = await readEntityFacts(
@@ -4558,6 +4601,17 @@ async function loadReusableBasicFacts(ctx: CollectContext): Promise<BasicFact[]>
   );
   const cached = rec?.facts && typeof rec.facts === "object" ? (rec.facts as { basicFacts?: unknown }).basicFacts : undefined;
   if (!Array.isArray(cached)) return [];
+  const storedIdentity = rec?.facts && typeof rec.facts === "object" ? (rec.facts as { identity?: unknown }).identity : undefined;
+  if (!storedEntityIdentityMatchesProfile(storedIdentity, ctx.evidence.profile)) {
+    ctx.emit({
+      phase: "P1 · Facts",
+      label: "Stored facts belong to a different account",
+      detail: `The knowledge base holds verified facts under ${ctx.handle}, but they were recorded for a different X account (user id, creation date, name or website no longer match the live profile). Nothing was reused; the handle appears to have changed hands.`,
+      source: "entity store",
+      tone: "warn",
+    });
+    return [];
+  }
   // Never reuse provider-projection facts (market captures, TVL, fee
   // snapshots): every run regenerates them fresh from free providers, so a
   // reused copy is both stale and a duplicate that compounds across scans.
@@ -4696,6 +4750,13 @@ export async function collectBasicFacts(
     leads: readonly BasicFactLead[],
   ): Promise<BasicFactLead[]> => {
     if (canonicalOfficialWebsite(ctx.evidence.profile.website)) return [];
+    // Recovery exists for a suspended or absent profile. A LIVE profile that
+    // merely links a link hub or no site already had its chance through the
+    // bidirectional link-hub resolver at intake; letting a model-cited
+    // brand-stem domain confirm identity here would let a lookalike site
+    // choose the methodology for a resolvable account.
+    const profile = ctx.evidence.profile;
+    if (profile.profile_collection_state === "resolved" && profile.x_account_status === "active") return [];
     const candidates = new Map<string, OfficialSiteBindingCandidate>();
     for (const lead of leads) {
       // Never invent the brand name from the handle or domain. Recovery needs

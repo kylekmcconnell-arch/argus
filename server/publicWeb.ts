@@ -397,9 +397,9 @@ function defaultLookupForMode(): LookupFn {
   return evalMode() === "replay" ? replayLookup : defaultLookup;
 }
 
-async function readBoundedText(response: Response): Promise<Buffer | null> {
+async function readBoundedText(response: Response, maxBytes = MAX_TEXT_BYTES): Promise<Buffer | null> {
   const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_TEXT_BYTES) return null;
+  if (Number.isFinite(declared) && declared > maxBytes) return null;
   if (!response.body) return Buffer.alloc(0);
 
   const chunks: Buffer[] = [];
@@ -409,13 +409,24 @@ async function readBoundedText(response: Response): Promise<Buffer | null> {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_TEXT_BYTES) {
+    if (total > maxBytes) {
       await reader.cancel();
       return null;
     }
     chunks.push(Buffer.from(value));
   }
   return Buffer.concat(chunks, total);
+}
+
+/**
+ * Read a response body as UTF-8 text, stopping (and cancelling the stream)
+ * the moment it exceeds `maxBytes`. Returns null for an over-size body so a
+ * caller never holds an attacker-sized page in memory before slicing it. For
+ * adapters that fetch through their own transport rather than fetchPublicText.
+ */
+export async function readBoundedResponseText(response: Response, maxBytes = MAX_TEXT_BYTES): Promise<string | null> {
+  const bytes = await readBoundedText(response, maxBytes);
+  return bytes === null ? null : bytes.toString("utf8");
 }
 
 async function fetchValidatedPublicText(

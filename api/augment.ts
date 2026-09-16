@@ -253,8 +253,12 @@ async function listAug(
   const requests = [fetch(exactUrl, { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(7000) })];
   // Only person and site display keys were deterministic in the legacy store.
   // Ticker-keyed token rows are intentionally left for owner reconciliation.
-  if ((subject.kind === "person" || subject.kind === "site") && subjectLabel) {
-    const legacyRef = normalizeSubjectRef(subjectLabel);
+  // The legacy display key is read only when the caller's label normalizes to
+  // this exact canonical identity (the handle or host itself). A display name
+  // is never a bind key: two namesakes in one org must not see each other's
+  // legacy augmentations; those rows stay for owner reconciliation.
+  const legacyRef = subjectLabel ? normalizeSubjectRef(subjectLabel) : "";
+  if ((subject.kind === "person" || subject.kind === "site") && legacyRef && legacyRef.toLowerCase() === subject.ref.toLowerCase()) {
     requests.push(fetch(`${credentials.url}/rest/v1/augmentation_items?select=${AUGMENT_SELECT}&organization_id=eq.${encodeURIComponent(organizationId)}&subject_kind=eq.legacy&canonical_ref=eq.${encodeURIComponent(legacyRef)}&status=in.%28live%2Cpending%29&order=submitted_at.desc&limit=100`, { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(7000) }));
   }
   try {

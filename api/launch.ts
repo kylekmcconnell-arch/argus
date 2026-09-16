@@ -25,7 +25,10 @@ const SOL_ADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 // The earliest token transfers, oldest first. The first swap-out transfers from
 // the pool are the launch buys; distinct recipients in the pool's first active
 // block are the same-block snipers.
-async function evmSnipe(chainid: number, token: string, key: string) {
+const ZERO = "0x0000000000000000000000000000000000000000";
+// Exported for unit tests only. `pairAddress` is the audited pool when the
+// caller knows it (the dossier's DexScreener pairAddress).
+export async function evmSnipe(chainid: number, token: string, key: string, pairAddress: string | null = null) {
   try {
     const q = new URLSearchParams({
       chainid: String(chainid), module: "account", action: "tokentx",
@@ -38,20 +41,25 @@ async function evmSnipe(chainid: number, token: string, key: string) {
     if (d.status !== "1" || !Array.isArray(d.result) || !d.result.length) return null;
     const txs = d.result as any[];
 
-    // Identify the pool: the address that SENDS to many distinct recipients in
-    // the early window (swap outs). Mint/deploy transfers come from 0x0 or the
-    // deployer to one or two addresses; the pool fans out.
-    const bySender = new Map<string, Set<string>>();
-    for (const t of txs) {
-      const from = String(t.from ?? "").toLowerCase();
-      const to = String(t.to ?? "").toLowerCase();
-      if (!from || !to || from === "0x0000000000000000000000000000000000000000") continue;
-      (bySender.get(from) ?? bySender.set(from, new Set()).get(from)!).add(to);
+    // Identify the pool. The audited pair address is the pool by definition;
+    // only without it do we fall back to the fan-out heuristic (the address
+    // that SENDS to many distinct recipients in the early window), which a
+    // pre-pool airdrop from the deployer can fool into calling the deployer
+    // "the pool" and the airdrop block "the launch block".
+    const senders = new Set(txs.map((t) => String(t.from ?? "").toLowerCase()));
+    let pool: string | null = pairAddress && senders.has(pairAddress.toLowerCase()) ? pairAddress.toLowerCase() : null;
+    if (!pool) {
+      const bySender = new Map<string, Set<string>>();
+      for (const t of txs) {
+        const from = String(t.from ?? "").toLowerCase();
+        const to = String(t.to ?? "").toLowerCase();
+        if (!from || !to || from === ZERO) continue;
+        (bySender.get(from) ?? bySender.set(from, new Set()).get(from)!).add(to);
+      }
+      let fan = 0;
+      for (const [snd, tos] of bySender) if (tos.size > fan) { fan = tos.size; pool = snd; }
+      if (!pool || fan < 2) return null;
     }
-    let pool: string | null = null;
-    let fan = 0;
-    for (const [snd, tos] of bySender) if (tos.size > fan) { fan = tos.size; pool = snd; }
-    if (!pool || fan < 2) return null;
 
     // Buys = transfers FROM the pool. Group by block; the pool's first active
     // block is the launch block.
@@ -64,10 +72,13 @@ async function evmSnipe(chainid: number, token: string, key: string) {
     const buyers3 = new Set(within3.map((t) => String(t.to).toLowerCase())).size;
 
     // % of supply taken in the launch block, when supply is derivable from the
-    // mint transfer (from 0x0) in the same page of results.
-    const mint = txs.find((t) => String(t.from ?? "").toLowerCase() === "0x0000000000000000000000000000000000000000");
-    const dec = Number(mint?.tokenDecimal ?? buys[0]?.tokenDecimal ?? 18);
-    const supply = mint ? Number(mint.value) / 10 ** dec : null;
+    // mint transfers (from 0x0) in the same page of results. Supply is the SUM
+    // of every mint transfer, not the first one: a token that mints 5% to a
+    // treasury and then 95% to the pool would otherwise measure launch buys
+    // against the 5% tranche and read every 1% buy as 20% "of supply".
+    const mints = txs.filter((t) => String(t.from ?? "").toLowerCase() === ZERO);
+    const dec = Number(mints[0]?.tokenDecimal ?? buys[0]?.tokenDecimal ?? 18);
+    const supply = mints.length ? mints.reduce((a, t) => a + Number(t.value) / 10 ** dec, 0) : null;
     const taken = inLaunchBlock.reduce((a, t) => a + Number(t.value) / 10 ** dec, 0);
     const pctOfSupply = supply && supply > 0 ? Math.min(100, (taken / supply) * 100) : null;
 
@@ -207,6 +218,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     creatorVenue = (await bankrDopplerCheck(addr)) ? "bankr" : null;
   }
   if (!chainid || !key) { res.status(200).json({ available: !!creatorVenue, note: "snipe trace needs an Etherscan-covered chain and key", creatorVenue, pumpfun: null, snipe: null }); return; }
-  const snipe = await evmSnipe(chainid, addr, key);
+  const pairParam = String(req.query.pair ?? "").trim().toLowerCase();
+  const snipe = await evmSnipe(chainid, addr, key, EVM.test(pairParam) ? pairParam : null);
   res.status(200).json({ available: true, chain, pumpfun: null, snipe, creatorVenue });
 }

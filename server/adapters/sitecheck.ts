@@ -158,8 +158,11 @@ function isAntiBotResponse(response: Response, body: string): boolean {
  * looking at a window and not at the whole document. With no cap the body is
  * read in full, exactly as before.
  */
-async function readBody(response: Response, maxBytes?: number): Promise<{ text: string; truncated: boolean }> {
-  if (maxBytes === undefined || !response.body) {
+/** No page ARGUS reads for substance is legitimately larger than this. */
+const SUBSTANCE_PAGE_MAX_BYTES = 1_500_000;
+
+async function readBody(response: Response, maxBytes = SUBSTANCE_PAGE_MAX_BYTES): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) {
     return { text: await response.text(), truncated: false };
   }
   const reader = response.body.getReader();

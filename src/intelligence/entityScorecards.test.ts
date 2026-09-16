@@ -77,6 +77,26 @@ describe("role-specific entity scorecards", () => {
     });
   });
 
+  it("does not establish a bundled axis from one constituent domain while another stays open", () => {
+    // Regression for INT-13: one verified legal-entity fact established
+    // "Governance and adverse record" with the sanctions/legal screens open.
+    const base = snapshot("operating_company");
+    const governance: IntelligenceSpineSnapshot = {
+      ...base,
+      measurements: [{ ...base.measurements[0], id: "entity_fact:legal_entity", domain: "governance", label: "Legal entity" }],
+      questions: [
+        { ...base.questions[0], id: "entity.legal_entity", domain: "governance", state: "resolved", answerRefs: ["entity_fact:legal_entity"] },
+        { ...base.questions[0], id: "entity.legal_screen", domain: "legal", materiality: "critical", state: "unavailable", answerRefs: [], sourceRefs: [] },
+      ],
+    };
+    const axis = buildEntityScorecards(governance, []).scorecards[0].axes.find((candidate) => candidate.id === "governance");
+    expect(axis?.state).toBe("partial");
+
+    governance.questions[1] = { ...governance.questions[1], state: "resolved" };
+    expect(buildEntityScorecards(governance, []).scorecards[0].axes.find((candidate) => candidate.id === "governance")?.state)
+      .toBe("established");
+  });
+
   it.each([
     ["individual_investor", [], "individual_investor"],
     ["investment_firm", [], "investment_firm"],

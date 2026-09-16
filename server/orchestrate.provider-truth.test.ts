@@ -293,7 +293,9 @@ describe("orchestrator provider execution truth", () => {
     expect(grokTools).toContain("record_contradictions");
     expect(grokTools).toContain("record_verdict");
     expect(dossier?.report.composite_verdict).toBe("PROVISIONAL");
-    expect(dossier?.headline).toContain("Partial assessment: ARGUS scored 1 of 5 decision areas");
+    expect(dossier?.headline).toContain("Provisional assessment: ARGUS scored 1 of 5 decision areas (15% of the methodology weight).");
+    expect(dossier?.headline).toContain("remain unmeasured, so the score is provisional");
+    expect(dossier?.headline).not.toContain("did not produce an overall score");
     expect(Object.keys(dossier?.report.role_reports[0]?.axes ?? {})).toEqual(["I1_identity_legitimacy"]);
     expect(emitted).toContainEqual(expect.objectContaining({
       phase: "Analyst",

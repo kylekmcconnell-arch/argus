@@ -8,7 +8,7 @@ const fetchTrustedProfileImageMock = vi.fn();
 vi.mock("./x", () => ({ getProfile: (...args: unknown[]) => getProfileMock(...args) }));
 vi.mock("./profilePhoto", () => ({ fetchTrustedProfileImage: (...args: unknown[]) => fetchTrustedProfileImageMock(...args) }));
 
-const { enrichFirstPartyTeamAvatars, teamProfileEntityType } = await import("./teamEnrichment");
+const { enrichFirstPartyTeamAvatars, enrichmentErrorCode, teamProfileEntityType } = await import("./teamEnrichment");
 
 function member(overrides: Partial<WebTeamMember>): WebTeamMember {
   return { name: "Test Person", role: "Founder", source: "post role-scan", ...overrides };
@@ -149,5 +149,30 @@ describe("first-party team avatar enrichment", () => {
       associate_handle: "@womenofsatoshi",
       relation: "official-post mention",
     }));
+  });
+});
+
+describe("enrichment failures emit a stable code, never raw provider text (ID-10)", () => {
+  afterEach(() => {
+    getProfileMock.mockReset();
+    fetchTrustedProfileImageMock.mockReset();
+  });
+
+  it("classifies thrown errors without their message", () => {
+    const timeout = new Error("The operation was aborted due to timeout");
+    timeout.name = "TimeoutError";
+    expect(enrichmentErrorCode(timeout)).toBe("timeout");
+    expect(enrichmentErrorCode(new TypeError("fetch failed: ECONNRESET api.twitterapi.io"))).toBe("transport_error");
+    expect(enrichmentErrorCode(new Error("HTTP 500 {\"secret\":\"x\"}"))).toBe("provider_error");
+  });
+
+  it("keeps the provider's error text out of the emitted step", async () => {
+    getProfileMock.mockRejectedValueOnce(new TypeError("fetch failed: ECONNRESET api.twitterapi.io key=abc"));
+    const ctx = context([member({ name: "Prophett", handle: "@proph3ttt", handleProvenance: "subject_first_party" })]);
+    await enrichFirstPartyTeamAvatars(ctx);
+    const step = vi.mocked(ctx.emit).mock.calls.map(([row]) => row).find((row) => row.label === "Team enrichment error");
+    expect(step?.detail).toContain("transport_error");
+    expect(step?.detail).not.toContain("ECONNRESET");
+    expect(step?.detail).not.toContain("key=abc");
   });
 });

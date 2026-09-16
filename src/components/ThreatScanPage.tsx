@@ -1018,7 +1018,7 @@ export function EmbeddedThreatScan({ address, chain }: { address: string; chain:
     const input: ResolvedInput = { kind: "token", ref: address, via: chain === "solana" ? "solana" : "evm" };
     (async () => {
       try {
-        const r = await fetch(`/api/threat-scan?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(6000) });
+        const r = await fetch(`/api/threat-scan?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(6000) });
         const d = r.ok ? ((await r.json()) as { hit?: boolean; scan?: ThreatScan }) : null;
         if (cancelled) return;
         if (d?.hit && d.scan?.address) { setScan(d.scan); return; }
@@ -1144,7 +1144,10 @@ export function ThreatScanPage({ input, onError }: { input: ResolvedInput; onErr
     (async () => {
       if (input.kind === "token" && (input.via === "evm" || input.via === "solana")) {
         try {
-          const r = await fetch(`/api/threat-scan?address=${encodeURIComponent(input.ref)}`, { signal: AbortSignal.timeout(6000) });
+          // The cache is chain-scoped: without a known chain the lookup is a
+          // miss and the live scan resolves the chain itself.
+          const cachedChain = input.via === "solana" ? "solana" : input.chain ?? "";
+          const r = await fetch(`/api/threat-scan?address=${encodeURIComponent(input.ref)}&chain=${encodeURIComponent(cachedChain)}`, { signal: AbortSignal.timeout(6000) });
           const d = r.ok ? ((await r.json()) as { hit?: boolean; ageMs?: number; scan?: ThreatScan }) : null;
           if (d?.hit && d.scan && d.scan.address) { setScan(d.scan); setCachedAgeMs(d.ageMs ?? 0); return; }
         } catch { /* fall through to live */ }

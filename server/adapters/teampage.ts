@@ -5,7 +5,7 @@ import { deadlineFetch } from "../providerDeadline.js";
 // Claude pull the named roster. Keyless fetch + ANTHROPIC_API_KEY for extraction.
 import { structured } from "../agent";
 import { recordCall } from "../cost";
-import { fetchPublicTextWithRecovery, type PublicTextWithRecoveryResult } from "../publicWeb";
+import { fetchPublicTextWithRecovery, readBoundedResponseText, type PublicTextWithRecoveryResult } from "../publicWeb";
 import type { TeamMember } from "./x";
 import { isPlausiblePersonRosterName } from "../../src/lib/personName";
 
@@ -21,6 +21,9 @@ const normalizedApex = (domain: string) =>
  * retry would have covered. `init` is a factory so each attempt gets a fresh
  * AbortSignal (a fired timeout signal would instantly abort the retry).
  */
+/** A team/about page or doc index is never legitimately larger than this. */
+const TEAM_PAGE_MAX_BYTES = 1_500_000;
+
 async function fetchWithOneRetry(url: string, init: () => RequestInit): Promise<Response> {
   try {
     return await deadlineFetch(url, init());
@@ -122,7 +125,11 @@ async function discoverTeamDocumentUrls(domain: string): Promise<string[]> {
         );
         return "";
       }
-      const text = await response.text();
+      const text = await readBoundedResponseText(response, TEAM_PAGE_MAX_BYTES);
+      if (text === null) {
+        recordCall("site-fetch", "team-doc-index", 0, "response_too_large", "failed");
+        return "";
+      }
       recordCall("site-fetch", "team-doc-index", 0, undefined, "succeeded");
       return text.slice(0, 250_000);
     } catch {
@@ -553,7 +560,12 @@ async function fetchPage(
   }
   let raw: string;
   try {
-    raw = await response.text();
+    const bounded = await readBoundedResponseText(response, TEAM_PAGE_MAX_BYTES);
+    if (bounded === null) {
+      recordCall("site-fetch", op, 0, "response_too_large", "failed");
+      return null;
+    }
+    raw = bounded;
   } catch {
     recordCall("site-fetch", op, 0, "response_text_error", "failed");
     return null;

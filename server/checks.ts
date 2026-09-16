@@ -385,10 +385,12 @@ function iso(value?: string): string {
   return Number.isFinite(date.getTime()) ? date.toISOString() : new Date().toISOString();
 }
 
+const screenedNameKey = (value?: string): string => (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
 function uniqueObservations(values: readonly ChecklistObservation[]): ChecklistObservation[] {
   const seen = new Set<string>();
   return values.filter((value) => {
-    const key = `${value.id}\n${value.provider}\n${value.status}\n${value.note}`;
+    const key = `${value.id}\n${value.provider}\n${value.status}\n${value.note}\n${screenedNameKey(value.screenedName)}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -410,9 +412,20 @@ function supersededObservations(
   id: ChecklistCheckId,
   observations: readonly ChecklistObservation[],
 ): ChecklistObservation[] {
-  if (!NULL_FINDING_SUPERSEDED_BY_CONFIRMED.has(id)) return [...observations];
-  if (!observations.some((item) => item.status === "confirmed")) return [...observations];
-  return observations.filter((item) => item.status !== "finding");
+  // A name screen answers for exactly one screened name. When a later run
+  // screened a different resolved name (Basic Facts replaced the display name
+  // with the real person), the earlier name's observations are stale for this
+  // subject: a checked-empty for the wrong name must never outrank an
+  // unavailable refresh for the right one, and source counts never add up
+  // across names.
+  const latestScreened = [...observations].reverse().find((item) => item.screenedName)?.screenedName;
+  const rows = latestScreened
+    ? observations.filter((item) =>
+      !item.screenedName || screenedNameKey(item.screenedName) === screenedNameKey(latestScreened))
+    : [...observations];
+  if (!NULL_FINDING_SUPERSEDED_BY_CONFIRMED.has(id)) return rows;
+  if (!rows.some((item) => item.status === "confirmed")) return rows;
+  return rows.filter((item) => item.status !== "finding");
 }
 
 /**
@@ -433,6 +446,8 @@ export class PersonCheckTracker {
         : Math.max(0, Math.floor(observation.sourceCount)),
       completedAt: iso(observation.completedAt),
     };
+    if (observation.screenedName?.trim()) normalized.screenedName = observation.screenedName.trim();
+    else delete normalized.screenedName;
     if (!normalized.note || !normalized.provider) return;
     const current = this.observations.get(normalized.id) ?? [];
     this.observations.set(normalized.id, uniqueObservations([...current, normalized]));
