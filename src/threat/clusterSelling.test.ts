@@ -8,7 +8,7 @@ import type { SellStructure } from "./types";
 // snipe-ring wallets) still the one selling on the recent tape? The rule
 // measures wallets and USD; the verdict copy is written from those numbers.
 
-const SNIPER = "0x709b3fa0f8c85cff157fb92b045ae02321b0483b"; // HEY block+24 ring, registry
+const SNIPER = "0x709b3fa0f8c85cff157fb92b045ae02321b0483b"; // 0xb33eb167 block+24 ring, registry
 const SEEDED = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const ORGANIC = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DEPLOYER = "0xcccccccccccccccccccccccccccccccccccccccc";
