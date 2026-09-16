@@ -132,6 +132,40 @@ describe.sequential("discoverReverseBioFromTwitterapi", () => {
     expect(webTeam[0].enrichmentProvider).toBe("twitterapi");
   });
 
+  it("never nominates an org from a bystander follower's bio (the MultiHopper false association)", async () => {
+    // A mere follower of the subject, with no claimed tie to it, whose OWN bio
+    // reads "CEO//Founder @SomeOtherProject ... GP at Their Own Fund VC". The
+    // fund keyword belongs to the follower's world, not the subject's. Before
+    // the claim gate, this bio was scanned for orgs and @someotherproject was
+    // published as the audited project's VC backer.
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    const fetchMock = twitterapiStub({
+      followers: [{
+        userName: "bystanderfund",
+        name: "Bystander Fund",
+        description: "CEO//Founder @someotherproject + $TOKEN. GP at Bystander VC. Advising Various, Things",
+      }],
+      followings: [{
+        userName: "alice",
+        name: "Alice",
+        description: "COO @projecthandle · @orghandle fund",
+      }],
+      profiles: {
+        orghandle: { name: "Org Fund", description: "early-stage fund" },
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const found = await discoverReverseBioFromTwitterapi("@projecthandle", "Project Handle");
+
+    const orgHandles = found.orgs.map((org) => org.handle.toLowerCase());
+    expect(orgHandles).not.toContain("@someotherproject");
+    // The claim-carrying bio still nominates its org: recall is kept where a
+    // first-party tie exists.
+    expect(orgHandles).toContain("@orghandle");
+    expect(found.team.map((member) => member.handle)).toEqual(["@alice"]);
+  });
+
   it("still finds @alice when official project posts never name anyone", async () => {
     vi.stubEnv("TWITTERAPI_KEY", "tw-key");
     const officialPosts = ["gm", "shipping v2 this week", "docs are live"];

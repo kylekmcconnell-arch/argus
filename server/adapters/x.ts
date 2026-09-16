@@ -2496,6 +2496,13 @@ async function discoverReverseBioFromTwitterapiUncached(
   const team: TeamMember[] = [];
   const personKeys = new Set<string>();
   const biosByHandle = new Map<string, string>();
+  // Bios that actually carried a role/operator claim about the subject. Only
+  // these may seed the linked-org scan below: the candidate pool includes
+  // plain followers and followings with no claimed tie to the subject at all,
+  // and scanning THEIR bios for fund/VC keywords manufactured associations
+  // out of bystanders (a follower whose own bio read "Founder @TheirOwnFund
+  // ... VC" attached that unrelated fund to the audited project as a backer).
+  const claimBiosByHandle = new Map<string, string>();
   let fetches = 0;
   const MAX_PROFILE_FETCHES = 12;
   for (const candidate of [...candidates.values()].slice(0, 40)) {
@@ -2523,6 +2530,7 @@ async function discoverReverseBioFromTwitterapiUncached(
     if (!claim) continue;
     const userName = candidate.handle.replace(/^@/, "");
     personKeys.add(userName.toLowerCase());
+    claimBiosByHandle.set(userName.toLowerCase(), bio);
     team.push({
       name: name?.trim() || `@${userName}`,
       handle: `@${userName}`,
@@ -2547,7 +2555,11 @@ async function discoverReverseBioFromTwitterapiUncached(
     orgSeen.add(keyHandle);
     orgs.push(org);
   };
-  for (const bio of [projectBio ?? "", ...biosByHandle.values()]) {
+  // Linked orgs may only come from the subject's OWN bio and from bios that
+  // made a first-party claim about the subject. A bystander's bio (a mere
+  // follower/following) never nominates an org, no matter what keywords sit
+  // near an @handle in it.
+  for (const bio of [projectBio ?? "", ...claimBiosByHandle.values()]) {
     for (const org of linkedOrgsFromBioText(bio, handle, personKeys)) addOrg(org);
   }
   // Role-claim bios may @-mention a fund without adjacent class language
