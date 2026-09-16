@@ -4,6 +4,7 @@ import {
 } from "./cabals";
 
 const EVM = /^0x[0-9a-f]{40}$/;
+const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 describe("cabal registry shape", () => {
   it("has unique ids and dated evidence on every wallet and launch", () => {
@@ -27,7 +28,7 @@ describe("cabal registry shape", () => {
         if (w.address.startsWith("0x") && w.address.length === 42) expect(w.address).toMatch(EVM);
         else if (w.address.startsWith("0x")) expect(w.label ?? "").toMatch(/prefix/i);
       }
-      for (const l of c.launches) expect(l.address).toMatch(EVM);
+      for (const l of c.launches) expect(l.address).toMatch(l.chain === "solana" ? BASE58 : EVM);
     }
   });
 
@@ -42,6 +43,14 @@ describe("lookups", () => {
     expect(hit?.cabal.id).toBe("rh-farm-lebron");
     expect(hit?.wallet.role).toBe("sniper");
     expect(findCabalWallet("base", "0x1dd6e1f6e2d1696a88998cff9fc150cab4c3601a")).toBeNull();
+  });
+
+  it("resolves a Solana mint and its factory wallets case-insensitively", () => {
+    const hit = findCabalLaunch("solana", "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5");
+    expect(hit?.cabal.id).toBe("sol-park-pumpswap-pool-factory");
+    expect(hit?.launch.outcome).toBe("curve-scalped");
+    expect(findCabalWallet("solana", "cbbrs6xr6ksjyzpgh7pqnvvy42gxbhwk1z2wmejja99x")?.wallet.role).toBe("deployer");
+    expect(findCabalWallet("robinhood", "CBbRS6xr6KSjYzPgH7pQnVvy42GXbhWk1Z2WMejJa99X")).toBeNull();
   });
 
   it("never matches a prefix-only record", () => {

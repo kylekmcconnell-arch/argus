@@ -193,6 +193,26 @@ const VENUES: Venue[] = [
     feeNote: "v1: 1% pool fee split ~70% creator / 30% protocol inside the locked position. v2: the PonsV2MemeHook takes 5% on sells and 100% on sells by launch-block buyers, and both accrue as creator tax the deployer claims from PonsV2FeeEscrow - so a deployer who snipes their own launch recycles the tax; watch claim cadence and where the claimed ETH/USDG goes (RESEARCH.md, Pons V2 launch farms)",
   },
   {
+    // o1 Launchpad (o1.exchange): one launchpad-v4-minimal suite on Base,
+    // Robinhood Chain, Monad and Arc. No bonding curve - the creation tx pools
+    // the full supply into a Uniswap v4 pool under the o1 launch hook, quoted
+    // in ETH, USDC/USDG or a tokenized stock, so the pool reads as plain
+    // uniswap on DexScreener. Robinhood tokens are resolved server-side from
+    // the creating contract (/api/launch, current and historical o1 factories).
+    // Base tokens are native B20 assets (system addresses 0xb20000..., no
+    // creator on Blockscout); the 0xb2 prefix marks the B20 standard, not o1,
+    // so there is no client fingerprint yet on Base. Verified on $WRESTLER
+    // (Robinhood, 2026-09-14) and $BRAINARM (Base, 2026-09-16); see RESEARCH.md.
+    name: "o1",
+    chain: "evm",
+    chains: ["base", "robinhood"],
+    dexIds: [],
+    lpOnGraduation: "locked",
+    lpNote: "no curve phase: the full supply is pooled into a Uniswap v4 pool under the o1 launch hook in the creation tx and o1 documents the liquidity as permanent - creator rights are fee claims only, so an LP-pull is not the exit path here; the deployer's optional atomic Dev Buy and the 20-second anti-snipe window are the launch-block variables to read",
+    platformPaysCreator: true,
+    feeNote: "1% per swap split creator 50 bps / platform 30 bps / referrer 20 bps, claimed from the suite's Fee Escrow (claimFor) as ETH or the quote asset; a creator who sets their own address as referrer takes 70 bps of every trade. Watch the claim cadence and where the claimed ETH goes - $BRAINARM's creator claimed 1.68 ETH in 10 claims over 26 hours and parked it as USDC in two fresh wallets (RESEARCH.md, o1 Launchpad)",
+  },
+  {
     name: "four.meme",
     chain: "evm",
     chains: ["bsc"],
