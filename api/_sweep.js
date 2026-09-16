@@ -299,8 +299,8 @@ function contextOnlyNodeKeys(contribution, resolve) {
 }
 function buildAliasResolver(contributions) {
   const targets = /* @__PURE__ */ new Map();
-  const add = (alias, subject) => {
-    const a = canonical(alias);
+  const add = (alias2, subject) => {
+    const a = canonical(alias2);
     if (!a) return;
     const set = targets.get(a) ?? /* @__PURE__ */ new Set();
     set.add(subject);
@@ -313,7 +313,7 @@ function buildAliasResolver(contributions) {
     const addressBacked = subj.startsWith("token:");
     if (String(c.handle).startsWith("$")) add(c.handle, subj);
     if (!addressBacked) continue;
-    for (const alias of c.aliases ?? []) add(alias, subj);
+    for (const alias2 of c.aliases ?? []) add(alias2, subj);
     const subjectNode = c.nodes.find((n) => n.subject);
     if (subjectNode) {
       if (typeof subjectNode.label === "string") add(subjectNode.label, subj);
@@ -327,7 +327,7 @@ function buildAliasResolver(contributions) {
     }
   }
   const unique = /* @__PURE__ */ new Map();
-  for (const [alias, ids] of targets) if (ids.size === 1) unique.set(alias, [...ids][0]);
+  for (const [alias2, ids] of targets) if (ids.size === 1) unique.set(alias2, [...ids][0]);
   return (key) => {
     const id = canonical(key);
     return unique.get(id) ?? id;
@@ -487,9 +487,9 @@ function summarizeCandles(candles, timeframe) {
     ...windowShape(series, points.length, timeframe)
   };
 }
-async function gt(path, fetchImpl = fetch) {
+async function gt(path, fetchImpl2 = fetch) {
   try {
-    const r = await fetchImpl(`${GT}${path}`, {
+    const r = await fetchImpl2(`${GT}${path}`, {
       headers: { accept: "application/json" },
       signal: AbortSignal.timeout(8e3)
     });
@@ -498,27 +498,41 @@ async function gt(path, fetchImpl = fetch) {
     return null;
   }
 }
-async function topPool(network, address, fetchImpl = fetch) {
-  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`, fetchImpl);
+async function topPool(network, address, fetchImpl2 = fetch) {
+  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`, fetchImpl2);
   const rows = record(d).data;
   const first = Array.isArray(rows) ? record(rows[0]) : {};
   const attributes = record(first.attributes);
   const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
   return id ? id.replace(`${network}_`, "") : null;
 }
-async function fetchPriceHistory(address, chain, pairAddress, fetchImpl = fetch) {
+async function fetchPriceHistory(address, chain, pairAddress, fetchImpl2 = fetch) {
   const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
   if (!network || !address) return null;
-  const pool = pairAddress || await topPool(network, address, fetchImpl);
+  const pool = pairAddress || await topPool(network, address, fetchImpl2);
   if (!pool) return null;
   for (const timeframe of ["day", "hour"]) {
-    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`, fetchImpl);
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`, fetchImpl2);
     const rawList = record(record(record(d).data).attributes).ohlcv_list;
     const candles = Array.isArray(rawList) ? rawList.map(readCandle).filter((candle) => candle !== null) : [];
     if (candles.length < 3) continue;
     const summary = summarizeCandles(candles, timeframe);
     if (!summary || summary.points.length < 3) continue;
     return { ...summary, timeframe, capturedAt: (/* @__PURE__ */ new Date()).toISOString() };
+  }
+  return null;
+}
+async function fetchOhlcv(address, chain, pairAddress, timeframe) {
+  const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
+  if (!network || !address) return null;
+  const pool = pairAddress || await topPool(network, address);
+  if (!pool) return null;
+  for (const tf of timeframe ? [timeframe] : ["day", "hour"]) {
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${tf}?aggregate=1&limit=200&currency=usd`);
+    const rawList = record(record(record(d).data).attributes).ohlcv_list;
+    const candles = (Array.isArray(rawList) ? rawList.map(readCandle).filter((candle) => candle !== null) : []).filter((candle) => candle.close > 0).sort((left, right) => left.ts - right.ts);
+    if (candles.length < 3) continue;
+    return { candles, timeframe: tf };
   }
   return null;
 }
@@ -693,10 +707,10 @@ function normalizeTicker(symbol) {
 function mintKey(chain, address) {
   return `${chain}:${EVM_ADDRESS2.test(address) ? address.toLowerCase() : address}`;
 }
-async function rugcheckFirstSeen(mint, chain, fetchImpl = fetch) {
+async function rugcheckFirstSeen(mint, chain, fetchImpl2 = fetch) {
   if (chain !== "solana") return null;
   try {
-    const response = await fetchImpl(
+    const response = await fetchImpl2(
       `https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`,
       { signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) }
     );
@@ -708,9 +722,9 @@ async function rugcheckFirstSeen(mint, chain, fetchImpl = fetch) {
     return null;
   }
 }
-async function searchSameTicker(symbol, fetchImpl) {
+async function searchSameTicker(symbol, fetchImpl2) {
   try {
-    const response = await fetchImpl(
+    const response = await fetchImpl2(
       `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(symbol)}`,
       { signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }
     );
@@ -779,12 +793,12 @@ function lookupTargets(audited, peers, limit) {
   }
   return picked;
 }
-async function applyCreationTimes(targets, resolve, fetchImpl) {
+async function applyCreationTimes(targets, resolve, fetchImpl2) {
   let cursor = 0;
   const worker = async () => {
     while (cursor < targets.length) {
       const row = targets[cursor++];
-      const createdAt = await resolve(row.mint, row.chain, fetchImpl).catch(() => null);
+      const createdAt = await resolve(row.mint, row.chain, fetchImpl2).catch(() => null);
       if (createdAt === null) continue;
       if (row.pairCreatedAt === null || createdAt <= row.pairCreatedAt + ORDERING_MARGIN_MS) {
         row.firstSeenBasis = "creation";
@@ -814,8 +828,8 @@ var SWEEP_IS_A_FLOOR = "A clone with no liquidity pool is often not listed at al
 var CHECK_ADDRESS = "Check the contract address before you buy.";
 function earliestNote(ticker, auditedAt, clones) {
   const burst = clones.filter((clone) => clone.firstSeenAt !== null && clone.firstSeenAt <= auditedAt + BURST_WINDOW_MS);
-  const rest = clones.length - burst.length;
-  const tail = rest > 0 ? ` ${rest} more ${plural(rest, "has", "have")} used the ticker since. ${COUNT_IS_A_FLOOR}` : ` ${COUNT_IS_A_FLOOR}`;
+  const rest2 = clones.length - burst.length;
+  const tail = rest2 > 0 ? ` ${rest2} more ${plural(rest2, "has", "have")} used the ticker since. ${COUNT_IS_A_FLOOR}` : ` ${COUNT_IS_A_FLOOR}`;
   if (!burst.length) {
     return `${clones.length} other ${plural(clones.length, "mint uses", "mints use")} the ticker $${ticker}, every one of them first seen after this mint. ${CHECK_ADDRESS}${tail}`;
   }
@@ -837,7 +851,7 @@ function laterNote(ticker, gapMs, audited, earliest) {
   return `This is not the first mint using the ticker $${ticker}. Another appeared ${describeSpan(gapMs, Math.floor)} earlier at ${earliest.mint}${money}. ${CHECK_ADDRESS} Which mint the project itself issued is not something these timestamps settle.`;
 }
 async function checkForClones(input, options = {}) {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl2 = options.fetchImpl ?? fetch;
   const resolveCreatedAt = options.resolveCreatedAt ?? rugcheckFirstSeen;
   const limit = options.lookupLimit ?? DEFAULT_LOOKUP_LIMIT;
   const ticker = normalizeTicker(input.symbol);
@@ -852,7 +866,7 @@ async function checkForClones(input, options = {}) {
       note: "There is no ticker to sweep for, so no same ticker mint has been ruled in or out."
     };
   }
-  const pairs = await searchSameTicker(ticker, fetchImpl);
+  const pairs = await searchSameTicker(ticker, fetchImpl2);
   if (pairs === null) {
     return {
       audited: "unresolved",
@@ -889,7 +903,7 @@ async function checkForClones(input, options = {}) {
       note: `No other mint using the ticker $${ticker} is listed on dexscreener. ${SWEEP_IS_A_FLOOR}`
     };
   }
-  await applyCreationTimes(lookupTargets(audited, clones, limit), resolveCreatedAt, fetchImpl);
+  await applyCreationTimes(lookupTargets(audited, clones, limit), resolveCreatedAt, fetchImpl2);
   clones.sort((a, b) => (a.firstSeenAt ?? Infinity) - (b.firstSeenAt ?? Infinity));
   const auditedAt = audited.firstSeenAt;
   const dated = clones.filter((clone) => clone.firstSeenAt !== null);
@@ -939,12 +953,12 @@ async function checkForClones(input, options = {}) {
 }
 
 // src/lib/retry.ts
-async function retryFetch(input, init, attempts = 3, fetchImpl = fetch) {
+async function retryFetch(input, init, attempts = 3, fetchImpl2 = fetch) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
     try {
       init?.signal?.throwIfAborted();
-      const res = await fetchImpl(input, init);
+      const res = await fetchImpl2(input, init);
       if (res.ok || res.status !== 429 && res.status < 500) return res;
       lastErr = new Error(`HTTP ${res.status}`);
     } catch (e) {
@@ -954,11 +968,11 @@ async function retryFetch(input, init, attempts = 3, fetchImpl = fetch) {
   }
   throw lastErr;
 }
-async function retryFetchWithFreshTimeout(input, timeoutMs, init = {}, attempts = 2, fetchImpl = fetch) {
+async function retryFetchWithFreshTimeout(input, timeoutMs, init = {}, attempts = 2, fetchImpl2 = fetch) {
   let lastErr;
   for (let i = 0; i < attempts; i++) {
     try {
-      const response = await fetchImpl(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      const response = await fetchImpl2(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
       if (response.ok || response.status !== 429 && response.status < 500) return response;
       lastErr = new Error(`HTTP ${response.status}`);
     } catch (error) {
@@ -996,11 +1010,11 @@ function blockscoutHolderSourceUrl(chain, address) {
   const base = BLOCKSCOUT_API[chain.trim().toLowerCase()];
   return base ? `${base}/api/v2/tokens/${encodeURIComponent(address)}/holders` : null;
 }
-async function blockscoutContractSource(chain, address, fetchImpl = fetch) {
+async function blockscoutContractSource(chain, address, fetchImpl2 = fetch) {
   const base = BLOCKSCOUT_API[chain];
   if (!base) return null;
   try {
-    const response = await fetchImpl(`${base}/api/v2/smart-contracts/${address}`, { signal: AbortSignal.timeout(9e3) });
+    const response = await fetchImpl2(`${base}/api/v2/smart-contracts/${address}`, { signal: AbortSignal.timeout(9e3) });
     if (!response.ok) return null;
     const body = await response.json();
     const sourceCode = typeof body?.source_code === "string" ? body.source_code : "";
@@ -1014,7 +1028,7 @@ async function blockscoutContractSource(chain, address, fetchImpl = fetch) {
     return null;
   }
 }
-async function blockscoutHolders(chain, address, fetchImpl = fetch) {
+async function blockscoutHolders(chain, address, fetchImpl2 = fetch) {
   const chainKey = chain.trim().toLowerCase();
   const base = BLOCKSCOUT_API[chainKey];
   if (!base) return null;
@@ -1022,8 +1036,8 @@ async function blockscoutHolders(chain, address, fetchImpl = fetch) {
   if (!holderSourceUrl) return null;
   try {
     const [tokenRes, holderRes] = await Promise.all([
-      fetchImpl(`${base}/api/v2/tokens/${address}`, { signal: AbortSignal.timeout(9e3) }),
-      fetchImpl(holderSourceUrl, { signal: AbortSignal.timeout(9e3) })
+      fetchImpl2(`${base}/api/v2/tokens/${address}`, { signal: AbortSignal.timeout(9e3) }),
+      fetchImpl2(holderSourceUrl, { signal: AbortSignal.timeout(9e3) })
     ]);
     if (!tokenRes.ok || !holderRes.ok) return null;
     const meta = await tokenRes.json();
@@ -1044,8 +1058,8 @@ async function blockscoutHolders(chain, address, fetchImpl = fetch) {
     return null;
   }
 }
-async function dexByTokenResult(address, fetchImpl = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
+async function dexByTokenResult(address, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
   try {
     const res = await request(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
       signal: AbortSignal.timeout(8e3)
@@ -1080,8 +1094,8 @@ function cleanBlurb(raw) {
   return s;
 }
 var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
-async function coingeckoToken(chain, address, fetchImpl = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
+async function coingeckoToken(chain, address, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
     const res = await request(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
@@ -1126,8 +1140,8 @@ async function coingeckoToken(chain, address, fetchImpl = fetch) {
     return null;
   }
 }
-async function dexByPairResult(chain, pair, fetchImpl = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
+async function dexByPairResult(chain, pair, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
   try {
     const res = await request(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
       signal: AbortSignal.timeout(8e3)
@@ -1155,8 +1169,8 @@ function hasCompleteGoplusTradeability(result) {
   const reported = (value) => typeof value === "string" && value.trim().length > 0;
   return result?.is_in_dex === "1" && reported(result.buy_tax) && reported(result.sell_tax) && reported(result.cannot_sell_all);
 }
-async function honeypotIs(chainId, address, fetchImpl = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
+async function honeypotIs(chainId, address, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
   try {
     const res = await request(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
     if (!res.ok) return null;
@@ -1172,8 +1186,8 @@ async function honeypotIs(chainId, address, fetchImpl = fetch) {
     return null;
   }
 }
-async function goplusSolana(mint, fetchImpl = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
+async function goplusSolana(mint, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
   try {
     const res = await request(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
     if (!res.ok) return null;
@@ -1229,11 +1243,11 @@ function largestInsiderClusterPercent(networks) {
   const measured = networks.map((network) => network.percent).filter((percent) => percent != null);
   return measured.length ? Math.max(...measured) : null;
 }
-async function rugcheckReport(mint, fetchImpl = fetch) {
+async function rugcheckReport(mint, fetchImpl2 = fetch) {
   try {
     const res = await retryFetchWithFreshTimeout(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, 15e3, {
       headers: { accept: "application/json" }
-    }, 2, fetchImpl);
+    }, 2, fetchImpl2);
     if (!res.ok) return null;
     const d = await res.json();
     const creator = typeof d?.creator === "string" && SOLANA_ADDRESS2.test(d.creator.trim()) ? d.creator.trim() : null;
@@ -1260,8 +1274,8 @@ async function rugcheckReport(mint, fetchImpl = fetch) {
     return null;
   }
 }
-async function goplus(chainId, address, fetchImpl = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl);
+async function goplus(chainId, address, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
   const once = async () => {
     try {
       const res = await request(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
@@ -1293,14 +1307,14 @@ function sameWalletAddress(a, b) {
   return a === b;
 }
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
-async function screenDeployerRisk(address, fetchImpl = fetch) {
+async function screenDeployerRisk(address, fetchImpl2 = fetch) {
   if (!arkhamProviderEnabled()) return void 0;
   if (!address || address.length < 8) return void 0;
   const origin = globalThis.location?.origin;
   if (!origin) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
   try {
-    const r = await fetchImpl(`/api/deployer-risk?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(18e3) });
+    const r = await fetchImpl2(`/api/deployer-risk?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(18e3) });
     if (!r.ok) return { available: false, paths: [], completedAt };
     const d = await r.json();
     if (d?.available !== true) return { available: false, paths: [], completedAt };
@@ -1315,11 +1329,11 @@ async function screenDeployerRisk(address, fetchImpl = fetch) {
   }
 }
 var SIGNED_THE_CREATION = /* @__PURE__ */ new Set(["mint feePayer", "creation-tx fee payer"]);
-async function resolveDeployerViaRoute(mint, fetchImpl = fetch) {
+async function resolveDeployerViaRoute(mint, fetchImpl2 = fetch) {
   const origin = globalThis.location?.origin;
   if (!origin) return null;
   try {
-    const r = await fetchImpl(`/api/resolve-deployer?mint=${encodeURIComponent(mint)}`, { signal: AbortSignal.timeout(2e4) });
+    const r = await fetchImpl2(`/api/resolve-deployer?mint=${encodeURIComponent(mint)}`, { signal: AbortSignal.timeout(2e4) });
     if (!r.ok) return null;
     const d = await r.json();
     const address = typeof d?.deployer === "string" ? d.deployer.trim() : "";
@@ -1330,7 +1344,7 @@ async function resolveDeployerViaRoute(mint, fetchImpl = fetch) {
     return null;
   }
 }
-async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
+async function screenAddressSanctions(chain, addresses, fetchImpl2 = fetch) {
   const unique = [...new Set(addresses.filter((a) => typeof a === "string" && a.length > 8))].slice(0, 40);
   if (!unique.length) {
     return {
@@ -1345,7 +1359,7 @@ async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
   if (!origin) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
   try {
-    const r = await fetchImpl(
+    const r = await fetchImpl2(
       `/api/sanctions?addresses=${encodeURIComponent(unique.join(","))}&chain=${encodeURIComponent(chain)}`,
       { signal: AbortSignal.timeout(9e3) }
     );
@@ -1384,13 +1398,13 @@ function evmSafety(gp, sim) {
   let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
   let lpRowsSeen = 0;
   for (const h of gp?.lp_holders ?? []) {
-    const pct = Number(h.percent) * 100;
-    if (!Number.isFinite(pct) || pct < 0 || pct > 100) continue;
+    const pct2 = Number(h.percent) * 100;
+    if (!Number.isFinite(pct2) || pct2 < 0 || pct2 > 100) continue;
     lpRowsSeen += 1;
-    if (!Number.isFinite(pct)) continue;
-    if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct;
-    else if (h.is_locked === 1) lpLockedPct += pct;
-    else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
+    if (!Number.isFinite(pct2)) continue;
+    if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct2;
+    else if (h.is_locked === 1) lpLockedPct += pct2;
+    else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct2);
   }
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
   const creatorShare = num2(gp?.creator_percent);
@@ -1455,11 +1469,11 @@ function solanaSafety(sol) {
   let lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
   let lpRowsSeen = 0;
   for (const h of sol?.lp_holders ?? []) {
-    const pct = Number(h.percent) * 100;
-    if (!Number.isFinite(pct) || pct < 0 || pct > 100) continue;
+    const pct2 = Number(h.percent) * 100;
+    if (!Number.isFinite(pct2) || pct2 < 0 || pct2 > 100) continue;
     lpRowsSeen += 1;
-    if (h.is_locked === 1) lpLockedPct += pct;
-    else lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
+    if (h.is_locked === 1) lpLockedPct += pct2;
+    else lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct2);
   }
   const lpLocked = lpLockedPct >= 50;
   const mintable = solFlag(sol?.mintable);
@@ -1558,17 +1572,17 @@ var CACHE_TTL = 6e4;
 async function auditToken(input, emit, opts) {
   if (input.kind !== "token") return null;
   const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
-  const key = `${opts?.chain ?? ""}:${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}`;
+  const key = `${opts?.chain ?? ""}:${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}:${opts?.collectShipping ? 1 : 0}`;
   const hit = opts?.force ? void 0 : _cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
   const signal = opts?.deadlineAt != null ? AbortSignal.any([...opts.signal ? [opts.signal] : [], AbortSignal.timeout(Math.max(0, opts.deadlineAt - Date.now()))]) : opts?.signal;
   signal?.throwIfAborted();
   const baseFetch = opts?.fetchImpl ?? fetch;
-  const fetchImpl = (url, init) => {
+  const fetchImpl2 = (url, init) => {
     signal?.throwIfAborted();
     return baseFetch(url, { ...init, signal: signal ? AbortSignal.any([signal, ...init?.signal ? [init.signal] : []]) : init?.signal });
   };
-  const d = await runTokenAudit(input, emit, { ...opts, signal, fetchImpl });
+  const d = await runTokenAudit(input, emit, { ...opts, signal, fetchImpl: fetchImpl2 });
   signal?.throwIfAborted();
   _cache.set(key, { at: Date.now(), d });
   return d;
@@ -1872,10 +1886,10 @@ async function runTokenAudit(input, emit, opts) {
   const topWalletPct = eoaHolders.length ? Number(eoaHolders[0].percent) * 100 : null;
   const concentrationTopPct = topWalletPct ?? s.topHolderPct;
   const insiderPct = holdersReliable ? Math.round(topSum) : 0;
-  const materialWalletPcts = holdersReliable ? eoaHolders.map((h) => Number(h.percent) * 100).filter((pct) => Number.isFinite(pct) && pct >= 1).sort((a, b) => b - a) : [];
+  const materialWalletPcts = holdersReliable ? eoaHolders.map((h) => Number(h.percent) * 100).filter((pct2) => Number.isFinite(pct2) && pct2 >= 1).sort((a, b) => b - a) : [];
   const bundleCount = materialWalletPcts.length;
   const topThreeMaterialPct = Math.round(
-    materialWalletPcts.slice(0, 3).reduce((total2, pct) => total2 + pct, 0)
+    materialWalletPcts.slice(0, 3).reduce((total2, pct2) => total2 + pct2, 0)
   );
   const bundleRisk = !holdersReliable ? "low" : insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
   if (s.available && bundleRisk !== "low") {
@@ -2027,6 +2041,22 @@ async function runTokenAudit(input, emit, opts) {
     projectName: pair.baseToken.name,
     contractAddress: pair.baseToken.address
   }, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt }).catch(() => void 0) : void 0;
+  const githubOrg = socials.map((x) => x.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1]).find((g) => !!g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing|apps|collections)$/i.test(g));
+  let shipping;
+  if (githubOrg && opts?.collectShipping) {
+    step({ phase: "Corroborate", label: "Development", detail: `Reading github.com/${githubOrg}: cadence, committers, substance, whether the code reaches production.`, tone: "neutral" });
+    opts?.signal?.throwIfAborted();
+    shipping = await opts.collectShipping(githubOrg, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt, token: { address, chain, deployer: deployerAttribution?.address ?? null } }).catch(() => void 0);
+    if (shipping) {
+      step({ phase: "Corroborate", label: "Development read", detail: shipping.headline, tone: shipping.grade === "stalled" ? "bad" : shipping.grade === "thin" ? "warn" : shipping.grade === "unknown" ? "neutral" : "good" });
+      if (shipping.market === "price-without-shipping") findings.push({ claim: "The token's price rose over the last quarter while commits to the linked repositories fell: the move is not backed by visible development.", tone: "warn", source: "github" });
+      if (shipping.leadDeparted) findings.push({ claim: "The lead committer of the prior two months has stopped while the repository carried on: a departure signal, not yet a departure.", tone: "warn", source: "github" });
+      if (shipping.grade === "stalled") findings.push({ claim: `Development has stalled in the linked GitHub: ${shipping.headline}`, tone: "warn", source: "github" });
+      if (shipping.grade === "shipping-team" && shipping.live === "live") findings.push({ claim: `A team is shipping and the code is reaching production: ${shipping.headline}`, tone: "good", source: "github" });
+    } else {
+      step({ phase: "Corroborate", label: "Development read", detail: `github.com/${githubOrg} could not be read; the development lane is unassessed, not failed.`, tone: "neutral" });
+    }
+  }
   const deployer = deployerAttribution?.address ?? null;
   const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
   const topHolders = rawHolders.slice(0, 10).map((h) => ({
@@ -2150,6 +2180,7 @@ async function runTokenAudit(input, emit, opts) {
     holdersAssessed: holdersReliable,
     projectX,
     ...socialActivity ? { socialActivity } : {},
+    ...shipping ? { shipping } : {},
     deployer,
     ...deployerAttribution ? { deployerAttribution } : {},
     topHolders,
@@ -2483,6 +2514,23 @@ function chainDisplayName(chain) {
   if (!key) return "this chain";
   return CHAIN_DISPLAY_NAMES[key] ?? `the ${key} chain`;
 }
+function shippingCheck(dossier, outcomeNotRecorded2) {
+  const ship = dossier.shipping;
+  const linked = (dossier.socials ?? []).some((x) => /github\.com\//i.test(x.url));
+  if (ship && ship.grade !== "unknown") {
+    const finding = ship.grade === "stalled" || ship.market === "price-without-shipping" || ship.leadDeparted || ship.stars === "suspect" || ship.claimsUnsupported >= 2 && ship.claimsUnsupported > ship.claimsSupported;
+    return {
+      checkId: "github-forensics",
+      decisionCritical: true,
+      label: "GitHub forensics",
+      status: finding ? "finding" : "confirmed",
+      note: `${ship.headline} ${ship.distinctHuman} human committer${ship.distinctHuman === 1 ? "" : "s"}, cadence ${ship.cadenceStatus}, code ${ship.live === "live" ? "reaching production" : ship.live === "committed-only" ? "committed only" : ship.live === "deploys-without-code" ? "shipped from an unseen source" : "production status unread"}; ${ship.reposRead} repos and ${ship.commitsRead} commits read.`
+    };
+  }
+  if (ship) return { checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unavailable", note: "a GitHub account is linked but could not be read" };
+  if (linked) return { checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unknown", note: `a GitHub account is linked; ${outcomeNotRecorded2}` };
+  return { checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unknown", note: "no public repository is linked from the project's official sources; teams that build in private are read through on-chain deploys instead" };
+}
 function tokenChecks(dossier) {
   const evm = dossier.chain !== "solana";
   const safety = dossier.safety;
@@ -2607,7 +2655,7 @@ function tokenChecks(dossier) {
   );
   checks.push({ checkId: "documents-audits", decisionCritical: true, label: "Documents & audits", status: "unknown", note: `whitepaper, security audits, and documents; ${outcomeNotRecorded}` });
   checks.push({ checkId: "news-press", decisionCritical: true, label: "News & press", status: "unknown", note: outcomeNotRecorded });
-  checks.push({ checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unknown", note: `when a GitHub account is linked; ${outcomeNotRecorded}` });
+  checks.push(shippingCheck(dossier, outcomeNotRecorded));
   checks.push({ checkId: "trust-graph-connections", decisionCritical: true, label: "Trust-graph reconciliation", status: "unknown", note: `shared token creators or funders with flagged projects; ${outcomeNotRecorded}` });
   return checks;
 }
@@ -2764,9 +2812,1230 @@ function reportCompleteness(kind, payload, checks = reportChecks(kind, payload))
   ) ? "complete" : "partial";
 }
 
+// src/threat/shipping.ts
+var DAY = 864e5;
+var BOT_NAME = /\[bot\]$|^(github-actions|dependabot|renovate|snyk-bot|greenkeeper|mergify|semantic-release|codecov|imgbot)/i;
+var NOREPLY = /noreply\.github\.com$|^noreply@|^no-reply@/i;
+var MIRROR_HEADLINE = /^(sync(ed|ing)?|mirror(ed)?|export(ed)?|publish(ed)?|import(ed)?)\b.*\b(from|to|of)\b|^sync from\b|^automated sync\b/i;
+var GENERIC_HEADLINE = /^(update|updates|updated|fix|fixes|fixed|wip|changes|change|misc|stuff|test|tests|tmp|temp|asdf|\.+|init|initial commit|first commit|commit|save|cleanup|minor)\.?$/i;
+var DOCS_HEADLINE = /\b(docs?|readme|typo|changelog|license|comment(s)?)\b/i;
+var AI_TRAILER = /co-authored-by:[^\n]*\b(claude|copilot|chatgpt|openai|cursor|codex|devin|gemini|aider|sweep|windsurf)\b|generated with \[?claude|🤖 generated with|made with (cursor|copilot)/i;
+var SHIP_CLAIM = /\b(launch(ed|ing|es)?|releas(ed|e|es|ing)|shipp(ed|ing)|v\d+(\.\d+)+|mainnet|is live|now live|went live|deploy(ed|ing)|beta|alpha|new version|update is (out|live)|rolled out|rolling out)\b/i;
+var PERMISSIVE = /^(MIT|Apache-2\.0|BSD-[23]-Clause|ISC|MPL-2\.0|Unlicense|CC0-1\.0|0BSD|Zlib)$/i;
+var COPYLEFT = /^(GPL|AGPL|LGPL)/i;
+var SOURCE_AVAILABLE = /^(BUSL|BSL|SSPL|Elastic|Commons-Clause)/i;
+var MONTHS = "january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec";
+var ROADMAP_RE = new RegExp(`\\b(Q[1-4]\\s*['\u2019]?(?:20)?\\d{2}|H[12]\\s*['\u2019]?(?:20)?\\d{2}|(?:${MONTHS})\\.?\\s+20\\d{2}|(?:end of|by|before|in)\\s+20\\d{2})\\b`, "gi");
+var BULK_LINES = 1500;
+var BULK_FILES = 15;
+var TRIVIAL_LINES = 5;
+var pct = (n, d) => d > 0 ? Math.round(n / d * 1e3) / 10 : 0;
+var round1 = (n) => Math.round(n * 10) / 10;
+var median = (xs) => {
+  if (!xs.length) return void 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+};
+var parse = (iso) => iso ? Date.parse(iso) : NaN;
+var isoDate = (ms) => new Date(ms).toISOString().slice(0, 10);
+function committerKind(c) {
+  const name = c.authorName ?? "";
+  if (BOT_NAME.test(name) || BOT_NAME.test(c.authorLogin ?? "")) return "bot";
+  if (MIRROR_HEADLINE.test(c.headline) && (NOREPLY.test(c.authorKey) || !c.authorKey.includes("@"))) return "mirror";
+  return "human";
+}
+function positionOf(value, med) {
+  if (!Number.isFinite(med) || med <= 0) return "unknown";
+  if (value < med * 0.5) return "below";
+  if (value > med * 1.5) return "above";
+  return "within";
+}
+function statusFromDays(days) {
+  if (days == null) return "unknown";
+  if (days <= 7) return "shipping";
+  if (days <= 30) return "active";
+  if (days <= 60) return "quiet";
+  return "dormant";
+}
+function licenseClass(id) {
+  if (!id) return "none";
+  if (PERMISSIVE.test(id)) return "permissive";
+  if (COPYLEFT.test(id)) return "copyleft";
+  if (SOURCE_AVAILABLE.test(id)) return "source-available";
+  return "unknown";
+}
+function roadmapDue(phrase, fallbackYearFrom) {
+  const p = phrase.trim().toLowerCase().replace(/['’]/g, "");
+  const year = (y) => y.length === 2 ? 2e3 + Number(y) : Number(y);
+  let m = p.match(/^q([1-4])\s*(\d{2,4})$/);
+  if (m) return Date.UTC(year(m[2]), Number(m[1]) * 3, 0, 23, 59, 59);
+  m = p.match(/^h([12])\s*(\d{2,4})$/);
+  if (m) return Date.UTC(year(m[2]), Number(m[1]) * 6, 0, 23, 59, 59);
+  m = p.match(new RegExp(`^(${MONTHS})\\.?\\s+(\\d{4})$`));
+  if (m) {
+    const idx = "jan feb mar apr may jun jul aug sep oct nov dec".split(" ").indexOf(m[1].slice(0, 3));
+    return Date.UTC(Number(m[2]), idx + 1, 0, 23, 59, 59);
+  }
+  m = p.match(/(\d{4})$/);
+  if (m) return Date.UTC(Number(m[1]), 12, 0, 23, 59, 59);
+  return fallbackYearFrom ? parse(fallbackYearFrom) : NaN;
+}
+function extractRoadmapClaims(text, max = 12) {
+  if (!text) return [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const sentences = text.replace(/\s+/g, " ").split(/(?<=[.!?•\n])\s+|\s{2,}|\s[-–—]\s/);
+  for (const sentence of sentences) {
+    const hits = sentence.match(ROADMAP_RE);
+    if (!hits) continue;
+    const due = roadmapDue(hits[0]);
+    if (!Number.isFinite(due)) continue;
+    const clean = sentence.trim().slice(0, 160);
+    const key = `${hits[0].toLowerCase()}|${clean.toLowerCase().slice(0, 60)}`;
+    if (seen.has(key) || clean.length < 12) continue;
+    seen.add(key);
+    out.push({ text: clean, due: new Date(due).toISOString() });
+    if (out.length >= max) break;
+  }
+  return out;
+}
+function assessShipping(input) {
+  const nowMs = parse(input.now);
+  const windowMs = input.windowDays * DAY;
+  const windowStart = nowMs - windowMs;
+  const evidence = [];
+  const caveats = [];
+  const commits = input.commits.filter((c) => Number.isFinite(parse(c.date)) && parse(c.date) >= windowStart && parse(c.date) <= nowMs + DAY).sort((a, b) => parse(a.date) - parse(b.date));
+  const weekCount = Math.max(1, Math.ceil(input.windowDays / 7));
+  const weeks = [];
+  for (let i = weekCount - 1; i >= 0; i--) {
+    const start = nowMs - (i + 1) * 7 * DAY;
+    const end = start + 7 * DAY;
+    const n = commits.filter((c) => parse(c.date) >= start && parse(c.date) < end).length;
+    weeks.push({ weekStart: isoDate(start), commits: n });
+  }
+  const activeWeeks = weeks.filter((w) => w.commits > 0).length;
+  const lastCommitMs = commits.length ? parse(commits[commits.length - 1].date) : NaN;
+  const pushTimes = input.repos.map((r) => parse(r.pushedAt)).filter((t) => Number.isFinite(t) && t <= nowMs + DAY);
+  const lastPushMs = pushTimes.length ? Math.max(...pushTimes) : NaN;
+  const recencyMs = Number.isFinite(lastCommitMs) ? lastCommitMs : lastPushMs;
+  const lastCommitDaysAgo = Number.isFinite(recencyMs) ? Math.max(0, Math.round((nowMs - recencyMs) / DAY)) : void 0;
+  const gaps = [];
+  for (let i = 1; i < commits.length; i++) gaps.push((parse(commits[i].date) - parse(commits[i - 1].date)) / DAY);
+  if (commits.length) gaps.push((nowMs - lastCommitMs) / DAY);
+  const longestGapDays = gaps.length ? round1(Math.max(...gaps)) : void 0;
+  const medianGapDays = gaps.length ? round1(median(gaps) ?? 0) : void 0;
+  const releasesInWindow = input.repos.reduce((n, r) => n + r.releases.filter((rel) => parse(rel.publishedAt) >= windowStart && parse(rel.publishedAt) <= nowMs + DAY).length, 0);
+  const status = input.repos.length === 0 && commits.length === 0 ? "unknown" : statusFromDays(lastCommitDaysAgo);
+  const roster = /* @__PURE__ */ new Map();
+  const last30Start = nowMs - 30 * DAY;
+  const prior60Start = nowMs - 90 * DAY;
+  const identities = input.identities ?? {};
+  for (const c of commits) {
+    const kind = committerKind(c);
+    const key = kind === "mirror" ? `mirror:${c.authorKey}` : c.authorKey;
+    let row = roster.get(key);
+    if (!row) {
+      const createdMs = parse(c.authorAccountCreatedAt);
+      row = {
+        key,
+        name: c.authorName || c.authorLogin || c.authorKey,
+        login: c.authorLogin,
+        commits: 0,
+        sharePct: 0,
+        kind,
+        accountCreatedAt: c.authorAccountCreatedAt,
+        freshAccount: Number.isFinite(createdMs) && createdMs >= windowStart,
+        last30: 0,
+        prior60: 0
+      };
+      roster.set(key, row);
+    }
+    row.commits++;
+    const t = parse(c.date);
+    if (t >= last30Start) row.last30++;
+    else if (t >= prior60Start) row.prior60++;
+    if (!row.login && c.authorLogin) row.login = c.authorLogin;
+  }
+  for (const row of roster.values()) {
+    const id = row.login ? identities[row.login.toLowerCase()] : void 0;
+    if (!id) continue;
+    if (id.twitter) row.twitter = id.twitter.replace(/^@/, "");
+    if (id.company) row.company = id.company;
+    if (id.website) row.website = id.website;
+    if (id.orgs?.length) row.orgs = id.orgs.slice(0, 5);
+    if (id.name && (!row.name || row.name === row.login)) row.name = id.name;
+    if (id.createdAt && !row.accountCreatedAt) {
+      row.accountCreatedAt = id.createdAt;
+      row.freshAccount = parse(id.createdAt) >= windowStart;
+    }
+  }
+  const rows = [...roster.values()].sort((a, b) => b.commits - a.commits);
+  const total = commits.length;
+  for (const r of rows) r.sharePct = pct(r.commits, total);
+  const humans = rows.filter((r) => r.kind === "human");
+  const humanCommits = humans.reduce((n, r) => n + r.commits, 0);
+  const botCommits = rows.filter((r) => r.kind === "bot").reduce((n, r) => n + r.commits, 0);
+  const mirrorCommits = rows.filter((r) => r.kind === "mirror").reduce((n, r) => n + r.commits, 0);
+  const attributable = humanCommits + mirrorCommits;
+  const top1SharePct = attributable ? pct(Math.max(...rows.filter((r) => r.kind !== "bot").map((r) => r.commits)), attributable) : 0;
+  const hhi = attributable ? Math.round(rows.filter((r) => r.kind !== "bot").reduce((s, r) => s + Math.pow(r.commits / attributable, 2), 0) * 1e3) / 1e3 : 0;
+  let concentration;
+  if (total === 0) concentration = "unknown";
+  else if (humans.length === 0) concentration = "unattributed";
+  else if (top1SharePct >= 85) concentration = "single-author";
+  else if (top1SharePct >= 50) concentration = "lead-plus";
+  else concentration = "team";
+  const priorLead = [...humans].sort((a, b) => b.prior60 - a.prior60)[0];
+  const priorTotal = humans.reduce((n, r) => n + r.prior60, 0);
+  const recentTotal = humans.reduce((n, r) => n + r.last30, 0);
+  const leadPriorSharePct = priorLead && priorTotal ? pct(priorLead.prior60, priorTotal) : 0;
+  const departed = !!priorLead && priorLead.prior60 >= 5 && priorLead.last30 === 0 && recentTotal >= 3;
+  const goneQuiet = humans.filter((h) => h.prior60 >= 3 && h.last30 === 0).map((h) => h.login ? `@${h.login}` : h.name);
+  const churnDetail = !priorLead || priorTotal === 0 ? "Not enough history before the last 30 days to read committer churn." : departed ? `${priorLead.login ? `@${priorLead.login}` : priorLead.name} wrote ${leadPriorSharePct}% of the prior 60 days' commits and none in the last 30 while ${recentTotal} commits landed from others: the lead has stopped and the repository has not.` : goneQuiet.length ? `${goneQuiet.length} committer${goneQuiet.length === 1 ? "" : "s"} active in the prior 60 days ${goneQuiet.length === 1 ? "has" : "have"} no commits in the last 30 (${goneQuiet.slice(0, 3).join(", ")}).` : `${priorLead.login ? `@${priorLead.login}` : priorLead.name} carried ${leadPriorSharePct}% of the prior 60 days and is still committing (${priorLead.last30} in the last 30).`;
+  const measured = commits.filter((c) => c.additions != null && c.deletions != null);
+  const lines = measured.map((c) => (c.additions ?? 0) + (c.deletions ?? 0));
+  const files = measured.map((c) => c.files ?? 0).filter((n) => n > 0);
+  const trivial = measured.filter((c) => (c.additions ?? 0) + (c.deletions ?? 0) <= TRIVIAL_LINES).length;
+  const docsOnly = commits.filter((c) => DOCS_HEADLINE.test(c.headline) && !/\b(feat|feature|add|implement|fix)\b/i.test(c.headline)).length;
+  const bulkDrops = measured.filter((c) => (c.additions ?? 0) + (c.deletions ?? 0) >= BULK_LINES && (c.files ?? 0) >= BULK_FILES);
+  const substance = {
+    measuredCommits: measured.length,
+    medianLinesChanged: median(lines),
+    meanLinesChanged: lines.length ? Math.round(lines.reduce((a, b) => a + b, 0) / lines.length) : void 0,
+    medianFiles: median(files),
+    trivialSharePct: measured.length ? pct(trivial, measured.length) : void 0,
+    docsOnlySharePct: total ? pct(docsOnly, total) : void 0,
+    bulkDropCount: bulkDrops.length
+  };
+  const aiTrailerCount = commits.filter((c) => AI_TRAILER.test(`${c.headline}
+${c.body ?? ""}`)).length;
+  const generic = commits.filter((c) => GENERIC_HEADLINE.test(c.headline.trim())).length;
+  const mirroredSharePct = total ? pct(mirrorCommits, total) : 0;
+  const authorshipEvidence = [];
+  let authorship;
+  if (total === 0) authorship = "unknown";
+  else if (mirroredSharePct >= 80) {
+    authorship = "mirrored";
+    authorshipEvidence.push(`${mirroredSharePct}% of commits are sync/mirror exports from a private repository, so the public history says who published, not who wrote.`);
+  } else {
+    const aiShare = pct(aiTrailerCount, total);
+    const genericShare = pct(generic, total);
+    if (aiShare >= 30 || bulkDrops.length >= 3 && genericShare >= 30) authorship = "machine-heavy";
+    else if (aiShare > 0 || genericShare >= 30 || bulkDrops.length >= 2) authorship = "mixed";
+    else authorship = "hand-authored";
+    if (aiTrailerCount) authorshipEvidence.push(`${aiTrailerCount} commit${aiTrailerCount === 1 ? "" : "s"} carry an AI co-author trailer (Claude, Copilot, Cursor or similar).`);
+    if (genericShare >= 30) authorshipEvidence.push(`${genericShare}% of commit messages are placeholders ("update", "fix", "wip").`);
+    if (bulkDrops.length) authorshipEvidence.push(`${bulkDrops.length} bulk drop${bulkDrops.length === 1 ? "" : "s"} of ${BULK_LINES}+ lines across ${BULK_FILES}+ files landed as single commits.`);
+    if (authorship === "hand-authored") authorshipEvidence.push("Commit messages are specific and the change sizes are incremental, consistent with hand-authored work.");
+  }
+  const forks = input.repos.filter((r) => r.isFork).map((r) => ({ repo: r.nameWithOwner, parent: r.parent ?? "unknown upstream" }));
+  const templates = input.repos.filter((r) => r.isTemplate).map((r) => r.nameWithOwner);
+  const forkSharePct = input.repos.length ? pct(forks.length, input.repos.length) : 0;
+  const bulkImports = [];
+  for (const r of input.repos) {
+    const first = commits.find((c) => c.repo === r.nameWithOwner);
+    if (!first) continue;
+    const opensWithDrop = (first.additions ?? 0) >= BULK_LINES && (first.files ?? 0) >= BULK_FILES && parse(r.createdAt) >= windowStart;
+    if (opensWithDrop) bulkImports.push(r.nameWithOwner);
+  }
+  let origin;
+  if (input.repos.length === 0) origin = "unknown";
+  else if (forkSharePct >= 80 || forks.length > 0 && forks.length === input.repos.length) origin = "derivative";
+  else if (forks.length > 0 || bulkImports.length > 0) origin = "partly-derivative";
+  else origin = "original";
+  const sample = input.stargazers ?? [];
+  const starTotal = input.repos.reduce((n, r) => n + r.stars, 0);
+  const starEvidence = [];
+  let starVerdict;
+  let lowActivitySharePct;
+  let burstSharePct;
+  let burstWindowStart;
+  let historyStars;
+  let launchBurst = false;
+  const flagship = input.repos.find((r) => r.nameWithOwner === (input.starHistoryRepo ?? input.stargazerRepo)) ?? [...input.repos].sort((a, b) => b.stars - a.stars)[0];
+  const proportion = (() => {
+    if (!flagship || flagship.stars < 100) return null;
+    const forkRatio = flagship.forks / flagship.stars;
+    const watchRatio = flagship.watchers != null ? flagship.watchers / flagship.stars : void 0;
+    const commitsOnFlagship = commits.filter((c) => c.repo === flagship.nameWithOwner).length;
+    const thinWork = commitsOnFlagship < 5 && (flagship.commitsInWindow ?? commitsOnFlagship) < 5;
+    const disproportionate = forkRatio < 0.02 && (watchRatio == null || watchRatio < 0.01) && (thinWork || flagship.stars >= 1e3);
+    const line = `${flagship.nameWithOwner} has ${flagship.stars} stars against ${flagship.forks} forks${flagship.watchers != null ? ` and ${flagship.watchers} watchers` : ""}${thinWork ? " with under five commits in the window" : ""}.`;
+    return { disproportionate, line };
+  })();
+  const history = (input.starHistory ?? []).filter((d) => Number.isFinite(parse(d.date)) && Number.isFinite(d.stars) && d.stars >= 0).sort((a, b) => parse(a.date) - parse(b.date));
+  if (history.length) {
+    historyStars = history.reduce((n, d) => n + d.stars, 0);
+    if (historyStars >= 30) {
+      let best = 0;
+      let bestStart = history[0].date;
+      for (let i = 0; i < history.length; i++) {
+        let n = 0;
+        for (let j = i; j < history.length && parse(history[j].date) - parse(history[i].date) < 3 * DAY; j++) n += history[j].stars;
+        if (n > best) {
+          best = n;
+          bestStart = history[i].date;
+        }
+      }
+      burstSharePct = pct(best, historyStars);
+      burstWindowStart = bestStart;
+      const repoAgeAtBurstDays = flagship ? (parse(bestStart) - parse(flagship.createdAt)) / DAY : void 0;
+      launchBurst = repoAgeAtBurstDays != null && repoAgeAtBurstDays <= 30;
+    }
+  }
+  if (starTotal === 0) {
+    starVerdict = "none";
+    starEvidence.push("No stars on the reviewed repositories, so there is nothing to authenticate.");
+  } else if (sample.length >= 20) {
+    const low = sample.filter((s) => {
+      const created = parse(s.createdAt);
+      const starred = parse(s.starredAt);
+      const youngAccount = Number.isFinite(created) && Number.isFinite(starred) && starred - created <= 30 * DAY;
+      const empty = (s.repos ?? 1) === 0 && (s.followers ?? 1) === 0;
+      return youngAccount || empty;
+    }).length;
+    lowActivitySharePct = pct(low, sample.length);
+    const times = sample.map((s) => parse(s.starredAt)).filter(Number.isFinite).sort((a, b) => a - b);
+    let best = 0;
+    let bestStart = times[0];
+    for (let i = 0, j = 0; i < times.length; i++) {
+      while (times[i] - times[j] > 72 * 36e5) j++;
+      const n = i - j + 1;
+      if (n > best) {
+        best = n;
+        bestStart = times[j];
+      }
+    }
+    burstSharePct = pct(best, times.length);
+    burstWindowStart = Number.isFinite(bestStart) ? new Date(bestStart).toISOString() : void 0;
+    const sampledRepo = input.repos.find((r) => r.nameWithOwner === input.stargazerRepo);
+    const repoAgeAtBurstDays = sampledRepo && Number.isFinite(bestStart) ? (bestStart - parse(sampledRepo.createdAt)) / DAY : void 0;
+    launchBurst = repoAgeAtBurstDays != null && repoAgeAtBurstDays <= 30;
+    const suspect = lowActivitySharePct >= 40 || burstSharePct >= 50 && !launchBurst;
+    starVerdict = suspect ? "suspect" : "organic";
+    starEvidence.push(`${lowActivitySharePct}% of ${sample.length} sampled stargazers are low-activity accounts (created within 30 days of starring, or no repos and no followers).`);
+    starEvidence.push(`${burstSharePct}% of sampled stars landed inside one 72-hour window${launchBurst ? " during the repository's first month, which is a normal launch pattern" : ""}.`);
+    if (suspect) starEvidence.push("This is the signature StarScout (Six Million Suspected Fake Stars, ICSE 2026) associates with purchased stars.");
+  } else if (burstSharePct != null && historyStars != null && flagship) {
+    const timedBurst = burstSharePct >= 50 && !launchBurst;
+    const softBurst = burstSharePct >= 30 && !launchBurst;
+    const suspect = timedBurst || softBurst && !!proportion?.disproportionate || !!proportion?.disproportionate && burstSharePct >= 15;
+    starVerdict = suspect ? "suspect" : "organic";
+    starEvidence.push(`${burstSharePct}% of ${flagship.nameWithOwner}'s ${historyStars.toLocaleString("en-US")} stars arrived inside one three-day window starting ${burstWindowStart}${launchBurst ? ", inside the repository's first month, which is a normal launch pattern" : ""}.`);
+    if (proportion) starEvidence.push(proportion.line + (proportion.disproportionate ? " Organic attention brings forks, watchers and contributors along with stars; this repository has the stars alone." : ""));
+    if (suspect) starEvidence.push("A star burst outside launch week, with nothing else growing alongside it, is the lockstep signature StarScout associates with purchased stars. GitHub no longer exposes who starred, so the accounts themselves cannot be checked.");
+    else starEvidence.push("Star timing is spread across the history; the accounts behind the stars are no longer readable since GitHub restricted stargazer lists in June 2026.");
+  } else if (proportion) {
+    starVerdict = proportion.disproportionate ? "suspect" : "insufficient";
+    starEvidence.push(`No star history or stargazer sample was available, so the read is proportional: ${proportion.line}`);
+    if (proportion.disproportionate) starEvidence.push("Organic attention brings forks, watchers and contributors along with stars; this repository has the stars alone.");
+    else starEvidence.push("The proportions are ordinary; nothing here separates bought stars from earned ones without the star history.");
+  } else {
+    starVerdict = "insufficient";
+    starEvidence.push(historyStars != null && historyStars < 30 ? `The star history holds ${historyStars} star${historyStars === 1 ? "" : "s"}; a timing read needs at least 30.` : `Only ${sample.length} stargazer${sample.length === 1 ? "" : "s"} could be sampled; a star-authenticity read needs at least 20.`);
+  }
+  const hyg = {
+    reposReviewed: input.repos.length,
+    withLicense: input.repos.filter((r) => !!r.license).length,
+    withReadme: input.repos.filter((r) => r.hasReadme).length,
+    withCi: input.repos.filter((r) => r.hasCi).length,
+    withTests: input.repos.filter((r) => r.hasTests).length,
+    archived: input.repos.filter((r) => r.isArchived).length,
+    openIssues: input.repos.reduce((n, r) => n + (r.openIssues ?? 0), 0),
+    openPullRequests: input.repos.reduce((n, r) => n + (r.openPullRequests ?? 0), 0)
+  };
+  let hygieneVerdict = "unknown";
+  if (input.repos.length) {
+    const score = [hyg.withLicense, hyg.withReadme, hyg.withCi, hyg.withTests].filter((n) => n > 0).length;
+    hygieneVerdict = score >= 3 ? "maintained" : score >= 1 ? "partial" : "neglected";
+  }
+  const price = (input.priceSeries ?? []).filter((p) => Number.isFinite(p.close) && Number.isFinite(parse(p.date)) && parse(p.date) >= windowStart).sort((a, b) => parse(a.date) - parse(b.date));
+  let marketRead = "insufficient";
+  let priceChangePct;
+  let commitTrendPct;
+  let marketDetail = "Not enough price history or commits to compare the chart with the commit log.";
+  if (price.length >= 4 && total > 0) {
+    priceChangePct = round1((price[price.length - 1].close - price[0].close) / price[0].close * 100);
+    const mid = nowMs - windowMs / 2;
+    const firstHalf = commits.filter((c) => parse(c.date) < mid).length;
+    const secondHalf = total - firstHalf;
+    commitTrendPct = firstHalf > 0 ? round1((secondHalf - firstHalf) / firstHalf * 100) : secondHalf > 0 ? 100 : 0;
+    const shippingUp = secondHalf >= firstHalf && secondHalf > 0;
+    const shippingDown = secondHalf < firstHalf * 0.5;
+    if (priceChangePct <= -15 && shippingUp) {
+      marketRead = "shipping-into-weakness";
+      marketDetail = `Price is down ${Math.abs(priceChangePct)}% over the window while commits held or rose (${firstHalf} then ${secondHalf} per half): the team kept building through the drawdown.`;
+    } else if (priceChangePct >= 30 && (shippingDown || secondHalf === 0)) {
+      marketRead = "price-without-shipping";
+      marketDetail = `Price is up ${priceChangePct}% while commits fell (${firstHalf} then ${secondHalf} per half): the move is not backed by visible development.`;
+    } else if (priceChangePct >= 0 && shippingUp) {
+      marketRead = "aligned-up";
+      marketDetail = `Price (${priceChangePct >= 0 ? "+" : ""}${priceChangePct}%) and commit cadence (${firstHalf} then ${secondHalf} per half) rose together.`;
+    } else if (priceChangePct < 0 && shippingDown) {
+      marketRead = "aligned-down";
+      marketDetail = `Price (${priceChangePct}%) and commit cadence (${firstHalf} then ${secondHalf} per half) fell together: a project going quiet, not one being ignored.`;
+    } else {
+      marketRead = "mixed";
+      marketDetail = `Price moved ${priceChangePct >= 0 ? "+" : ""}${priceChangePct}% with commits at ${firstHalf} then ${secondHalf} per half: no clean relationship.`;
+    }
+  } else if (total === 0 && price.length >= 4) {
+    priceChangePct = round1((price[price.length - 1].close - price[0].close) / price[0].close * 100);
+    marketRead = priceChangePct >= 30 ? "price-without-shipping" : "insufficient";
+    marketDetail = priceChangePct >= 30 ? `Price is up ${priceChangePct}% over a window with no commits at all.` : "No commits in the window, so there is no development to set against the chart.";
+  }
+  const claimsIn = (input.claims ?? []).filter((c) => SHIP_CLAIM.test(c.text) && Number.isFinite(parse(c.date)));
+  const releases = input.repos.flatMap((r) => r.releases.map((rel) => ({ ...rel, repo: r.nameWithOwner })));
+  const graded = claimsIn.map((claim) => {
+    const at = parse(claim.date);
+    const matchedCommits = commits.filter((c) => parse(c.date) >= at - 7 * DAY && parse(c.date) <= at + 2 * DAY).length;
+    const rel = releases.find((r) => Math.abs(parse(r.publishedAt) - at) <= 7 * DAY);
+    const grade2 = rel || matchedCommits >= 3 ? "supported" : matchedCommits > 0 ? "context" : "unsupported";
+    return { ...claim, grade: grade2, matchedCommits, matchedRelease: rel?.tag };
+  });
+  const supported = graded.filter((g) => g.grade === "supported").length;
+  const context2 = graded.filter((g) => g.grade === "context").length;
+  const unsupported = graded.filter((g) => g.grade === "unsupported").length;
+  const claimDetail = !graded.length ? "No shipping claims were found in the project's posts inside the window." : `${graded.length} shipping claim${graded.length === 1 ? "" : "s"} in the project's posts: ${supported} backed by a release or a burst of commits, ${context2} near light activity, ${unsupported} with nothing in the public repositories within a week.`;
+  let peers;
+  if (input.peers && input.peers.repos.length) {
+    const subject = {
+      commitsInWindow: total,
+      authorsInWindow: humans.length,
+      stars: starTotal
+    };
+    const med = {
+      commitsInWindow: median(input.peers.repos.map((r) => r.commitsInWindow)) ?? 0,
+      authorsInWindow: median(input.peers.repos.map((r) => r.authorsInWindow)) ?? 0,
+      stars: median(input.peers.repos.map((r) => r.stars)) ?? 0
+    };
+    const position = {
+      commits: positionOf(subject.commitsInWindow, med.commitsInWindow),
+      authors: positionOf(subject.authorsInWindow, med.authorsInWindow),
+      stars: positionOf(subject.stars, med.stars)
+    };
+    const word = (p) => p === "below" ? "below" : p === "above" ? "above" : p === "within" ? "in line with" : "not comparable to";
+    peers = {
+      sector: input.peers.sector,
+      label: input.peers.label,
+      subject,
+      median: med,
+      position,
+      rows: input.peers.repos,
+      detail: `Against ${input.peers.label} (${input.peers.repos.map((r) => r.nameWithOwner).join(", ")}): ${subject.commitsInWindow} commits is ${word(position.commits)} the peer median of ${Math.round(med.commitsInWindow)}, ${subject.authorsInWindow} human author${subject.authorsInWindow === 1 ? "" : "s"} is ${word(position.authors)} the median of ${Math.round(med.authorsInWindow)}, and ${starTotal} stars is ${word(position.stars)} the median of ${Math.round(med.stars)}.`
+    };
+  }
+  const deploys = (input.deploys ?? []).filter((d) => Number.isFinite(parse(d.date)) && parse(d.date) >= windowStart);
+  const publishes = (input.packages ?? []).flatMap((pk) => pk.versions.filter((v) => Number.isFinite(parse(v.date)) && parse(v.date) >= windowStart).map((v) => ({ ...v, name: pk.name })));
+  const releaseTimes = input.repos.flatMap((r) => r.releases.map((rel) => parse(rel.publishedAt))).filter((t) => Number.isFinite(t) && t <= nowMs + DAY);
+  const followsCode = (t) => releaseTimes.some((r) => t >= r && t - r <= 14 * DAY) || commits.filter((c) => parse(c.date) <= t && t - parse(c.date) <= 14 * DAY).length >= 3;
+  const codeToChain = [...deploys.map((d) => parse(d.date)), ...publishes.map((p) => parse(p.date))].filter(followsCode).length;
+  const verifiedDeploys = deploys.filter((d) => d.verified).length;
+  let liveVerdict;
+  if (!input.deploys && !input.packages) liveVerdict = "unknown";
+  else if ((deploys.length || publishes.length) && codeToChain > 0) liveVerdict = "live";
+  else if (deploys.length || publishes.length) liveVerdict = "deploys-without-code";
+  else liveVerdict = total > 0 ? "committed-only" : "unknown";
+  const liveDetail = liveVerdict === "unknown" ? "No deployer history or package registry was read, so whether the code reached production is not known." : liveVerdict === "live" ? `${deploys.length} on-chain deploy${deploys.length === 1 ? "" : "s"}${verifiedDeploys ? ` (${verifiedDeploys} verified)` : ""} and ${publishes.length} package publish${publishes.length === 1 ? "" : "es"} in the window; ${codeToChain} followed a release or a burst of commits within two weeks, so the public code is what is going live.` : liveVerdict === "deploys-without-code" ? `${deploys.length} deploy${deploys.length === 1 ? "" : "s"} and ${publishes.length} publish${publishes.length === 1 ? "" : "es"} in the window with no matching activity in the public repositories: the shipping happens somewhere this read cannot see.` : `${total} commits in the window and no on-chain deploy or package publish: work committed, nothing visibly shipped to users yet.`;
+  const prsSampled = input.repos.reduce((n, r) => n + (r.pullRequestsSampled ?? 0), 0);
+  const externalPrs = input.repos.reduce((n, r) => n + (r.externalPullRequests ?? 0), 0);
+  const issuesSampled = input.repos.reduce((n, r) => n + (r.issuesSampled ?? 0), 0);
+  const externalIssues = input.repos.reduce((n, r) => n + (r.externalIssues ?? 0), 0);
+  const activeForks = input.repos.reduce((n, r) => n + (r.activeForks ?? 0), 0);
+  const packageDownloads = (input.packages ?? []).reduce((n, pk) => pk.downloadsLastMonth == null ? n : (n ?? 0) + pk.downloadsLastMonth, void 0);
+  const externalPrSharePct = prsSampled ? pct(externalPrs, prsSampled) : void 0;
+  const externalIssueSharePct = issuesSampled ? pct(externalIssues, issuesSampled) : void 0;
+  let adoptionVerdict = "unknown";
+  const adoptionRead = prsSampled > 0 || issuesSampled > 0 || input.repos.some((r) => r.activeForks != null) || packageDownloads != null;
+  if (adoptionRead) {
+    const strong = externalPrs >= 3 || (packageDownloads ?? 0) >= 1e3 || activeForks >= 5;
+    const some = externalPrs >= 1 || externalIssues >= 3 || (packageDownloads ?? 0) >= 100 || activeForks >= 1;
+    adoptionVerdict = strong ? "used" : some ? "noticed" : "unused";
+  }
+  const adoptionDetail = !adoptionRead ? "No pull-request, issue, fork or download data was read." : `${externalPrs} of ${prsSampled} sampled pull requests and ${externalIssues} of ${issuesSampled} sampled issues came from outside the team; ${activeForks} fork${activeForks === 1 ? "" : "s"} pushed to in the window${packageDownloads != null ? `; ${packageDownloads.toLocaleString("en-US")} package downloads last month` : ""}. ${adoptionVerdict === "used" ? "Outsiders are contributing, which is the hardest attention signal to fake." : adoptionVerdict === "noticed" ? "Some outside attention, not yet outside contribution." : "Nobody outside the team is contributing, filing or forking."}`;
+  const flagshipForHealth = flagship ?? input.repos[0];
+  const ci = flagshipForHealth?.ciState ?? "unknown";
+  const licenseId = flagshipForHealth?.license;
+  const license = flagshipForHealth ? licenseClass(licenseId) : "unknown";
+  const auditInTree = input.repos.some((r) => r.hasAudit);
+  const lockfileAgeDays = flagshipForHealth?.lockfileUpdatedAt && Number.isFinite(parse(flagshipForHealth.lockfileUpdatedAt)) ? Math.max(0, Math.round((nowMs - parse(flagshipForHealth.lockfileUpdatedAt)) / DAY)) : void 0;
+  let healthVerdict = "unknown";
+  if (input.repos.length) {
+    let good = 0;
+    let bad = 0;
+    if (ci === "success") good++;
+    else if (ci === "failure") bad++;
+    if (license === "permissive") good++;
+    else if (license === "none") bad++;
+    if (auditInTree) good++;
+    if (lockfileAgeDays != null) {
+      if (lockfileAgeDays <= 90) good++;
+      else if (lockfileAgeDays > 365) bad++;
+    }
+    healthVerdict = bad === 0 && good >= 2 ? "sound" : bad >= 2 ? "poor" : "mixed";
+  }
+  const healthDetail = !input.repos.length ? "No repository to assess." : [
+    ci === "success" ? "Latest default-branch checks pass" : ci === "failure" ? "Latest default-branch checks FAIL" : ci === "pending" ? "Latest checks still running" : "No check status exposed",
+    license === "permissive" ? `${licenseId} licence (permissive)` : license === "copyleft" ? `${licenseId} licence (copyleft; derivative work must be shared)` : license === "source-available" ? `${licenseId} (source-available, not open source)` : license === "none" ? "no licence file, so the code cannot legally be reused" : `${licenseId ?? "unrecognised"} licence`,
+    auditInTree ? "an audit report is in the tree" : "no audit report in the tree",
+    lockfileAgeDays != null ? `dependencies last locked ${lockfileAgeDays} days ago` : "no lockfile read"
+  ].join("; ") + ".";
+  const weeklyMap = /* @__PURE__ */ new Map();
+  let trendSource = "none";
+  for (const r of input.repos) for (const w of r.weeklyCommits ?? []) {
+    weeklyMap.set(w.weekStart, (weeklyMap.get(w.weekStart) ?? 0) + w.commits);
+    trendSource = "provider-weekly";
+  }
+  if (trendSource === "none" && commits.length) {
+    for (const w of weeks) weeklyMap.set(w.weekStart, w.commits);
+    trendSource = "window-commits";
+  }
+  const trendKeys = [...weeklyMap.keys()].sort().slice(-52);
+  const weekOf = (t) => trendKeys.find((k, i) => t >= parse(k) && (i === trendKeys.length - 1 || t < parse(trendKeys[i + 1])));
+  const priceByWeek = /* @__PURE__ */ new Map();
+  for (const pt of input.priceSeries ?? []) {
+    const k = weekOf(parse(pt.date));
+    if (k) {
+      priceByWeek.set(k, [...priceByWeek.get(k) ?? [], pt.close]);
+    }
+  }
+  const releasesByWeek = /* @__PURE__ */ new Map();
+  for (const t of releaseTimes) {
+    const k = weekOf(t);
+    if (k) releasesByWeek.set(k, (releasesByWeek.get(k) ?? 0) + 1);
+  }
+  const deploysByWeek = /* @__PURE__ */ new Map();
+  for (const d of input.deploys ?? []) {
+    const k = weekOf(parse(d.date));
+    if (k) deploysByWeek.set(k, (deploysByWeek.get(k) ?? 0) + 1);
+  }
+  const trendWeeks = trendKeys.map((k) => ({ weekStart: k, commits: weeklyMap.get(k) ?? 0, price: median(priceByWeek.get(k) ?? []), releases: releasesByWeek.get(k) ?? 0, deploys: deploysByWeek.get(k) ?? 0 }));
+  const lifeCommits = trendWeeks.reduce((n, w) => n + w.commits, 0);
+  const activeWeeksLife = trendWeeks.filter((w) => w.commits > 0).length;
+  const trendDetail = trendSource === "none" ? "No weekly history was read." : `${lifeCommits} commits across ${activeWeeksLife} of the last ${trendWeeks.length} weeks${trendSource === "window-commits" ? " (window only; the provider's yearly statistics were not available)" : ""}.`;
+  const roadmapClaims = extractRoadmapClaims(input.docsText).map((c) => {
+    const due = parse(c.due);
+    const from = due - 30 * DAY;
+    const to = due + 30 * DAY;
+    const rel = releaseTimes.filter((t) => t >= from && t <= to).length;
+    const dep = deploys.filter((d) => parse(d.date) >= from && parse(d.date) <= to).length;
+    const com = commits.filter((c2) => parse(c2.date) >= from && parse(c2.date) <= to).length;
+    const weekly = trendWeeks.filter((w) => parse(w.weekStart) >= from - 7 * DAY && parse(w.weekStart) <= to).reduce((n, w) => n + w.commits, 0);
+    let grade2;
+    let evidence2;
+    if (due > nowMs) {
+      grade2 = "pending";
+      evidence2 = `Due ${c.due.slice(0, 10)}; not yet reached.`;
+    } else if (rel || dep) {
+      grade2 = "met";
+      evidence2 = `${rel} release${rel === 1 ? "" : "s"} and ${dep} deploy${dep === 1 ? "" : "s"} within a month of ${c.due.slice(0, 10)}.`;
+    } else if (com >= 5 || weekly >= 10) {
+      grade2 = "met";
+      evidence2 = `${Math.max(com, weekly)} commits within a month of ${c.due.slice(0, 10)}; no tagged release or deploy to name.`;
+    } else if (due < windowStart - 30 * DAY && trendSource !== "provider-weekly") {
+      grade2 = "unclear";
+      evidence2 = `Due ${c.due.slice(0, 10)}, before this read's history begins.`;
+    } else {
+      grade2 = "missed";
+      evidence2 = `Nothing in the repositories within a month of ${c.due.slice(0, 10)}.`;
+    }
+    return { text: c.text, due: c.due, grade: grade2, evidence: evidence2 };
+  });
+  const roadmapMet = roadmapClaims.filter((c) => c.grade === "met").length;
+  const roadmapMissed = roadmapClaims.filter((c) => c.grade === "missed").length;
+  const roadmapPending = roadmapClaims.filter((c) => c.grade === "pending").length;
+  const roadmapDetail = !input.docsText ? "No roadmap or docs text was read." : !roadmapClaims.length ? "The docs carry no dated promises to check." : `${roadmapClaims.length} dated promise${roadmapClaims.length === 1 ? "" : "s"} in the docs: ${roadmapMet} met, ${roadmapMissed} missed, ${roadmapPending} still ahead.`;
+  const cohort = input.cohort && input.cohort.size > 0 ? {
+    ...input.cohort,
+    detail: `Among ${input.cohort.size} ${input.cohort.label}: ${total} commits sits ${input.cohort.percentileCommits != null ? `at the ${Math.round(input.cohort.percentileCommits)}th percentile` : `against a median of ${Math.round(input.cohort.medianCommits)}`}, ${humans.length} human author${humans.length === 1 ? "" : "s"} ${input.cohort.percentileAuthors != null ? `at the ${Math.round(input.cohort.percentileAuthors)}th` : `against a median of ${Math.round(input.cohort.medianAuthors)}`}${input.cohort.shippingSharePct != null ? `; ${Math.round(input.cohort.shippingSharePct)}% of the cohort is still shipping` : ""}.`
+  } : void 0;
+  const commitsCounted = input.repos.reduce((n, r) => n + (r.commitsInWindow ?? 0), 0);
+  const historyRepos = new Set(commits.map((c) => c.repo)).size;
+  const coverageNotes = [...input.readNotes ?? []];
+  if (input.reposTotal != null && input.reposTotal > input.repos.length) coverageNotes.push(`${input.repos.length} of ${input.reposTotal} repositories reviewed (most recently pushed first).`);
+  if (commitsCounted > total) coverageNotes.push(`${total} of ${commitsCounted} window commits read in detail; cadence and authorship come from the read set, the count from the provider.`);
+  if (!input.starHistory?.length && starTotal > 0) coverageNotes.push("No star history was read; the star read is proportional.");
+  if (!input.identities) coverageNotes.push("Committer accounts were not resolved to X handles or employers.");
+  if (!input.deploys && !input.packages) coverageNotes.push("No on-chain deployer history or package registry was joined.");
+  if (!input.priceSeries?.length) coverageNotes.push("No price series was joined; the chart-versus-commits read is empty.");
+  if (!input.claims?.length) coverageNotes.push("No project posts were joined; shipping claims were not graded.");
+  if (!input.docsText) coverageNotes.push("No roadmap or docs text was joined.");
+  let grade;
+  if (status === "unknown") grade = "unknown";
+  else if (status === "dormant") grade = "stalled";
+  else if (total < 10 || total < 30 && substance.medianLinesChanged != null && substance.medianLinesChanged < 10 && releasesInWindow === 0) grade = "thin";
+  else if (concentration === "team" || concentration === "lead-plus") grade = "shipping-team";
+  else grade = "shipping-solo";
+  const who = concentration === "team" ? `${humans.length} people` : concentration === "lead-plus" ? `${humans.length} people with one carrying ${top1SharePct}%` : concentration === "single-author" ? "one person" : concentration === "unattributed" ? "an unattributed mirror account" : "nobody visible";
+  const headline = grade === "unknown" ? `No public code activity could be read for ${input.target}.` : grade === "stalled" ? `Development has stalled: last commit ${lastCommitDaysAgo} days ago.` : grade === "thin" ? `Thin development: ${total} commit${total === 1 ? "" : "s"} in ${input.windowDays} days from ${who}.` : grade === "shipping-team" ? `Shipping as a team: ${total} commits in ${input.windowDays} days from ${who}.` : `Shipping, but it is ${who}: ${total} commits in ${input.windowDays} days.`;
+  let delta;
+  if (input.previous) {
+    const prev = input.previous;
+    const changePct = prev.totalCommits > 0 ? round1((total - prev.totalCommits) / prev.totalCommits * 100) : void 0;
+    const stalled = (prev.grade === "shipping-team" || prev.grade === "shipping-solo") && (grade === "stalled" || grade === "thin" || status === "quiet" || status === "dormant");
+    const parts = [];
+    if (prev.grade !== grade) parts.push(`grade ${shippingGradeLabel(prev.grade).toLowerCase()} \u2192 ${shippingGradeLabel(grade).toLowerCase()}`);
+    if (changePct != null) parts.push(`commits ${prev.totalCommits} \u2192 ${total} (${changePct >= 0 ? "+" : ""}${changePct}%)`);
+    else if (prev.totalCommits !== total) parts.push(`commits ${prev.totalCommits} \u2192 ${total}`);
+    if (prev.distinctHuman !== humans.length) parts.push(`human committers ${prev.distinctHuman} \u2192 ${humans.length}`);
+    if (prev.cadenceStatus !== status) parts.push(`cadence ${prev.cadenceStatus} \u2192 ${status}`);
+    delta = {
+      capturedAt: prev.capturedAt,
+      grade: { from: prev.grade, to: grade },
+      commits: { from: prev.totalCommits, to: total, changePct },
+      humans: { from: prev.distinctHuman, to: humans.length },
+      cadence: { from: prev.cadenceStatus, to: status },
+      stalled,
+      detail: parts.length ? `Since the report of ${prev.capturedAt.slice(0, 10)}: ${parts.join("; ")}.${stalled ? " The project was shipping then and is not now." : ""}` : `Unchanged since the report of ${prev.capturedAt.slice(0, 10)}.`
+    };
+  }
+  evidence.push(`${total} commits across ${activeWeeks} of ${weekCount} weeks; last activity ${lastCommitDaysAgo != null ? `${lastCommitDaysAgo} day${lastCommitDaysAgo === 1 ? "" : "s"} ago` : "unknown"}${longestGapDays != null ? `; longest gap ${longestGapDays} days` : ""}.`);
+  if (rows.length) evidence.push(`${humans.length} human committer${humans.length === 1 ? "" : "s"}${botCommits ? `, ${pct(botCommits, total)}% bot commits` : ""}${mirrorCommits ? `, ${mirroredSharePct}% mirrored` : ""}; top author holds ${top1SharePct}% of attributable commits.`);
+  if (substance.medianLinesChanged != null) evidence.push(`Median commit changes ${substance.medianLinesChanged} lines${substance.medianFiles != null ? ` across ${substance.medianFiles} files` : ""}; ${substance.trivialSharePct}% are trivial (${TRIVIAL_LINES} lines or fewer).`);
+  if (releasesInWindow) evidence.push(`${releasesInWindow} tagged release${releasesInWindow === 1 ? "" : "s"} in the window.`);
+  if (forks.length) evidence.push(`${forks.length} of ${input.repos.length} repositories are forks: ${forks.slice(0, 3).map((f) => `${f.repo.split("/")[1]} \u2190 ${f.parent}`).join("; ")}.`);
+  if (bulkImports.length) evidence.push(`${bulkImports.length} repositor${bulkImports.length === 1 ? "y opens" : "ies open"} with a bulk code drop rather than incremental history: ${bulkImports.join(", ")}.`);
+  evidence.push(...authorshipEvidence);
+  if (starVerdict === "suspect") evidence.push(`Star authenticity is suspect: ${starEvidence[0]}`);
+  if (departed) evidence.push(churnDetail);
+  if (liveVerdict === "live" || liveVerdict === "deploys-without-code") evidence.push(liveDetail);
+  if (adoptionVerdict === "used") evidence.push(adoptionDetail);
+  if (roadmapMissed) evidence.push(`${roadmapMissed} dated roadmap promise${roadmapMissed === 1 ? "" : "s"} passed with nothing in the repositories to show for ${roadmapMissed === 1 ? "it" : "them"}.`);
+  if (ci === "failure") evidence.push("The latest default-branch checks fail.");
+  if (delta?.stalled) evidence.push(delta.detail);
+  const fresh = humans.filter((h) => h.freshAccount);
+  if (fresh.length) caveats.push(`${fresh.length} committer account${fresh.length === 1 ? " was" : "s were"} created inside the window; new accounts are not new people, but they carry no history to check.`);
+  if (authorship === "mirrored") caveats.push("A mirrored repository can hide a real team or a single contractor equally well; ask for the private repository's contributor list.");
+  if (input.repos.length && input.repos.every((r) => parse(r.createdAt) >= windowStart)) caveats.push("Every reviewed repository was created inside the window, so cadence cannot be distinguished from a launch push.");
+  if (starVerdict === "insufficient") caveats.push(starEvidence[0]);
+  return {
+    target: input.target,
+    windowDays: input.windowDays,
+    grade,
+    headline,
+    evidence,
+    caveats,
+    cadence: { status, totalCommits: total, activeWeeks, weeks, lastCommitDaysAgo, longestGapDays, medianGapDays, releasesInWindow },
+    committers: {
+      concentration,
+      distinctHuman: humans.length,
+      distinctAll: rows.length,
+      top1SharePct,
+      botSharePct: total ? pct(botCommits, total) : 0,
+      mirrorSharePct: mirroredSharePct,
+      hhi,
+      roster: rows.slice(0, 25),
+      churn: { leadLogin: priorLead?.login, leadName: priorLead?.name, leadPriorSharePct, leadLast30: priorLead?.last30 ?? 0, departed, goneQuiet, detail: churnDetail }
+    },
+    substance,
+    authorship: { verdict: authorship, aiTrailerCount, genericMessageSharePct: total ? pct(generic, total) : void 0, bulkDropCount: bulkDrops.length, mirroredSharePct, evidence: authorshipEvidence },
+    origin: { verdict: origin, forks, forkSharePct, templates, bulkImports },
+    stars: { verdict: starVerdict, total: starTotal, sampled: sample.length, repo: input.starHistoryRepo ?? input.stargazerRepo, lowActivitySharePct, burstSharePct, burstWindowStart, historyStars, launchBurst, evidence: starEvidence },
+    hygiene: { verdict: hygieneVerdict, ...hyg },
+    market: { read: marketRead, priceChangePct, commitTrendPct, detail: marketDetail },
+    claims: { graded, supported, context: context2, unsupported, detail: claimDetail },
+    ...peers ? { peers } : {},
+    ...cohort ? { cohort } : {},
+    live: { verdict: liveVerdict, deploysInWindow: deploys.length, verifiedDeploys, publishesInWindow: publishes.length, codeToChain, detail: liveDetail },
+    adoption: { verdict: adoptionVerdict, externalPrSharePct, externalIssueSharePct, externalPrs, externalIssues, activeForks, packageDownloadsLastMonth: packageDownloads, packages: (input.packages ?? []).map((pk) => `${pk.registry}:${pk.name}`), detail: adoptionDetail },
+    health: { verdict: healthVerdict, ci, license, licenseId, auditInTree, lockfileAgeDays, detail: healthDetail },
+    trend: { weeks: trendWeeks, lifeCommits, activeWeeksLife, source: trendSource, detail: trendDetail },
+    roadmap: { claims: roadmapClaims, met: roadmapMet, missed: roadmapMissed, pending: roadmapPending, detail: roadmapDetail },
+    ...delta ? { delta } : {},
+    coverage: { reposTotal: input.reposTotal, reposRead: input.repos.length, historyRepos, commitsCounted, commitsRead: total, starHistoryDays: input.starHistory?.length ?? 0, weeklyStatsRead: trendSource === "provider-weekly", identitiesRead: Object.keys(identities).length, windowDays: input.windowDays, notes: coverageNotes }
+  };
+}
+function summarizeShipping(a, capturedAt) {
+  return {
+    version: 1,
+    target: a.target,
+    capturedAt,
+    windowDays: a.windowDays,
+    grade: a.grade,
+    headline: a.headline,
+    cadenceStatus: a.cadence.status,
+    totalCommits: a.cadence.totalCommits,
+    activeWeeks: a.cadence.activeWeeks,
+    distinctHuman: a.committers.distinctHuman,
+    concentration: a.committers.concentration,
+    authorship: a.authorship.verdict,
+    origin: a.origin.verdict,
+    stars: a.stars.verdict,
+    market: a.market.read,
+    claimsSupported: a.claims.supported,
+    claimsUnsupported: a.claims.unsupported,
+    live: a.live.verdict,
+    adoption: a.adoption.verdict,
+    health: a.health.verdict,
+    leadDeparted: a.committers.churn.departed,
+    reposRead: a.coverage.reposRead,
+    commitsRead: a.coverage.commitsRead,
+    releasesInWindow: a.cadence.releasesInWindow
+  };
+}
+function shippingGradeLabel(grade) {
+  switch (grade) {
+    case "shipping-team":
+      return "Shipping \xB7 team";
+    case "shipping-solo":
+      return "Shipping \xB7 solo";
+    case "thin":
+      return "Thin";
+    case "stalled":
+      return "Stalled";
+    default:
+      return "Unread";
+  }
+}
+
+// src/threat/shippingCollect.ts
+var GQL = "https://api.github.com/graphql";
+var REST = "https://api.github.com";
+var NPM_REGISTRY = "https://registry.npmjs.org";
+var NPM_DOWNLOADS = "https://api.npmjs.org/downloads/point/last-month";
+var PYPI_REGISTRY = "https://pypi.org/pypi";
+var PYPI_DOWNLOADS = "https://pypistats.org/api/packages";
+var CRATES_REGISTRY = "https://crates.io/api/v1/crates";
+var API_VERSION = "2026-03-10";
+var GITHUB_LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+var LOGIN_RE = GITHUB_LOGIN_RE;
+var NPM_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+var PYPI_NAME_RE = /^[A-Za-z0-9]([A-Za-z0-9._-]{0,80}[A-Za-z0-9])?$/;
+var CRATE_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+var WINDOW_DAYS = 90;
+var OWNER_REPOS = 10;
+var OWNER_REPOS_FALLBACK = 5;
+var HISTORY_REPOS = 4;
+var HISTORY_PER_REPO = 100;
+var IDENTITY_MAX = 25;
+var PACKAGES_MAX = 3;
+var STAR_HISTORY_PAGES = 4;
+var STAR_HISTORY_MIN_STARS = 30;
+var LOCKFILES = ["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "Cargo.lock", "foundry.lock"];
+var gh = (key) => ({ authorization: `Bearer ${key}`, "user-agent": "argus-due-diligence" });
+var fetchImpl = (...args) => fetch(...args);
+async function graphql(query, variables, key, usage) {
+  usage.calls += 1;
+  const r = await fetchImpl(GQL, {
+    method: "POST",
+    headers: { ...gh(key), "content-type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(12e3)
+  });
+  if (!r.ok) throw new Error(`GitHub GraphQL ${r.status}`);
+  const body = await r.json();
+  const hard = (body.errors ?? []).filter((e) => e.type !== "NOT_FOUND");
+  if (hard.length) throw new Error(`GitHub GraphQL: ${hard[0].message}`);
+  if (!body.data) throw new Error("GitHub GraphQL returned no data");
+  usage.succeeded += 1;
+  return body.data;
+}
+async function rest(path, key, usage) {
+  usage.calls += 1;
+  const r = await fetchImpl(REST + path, {
+    headers: { ...gh(key), accept: "application/vnd.github+json", "x-github-api-version": API_VERSION },
+    signal: AbortSignal.timeout(9e3)
+  });
+  if (r.status === 202) {
+    usage.succeeded += 1;
+    return { status: 202, data: null };
+  }
+  if (!r.ok) throw new Error(`GitHub ${r.status}`);
+  const data = await r.json();
+  usage.succeeded += 1;
+  return { status: r.status, data };
+}
+async function keyless(url, usage) {
+  usage.calls += 1;
+  try {
+    const r = await fetchImpl(url, { headers: { accept: "application/json", "user-agent": "argus-due-diligence" }, signal: AbortSignal.timeout(8e3) });
+    if (!r.ok) return null;
+    const data = await r.json();
+    usage.succeeded += 1;
+    return data;
+  } catch {
+    return null;
+  }
+}
+function flattenWeeks(rows) {
+  const out = [];
+  for (const row of rows) {
+    if (typeof row?.week !== "number" || !Array.isArray(row.days)) continue;
+    row.days.forEach((n, i) => {
+      if (typeof n === "number" && Number.isFinite(n)) out.push({ date: new Date((row.week + i * 86400) * 1e3).toISOString().slice(0, 10), stars: n });
+    });
+  }
+  return out;
+}
+async function readStarHistory(full, key, usage) {
+  const out = [];
+  for (let page = 1; page <= STAR_HISTORY_PAGES; page++) {
+    const { data: rows } = await rest(`/repos/${full}/stargazers/history?per_page=30&page=${page}`, key, usage);
+    if (!Array.isArray(rows)) throw new Error("GitHub star history had an invalid shape");
+    out.push(...flattenWeeks(rows));
+    if (rows.length < 30) break;
+  }
+  return out;
+}
+async function readWeeklyCommits(full, key, usage) {
+  const { status, data } = await rest(`/repos/${full}/stats/commit_activity`, key, usage);
+  if (status === 202 || !Array.isArray(data)) return null;
+  return data.filter((w) => typeof w?.week === "number" && typeof w.total === "number").map((w) => ({ weekStart: new Date(w.week * 1e3).toISOString().slice(0, 10), commits: w.total })).sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+}
+var REPO_FIELDS = `
+  nameWithOwner isFork isTemplate isArchived description
+  parent { nameWithOwner }
+  createdAt pushedAt stargazerCount forkCount
+  watchers { totalCount }
+  primaryLanguage { name }
+  licenseInfo { spdxId }
+  releases(first: 12, orderBy: { field: CREATED_AT, direction: DESC }) { totalCount nodes { tagName publishedAt } }
+  openIssues: issues(states: OPEN) { totalCount }
+  openPrs: pullRequests(states: OPEN) { totalCount }
+  prSample: pullRequests(last: 20, orderBy: { field: CREATED_AT, direction: ASC }) { nodes { authorAssociation createdAt } }
+  issueSample: issues(last: 20, orderBy: { field: CREATED_AT, direction: ASC }) { nodes { authorAssociation createdAt } }
+  forks(first: 12, orderBy: { field: PUSHED_AT, direction: DESC }) { nodes { pushedAt } }
+  readme: object(expression: "HEAD:README.md") { ... on Blob { byteSize } }
+  workflows: object(expression: "HEAD:.github/workflows") { ... on Tree { entries { name } } }
+  testDir: object(expression: "HEAD:test") { ... on Tree { entries { name } } }
+  testsDir: object(expression: "HEAD:tests") { ... on Tree { entries { name } } }
+  auditsDir: object(expression: "HEAD:audits") { ... on Tree { entries { name } } }
+  auditDir: object(expression: "HEAD:audit") { ... on Tree { entries { name } } }
+  pkg: object(expression: "HEAD:package.json") { ... on Blob { text } }
+  pyproject: object(expression: "HEAD:pyproject.toml") { ... on Blob { text } }
+  cargo: object(expression: "HEAD:Cargo.toml") { ... on Blob { text } }
+  defaultBranchRef { target { ... on Commit {
+    history(since: $since, until: $until) { totalCount }
+    statusCheckRollup { state }
+    ${LOCKFILES.map((f, i) => `lock${i}: history(first: 1, path: ${JSON.stringify(f)}) { nodes { committedDate } }`).join("\n    ")}
+  } } }
+`;
+var INSIDER = /* @__PURE__ */ new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+var isExternal = (assoc) => !!assoc && !INSIDER.has(assoc);
+function packageNameOf(text) {
+  if (!text || text.length > 2e5) return void 0;
+  try {
+    const pkg = JSON.parse(text);
+    if (pkg.private === true) return void 0;
+    return typeof pkg.name === "string" && NPM_NAME_RE.test(pkg.name) ? pkg.name : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function tomlNameUnder(text, tables, valid) {
+  if (!text || text.length > 2e5) return void 0;
+  for (const table of tables) {
+    const start = text.indexOf(`[${table}]`);
+    if (start < 0) continue;
+    const body = text.slice(start + table.length + 2);
+    const end = body.search(/\n\s*\[/);
+    const section = end >= 0 ? body.slice(0, end) : body;
+    const m = section.match(/^\s*name\s*=\s*"([^"]+)"/m);
+    if (m && valid.test(m[1])) return m[1];
+  }
+  return void 0;
+}
+function normaliseRepo(r, since) {
+  const target = r.defaultBranchRef?.target;
+  const ciRaw = target?.statusCheckRollup?.state;
+  const ciState = ciRaw === "SUCCESS" ? "success" : ciRaw === "FAILURE" || ciRaw === "ERROR" ? "failure" : ciRaw === "PENDING" || ciRaw === "EXPECTED" ? "pending" : "unknown";
+  const lockDates = LOCKFILES.map((_, i) => target?.[`lock${i}`]?.nodes?.[0]?.committedDate).filter((d) => !!d).sort();
+  const sinceMs = Date.parse(since);
+  const prs = r.prSample?.nodes ?? [];
+  const issues = r.issueSample?.nodes ?? [];
+  const hasEntries = (t) => (t?.entries?.length ?? 0) > 0;
+  return {
+    nameWithOwner: r.nameWithOwner,
+    isFork: !!r.isFork,
+    parent: r.parent?.nameWithOwner,
+    isTemplate: !!r.isTemplate,
+    isArchived: !!r.isArchived,
+    createdAt: r.createdAt,
+    pushedAt: r.pushedAt ?? void 0,
+    stars: r.stargazerCount ?? 0,
+    forks: r.forkCount ?? 0,
+    watchers: r.watchers?.totalCount,
+    language: r.primaryLanguage?.name,
+    license: r.licenseInfo?.spdxId ?? void 0,
+    description: r.description ?? void 0,
+    releases: (r.releases?.nodes ?? []).filter((n) => n.publishedAt).map((n) => ({ tag: n.tagName, publishedAt: n.publishedAt })),
+    releaseCount: r.releases?.totalCount ?? 0,
+    commitsInWindow: target?.history?.totalCount,
+    hasReadme: (r.readme?.byteSize ?? 0) > 0,
+    hasCi: hasEntries(r.workflows ?? null),
+    hasTests: hasEntries(r.testDir ?? null) || hasEntries(r.testsDir ?? null),
+    hasAudit: hasEntries(r.auditsDir ?? null) || hasEntries(r.auditDir ?? null),
+    openIssues: r.openIssues?.totalCount,
+    openPullRequests: r.openPrs?.totalCount,
+    ciState,
+    lockfileUpdatedAt: lockDates.length ? lockDates[lockDates.length - 1] : void 0,
+    packageName: packageNameOf(r.pkg?.text),
+    pypiName: tomlNameUnder(r.pyproject?.text, ["project", "tool.poetry"], PYPI_NAME_RE),
+    crateName: tomlNameUnder(r.cargo?.text, ["package"], CRATE_NAME_RE),
+    pullRequestsSampled: prs.length,
+    externalPullRequests: prs.filter((p) => isExternal(p.authorAssociation)).length,
+    issuesSampled: issues.length,
+    externalIssues: issues.filter((p) => isExternal(p.authorAssociation)).length,
+    activeForks: (r.forks?.nodes ?? []).filter((f) => f.pushedAt && Date.parse(f.pushedAt) >= sinceMs).length
+  };
+}
+function normaliseCommit(c, repo) {
+  const email = (c.author?.email ?? "").trim().toLowerCase();
+  const login = c.author?.user?.login;
+  const name = (c.author?.name ?? "").trim();
+  return {
+    sha: c.oid,
+    date: c.committedDate,
+    authorKey: email || (login ? login.toLowerCase() : name.toLowerCase()),
+    authorName: name || void 0,
+    authorLogin: login ?? void 0,
+    authorAccountCreatedAt: c.author?.user?.createdAt,
+    additions: c.additions,
+    deletions: c.deletions,
+    files: c.changedFilesIfAvailable ?? void 0,
+    headline: c.messageHeadline,
+    body: c.messageBody ?? void 0,
+    repo
+  };
+}
+var alias = (i) => `r${i}`;
+var splitRepo = (full) => {
+  const [owner, name] = full.split("/");
+  return { owner, name };
+};
+async function readOwnerRepoList(owner, key, usage) {
+  const q = `query($login: String!) { light: repositoryOwner(login: $login) { repositories(first: ${OWNER_REPOS}, orderBy: { field: PUSHED_AT, direction: DESC }, ownerAffiliations: OWNER, privacy: PUBLIC) { totalCount nodes { nameWithOwner } } } }`;
+  const d = await graphql(q, { login: owner }, key, usage);
+  if (!d.light) throw new Error("owner_not_found");
+  return { names: (d.light.repositories?.nodes ?? []).map((n) => n.nameWithOwner), total: d.light.repositories?.totalCount ?? 0 };
+}
+async function readOwnerRepos(owner, since, until, key, usage, notes) {
+  const query = (first) => `query($login: String!, $since: GitTimestamp!, $until: GitTimestamp) { repositoryOwner(login: $login) { repositories(first: ${first}, orderBy: { field: PUSHED_AT, direction: DESC }, ownerAffiliations: OWNER, privacy: PUBLIC) { totalCount nodes { ${REPO_FIELDS} } } } }`;
+  const edgeTimeout = (e) => /GraphQL 50[234]/.test(String(e));
+  let d;
+  try {
+    d = await graphql(query(OWNER_REPOS), { login: owner, since, until }, key, usage);
+  } catch (e) {
+    if (!edgeTimeout(e)) throw e;
+    try {
+      d = await graphql(query(OWNER_REPOS_FALLBACK), { login: owner, since, until }, key, usage);
+      notes?.push(`GitHub timed out on the wide read; only the ${OWNER_REPOS_FALLBACK} most recently pushed repositories were reviewed.`);
+    } catch (e2) {
+      if (!edgeTimeout(e2)) throw e2;
+      const { names, total } = await readOwnerRepoList(owner, key, usage);
+      const repos = [];
+      for (const full of names.slice(0, OWNER_REPOS_FALLBACK)) {
+        try {
+          const one = await readSingleRepo(full, since, until, key, usage);
+          repos.push(...one.repos);
+        } catch (e3) {
+          if (!edgeTimeout(e3)) throw e3;
+          notes?.push(`${full} could not be read even on its own.`);
+        }
+      }
+      notes?.push(`GitHub timed out on the organisation read twice; ${repos.length} of ${total} repositories were read one at a time.`);
+      return { repos, total };
+    }
+  }
+  if (!d.repositoryOwner) throw new Error("owner_not_found");
+  return { repos: (d.repositoryOwner.repositories?.nodes ?? []).map((r) => normaliseRepo(r, since)), total: d.repositoryOwner.repositories?.totalCount ?? 0 };
+}
+async function readSingleRepo(full, since, until, key, usage) {
+  const { owner, name } = splitRepo(full);
+  const q = `query($owner: String!, $name: String!, $since: GitTimestamp!, $until: GitTimestamp) { repository(owner: $owner, name: $name) { ${REPO_FIELDS} } }`;
+  const d = await graphql(q, { owner, name, since, until }, key, usage);
+  return d.repository ? { repos: [normaliseRepo(d.repository, since)], total: 1 } : { repos: [], total: 0 };
+}
+var HISTORY_PER_REPO_FALLBACK = 40;
+var HISTORY_FIELDS_OF = (first) => `
+  nameWithOwner
+  defaultBranchRef { target { ... on Commit { history(first: ${first}, since: $since, until: $until) { nodes {
+    oid committedDate additions deletions changedFilesIfAvailable messageHeadline messageBody
+    author { name email user { login createdAt } }
+  } } } } }
+`;
+async function readHistory(repos, since, until, key, usage, notes) {
+  if (!repos.length) return [];
+  const edgeTimeout = (e) => /GraphQL 50[234]/.test(String(e));
+  const collect = (d) => {
+    const out2 = [];
+    for (const node of Object.values(d)) {
+      if (!node) continue;
+      for (const c of node.defaultBranchRef?.target?.history?.nodes ?? []) out2.push(normaliseCommit(c, node.nameWithOwner));
+    }
+    return out2;
+  };
+  const one = (r, i, first) => {
+    const { owner, name } = splitRepo(r.nameWithOwner);
+    return `${alias(i)}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${HISTORY_FIELDS_OF(first)} }`;
+  };
+  try {
+    const q = `query($since: GitTimestamp!, $until: GitTimestamp) { ${repos.map((r, i) => one(r, i, HISTORY_PER_REPO)).join("\n")} }`;
+    return collect(await graphql(q, { since, until }, key, usage));
+  } catch (e) {
+    if (!edgeTimeout(e)) throw e;
+  }
+  const out = [];
+  let trimmed = 0;
+  for (const r of repos) {
+    let got = null;
+    for (const first of [HISTORY_PER_REPO, HISTORY_PER_REPO_FALLBACK]) {
+      try {
+        got = collect(await graphql(`query($since: GitTimestamp!, $until: GitTimestamp) { ${one(r, 0, first)} }`, { since, until }, key, usage));
+        if (first !== HISTORY_PER_REPO) trimmed++;
+        break;
+      } catch (e) {
+        if (!edgeTimeout(e)) throw e;
+      }
+    }
+    if (got) out.push(...got);
+    else notes?.push(`${r.nameWithOwner}'s commit history could not be read even on its own.`);
+  }
+  notes?.push(`GitHub timed out on the batched history read; repositories were read one at a time${trimmed ? `, ${trimmed} with ${HISTORY_PER_REPO_FALLBACK} commits instead of ${HISTORY_PER_REPO}` : ""}.`);
+  return out;
+}
+async function readIdentities(logins, key, usage) {
+  const out = {};
+  const wanted = [...new Set(logins.map((l) => l.toLowerCase()))].filter((l) => LOGIN_RE.test(l)).slice(0, IDENTITY_MAX);
+  if (!wanted.length) return out;
+  const parts = wanted.map((login, i) => `u${i}: user(login: ${JSON.stringify(login)}) { login name twitterUsername company websiteUrl createdAt followers { totalCount } organizations(first: 5) { nodes { login } } }`);
+  const d = await graphql(`{ ${parts.join("\n")} }`, {}, key, usage);
+  for (const u of Object.values(d)) {
+    if (!u?.login) continue;
+    out[u.login.toLowerCase()] = {
+      login: u.login,
+      name: u.name ?? void 0,
+      twitter: u.twitterUsername ?? void 0,
+      company: u.company?.trim() || void 0,
+      website: u.websiteUrl ?? void 0,
+      orgs: (u.organizations?.nodes ?? []).map((o) => o.login),
+      followers: u.followers?.totalCount,
+      createdAt: u.createdAt
+    };
+  }
+  return out;
+}
+async function readPackages(declared, usage) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const { registry, name } of declared) {
+    const k = `${registry}:${name}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (out.length >= PACKAGES_MAX) break;
+    if (registry === "npm") {
+      const enc = encodeURIComponent(name).replace("%40", "@");
+      const meta = await keyless(`${NPM_REGISTRY}/${enc}`, usage);
+      if (!meta?.time) continue;
+      const versions = Object.entries(meta.time).filter(([v]) => v !== "created" && v !== "modified").map(([version, date]) => ({ version, date })).filter((v) => Number.isFinite(Date.parse(v.date)));
+      const dl = await keyless(`${NPM_DOWNLOADS}/${enc}`, usage);
+      out.push({ name, registry, versions, downloadsLastMonth: typeof dl?.downloads === "number" ? dl.downloads : void 0 });
+    } else if (registry === "pypi") {
+      const meta = await keyless(`${PYPI_REGISTRY}/${encodeURIComponent(name)}/json`, usage);
+      if (!meta?.releases) continue;
+      const versions = Object.entries(meta.releases).map(([version, files]) => ({ version, date: files?.[0]?.upload_time_iso_8601 ?? "" })).filter((v) => Number.isFinite(Date.parse(v.date)));
+      const dl = await keyless(`${PYPI_DOWNLOADS}/${encodeURIComponent(name)}/recent`, usage);
+      out.push({ name, registry, versions, downloadsLastMonth: typeof dl?.data?.last_month === "number" ? dl.data.last_month : void 0 });
+    } else {
+      const meta = await keyless(`${CRATES_REGISTRY}/${encodeURIComponent(name)}`, usage);
+      if (!meta?.versions) continue;
+      const versions = meta.versions.map((v) => ({ version: v.num, date: v.created_at })).filter((v) => Number.isFinite(Date.parse(v.date)));
+      out.push({ name, registry, versions, downloadsLastMonth: typeof meta.crate?.recent_downloads === "number" ? Math.round(meta.crate.recent_downloads / 3) : void 0 });
+    }
+  }
+  return out;
+}
+async function readPeers(sector, since, key, usage, cache) {
+  const ck = `ghpeers:${sector.id}:${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}:v1`;
+  const cached = cache ? await cache.get(ck) : null;
+  if (cached) return cached;
+  const parts = sector.repos.map((full, i) => {
+    const { owner, name } = splitRepo(full);
+    return `${alias(i)}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { nameWithOwner stargazerCount defaultBranchRef { target { ... on Commit { history(first: 100, since: $since) { totalCount nodes { author { email user { login } } } } } } } }`;
+  });
+  const q = `query($since: GitTimestamp!) { ${parts.join("\n")} }`;
+  const d = await graphql(q, { since }, key, usage);
+  const rows = [];
+  for (const node of Object.values(d)) {
+    if (!node) continue;
+    const h = node.defaultBranchRef?.target?.history;
+    const authors = /* @__PURE__ */ new Set();
+    for (const c of h?.nodes ?? []) {
+      const k = c.author?.user?.login?.toLowerCase() || c.author?.email?.toLowerCase();
+      if (k && !/\[bot\]|noreply\.github\.com$/i.test(k)) authors.add(k);
+    }
+    rows.push({ nameWithOwner: node.nameWithOwner, commitsInWindow: h?.totalCount ?? 0, authorsInWindow: authors.size, stars: node.stargazerCount ?? 0 });
+  }
+  if (rows.length && cache) await cache.set(ck, rows);
+  return rows;
+}
+async function collectShipping(opts) {
+  const { target, key, usage } = opts;
+  if (opts.fetchImpl) fetchImpl = opts.fetchImpl;
+  const now = opts.now ?? /* @__PURE__ */ new Date();
+  const windowDays = opts.windowDays ?? WINDOW_DAYS;
+  const pointInTime = !!opts.pointInTime || opts.now != null && Date.now() - opts.now.getTime() > 36e5;
+  const since = new Date(now.getTime() - windowDays * 864e5).toISOString();
+  const until = pointInTime ? now.toISOString() : null;
+  const readNotes = [];
+  const { repos, total: reposTotal } = opts.kind === "repo" ? await readSingleRepo(target, since, until, key, usage) : await readOwnerRepos(target, since, until, key, usage, readNotes);
+  const ranked = [...repos].sort((a, b) => Number(a.isFork) - Number(b.isFork) || (b.commitsInWindow ?? 0) - (a.commitsInWindow ?? 0));
+  const active = ranked.filter((r) => (r.commitsInWindow ?? 0) > 0).slice(0, HISTORY_REPOS);
+  const commits = await readHistory(active, since, until, key, usage, readNotes);
+  let identities;
+  const logins = [...new Set(commits.map((c) => c.authorLogin).filter((l) => !!l && !/\[bot\]$/i.test(l)))];
+  if (logins.length) {
+    try {
+      identities = await readIdentities(logins, key, usage);
+    } catch {
+      readNotes.push("Committer accounts could not be resolved.");
+    }
+  }
+  if (!pointInTime) {
+    let pending = 0;
+    for (const r of active) {
+      try {
+        const weekly = await readWeeklyCommits(r.nameWithOwner, key, usage);
+        if (weekly) r.weeklyCommits = weekly;
+        else pending++;
+      } catch {
+        pending++;
+      }
+    }
+    if (pending) readNotes.push(`Yearly commit statistics were still being computed for ${pending} repositor${pending === 1 ? "y" : "ies"}; the trend uses the window's commits there.`);
+  } else {
+    readNotes.push("Point-in-time read: yearly commit statistics and peer baselines were not read.");
+  }
+  const flagship = [...repos].sort((a, b) => b.stars - a.stars)[0];
+  let starHistory;
+  if (flagship && flagship.stars >= STAR_HISTORY_MIN_STARS) {
+    try {
+      const days = await readStarHistory(flagship.nameWithOwner, key, usage);
+      const cut = until ? days.filter((d) => d.date <= until.slice(0, 10)) : days;
+      if (cut.length) starHistory = cut;
+    } catch {
+      readNotes.push("The star history could not be read; the star read is proportional.");
+    }
+  }
+  readNotes.push("GitHub restricted stargazer lists to repository admins on 2026-06-30, so the accounts behind the stars are not readable.");
+  let packages;
+  const declared = repos.flatMap((r) => [
+    ...r.packageName ? [{ registry: "npm", name: r.packageName }] : [],
+    ...r.pypiName ? [{ registry: "pypi", name: r.pypiName }] : [],
+    ...r.crateName ? [{ registry: "crates", name: r.crateName }] : []
+  ]);
+  if (declared.length && !pointInTime) {
+    packages = await readPackages(declared, usage);
+    if (!packages.length) packages = void 0;
+  }
+  let peers;
+  if (opts.sector && !pointInTime) {
+    try {
+      const rows = await readPeers(opts.sector, since, key, usage, opts.peerCache);
+      if (rows.length) peers = { sector: opts.sector.id, label: opts.sector.label, repos: rows };
+    } catch {
+      readNotes.push("The sector baseline could not be read.");
+    }
+  }
+  return {
+    target,
+    kind: opts.kind === "user" ? "user" : "org",
+    now: now.toISOString(),
+    windowDays,
+    repos,
+    reposTotal,
+    commits,
+    ...identities ? { identities } : {},
+    ...starHistory && flagship ? { starHistory, starHistoryRepo: flagship.nameWithOwner } : {},
+    ...packages ? { packages } : {},
+    ...peers ? { peers } : {},
+    readNotes
+  };
+}
+
+// src/threat/deployTrail.ts
+var ETHERSCAN = "https://api.etherscan.io/v2/api";
+var CHAINID = {
+  ethereum: 1,
+  bsc: 56,
+  base: 8453,
+  polygon: 137,
+  arbitrum: 42161,
+  optimism: 10,
+  avalanche: 43114,
+  fantom: 250,
+  linea: 59144,
+  scroll: 534352
+};
+var BLOCKSCOUT = {
+  robinhood: "https://robinhoodchain.blockscout.com/api",
+  gnosis: "https://gnosis.blockscout.com/api"
+};
+var MAX_RECORDS = 50;
+var isAddr = (s) => /^0x[a-fA-F0-9]{40}$/.test(s);
+function deployTrailReadable(chain, etherscanKey) {
+  const c = chain.toLowerCase();
+  return !!BLOCKSCOUT[c] || !!CHAINID[c] && !!etherscanKey;
+}
+async function readDeployTrail(opts) {
+  const chain = opts.chain.toLowerCase();
+  const wallet = opts.wallet.trim();
+  if (!isAddr(wallet)) return null;
+  const f = opts.fetchImpl ?? fetch;
+  const params = { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "10000", sort: "asc" };
+  let url;
+  if (BLOCKSCOUT[chain]) url = `${BLOCKSCOUT[chain]}?${new URLSearchParams(params)}`;
+  else if (CHAINID[chain] && opts.etherscanKey) url = `${ETHERSCAN}?${new URLSearchParams({ chainid: String(CHAINID[chain]), apikey: opts.etherscanKey, ...params })}`;
+  else return null;
+  try {
+    const r = await f(url, { headers: { accept: "application/json", "user-agent": "argus-due-diligence" }, signal: AbortSignal.timeout(opts.timeoutMs ?? 12e3) });
+    if (!r.ok) return null;
+    const body = await r.json();
+    const rows = Array.isArray(body.result) ? body.result : [];
+    if (!rows.length && !(body.status === "0" && /no transactions found/i.test(`${body.message} ${body.result}`)) && body.status !== "1") return null;
+    const seen = /* @__PURE__ */ new Map();
+    for (const value of rows) {
+      const tx = value ?? {};
+      const to = String(tx.to ?? "");
+      const created = String(tx.contractAddress ?? "");
+      const from = String(tx.from ?? "").toLowerCase();
+      const ts = Number(tx.timeStamp);
+      if (!to && created && isAddr(created) && from === wallet.toLowerCase() && !seen.has(created.toLowerCase())) {
+        seen.set(created.toLowerCase(), Number.isFinite(ts) && ts > 0 ? new Date(ts * 1e3).toISOString() : "");
+      }
+    }
+    return [...seen.entries()].filter(([, at]) => at).map(([address, at]) => ({ address, at })).slice(-MAX_RECORDS);
+  } catch {
+    return null;
+  }
+}
+
+// server/shippingSummary.ts
+var collectShippingSummary = async (githubOrg, options) => {
+  const key = env("GITHUB_TOKEN");
+  if (!key) return void 0;
+  const usage = { calls: 0, succeeded: 0 };
+  const fetchImpl2 = options?.fetchImpl;
+  const token = options?.token;
+  const etherscanKey = env("ETHERSCAN_API_KEY") || void 0;
+  const [input, series, trail] = await Promise.all([
+    collectShipping({ target: githubOrg, kind: "org", key, usage, ...fetchImpl2 ? { fetchImpl: fetchImpl2 } : {} }),
+    token?.address && token.chain ? fetchOhlcv(token.address, token.chain, void 0, "day").catch(() => null) : Promise.resolve(null),
+    token?.deployer && token.chain && deployTrailReadable(token.chain, etherscanKey) ? readDeployTrail({ chain: token.chain, wallet: token.deployer, etherscanKey, ...fetchImpl2 ? { fetchImpl: fetchImpl2 } : {} }) : Promise.resolve(null)
+  ]);
+  const priceSeries = series?.candles.length ? series.candles.map((c) => ({ date: new Date(c.ts < 1e12 ? c.ts * 1e3 : c.ts).toISOString(), close: c.close })) : void 0;
+  const deploys = trail ? trail.map((d) => ({ address: d.address, date: d.at, kind: "create" })) : void 0;
+  const notes = [...input.readNotes ?? []];
+  if (token?.address && !priceSeries) notes.push("The token's daily price series could not be read, so the chart-versus-commits read is empty.");
+  if (token?.deployer && token.chain && !deployTrailReadable(token.chain, etherscanKey)) notes.push(`No explorer is configured for ${token.chain}, so the deployer's creations were not joined.`);
+  return summarizeShipping(assessShipping({ ...input, readNotes: notes, ...priceSeries ? { priceSeries } : {}, ...deploys ? { deploys } : {} }), (/* @__PURE__ */ new Date()).toISOString());
+};
+
 // server/sweep.ts
 var MAX_TOKEN_CHECKS = 15;
 var TOKEN_CHECK_RESERVE_MS = 2e4;
+var SHIPPING_GRADES = /* @__PURE__ */ new Set(["shipping-team", "shipping-solo"]);
 function creds() {
   const url = env("SUPABASE_URL");
   const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
@@ -2833,6 +4102,7 @@ async function runSweepInLedger(organizationId, options) {
       const input = { kind: "token", ref: w.id.includes(":") ? w.id.split(":")[1] : w.id, chain: w.chain, via: w.via ?? "evm" };
       const d = await auditToken(input, void 0, {
         skipSim: true,
+        collectShipping: collectShippingSummary,
         ...deadlineAt != null ? { deadlineAt: Math.min(deadlineAt - TOKEN_CHECK_RESERVE_MS / 2, Date.now() + 6e4) } : {}
       }).catch(() => null);
       if (d && w.snapshot) {
@@ -2845,6 +4115,22 @@ async function runSweepInLedger(organizationId, options) {
         if (typeof s.liquidityUsd === "number" && s.liquidityUsd > 5e3 && (d.liquidityUsd ?? 0) < s.liquidityUsd * 0.5) {
           found.push({ subject: w.id, label: w.label, type: "drift", detail: `liquidity halved: $${Math.round(s.liquidityUsd).toLocaleString()} \u2192 $${Math.round(d.liquidityUsd ?? 0).toLocaleString()}`, at: Date.now() });
         }
+        if (s.shipping && d.shipping) {
+          const was = s.shipping;
+          const now = d.shipping;
+          const stalled = SHIPPING_GRADES.has(was.grade) && (now.grade === "stalled" || now.grade === "thin" || now.cadenceStatus === "dormant" || now.cadenceStatus === "quiet");
+          const halved = was.totalCommits >= 10 && now.totalCommits <= was.totalCommits * 0.4;
+          const lost = was.distinctHuman >= 2 && now.distinctHuman <= Math.floor(was.distinctHuman / 2);
+          if (stalled || halved || lost || now.leadDeparted) {
+            const parts = [
+              stalled ? `grade ${was.grade} \u2192 ${now.grade}` : "",
+              halved ? `commits ${was.totalCommits} \u2192 ${now.totalCommits} per quarter` : "",
+              lost ? `human committers ${was.distinctHuman} \u2192 ${now.distinctHuman}` : "",
+              now.leadDeparted ? "lead committer has stopped" : ""
+            ].filter(Boolean);
+            found.push({ subject: w.id, label: w.label, type: "stall", detail: `development stalled: ${parts.join("; ")}`, at: Date.now() });
+          }
+        }
         const item = {
           ...w,
           snapshot: {
@@ -2852,7 +4138,8 @@ async function runSweepInLedger(organizationId, options) {
             score: d.score,
             completenessState: reportCompleteness("token", d),
             liquidityUsd: d.liquidityUsd,
-            mcap: d.mcap
+            mcap: d.mcap,
+            ...d.shipping ? { shipping: { grade: d.shipping.grade, cadenceStatus: d.shipping.cadenceStatus, totalCommits: d.shipping.totalCommits, distinctHuman: d.shipping.distinctHuman, leadDeparted: d.shipping.leadDeparted } } : {}
           }
         };
         await pg(c, "reports?on_conflict=organization_id,ref,kind", {
