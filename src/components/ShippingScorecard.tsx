@@ -25,11 +25,11 @@ function Cell({ label, value, tone }: { label: string; value: string; tone?: "go
   );
 }
 
-export function ShippingScorecard({ shipping, delta, githubOrg }: { shipping?: ShippingSummary; delta?: MaterialReportDelta | null; githubOrg?: string | null }) {
+export function ShippingScorecard({ shipping, delta, githubOrg, id = "development" }: { shipping?: ShippingSummary; delta?: MaterialReportDelta | null; githubOrg?: string | null; /** Anchor id; the development delta links here (#development on token reports, #investigation-development on investigations). */ id?: string }) {
   if (!shipping) {
     if (!githubOrg) return null;
     return (
-      <section id="development" className="panel mt-4 scroll-mt-28 px-5 py-4">
+      <section id={id} className="panel mt-4 scroll-mt-28 px-5 py-4">
         <div className="eyebrow">Development · github.com/{githubOrg}</div>
         <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">A repository is linked but the scan did not read it. Rescan with the GitHub lane configured, or run the shipping assessment below.</p>
       </section>
@@ -38,7 +38,7 @@ export function ShippingScorecard({ shipping, delta, githubOrg }: { shipping?: S
   const s = shipping;
   const dev = delta?.category === "development" ? delta : null;
   return (
-    <section id="development" className="panel mt-4 scroll-mt-28 px-5 py-4" aria-label="Development read">
+    <section id={id} className="panel mt-4 scroll-mt-28 px-5 py-4" aria-label="Development read">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="eyebrow">Development · github.com/{s.target} · frozen {s.capturedAt.slice(0, 10)}</span>
         <span className={`btn-chip ${GRADE_TONE[s.grade]}`}>{shippingGradeLabel(s.grade)}</span>
