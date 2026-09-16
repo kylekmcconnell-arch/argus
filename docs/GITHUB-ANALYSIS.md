@@ -216,10 +216,14 @@ frozen summary on every saved report now does automatically.
 
 ## 5. Still open
 
-1. **Backtest breadth.** 33 subjects, 11 priced. The engine's development
-   penalties remain judgement until stalled and thin rows number in the dozens.
-   `scripts/backtest-from-reports.ts` adds every saved report's subject once it
-   is a month old; run it monthly where the service credentials live.
+1. **Backtest breadth.** 49 subjects after a CoinGecko sweep of $300k to $30M
+   tokens with a GitHub organisation (16 added, 5 of them stalled or thin: DEP,
+   TORN, UQC, ILV, BRLA), read as of 2026-06-15. GeckoTerminal's free tier
+   priced only a few per run, so the priced rows are still in the teens; the
+   engine's development penalties remain judgement until stalled and thin rows
+   with prices number in the dozens. `scripts/backtest-from-reports.ts` adds
+   every saved report's subject once it is a month old; run it monthly where
+   the service credentials live.
 2. **Star lists.** Only a repository admin can read who starred. If a project
    under review grants collaborator access, the stargazer sample input already
    runs the account-level StarScout read.
