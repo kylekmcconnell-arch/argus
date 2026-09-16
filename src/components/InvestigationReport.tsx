@@ -42,6 +42,7 @@ import { TokenSnapshotVisuals } from "./TokenSnapshotVisuals";
 import { LpCustody } from "./LpCustody";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { DeepLaunchPanel } from "./DeepLaunchPanel";
+import { ShippingScorecard } from "./ShippingScorecard";
 import { marketSizeBand } from "../lib/marketPosition";
 import { UsageVisuals } from "./UsageVisuals";
 import { EntityContinuityTimeline } from "./EntityContinuityTimeline";
@@ -1172,6 +1173,7 @@ export function InvestigationReport({
     fdvUsd: fullyDilutedValue ?? null,
     marketCapUsd: marketCap ?? null,
     volume24hUsd: token.vol24 ?? null,
+    shipping: token.shipping,
     nextUnlock: upcomingUnlocks
       ? { date: upcomingUnlocks.nextUnlockDate, amountUsd: upcomingUnlocks.unlockValueUsd, pctSupply: upcomingUnlocks.percentOfSupply }
       : null,
@@ -1186,7 +1188,7 @@ export function InvestigationReport({
       name: person.handle || person.name,
       role: person.role,
     })),
-    anchors: { market: "#investigation-visuals", team: "#investigation-team", account: "#investigation-people" },
+    anchors: { market: "#investigation-visuals", team: "#investigation-team", account: "#investigation-people", development: "#investigation-development" },
   });
   const decisionDiscovery = deriveDecisionDiscovery(noticedSignals);
   const materialChangeDiscovery = materialDeltaDiscovery(
@@ -2511,11 +2513,15 @@ export function InvestigationReport({
           </div>
         )}
 
+        {/* frozen development read: scored by the engine, closed on the checklist,
+            printed with the PDF; the same saved fact the token report shows */}
+        <ShippingScorecard shipping={token.shipping} delta={token.reportDelta} githubOrg={ghOrg} id="investigation-development" />
+
         {/* unified project research: news & press, documents & resources, domain
             intelligence, and GitHub forensics — the same cluster every report uses */}
         {showCurrentIntelligence && (
           <div className="mt-3">
-            <ProjectResearch name={token.name} symbol={token.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${token.symbol}`} newsHandle={projectX} record={canRecordCurrentIntelligence} {...(panelCostToken ? { panelCostToken } : {})} />
+            <ProjectResearch name={token.name} symbol={token.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${token.symbol}`} newsHandle={projectX} record={canRecordCurrentIntelligence} sectorText={[recon?.title, recon?.retrieval?.description].filter(Boolean).join(" · ") || null} docsText={recon?.retrieval?.content ?? null} token={{ address: token.address, chain: token.chain, deployer: token.deployer, mcap: token.mcap ?? undefined, ageDays: token.ageDays ?? undefined }} projectHandle={projectX} previousShipping={token.reportDelta?.category === "development" ? token.reportDelta.previousShipping ?? null : null} {...(panelCostToken ? { panelCostToken } : {})} />
           </div>
         )}
 

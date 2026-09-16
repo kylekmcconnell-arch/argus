@@ -1,5 +1,6 @@
 import { tokenSubjectIdentity } from "../lib/tokenIdentity";
 import { DeepLaunchPanel } from "./DeepLaunchPanel";
+import { ShippingScorecard } from "./ShippingScorecard";
 import { tokenCompositionRow, tokenMarketPresentation } from "../lib/tokenPresentation";
 import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
@@ -131,6 +132,12 @@ export function tokenReportText(
     plainLanguageSummary(d.headline),
     "",
     ...findings,
+    ...(d.shipping && d.shipping.grade !== "unknown"
+      ? [
+          "",
+          `Development (github.com/${d.shipping.target}, read ${d.shipping.capturedAt.slice(0, 10)}): ${d.shipping.headline} Cadence ${d.shipping.cadenceStatus}; ${d.shipping.distinctHuman} human committer${d.shipping.distinctHuman === 1 ? "" : "s"}${d.shipping.leadDeparted ? ", lead has stopped" : ""}; code ${d.shipping.live === "live" ? "reaching production" : d.shipping.live === "committed-only" ? "committed only" : d.shipping.live === "deploys-without-code" ? "shipped from an unseen source" : "production status unread"}; ${d.shipping.market === "insufficient" ? "chart not compared" : `chart ${d.shipping.market.replace(/-/g, " ")}`}; stars ${d.shipping.stars}; ${d.shipping.reposRead} repos and ${d.shipping.commitsRead} commits read.`,
+        ]
+      : []),
     "",
     `Liquidity ${moneyShort(market.liquidityUsd ?? undefined)} · market cap ${moneyShort(market.marketCap ?? undefined)} · FDV ${moneyShort(market.fullyDilutedValuation ?? undefined)} · token age ${market.ageDays == null ? "unknown" : age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} centralized exchanges` : ""}`,
     d.address,
@@ -230,7 +237,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     marketCapUsd: d.mcap,
     volume24hUsd: d.vol24,
     athDrawdownPct: d.cg?.ath?.drawdownPct,
-    anchors: { market: "#token-market" },
+    shipping: d.shipping,
+    anchors: { market: "#token-market", development: "#development" },
   }));
   const materialChangeDiscovery = materialDeltaDiscovery(
     d.reportDelta,
@@ -565,6 +573,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
 
         {!shareView && <DeepLaunchPanel chain={d.chain} reportVersionId={versionContext?.reportVersionId ?? (livePersistence?.state === 'persisted' ? livePersistence.reportVersionId ?? undefined : undefined)} />}
+        {/* frozen development read: scored by the engine, closed on the checklist, printed with the PDF */}
+        <ShippingScorecard shipping={d.shipping} delta={d.reportDelta} githubOrg={ghOrg} />
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
         {showCurrentIntelligence && panelCostToken && (
           <div className="mt-4">
@@ -580,7 +590,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             intelligence, and GitHub forensics — the same cluster every report uses */}
         {showCurrentIntelligence && (
           <div className="mt-4">
-            <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} record={canRecordCurrentIntelligence} {...(panelCostToken ? { panelCostToken } : {})} />
+            <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} record={canRecordCurrentIntelligence} token={{ address: d.address, chain: d.chain, deployer: d.deployer, mcap: d.mcap ?? undefined, ageDays: d.ageDays ?? undefined }} projectHandle={d.projectX} previousShipping={d.reportDelta?.category === "development" ? d.reportDelta.previousShipping ?? null : null} {...(panelCostToken ? { panelCostToken } : {})} />
           </div>
         )}
 
