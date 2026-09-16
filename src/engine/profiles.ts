@@ -41,6 +41,8 @@ export const PROFILES: Record<SubjectClass, Profile> = {
       "serial failure pattern: repeated silent shutdowns with no exits",
       "any prior rug or exit scam as a named principal",
       "builds or operates tooling for undetectable token manipulation (bundlers, mixers, volume fakers, multi-wallet snipe bots): the means and motive to rug",
+      "launched a token whose deployer and launch-block sniper were funded from the same wallet or batch (a self-sniped launch): the anti-snipe tax and the launch premium both flow back to the operator",
+      "harvests platform creator fees from a launch on a daily cadence and routes them off-chain (bridge, exchange deposit) rather than into the product or the market",
       "claimed exits unverifiable against acquirer or press",
       "no prior backer or acquirer re-backed the new venture despite a claimed exit",
       "GitHub or product substance absent despite a builder persona",
