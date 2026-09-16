@@ -88,6 +88,56 @@ function canonicalProtocolIndexMatch(
   return Boolean(canonicalId && indexedId && canonicalId === indexedId);
 }
 
+const apexDomainsAgree = (left: string, right: string): boolean =>
+  left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
+
+/**
+ * Identity join for a protocol document that carries no CoinGecko id — the
+ * tokenless-protocol case ($2.5M-seed Ammalgam had both of its raises sitting
+ * in DeFiLlama's curated record, discarded for want of a token to join on).
+ * The document's own X handle and official site must match the audited
+ * subject's provider-resolved handle and official domain, the same doctrine the
+ * token binding uses. One exact surface binds; a contradiction between the two
+ * surfaces never does.
+ */
+export function protocolRecordMatchesOfficialIdentity(
+  record: { officialTwitter: string | null; officialUrl: string | null },
+  subjectHandle: string,
+  profile: Pick<CollectedEvidence["profile"], "website" | "profile_collection_state" | "profile_provider">,
+): boolean {
+  const handle = subjectHandle.replace(/^@/, "").trim().toLowerCase();
+  const recordHandle = (record.officialTwitter ?? "").replace(/^@/, "").trim().toLowerCase();
+  const handleMatches = Boolean(handle && recordHandle && handle === recordHandle);
+  const profileResolved = profile.profile_collection_state === "resolved"
+    && profile.profile_provider === "twitterapi";
+  const subjectScope = profileResolved ? canonicalOfficialWebsite(profile.website) : null;
+  const recordScope = record.officialUrl ? canonicalOfficialWebsite(record.officialUrl) : null;
+  const domainsAgree = Boolean(
+    subjectScope && recordScope && apexDomainsAgree(subjectScope.domain, recordScope.domain),
+  );
+  if (recordHandle && handle && !handleMatches && domainsAgree) return false;
+  if (handleMatches && subjectScope && recordScope && !domainsAgree) return false;
+  return handleMatches || domainsAgree;
+}
+
+/**
+ * Whether an indexed DeFiLlama record is identity-bound to the audited
+ * subject: by the verified canonical token's CoinGecko id, or, for a tokenless
+ * protocol, by the record's own official X handle / official domain.
+ */
+export function indexedProtocolRecordMatch(
+  evidence: Pick<CollectedEvidence, "projectToken" | "profile">,
+  record: { geckoId?: string | null; officialTwitter?: string | null; officialUrl?: string | null } | undefined,
+): boolean {
+  if (!record) return false;
+  if (canonicalProtocolIndexMatch(evidence, record.geckoId)) return true;
+  return protocolRecordMatchesOfficialIdentity(
+    { officialTwitter: record.officialTwitter ?? null, officialUrl: record.officialUrl ?? null },
+    evidence.profile.handle,
+    evidence.profile,
+  );
+}
+
 function canonicalTokenAddressChainMatch(
   evidence: Pick<CollectedEvidence, "projectToken">,
   binding: { canonicalAddress: string; chain: string; method: string } | null | undefined,
@@ -834,7 +884,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     // which the singleton reconciliation would mark conflicted.
     const protocolFootprint = token.deployedChains?.length
       && evidence.protocolTvl?.sourceUrl
-      && canonicalProtocolIndexMatch(evidence, evidence.protocolTvl.geckoId)
+      && indexedProtocolRecordMatch(evidence, evidence.protocolTvl)
       ? evidence.protocolTvl
       : undefined;
     const chainFootprint = protocolFootprint
@@ -989,7 +1039,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   const fundingFact = !hasStrongerFundingFact
     && isProject
     && evidence.protocolFunding
-    && canonicalProtocolIndexMatch(evidence, evidence.protocolFunding.geckoId)
+    && indexedProtocolRecordMatch(evidence, evidence.protocolFunding)
     && evidence.protocolFunding.rounds.length
     ? {
         rounds: evidence.protocolFunding.rounds.length,
@@ -1050,7 +1100,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // promoted to lead.
   const indexedFunding = isProject
     && evidence.protocolFunding
-    && canonicalProtocolIndexMatch(evidence, evidence.protocolFunding.geckoId)
+    && indexedProtocolRecordMatch(evidence, evidence.protocolFunding)
     ? evidence.protocolFunding
     : undefined;
   if (indexedFunding?.rounds.length) {
@@ -1117,7 +1167,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // buried inside the source excerpt for an otherwise positive TVL metric.
   const tvlSnapshot = isProject
     && evidence.protocolTvl
-    && canonicalProtocolIndexMatch(evidence, evidence.protocolTvl.geckoId)
+    && indexedProtocolRecordMatch(evidence, evidence.protocolTvl)
     ? evidence.protocolTvl
     : undefined;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
@@ -1305,8 +1355,8 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
 
   // Protocol fees → a second dated usage metric (P5). Fees are on-chain
   // derived and self-limiting to fake: generating fee volume costs the fees.
-  const protocolIndexIdentityMatched = canonicalProtocolIndexMatch(evidence, evidence.protocolTvl?.geckoId)
-    || canonicalProtocolIndexMatch(evidence, evidence.protocolFunding?.geckoId);
+  const protocolIndexIdentityMatched = indexedProtocolRecordMatch(evidence, evidence.protocolTvl)
+    || indexedProtocolRecordMatch(evidence, evidence.protocolFunding);
   const feesSnapshot = isProject && protocolIndexIdentityMatched && protocolFeesBindingMatches(evidence)
     ? evidence.protocolFees
     : undefined;

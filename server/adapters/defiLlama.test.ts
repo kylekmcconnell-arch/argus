@@ -194,6 +194,36 @@ describe("collectProtocolFunding", () => {
     expect(describeFunding(out).note).toContain("Blockchain Capital");
   });
 
+  it("carries the protocol document's own identity surfaces for tokenless binding", async () => {
+    // The Ammalgam shape: no gecko_id (tokenless protocol), but the curated
+    // record names its X handle and official site. Those surfaces are what an
+    // official-identity join binds on when no CoinGecko id can.
+    const out = await collectProtocolFunding("Ammalgam", {
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody({
+        name: "Ammalgam",
+        gecko_id: null,
+        twitter: "ammalgam",
+        url: "https://ammalgam.xyz/",
+        raises: [{
+          date: 1725926400,
+          round: "Seed",
+          amount: 2.5,
+          valuation: null,
+          leadInvestors: ["Faction", "Framework Ventures"],
+          otherInvestors: ["Robot Ventures"],
+        }],
+      }))),
+    });
+
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.geckoId).toBeNull();
+    expect(out.value.officialTwitter).toBe("ammalgam");
+    expect(out.value.officialUrl).toBe("https://ammalgam.xyz/");
+    expect(out.value.rounds[0]).toMatchObject({ round: "Seed", amountUsd: 2_500_000 });
+    expect(out.value.leadInvestors).toEqual(["Faction", "Framework Ventures"]);
+  });
+
   it("rejects investor-only relationship rows that are not funding rounds", async () => {
     const out = await collectProtocolFunding("Uniswap", {
       fetcher: fetcherReturning(() => jsonResponse(protocolBody({
