@@ -6,6 +6,8 @@ export { providerStatus } from "./config";
 export { runAudit } from "./orchestrate";
 export { auditToken } from "./tokenAudit";
 export { collectSocialActivity } from "./socialActivity";
+export { getRecentPostsMeta } from "./adapters/x";
+export { collectShippingSummary } from "./shippingSummary";
 export { resolveInput } from "../src/lib/resolveInput";
 
 export { fetchPublicText, fetchPublicAssetHash } from "./publicWeb";
