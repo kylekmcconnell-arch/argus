@@ -633,6 +633,28 @@ export function judge( // exported for unit tests only
   if (cls.kind === "security-like") warnings.push("Dividend / revenue-share mechanics make this SECURITY-LIKE - securities-law exposure (delisting, enforcement) sits on top of ordinary market risk");
   if (cls.kind === "meme" && cls.confidence !== "low") positives.push("Assessed as a meme coin - judged on exit mechanics, liquidity custody and holder spread, not on utility it never claimed (an anon team is the norm in this class)");
 
+  // --- development vs the claim ---
+  // The frozen shipping summary from the scan-time GitHub lane. A token that
+  // claims to do something is judged on whether anyone is still building it;
+  // a meme never made the claim, so only the contradictions that cut across
+  // class (a rally with no code behind it, a departed lead, bought stars)
+  // score there. Absence is never penalised: no repository is "unread".
+  const ship = d.shipping;
+  if (ship && ship.grade !== "unknown") {
+    const claimsToBuild = cls.kind === "utility" || cls.kind === "rwa" || cls.kind === "security-like" || cls.kind === "equity";
+    if (claimsToBuild && ship.grade === "stalled") { soft(10); warnings.push(`Development has stalled in the linked GitHub (${ship.headline.replace(/\.$/, "")}) - a utility claim with nobody visibly building it`); }
+    else if (claimsToBuild && ship.grade === "thin") { soft(6); warnings.push(`Development is thin in the linked GitHub (${ship.headline.replace(/\.$/, "")}) - not enough visible work to carry the product claim`); }
+    if (ship.market === "price-without-shipping") { soft(8); warnings.push("Price rose over the quarter while commits fell - the move is not backed by visible development"); }
+    if (ship.leadDeparted) { soft(6); warnings.push("The lead committer of the prior two months has stopped while others continue - a departure signal on the team that ships"); }
+    if (ship.claimsUnsupported >= 2 && ship.claimsUnsupported > ship.claimsSupported) { soft(6); warnings.push(`${ship.claimsUnsupported} shipping claims in the project's posts have nothing in the repositories behind them`); }
+    if (ship.stars === "suspect") { soft(5); warnings.push("Star growth on the flagship repository has the timing and proportions of purchased stars"); }
+    if (ship.health === "poor") { soft(3); warnings.push("Repository health is poor - failing checks, no licence, or dependencies left unlocked for over a year"); }
+    if (ship.grade === "shipping-team") positives.push(`A team is shipping: ${ship.headline.replace(/\.$/, "")}`);
+    else if (ship.grade === "shipping-solo" && claimsToBuild) warnings.push(`Shipping, but one person: ${ship.headline.replace(/\.$/, "")} - key-person risk on the product claim`);
+    if (ship.live === "live") positives.push("Commits are followed by on-chain deploys or package publishes - the public code is what goes live");
+    if (ship.adoption === "used") positives.push("Outsiders contribute pull requests, issues or forks - the hardest attention signal to fake");
+  }
+
   // --- corroboration positives ---
   if (d.cg?.listed) positives.push(`Listed on CoinGecko${d.cg.rank ? ` (rank #${d.cg.rank})` : ""}${d.cg.cexCount ? `, ${d.cg.cexCount} CEX market${d.cg.cexCount === 1 ? "" : "s"}` : ""}`);
   if (s.contractPropertiesAssessed !== false && s.ownerRenounced && !s.mintable && !s.freezable && !s.takeBack)
@@ -693,6 +715,15 @@ function buildChecks(
       posture == null
         ? "Not covered by major-venue chart data"
         : `${posture.stance.charAt(0).toUpperCase()}${posture.stance.slice(1)} - ${posture.readings[0]?.observations[0] ?? "no dominant signal"}`),
+    chk("shipping", "code", "Development",
+      d.shipping == null || d.shipping.grade === "unknown" ? "na"
+        : d.shipping.grade === "stalled" || d.shipping.market === "price-without-shipping" || d.shipping.leadDeparted ? "warn"
+          : "pass",
+      d.shipping == null
+        ? "No public repository is linked from the project's official sources; on-chain deploys and package publishes stand in for a code read"
+        : d.shipping.grade === "unknown"
+          ? "The linked GitHub could not be read"
+          : `${d.shipping.headline} Cadence ${d.shipping.cadenceStatus}; code ${d.shipping.live === "live" ? "reaches production" : d.shipping.live === "committed-only" ? "committed, not yet shipped" : d.shipping.live === "deploys-without-code" ? "ships from somewhere unseen" : "production status unknown"}; ${d.shipping.reposRead} repos read.`),
     chk("honeypot", "honeypot", "Can holders sell?",
       na ? "na" : s.honeypot || s.cannotSellAll || (hp?.siphoned ?? 0) > 0 ? "fail" : "pass",
       na ? "Not verifiable on this chain keyless" : s.honeypot ? "Selling is blocked" : (hp?.siphoned ?? 0) > 0 ? "Real holders' sells are siphoned" : hp && hp.holdersAnalyzed >= 5 ? `Sells simulated for ${hp.holdersAnalyzed} real holders` : s.simChecked ? "Real sell simulated successfully" : "No sell restriction found on-chain"),
