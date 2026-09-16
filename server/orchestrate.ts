@@ -17,7 +17,7 @@ import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEnt
 import { env, providerFallbacksEnabled } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
-import { emptyEvidence, type BasicFact, type WebTeamMember } from "../src/data/evidence";
+import { emptyEvidence, type AxisEvidenceRecord, type BasicFact, type ProjectStrengthBandRecord, type WebTeamMember } from "../src/data/evidence";
 import type { EvmControlRealitySnapshot } from "../src/data/evmControlReality";
 import type { AdapterRunResult, CheckObservation, CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import {
@@ -3800,11 +3800,31 @@ export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Em
     if (!name) continue;
     const existing = webTeam.find((member) => norm(member.name) === norm(name));
     if (existing) {
+      // The display name is the only thing Monid and the existing row share.
+      // A name match corroborates the person's role, title and LinkedIn; it
+      // never verifies an X handle, GitHub, or developer profile the model
+      // guessed for that name. Those survive only when the identity link was
+      // already deterministic before this merge (first-party bound), so a
+      // verified row can never carry a model-lead handle into the trust graph.
+      const identityAlreadyDeterministic = existing.identity_link_evidence_origin === "deterministic"
+        || existing.handleProvenance === "subject_first_party";
+      if (!identityAlreadyDeterministic) {
+        delete existing.handle;
+        delete existing.github;
+        delete existing.developerProfiles;
+        delete existing.avatarUrl;
+        delete existing.linkedin;
+      }
+      // With model-guessed links stripped, Monid's LinkedIn is the row's only
+      // identity link, so it may carry the deterministic origin on its own.
       if (!existing.linkedin && person.linkedin) {
         existing.linkedin = person.linkedin;
         existing.identity_link_evidence_origin = "deterministic";
       }
       if ((!existing.role || /^team$/i.test(existing.role)) && person.title) existing.role = person.title;
+      if (!existing.evidence && person.priorCompanies?.length) {
+        existing.evidence = `prior: ${person.priorCompanies.slice(0, 3).join(", ")}`;
+      }
       if (existing.artifact_verified !== true) {
         existing.evidence_origin = "deterministic";
         existing.artifact_verified = true;
@@ -5305,6 +5325,28 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     const scoringEvidenceJson = partialAxisScoring
       ? buildScoringEvidencePacket(baseEvidence, scoringAxes)
       : evidenceJson;
+    // The analyst is validated against the packet it actually reads. When that
+    // packet is the supported-axis subset, its catalog can retain artifacts the
+    // full packet pruned (fewer axes, less budget pressure) and its bands can
+    // differ for a scored axis, so reconciling and persisting the FULL packet's
+    // catalog and bands could fail a successful paid verdict closed or have
+    // persistence reject a score that was legal in the packet the model saw.
+    // Persist and reconcile against the scored packet: the full catalog plus
+    // every subset artifact it lacks (artifact ids are content-addressed, so
+    // shared artifacts agree), and subset bands for the scored axes with the
+    // full packet's bands kept only for the unmeasured remainder so the
+    // persisted PROJECT band set stays canonical.
+    const persisted = reconcileScoredPacketLineage({
+      partialAxisScoring,
+      fullCatalog: frozenAxisEvidence,
+      fullBands: projectStrengthBands,
+      scoredCatalog: partialAxisScoring
+        ? extractScoringEvidenceCatalog(scoringEvidenceJson, scoringAxes)
+        : frozenAxisEvidence,
+      scoredBands: partialAxisScoring
+        ? deriveProjectStrengthBands(scoringEvidenceJson, scoringAxes)
+        : projectStrengthBands,
+    });
     const decisionPacketUsable = scoringPreflight.state === "ready"
       || scoringPreflight.state === "insufficient_evidence";
     if (decisionPacketUsable) {
@@ -5320,11 +5362,11 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
         tone: partialAxisScoring ? "warn" : "neutral",
       });
     }
-    if (frozenAxisEvidence.length > 0) {
+    if (persisted.catalog.length > 0) {
       evidence.axisCitationVersion = 1;
-      evidence.axisEvidenceCatalog = frozenAxisEvidence;
-      if (Object.keys(projectStrengthBands).length > 0) {
-        evidence.projectStrengthBands = projectStrengthBands;
+      evidence.axisEvidenceCatalog = persisted.catalog;
+      if (Object.keys(persisted.bands).length > 0) {
+        evidence.projectStrengthBands = persisted.bands;
       }
     }
     // The validator accepts all requested axes or none, and the collector ledger
@@ -5344,12 +5386,14 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
         : Promise.resolve(null),
     ]);
     const lineageReconciliation = rawVerdict
-      ? reconcileAnalystVerdictLineage(rawVerdict, frozenAxisEvidence, scoringAxes)
+      ? reconcileAnalystVerdictLineage(rawVerdict, persisted.catalog, scoringAxes)
       : null;
     const verdict = lineageReconciliation?.verdict ?? null;
     if (lineageReconciliation?.removed.length) {
       console.warn("[agent-lineage]", JSON.stringify({
         state: verdict ? "reconciled" : "failed_closed",
+        packet: partialAxisScoring ? "supported_axis_subset" : "full",
+        removedArtifactIds: [...new Set(lineageReconciliation.removed.map((row) => row.artifactId))],
         removed: lineageReconciliation.removed,
         ...(lineageReconciliation.reason ? { reason: lineageReconciliation.reason } : {}),
       }));
@@ -5385,7 +5429,12 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     if (scorerObserved && verdict) {
       evidence.axes = verdict.axes;
       evidence.headline = partialAxisScoring
-        ? `Partial assessment: ARGUS scored ${verdict.axes.length} of ${requestedAxes.length} decision areas. ${scoringPreflight.missingSubstantiveAxes.map(axisLabel).join(" and ")} remain unmeasured, so ARGUS did not produce an overall score.`
+        ? partialScoringHeadline({
+          scoredAxes: scoringAxes,
+          requestedAxes,
+          missingAxes: scoringPreflight.missingSubstantiveAxes,
+          analystHeadline: verdict.headline,
+        })
         : verdict.headline || evidence.headline;
       if (verdict.identity_note) evidence.profile.identity_note = verdict.identity_note;
       emit({
@@ -5629,6 +5678,60 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
   }
   finishRuntimeStage("pipeline", runtimeStartedAt);
   return dossier;
+}
+
+/**
+ * Headline for a supported-axis (partial) scoring run. The engine publishes a
+ * provisional governing score over the assessed axes on this same immutable
+ * version, so the copy must say that the score exists and is provisional,
+ * not that ARGUS produced no overall score. The analyst's own headline is kept
+ * as a secondary sentence.
+ */
+export function partialScoringHeadline(input: {
+  scoredAxes: readonly { axis: string; weight: number }[];
+  requestedAxes: readonly { axis: string; weight: number }[];
+  missingAxes: readonly string[];
+  analystHeadline?: string;
+}): string {
+  const scoredWeight = input.scoredAxes.reduce((sum, axis) => sum + axis.weight, 0);
+  const totalWeight = input.requestedAxes.reduce((sum, axis) => sum + axis.weight, 0);
+  const weightPercent = Math.round(100 * scoredWeight / Math.max(1, totalWeight));
+  const labels = input.missingAxes.map(axisLabel);
+  const missing = labels.length <= 2
+    ? labels.join(" and ")
+    : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  const analyst = (input.analystHeadline ?? "").trim();
+  return [
+    `Provisional assessment: ARGUS scored ${input.scoredAxes.length} of ${input.requestedAxes.length} decision areas (${weightPercent}% of the methodology weight).`,
+    missing
+      ? `${missing} remain${input.missingAxes.length === 1 ? "s" : ""} unmeasured, so the score is provisional and may change when ${input.missingAxes.length === 1 ? "that area is" : "those areas are"} assessed.`
+      : "The score is provisional and may change as the remaining areas are assessed.",
+    analyst,
+  ].filter(Boolean).join(" ");
+}
+
+/**
+ * Lineage for a scoring run: the catalog and bands that are reconciled and
+ * persisted must describe the packet the analyst actually scored.
+ */
+export function reconcileScoredPacketLineage(input: {
+  partialAxisScoring: boolean;
+  fullCatalog: readonly AxisEvidenceRecord[];
+  fullBands: Readonly<Record<string, ProjectStrengthBandRecord>>;
+  scoredCatalog: readonly AxisEvidenceRecord[];
+  scoredBands: Readonly<Record<string, ProjectStrengthBandRecord>>;
+}): { catalog: AxisEvidenceRecord[]; bands: Record<string, ProjectStrengthBandRecord> } {
+  if (!input.partialAxisScoring) {
+    return { catalog: [...input.fullCatalog], bands: { ...input.fullBands } };
+  }
+  const byId = new Map(input.fullCatalog.map((artifact) => [artifact.artifactId, artifact]));
+  for (const artifact of input.scoredCatalog) {
+    if (!byId.has(artifact.artifactId)) byId.set(artifact.artifactId, artifact);
+  }
+  return {
+    catalog: [...byId.values()],
+    bands: { ...input.fullBands, ...input.scoredBands },
+  };
 }
 
 export function runAudit(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {

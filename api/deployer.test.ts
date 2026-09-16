@@ -264,7 +264,7 @@ describe("GET /api/deployer", () => {
       const url = String(input);
       if (url.startsWith("https://api.helius.xyz/")) {
         return new Response(JSON.stringify(options?.enhancedTx ?? [
-          { type: "TOKEN_MINT", tokenTransfers: [{ mint: MINT }] },
+          { type: "TOKEN_MINT", feePayer: DEPLOYER, tokenTransfers: [{ mint: MINT }] },
         ]), { status: 200, headers: { "content-type": "application/json" } });
       }
       const body = JSON.parse(init?.body ?? "{}") as { method: string; params: any[] };
@@ -381,7 +381,7 @@ describe("GET /api/deployer", () => {
   it("counts the deployer's own mints under the name of what it measures", async () => {
     vi.setSystemTime((MINTED_AT + 60) * 1000);
     vi.stubGlobal("fetch", chainFetch({
-      enhancedTx: Array.from({ length: 6 }, (_, i) => ({ type: "TOKEN_MINT", tokenTransfers: [{ mint: `mint-${i}` }] })),
+      enhancedTx: Array.from({ length: 6 }, (_, i) => ({ type: "TOKEN_MINT", feePayer: DEPLOYER, tokenTransfers: [{ mint: `mint-${i}` }] })),
     }));
 
     const { body } = await run({ wallet: DEPLOYER, mintedAt: String(MINTED_AT) });
@@ -389,5 +389,25 @@ describe("GET /api/deployer", () => {
     expect(body.tokensCreated).toBe(6);
     expect(body.serialMinter).toBe(true);
     expect(body.serialDeployer).toBe(true);
+  });
+
+  // The Helius address endpoint returns every transaction the wallet took part
+  // in. Five airdrops minted TO this wallet (someone else paid for the mint)
+  // are not five launches it made, and must not brand it a serial minter.
+  it("does not count mints another wallet paid for (airdrops received, launches bought into)", async () => {
+    vi.setSystemTime((MINTED_AT + 60) * 1000);
+    vi.stubGlobal("fetch", chainFetch({
+      enhancedTx: [
+        ...Array.from({ length: 5 }, (_, i) => ({ type: "TOKEN_MINT", feePayer: "AirdropperWallet1111111111111111111111111111", tokenTransfers: [{ mint: `airdrop-${i}`, toUserAccount: DEPLOYER }] })),
+        { type: "CREATE", feePayer: "SomeoneElse11111111111111111111111111111111", tokenTransfers: [{ mint: "launch-bought-into" }] },
+        { type: "TOKEN_MINT", feePayer: DEPLOYER, tokenTransfers: [{ mint: MINT }] },
+      ],
+    }));
+
+    const { body } = await run({ wallet: DEPLOYER, mintedAt: String(MINTED_AT) });
+
+    expect(body.tokensCreated).toBe(1);
+    expect(body.serialMinter).toBe(false);
+    expect(body.serialDeployer).toBe(false);
   });
 });

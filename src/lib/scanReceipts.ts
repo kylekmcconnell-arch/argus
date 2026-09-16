@@ -13,6 +13,12 @@ export interface FinishScanReceiptInput {
   costBasis?: "exact" | "estimated" | "unknown";
   failureCode?: string;
   failureDetail?: string;
+  /**
+   * Credits the reservation actually charged for this run. A refused or
+   * unreachable reservation charged nothing, so its receipt must say 0
+   * rather than the literal 1 every receipt used to carry.
+   */
+  creditsCharged?: number;
 }
 
 /** Best-effort operations receipt. It never replaces the scan result. */
@@ -28,7 +34,9 @@ export async function finishScanReceipt(input: FinishScanReceiptInput): Promise<
         startedAt: new Date(input.startedAt).toISOString(),
         finishedAt: new Date(finishedAt).toISOString(),
         durationMs: Math.max(0, finishedAt - input.startedAt),
-        creditsCharged: 1,
+        creditsCharged: typeof input.creditsCharged === "number" && Number.isFinite(input.creditsCharged)
+          ? Math.max(0, input.creditsCharged)
+          : 1,
         costBasis: input.costBasis ?? "unknown",
       }),
       signal: AbortSignal.timeout(8_000),

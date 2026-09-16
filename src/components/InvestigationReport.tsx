@@ -7,6 +7,7 @@ import { printReportPdf } from "../lib/printPdf";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import {
   isConfirmedWebTeamPerson,
+  isProjectSiteBound,
   type Investigation,
   type WebPerson,
 } from "../lib/investigation";
@@ -968,7 +969,13 @@ export function InvestigationReport({
   // concrete case), so collapsing the two both hides a useful link and binds
   // company evidence to the wrong domain.
   const evidencedProjectSites = projectWebSurfaces(projectAccount);
-  const projectDomain = [evidencedProjectSites[0]?.url, projectAccount?.website, siteUrl, ...(recon?.socials ?? []).map((s) => s.url), ...(token.socials ?? []).map((s) => s.url)]
+  // A model-suggested site that never bound to the contract is a lead about an
+  // unverified site. Its domain and the accounts it links must not scope which
+  // company or leadership facts are retained as this project's.
+  const siteBound = isProjectSiteBound(inv);
+  const boundSiteUrl = siteBound ? siteUrl : null;
+  const boundSiteSocials = siteBound ? (recon?.socials ?? []) : [];
+  const projectDomain = [evidencedProjectSites[0]?.url, projectAccount?.website, boundSiteUrl, ...boundSiteSocials.map((s) => s.url), ...(token.socials ?? []).map((s) => s.url)]
     .filter((url): url is string => Boolean(url))
     .find((u) => /^https?:\/\//i.test(u) && !/x\.com|twitter\.com|t\.me|telegram|discord|github\.com|medium\.com|linktr\.ee/i.test(u))
     ?.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "") ?? null;
@@ -1126,6 +1133,9 @@ export function InvestigationReport({
       });
     }
     for (const founder of founders) {
+      // Site-named people are the project's own claim only when the site is
+      // bound to the scanned contract (never from an unbound model lead).
+      if (founder.source === "site" && !siteBound) continue;
       add({
         name: founder.name,
         handle: founder.handle ?? undefined,
@@ -2331,9 +2341,9 @@ export function InvestigationReport({
                   <p className="mt-1 text-[12px] leading-relaxed text-ink-faint">
                     {publishedTeamClaims.length > 0
                       ? "The people and roles named by the project are shown below. Those claims do not independently confirm identity, ownership, or control."
-                      : recon?.team.state === "named"
+                      : recon?.team.state === "named" && siteBound
                         ? "The project site published the names below, but an independent source has not confirmed them."
-                      : recon ? recon.identityLine : inv.founderNote}
+                      : recon && siteBound ? recon.identityLine : inv.founderNote}
                   </p>
                 </div>
               )}

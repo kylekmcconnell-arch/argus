@@ -56,6 +56,24 @@ async function gh<T>(path: string, key: string, usage: CallCounter, emptyOnConfl
   return data as T;
 }
 
+// The list endpoint omits `parent`; only the repository record names the
+// upstream. A failed lookup leaves the fork listed with its parent unknown.
+const MAX_FORK_LOOKUPS = 4;
+async function forkParent(full: string, key: string, usage: CallCounter): Promise<string | null> {
+  usage.calls += 1;
+  try {
+    const r = await fetch(`${GH}/repos/${full}`, { headers: headers(key), signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return null;
+    const data: unknown = await r.json();
+    if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+    usage.succeeded += 1;
+    const parent = (data as { parent?: { full_name?: unknown } }).parent?.full_name;
+    return typeof parent === "string" && parent ? parent : null;
+  } catch {
+    return null;
+  }
+}
+
 const domainOf = (email: string) => (email.includes("@") ? email.split("@")[1].toLowerCase() : "");
 
 interface RepoRef { name: string; full: string; fork: boolean; parent?: string }
@@ -91,14 +109,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    const forks: { repo: string; parent: string }[] = [];
+    // Forks are never mined: their history is the upstream maintainers'
+    // commits, and recording those emails as this account's identities would
+    // tie every project that forked the same upstream into one hard-linked
+    // team. Forks are listed (copied code) with their parent resolved from the
+    // repository record, which the list endpoint omits.
+    const forks: { repo: string; parent: string | null; parentUnavailable?: true }[] = [];
     const chosen: RepoRef[] = [];
+    const forkRefs: RepoRef[] = [];
     for (const r of repoList) {
       const ref: RepoRef = { name: r.name, full: r.full_name, fork: !!r.fork, parent: r.parent?.full_name };
-      if (r.fork) { if (r.parent?.full_name) forks.push({ repo: r.full_name, parent: r.parent.full_name }); }
+      if (ref.fork) {
+        forkRefs.push(ref);
+        continue;
+      }
       if (chosen.length < MAX_REPOS) chosen.push(ref);
     }
-    // Forks need a second call to learn the parent (list endpoint omits it).
+    for (const ref of forkRefs.slice(0, MAX_FORK_LOOKUPS)) {
+      const parent = ref.parent ?? await forkParent(ref.full, key, usage);
+      forks.push(parent ? { repo: ref.full, parent } : { repo: ref.full, parent: null, parentUnavailable: true });
+    }
+    for (const ref of forkRefs.slice(MAX_FORK_LOOKUPS)) {
+      forks.push({ repo: ref.full, parent: ref.parent ?? null, ...(ref.parent ? {} : { parentUnavailable: true as const }) });
+    }
     const identities = new Map<string, Identity>();
 
     for (const repo of chosen) {
@@ -127,11 +160,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const people = [...identities.values()].sort((a, b) => b.commits - a.commits).slice(0, 25);
     const leaks = people.filter((p) => p.kind === "personal");
 
-    const note = !people.length
-      ? "No commit-author metadata recovered (repos empty, or authors use GitHub's email privacy)."
-      : `${people.length} distinct commit author${people.length === 1 ? "" : "s"} across ${chosen.length} repo${chosen.length === 1 ? "" : "s"}. ` +
-        (leaks.length ? `${leaks.length} leaked a personal email, creating real-identity exposure. ` : "") +
-        (forks.length ? `${forks.length} repo(s) are forks of other projects (copied code).` : "");
+    const forkNote = forks.length
+      ? `${forks.length} repo(s) are forks of other projects (copied code); forked history was not mined for authors.`
+      : "";
+    const note = !chosen.length
+      ? `All ${forkRefs.length} public repo(s) are forks; no original history to mine. ${forkNote}`.trim()
+      : !people.length
+        ? `No commit-author metadata recovered (repos empty, or authors use GitHub's email privacy). ${forkNote}`.trim()
+        : `${people.length} distinct commit author${people.length === 1 ? "" : "s"} across ${chosen.length} original repo${chosen.length === 1 ? "" : "s"}. ` +
+          (leaks.length ? `${leaks.length} leaked a personal email, creating real-identity exposure. ` : "") +
+          forkNote;
 
     res.status(200).json({
       target,

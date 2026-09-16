@@ -16,7 +16,7 @@ import {
   type RepeatBackingResult,
 } from "./taxonomy";
 import { getProfile, effectiveCaps, classForAxis, SHARED_CAPS } from "./profiles";
-import { classifyTestimonial, scoreAxis, type AxisSummary } from "./corroboration";
+import { classifyTestimonial } from "./corroboration";
 import type { TokenApplicabilitySnapshot } from "../data/evidence";
 
 export const VERDICT_BANDS: [string, number, number][] = [
@@ -388,7 +388,10 @@ export class Audit {
     opts: { subject_class?: SubjectClass; roles?: SubjectClass[]; display_name?: string; organizationSubject?: boolean } = {},
   ) {
     this.handle = normalizeHandle(handle);
-    if (opts.roles) this.roles = opts.roles.map(asClass);
+    // A role held twice is one role. Finalize iterates the held roles, so a
+    // duplicate (fixture or persisted payload) would emit two role reports
+    // and double score_coverage totals.
+    if (opts.roles) this.roles = [...new Set(opts.roles.map(asClass))];
     else if (opts.subject_class != null) this.roles = [asClass(opts.subject_class)];
     else this.roles = [];
     this.subject_class = this.roles[0] ?? null;
@@ -518,22 +521,6 @@ export class Audit {
     };
   }
 
-  corroborationAxis(axis = "I4_testimonial_corroboration"): [number, AxisSummary, string | null] {
-    const w = getProfile(SubjectClass.INVESTOR).axes[axis];
-    return scoreAxis(
-      this.testimonials.map((t) => ({ corroboration_verdict: t.corroboration_verdict! })),
-      w,
-    );
-  }
-
-  advisoryCorroborationAxis(axis = "AD3_relationship_corroboration"): [number, AxisSummary, string | null] {
-    const w = getProfile(SubjectClass.ADVISOR).axes[axis];
-    return scoreAxis(
-      this.advisedProjects.map((t) => ({ corroboration_verdict: t.corroboration_verdict! })),
-      w,
-    );
-  }
-
   private sharedCapsTriggered(): string[] {
     const keys: string[] = [];
     const has = (ftype: string, status: string, n = 1) =>
@@ -547,7 +534,8 @@ export class Audit {
         const graph = finding.trust_graph;
         const tieKey = typeof graph?.tie_key === "string" ? graph.tie_key.trim() : "";
         const hardKey = /^(?:code:|email:|wallet:|funder:|mint:|token:|ga:|gtm:|adsense:|fbpixel:).+/i.test(tieKey);
-        const weakKey = /^(?:holder|amm|dex|pool|lp|market)(?::|$)|^(?:ip|favicon):/i.test(tieKey);
+        // A name slug or ticker is non-binding: it can never carry a medium link.
+        const weakKey = /^(?:holder|amm|dex|pool|lp|market)(?::|$)|^(?:ip|favicon|name|ticker):|^\$/i.test(tieKey);
         const tieType = typeof graph?.tie_type === "string" ? graph.tie_type.trim() : "";
         const relationshipEdges = new Set([
           "TEAM",
@@ -940,9 +928,12 @@ export class Audit {
       edges.push({ src: this.handle, dst: key, type: edgeType, role: v.role, outcome: v.outcome, ...receipt(v, v.evidence_url) });
     }
     for (const p of this.promotions) {
-      // Strip an existing $ before re-prefixing — a ticker stored as "$SUSHI"
-      // was rendering "$$SUSHI" in the connection web.
-      const key = p.contract_address || "$" + (p.ticker ?? "").replace(/^\$+/, "");
+      // A promoted token binds by contract (token:<chain>:<address>), never by
+      // ticker: two KOLs promoting different $PEPE tokens share nothing. A
+      // ticker-only promotion gets a namespaced, non-binding key.
+      const key = p.contract_address
+        ? `token:${p.chain?.trim() ? `${p.chain.trim().toLowerCase()}:` : ""}${p.contract_address.trim()}`
+        : "ticker:" + (p.ticker ?? "").replace(/^\$+/, "").trim().toLowerCase();
       nodes.push({ type: "Company", key, was_rug: !!p.outcome_was_rug });
       edges.push({ src: this.handle, dst: key, type: "PROMOTED" });
     }
@@ -1020,5 +1011,10 @@ export function canonicalEntityKey(opts: { handle?: string | null; domain?: stri
   if (/^[a-z0-9_]{2,30}$/.test(h)) return "@" + h;
   const d = (opts.domain ?? "").replace(/^https?:\/\//i, "").replace(/^www\./, "").replace(/\/.*$/, "").trim().toLowerCase();
   if (d && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return d;
-  return (opts.name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  // A display name is never a bind key. A name-only entity gets a namespaced
+  // key that can never collide with an @handle ("john smith" vs @johnsmith)
+  // and that the graph treats as non-binding, so a namesake on a failed report
+  // cannot lend a medium tie to an unrelated subject.
+  const n = (opts.name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  return n ? `name:${n}` : "";
 }

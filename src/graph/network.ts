@@ -329,7 +329,9 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   // cluster is its own cabal, strongest first — never one blob.
   const isHolderVia = (n: NetNode) => /^holder:/i.test(n.key);
   const isWalletVia = (n: NetNode) => !isHolderVia(n) && (/^(wallet|funder):/i.test(n.key) || n.type === "Identity");
-  const isNamedVia = (n: NetNode) => (n.type === "Person" || n.type === "Company") && !isHolderVia(n) && !isWalletVia(n);
+  // A name-only or ticker-only node is shared context, never a coordination tie.
+  const isNamedVia = (n: NetNode) => (n.type === "Person" || n.type === "Company")
+    && !isHolderVia(n) && !isWalletVia(n) && !NON_BINDING_KEY.test(n.key);
 
   // Union subjects ONLY through shared via-entities (a node surfaced by >= 2
   // subjects), so unrelated subjects that merely coexist in one component don't
@@ -404,8 +406,15 @@ export function tieStrength(rawKey: string): "hard" | "medium" | "weak" {
   // verification checks; as a shared graph tie this remains weak context.
   if (/^risk:/.test(k)) return "weak";
   if (/^(holder|amm|dex|pool|lp|market|ip:|favicon:)/.test(k)) return "weak";
+  // A display-name slug or a ticker is never a bind key: a namesake or a
+  // same-ticker token on another report shares nothing verifiable.
+  if (NON_BINDING_KEY.test(k)) return "weak";
   return "medium"; // shared @handle / domain / company
 }
+
+/** Keys that identify nothing by themselves: name-only entities and tickers. */
+export const NON_BINDING_KEY = /^(?:name:|ticker:|\$)/i;
+export const isNonBindingKey = (rawKey: string): boolean => NON_BINDING_KEY.test(String(rawKey).trim());
 
 // Direct exposure to an Arkham-flagged bad actor in the subject's OWN graph — a
 // wallet it deployed near, was funded by, or transacts with that Arkham ties to a
@@ -452,8 +461,11 @@ export function reconcileVerdict(handle: string, contributions: GraphContributio
   const bad = subjectConnections(handle, authoritative, 24)
     .filter((connection) => connection.otherVerdict && BAD_VERDICTS.has(connection.otherVerdict));
   const strongestOf = (c: SubjectConnection): "hard" | "medium" | "weak" => {
-    if (c.direct) return "hard"; // the flagged subject IS an entity this audit surfaced
-    let best: "hard" | "medium" | "weak" = "weak";
+    // A direct mention (this audit surfaced the flagged subject's key) is as
+    // strong as that key, matching the server trust graph: listing @mallory
+    // as an associate is a medium tie, not byte-identical infrastructure.
+    let best: "hard" | "medium" | "weak" = c.direct ? tieStrength(c.other) : "weak";
+    if (best === "hard") return "hard";
     for (const t of c.ties) { const s = tieStrength(t.key); if (s === "hard") return "hard"; if (s === "medium") best = "medium"; }
     return best;
   };

@@ -62,6 +62,7 @@ const fundScale = (): SourceArtifact => ({
   attribution: "direct_subject",
   sourceClass: "first_party_subject",
   fundName: "Subject Capital",
+  attributedEntityName: "Subject Capital",
   fundSizeUsd: 500_000_000,
   fundVehicle: "Subject Venture Fund I",
   fundScaleMetric: "fund_vehicle",
@@ -92,6 +93,111 @@ function verdict(axis: AnalystAxis, score: number, artifactId: string) {
     identity_note: "The exact audited account is preserved.",
   };
 }
+
+const materialPress = (
+  host: string,
+  title: string,
+  contentHash: string,
+): SourceArtifact => ({
+  kind: "press",
+  provider: "google-news",
+  title,
+  excerpt: `${title}. The report names Subject Capital directly.`,
+  sourceUrl: `https://${host}/story/${contentHash.slice(0, 8)}`,
+  capturedAt: NOW,
+  publishedAt: "2026-07-01T00:00:00.000Z",
+  contentHash,
+  match: "exact_name",
+});
+
+// E2 (2026-09-14 deep-dive): investor I5 floors are minted from verified
+// artifacts only; observed press widens the ceiling and adverse press does
+// neither.
+describe("investor reputation floors come from verified artifacts only", () => {
+  const axes = oneAxis("I5_reputation_fud");
+  const weight = axes[0].weight;
+  const adverse = [
+    materialPress("newswire.example", "SEC sues Subject Capital for fraud", "1".repeat(64)),
+    materialPress("ledger.example", "Subject Capital faces investor lawsuit over undisclosed conflict of interest", "2".repeat(64)),
+    materialPress("chainpaper.example", "Regulator sanctions Subject Capital partner in enforcement action", "3".repeat(64)),
+  ];
+  const neutral = [
+    materialPress("newswire.example", "Subject Capital wins industry ethics award for investor conduct", "4".repeat(64)),
+    materialPress("ledger.example", "Subject Capital reputation praised in LP testimonial roundup", "5".repeat(64)),
+    materialPress("chainpaper.example", "Founders publish endorsements of Subject Capital's conduct", "6".repeat(64)),
+  ];
+
+  it("does not mint a floor from three adverse headlines on three hosts", () => {
+    const packet = buildScoringEvidencePacket({ profile: organizationProfile, sourceArtifacts: adverse }, axes);
+    const catalog = extractScoringEvidenceCatalog(packet, axes);
+    const press = catalog.filter((artifact) => artifact.operation === "sourceArtifacts:press");
+    expect(press).toHaveLength(3);
+    const band = deriveInvestorStrengthBands(packet, axes).I5_reputation_fud;
+    expect(band).toMatchObject({ tier: "assessed_null", minScore: 0, maxScore: Math.floor(weight * 0.39) });
+    expect(band).not.toHaveProperty("floorTier");
+    expect(band.reasons).toContain("3 adverse press headlines remain unverified and neither support reputation nor set a floor");
+    // The analyst may score it low citing the headline as primary support...
+    expect(validateAnalystVerdict(verdict(axes[0], 3, press[0].artifactId), axes, catalog, undefined,
+      { investorScoreBands: { I5_reputation_fud: band } })).not.toBeNull();
+    // ...and can no longer be forced to 72-84 percent.
+    let reason = "";
+    expect(validateAnalystVerdict(verdict(axes[0], 20, press[0].artifactId), axes, catalog,
+      (why) => { reason = why; }, { investorScoreBands: { I5_reputation_fud: band } })).toBeNull();
+    expect(reason).toBe("investor-scores-outside-evidence-strength-band:I5_reputation_fud");
+  });
+
+  it("lets non-adverse observed press widen the ceiling but never the floor", () => {
+    const packet = buildScoringEvidencePacket({ profile: organizationProfile, sourceArtifacts: neutral }, axes);
+    const catalog = extractScoringEvidenceCatalog(packet, axes);
+    const press = catalog.filter((artifact) => artifact.operation === "sourceArtifacts:press");
+    expect(press).toHaveLength(3);
+    const band = deriveInvestorStrengthBands(packet, axes).I5_reputation_fud;
+    expect(band).toMatchObject({ tier: "solid", floorTier: "none", minScore: 0, maxScore: Math.floor(weight * 0.84) });
+    expect(band.reasons).toContain("unverified press widens the ceiling only, never the floor");
+    expect(validateAnalystVerdict(verdict(axes[0], 2, press[0].artifactId), axes, catalog, undefined,
+      { investorScoreBands: { I5_reputation_fud: band } })).not.toBeNull();
+    expect(validateAnalystVerdict(verdict(axes[0], band.maxScore + 1, press[0].artifactId), axes, catalog, undefined,
+      { investorScoreBands: { I5_reputation_fud: band } })).toBeNull();
+  });
+
+  it("allows a score below the investor minimum only with a verified counter artifact", () => {
+    const portfolioAxes = oneAxis("I2_portfolio_quality");
+    const packet = buildScoringEvidencePacket({
+      profile: organizationProfile,
+      sourceArtifacts: [portfolioRelationship()],
+      findings: [{
+        finding_type: "Exit",
+        claim: "Unrelated Holdings wrote off its stake after a failed liquidation",
+        source_url: "https://ledger.example/writeoff",
+        source_date: "2026-06-01",
+        verification_status: "Verified",
+        independent_source_count: 1,
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        content_hash: "7".repeat(64),
+      }],
+    }, portfolioAxes);
+    const catalog = extractScoringEvidenceCatalog(packet, portfolioAxes);
+    const relationship = catalog.find((artifact) => artifact.operation === "sourceArtifacts:portfolio_relationship")!;
+    const limiting = catalog.find((artifact) => artifact.operation === "findings:Exit")!;
+    expect(limiting.counterEligibleAxes).toContain("I2_portfolio_quality");
+    const band = deriveInvestorStrengthBands(packet, portfolioAxes).I2_portfolio_quality;
+    expect(band.tier).toBe("emerging");
+    expect(band.minScore).toBeGreaterThan(3);
+    const below = verdict(portfolioAxes[0], 3, relationship.artifactId);
+    let reason = "";
+    expect(validateAnalystVerdict(below, portfolioAxes, catalog, (why) => { reason = why; },
+      { investorScoreBands: { I2_portfolio_quality: band } })).toBeNull();
+    expect(reason).toBe("investor-scores-outside-evidence-strength-band:I2_portfolio_quality");
+    const withCounter = {
+      ...below,
+      axes: [{ ...below.axes[0], counterEvidenceRefs: [limiting.artifactId] }],
+    };
+    expect(validateAnalystVerdict(withCounter, portfolioAxes, catalog, undefined,
+      { investorScoreBands: { I2_portfolio_quality: band } })).not.toBeNull();
+  });
+});
 
 describe("deterministic investor scoring calibration", () => {
   it("keeps social activity, notable follows, and ordinary affiliations out of I4 and I5", () => {

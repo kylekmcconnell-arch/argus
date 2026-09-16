@@ -135,12 +135,36 @@ export interface ProjectAccountBinding {
   checkedAt: string;
 }
 
+/**
+ * Where `siteUrl` came from. "token-sources" is a site the token's own
+ * listings (DexScreener / CoinGecko) publish; "model_lead" is a site a
+ * knowledge model suggested for a thin token. A model lead is a lead, not the
+ * project site, until `siteBinding` records a binding to the scanned contract.
+ */
+export type SiteUrlOrigin = "token-sources" | "model_lead";
+
+export interface ProjectSiteBinding {
+  origin: SiteUrlOrigin;
+  status: "bound" | "unbound";
+  /** How the site was tied to the scanned contract (absent while unbound). */
+  via?: "token-sources" | "contract-on-page" | "official-account-domain";
+  note: string;
+}
+
 export interface Investigation {
   facets?: import("./investigationFacets").InvestigationFacet[];
   rootRef: string;
   token: TokenDossier;
   projectX: string | null;
   siteUrl: string | null;
+  /**
+   * Provenance of `siteUrl`. Investigations frozen before this field existed
+   * omit it and are read as "token-sources" (their site was whatever the
+   * token listing published at the time).
+   */
+  siteUrlOrigin?: SiteUrlOrigin;
+  /** Site-to-contract binding, recorded for every site the scan rendered. */
+  siteBinding?: ProjectSiteBinding | null;
   recon: Recon | null;
   projectAccount: Dossier | null; // people-audit of the project X account
   /**
@@ -176,10 +200,17 @@ export interface Investigation {
 // scan-time call to it answered 409, so this trail came back null on every
 // investigation and the report published "we could not confirm who owns the
 // wallet that deployed the contract" over a trace the server had already run.
-async function fetchDeployerTrail(wallet: string, mintedAt: number | null): Promise<DeployerTrail | null> {
+// Bounded like every other hop: an unanswered trace request used to hold the
+// whole investigation (and its sidebar chip) open indefinitely.
+export const DEPLOYER_TRAIL_TIMEOUT_MS = 30_000;
+
+async function fetchDeployerTrail(wallet: string, mintedAt: number | null, signal?: AbortSignal): Promise<DeployerTrail | null> {
   try {
     const pinned = mintedAt == null ? "" : `&mintedAt=${encodeURIComponent(String(mintedAt))}`;
-    const res = await fetch(`/api/deployer-origin?wallet=${encodeURIComponent(wallet)}${pinned}`);
+    const timeout = AbortSignal.timeout(DEPLOYER_TRAIL_TIMEOUT_MS);
+    const res = await fetch(`/api/deployer-origin?wallet=${encodeURIComponent(wallet)}${pinned}`, {
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
     if (!res.ok) return null;
     const d = await res.json() as Partial<DeployerTrail> & { available?: boolean; error?: unknown };
     if (d.available === false || d.error) return null;
@@ -200,6 +231,81 @@ async function fetchDeployerTrail(wallet: string, mintedAt: number | null): Prom
 function launchInstant(token: TokenDossier): number | null {
   const raw = (token as TokenDossier & { pairCreatedAt?: number | null }).pairCreatedAt;
   return typeof raw === "number" && raw > 0 ? raw : null;
+}
+
+/**
+ * Whether `siteUrl` may be treated as THE project site: its named team may be
+ * published as founders / project claims, its domain may scope company facts,
+ * and paid team discovery may run against it. A model-suggested site earns
+ * that only through a recorded binding; a listing-published site (or a frozen
+ * investigation from before provenance was recorded) keeps its prior standing.
+ */
+export function isProjectSiteBound(
+  inv: Pick<Investigation, "siteUrlOrigin" | "siteBinding">,
+): boolean {
+  // Only a model-suggested site can be unbound. Listing-published sites and
+  // investigations frozen before provenance was recorded keep their standing
+  // exactly as before (callers that spend still require a site and a recon).
+  if (inv.siteUrlOrigin !== "model_lead") return true;
+  return inv.siteBinding?.status === "bound";
+}
+
+function siteHost(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "").toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+// Does the rendered site itself publish the scanned contract? EVM addresses are
+// case-insensitive; Solana mints must match exactly. The on-chain pivot's
+// resolved contract counts too (it is read off the same page).
+function sitePublishesContract(recon: Recon | null, token: TokenDossier): boolean {
+  if (!recon || recon.retrieval.status === "gap") return false;
+  const address = token.address.trim();
+  if (!address) return false;
+  const evm = /^0x[0-9a-f]{40}$/i.test(address);
+  const content = recon.retrieval.content ?? "";
+  if (evm ? content.toLowerCase().includes(address.toLowerCase()) : content.includes(address)) return true;
+  const found = recon.pivot?.found;
+  if (!found?.address) return false;
+  const sameAddress = evm ? found.address.toLowerCase() === address.toLowerCase() : found.address === address;
+  return sameAddress && (!found.chain || !token.chain || found.chain.toLowerCase() === token.chain.toLowerCase());
+}
+
+// The verified project account's official-domain proof names the page that
+// publishes the contract; when that page lives on the suggested site's host,
+// the account itself has bound the domain.
+function officialAccountBindsSite(siteUrl: string, binding: ProjectAccountBinding | null): boolean {
+  if (binding?.status !== "verified" || binding.via !== "official-domain") return false;
+  const proofHost = siteHost(binding.proof?.sourceUrl);
+  const host = siteHost(siteUrl);
+  return !!proofHost && !!host && (proofHost === host || proofHost.endsWith(`.${host}`));
+}
+
+function resolveSiteBinding(
+  siteUrl: string,
+  origin: SiteUrlOrigin,
+  recon: Recon | null,
+  token: TokenDossier,
+  accountBinding: ProjectAccountBinding | null,
+): ProjectSiteBinding {
+  if (origin === "token-sources") {
+    return { origin, status: "bound", via: "token-sources", note: `${shorten(siteUrl)} is the site the token's own listings publish.` };
+  }
+  if (sitePublishesContract(recon, token)) {
+    return { origin, status: "bound", via: "contract-on-page", note: `${shorten(siteUrl)} was model-suggested and publishes the exact scanned contract, so it is bound to this token.` };
+  }
+  if (officialAccountBindsSite(siteUrl, accountBinding)) {
+    return { origin, status: "bound", via: "official-account-domain", note: `${shorten(siteUrl)} was model-suggested and the verified project account publishes the scanned contract on that domain, so it is bound to this token.` };
+  }
+  return {
+    origin,
+    status: "unbound",
+    note: `${shorten(siteUrl)} was suggested by a knowledge model and does not publish the scanned contract. It is an unverified lead, not the project site: nothing on it is attributed to this token.`,
+  };
 }
 
 export interface InvestigationHandlers {
@@ -260,9 +366,20 @@ function deriveFounders(recon: Recon | null, projectX: string | null, projectAcc
   return out.slice(0, 10);
 }
 
-function founderNote(siteUrl: string | null, recon: Recon | null, founders: FounderCandidate[]): string {
+function founderNote(siteUrl: string | null, recon: Recon | null, founders: FounderCandidate[], siteBinding: ProjectSiteBinding | null): string {
   let base: string;
   if (!siteUrl) base = "No project website surfaced from the token's sources, so the team is not stated on-site.";
+  else if (siteBinding?.status === "unbound") {
+    // A model-suggested site that never bound to the contract lends nothing to
+    // the token: its named people are leads about an unverified site, never
+    // "the project's" claims.
+    const named = recon?.team.state === "named" ? recon.team.names.slice(0, 5).join(", ") : "";
+    base = !recon || recon.retrieval.status === "gap"
+      ? `A model-suggested site (${shorten(siteUrl)}, unverified) could not be rendered and is not bound to this contract. The team is not stated on any verified project site.`
+      : named
+        ? `A model-suggested site (${shorten(siteUrl)}, unverified) names ${named}, but it does not publish this contract, so those names are leads about an unverified site, not the project's claims.`
+        : `A model-suggested site (${shorten(siteUrl)}, unverified) rendered but does not publish this contract, so nothing on it is attributed to this token.`;
+  }
   else if (!recon || recon.retrieval.status === "gap") base = "Could not render the project site. The team could not be assessed there (a coverage gap, not an absence claim).";
   else if (recon.team.state === "named") base = `Named on the project site: ${recon.team.names.slice(0, 5).join(", ")}.`;
   else if (recon.team.state === "unnamed-section") base = "The project site has a team section but names no individuals. The team is stated but unnamed.";
@@ -271,7 +388,7 @@ function founderNote(siteUrl: string | null, recon: Recon | null, founders: Foun
   // Surface accounts the project account itself links to (e.g. a backing VC).
   const linked = founders.filter((f) => f.handle && f.source === "project").map((f) => f.handle!);
   if (linked.length) base += ` The project account links to ${linked.slice(0, 4).join(", ")}. Background ${linked.length === 1 ? "it" : "them"} below.`;
-  else if (!linked.length && recon?.team.state !== "named") base += " No personal accounts are surfaced to background.";
+  else if (!linked.length && (recon?.team.state !== "named" || siteBinding?.status === "unbound")) base += " No personal accounts are surfaced to background.";
   return base;
 }
 
@@ -314,6 +431,7 @@ export function streamInvestigation(
 
       let projectX = token.projectX;
       let siteUrl = token.socials.find((s) => /^https?:\/\//i.test(s.url) && !/x\.com|twitter\.com|t\.me|discord|github\.com/i.test(s.url))?.url ?? null;
+      let siteUrlOrigin: SiteUrlOrigin = "token-sources";
       h.onStep(milestone("Token audited", `$${token.symbol}: ${token.verdict} ${token.score ?? "N/A"}/100.${projectX ? ` Project X ${projectX}.` : " No project X linked."}${siteUrl ? ` Site ${shorten(siteUrl)}.` : " No site linked."}`, token.verdict === "PASS" ? "good" : "warn"));
 
       // If the token's own sources (DexScreener + CoinGecko) yielded no site OR no
@@ -326,7 +444,12 @@ export function streamInvestigation(
         h.onStep(milestone("Step 1c · Resolve identity", `On-chain sources are thin. Resolving $${token.symbol}'s official site, X account, and founder from knowledge…`, "neutral"));
         const id = await fetchTokenIdentity(token.symbol, token.name, token.address, token.chain);
         if (!aborted && id) {
-          if (!siteUrl && id.website) siteUrl = id.website;
+          // A model-suggested site is a LEAD with recorded provenance. It becomes
+          // "the project site" only once it binds to the scanned contract (see
+          // resolveSiteBinding); until then nothing on it is attributed to the
+          // token. The X-handle half of this fallback is gated the same way by
+          // the account binding check below.
+          if (!siteUrl && id.website && /^https?:\/\//i.test(id.website)) { siteUrl = id.website; siteUrlOrigin = "model_lead"; }
           if (!projectX && id.x_handle) projectX = id.x_handle;
 
           const bits = [id.website && `site ${shorten(id.website)}`, id.x_handle && `X ${id.x_handle}`, id.founder && `unverified founder lead ${id.founder}${id.founder_handle ? ` (${id.founder_handle})` : ""}`].filter(Boolean) as string[];
@@ -341,7 +464,7 @@ export function streamInvestigation(
       if (token.deployer && token.chain === "solana") {
         h.onHop("tracing who funded the deployer");
         h.onStep(milestone("Step 1b · Deployer funding trail", `Tracing the SOL that funded deployer ${token.deployer.slice(0, 6)}…${token.deployer.slice(-4)}.`, "neutral"));
-        deployerTrail = await fetchDeployerTrail(token.deployer, launchInstant(token));
+        deployerTrail = await fetchDeployerTrail(token.deployer, launchInstant(token), tokenController.signal);
         if (!aborted && deployerTrail) {
           const tone = deployerTrail.funder?.kind === "cex" ? "good" : deployerTrail.serialDeployer ? "bad" : "neutral";
           h.onStep(milestone("Deployer trail", deployerTrail.note, tone));
@@ -352,14 +475,21 @@ export function streamInvestigation(
       // ── Hop 2: recon the project site for the team (free) ──
       let recon: Recon | null = null;
       if (siteUrl) {
-        h.onHop("reading the project site for the team");
-        h.onStep(milestone("Step 2 · Recon the project site", `Rendering ${shorten(siteUrl)} to find the team.`, "neutral"));
+        const modelLead = siteUrlOrigin === "model_lead";
+        h.onHop(modelLead ? "reading a model-suggested site (unverified)" : "reading the project site for the team");
+        h.onStep(milestone(
+          modelLead ? "Step 2 · Recon a model-suggested site (unverified)" : "Step 2 · Recon the project site",
+          modelLead
+            ? `Rendering ${shorten(siteUrl)}, a knowledge-model suggestion. It binds to this token only if it publishes the scanned contract; until then its team is a lead, not a project claim.`
+            : `Rendering ${shorten(siteUrl)} to find the team.`,
+          "neutral",
+        ));
         recon = await runRecon(
           siteUrl,
           (st) => { if (!aborted) h.onStep(reconToStep(st)); },
           (note) => { if (!aborted) h.onStep({ phase: "Site recon", label: "on-chain pivot", detail: note, tone: "neutral", source: "argus" }); },
         );
-        if (!aborted && recon) h.onStep(milestone("Site read", recon.identityLine, recon.team.state === "named" ? "good" : "warn"));
+        if (!aborted && recon) h.onStep(milestone("Site read", recon.identityLine, recon.team.state === "named" && !modelLead ? "good" : "warn"));
       } else {
         h.onStep(milestone("Step 2 · Project site", "No project website surfaced from the token's sources, so site recon was skipped.", "warn"));
       }
@@ -369,9 +499,18 @@ export function streamInvestigation(
       // persisted and can present an exact report-bound capability. Keeping it
       // out of the core collector prevents private or failed saves from creating
       // unbound provider spend; App attaches the result as live supplemental data.
+      // It is never scheduled against a model-suggested site that does not
+      // publish the contract: that would pay to research a namesake's team.
       const webTeam: WebPerson[] = [];
       if (siteUrl) {
-        h.onStep(milestone("Step 2b · Deep team search", "Scheduled after the immutable investigation version is saved.", "neutral"));
+        const contractOnPage = siteUrlOrigin === "token-sources" || sitePublishesContract(recon, token);
+        h.onStep(milestone(
+          "Step 2b · Deep team search",
+          contractOnPage
+            ? "Scheduled after the immutable investigation version is saved."
+            : `Not scheduled: ${shorten(siteUrl)} was model-suggested and does not publish the scanned contract, so ARGUS will not pay to research its team as this token's.`,
+          contractOnPage ? "neutral" : "warn",
+        ));
       }
 
       // ── Hop 3: background the project's X account (ONE paid people-audit, auto) ──
@@ -457,11 +596,18 @@ export function streamInvestigation(
       }
       if (aborted) return;
 
+      // ── Site binding: only a bound site lends its named team to the token ──
+      const siteBinding = siteUrl ? resolveSiteBinding(siteUrl, siteUrlOrigin, recon, token, projectAccountBinding) : null;
+      if (siteBinding && siteUrlOrigin === "model_lead") {
+        h.onStep(milestone("Suggested-site binding", siteBinding.note, siteBinding.status === "bound" ? "good" : "warn"));
+      }
+      const siteBound = !!siteUrl && isProjectSiteBound({ siteUrlOrigin, siteBinding });
+
       // ── Founders (honesty-gated; no auto-spend beyond the project account) ──
-      const founders = deriveFounders(recon, projectX, projectAccount);
-      const note = founderNote(siteUrl, recon, founders);
+      const founders = deriveFounders(siteBound ? recon : null, projectX, projectAccount);
+      const note = founderNote(siteUrl, recon, founders, siteBinding);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
-      h.onDone({ rootRef: input.ref, token, projectX, siteUrl, recon, projectAccount, projectAccountAudit, projectAccountBinding, founders, founderNote: note, deployerTrail, webTeam });
+      h.onDone({ rootRef: input.ref, token, projectX, siteUrl, siteUrlOrigin, siteBinding, recon, projectAccount, projectAccountAudit, projectAccountBinding, founders, founderNote: note, deployerTrail, webTeam });
     } catch (e) {
       if (!aborted) h.onError(String(e));
     }
