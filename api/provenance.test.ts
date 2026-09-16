@@ -626,6 +626,109 @@ describe("frozen source artifact provenance", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("persists a PROVISIONAL PROJECT report whose payload declares its axis omissions", async () => {
+    // The Ammalgam shape: a tokenless protocol omits P3 via axis_applicability
+    // (not_applicable) and partial scoring leaves P4 unmeasured via
+    // score_coverage.missingAxes. Both omissions are declared by the same
+    // immutable payload, so the strict lineage accepts the 4-axis set instead
+    // of failing every honestly partial PROJECT save.
+    const weights = getProfile(SubjectClass.PROJECT).axes;
+    const scoredAxes = ["P1_team_and_identity", "P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"] as const;
+    const artifacts: AxisEvidenceRecord[] = scoredAxes.map((axis, index) => {
+      const contentHash = (index + 1).toString(16).repeat(64);
+      return {
+        artifactId: `art_v1_${contentHash}`,
+        contentHash,
+        kind: "axis_evidence",
+        provider: "project-control",
+        operation: "verified-project-anchor",
+        section: "basicFacts",
+        title: `Verified anchor for ${axis}`,
+        eligibleAxes: [axis],
+        verification: "verified",
+        scope: "direct_subject",
+      };
+    });
+    const projectStrengthBands: Record<string, unknown> = Object.fromEntries(scoredAxes.map((axis, index) => [axis, {
+      tier: "emerging",
+      minScore: Math.ceil(weights[axis] * 0.4),
+      maxScore: Math.floor(weights[axis] * 0.69),
+      reasons: [`Source-backed emerging evidence for ${axis}`],
+      anchorArtifactIds: [artifacts[index].artifactId],
+    }]));
+    // P4 was applicable but unmeasured: its band exists at tier none. P3 was
+    // set aside by applicability, so no band is derived for it at all.
+    projectStrengthBands.P4_backing_and_partners = {
+      tier: "none", minScore: 0, maxScore: 0, reasons: [], anchorArtifactIds: [],
+    };
+    const payload = {
+      axisCitationVersion: 1,
+      axisEvidenceCatalog: artifacts,
+      projectStrengthBands,
+      report: {
+        composite_verdict: "PROVISIONAL",
+        governing_score: 62,
+        roles: ["PROJECT"],
+        role_reports: [{
+          role: "PROJECT",
+          axes: Object.fromEntries(scoredAxes.map((axis, index) => [axis, {
+            score: Math.ceil(weights[axis] * 0.4),
+            weight: weights[axis],
+            rationale: `Emerging evidence supports ${axis}.`,
+            role: "PROJECT",
+            evidenceRefs: [artifacts[index].artifactId],
+            counterEvidenceRefs: [],
+            gaps: [],
+          }])),
+          score_coverage: {
+            assessedAxes: 4,
+            totalAxes: 5,
+            missingAxes: ["P4_backing_and_partners"],
+            provisional: true,
+          },
+          axis_applicability: {
+            P3_token_conduct: { axisTreatment: "not_applicable", reason: "no applicable token" },
+          },
+        }],
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const credentials = { url: "https://database.example", key: "sb_secret_test" };
+    const context = {
+      organizationId: "00000000-0000-4000-8000-000000000011",
+      reportVersionId: "00000000-0000-4000-8000-000000000022",
+      attestationState: "server_collected" as const,
+    };
+
+    await expect(persistProvenance(credentials, context, payload, [])).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // An omission the payload does not declare still fails closed.
+    const undeclared = structuredClone(payload);
+    undeclared.report.role_reports[0].score_coverage.missingAxes = [];
+    await expect(persistProvenance(credentials, context, undeclared, [])).rejects.toThrow(
+      "PROJECT axis set is incomplete or non-canonical",
+    );
+
+    // A declared omission naming a non-canonical axis fails closed.
+    const bogus = structuredClone(payload);
+    bogus.report.role_reports[0].score_coverage.missingAxes = ["P9_not_an_axis"];
+    await expect(persistProvenance(credentials, context, bogus, [])).rejects.toThrow(
+      "declared missing axis is not canonical",
+    );
+
+    // An axis both scored and declared missing is a contradiction, not a gap.
+    const contradictory = structuredClone(payload);
+    contradictory.report.role_reports[0].score_coverage.missingAxes = [
+      "P4_backing_and_partners",
+      "P6_transparency_integrity",
+    ];
+    await expect(persistProvenance(credentials, context, contradictory, [])).rejects.toThrow(
+      "PROJECT axis set is incomplete or non-canonical",
+    );
+  });
+
   it("rejects a report that drops an entire declared role", async () => {
     const artifactId = `art_v1_${"a".repeat(64)}`;
     const fetchMock = vi.fn();

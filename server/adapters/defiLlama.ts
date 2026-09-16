@@ -39,6 +39,8 @@ type ProtocolDocument = {
   name?: unknown;
   symbol?: unknown;
   gecko_id?: unknown;
+  twitter?: unknown;
+  url?: unknown;
   currentChainTvls?: unknown;
   tvl?: unknown;
   raises?: unknown;
@@ -208,6 +210,16 @@ export interface ProtocolTvl {
   chainBreakdown: { chain: string; tvlUsd: number }[];
   geckoId: string | null;
   /**
+   * The protocol document's own identity surfaces: its listed X handle and
+   * official site. A tokenless protocol has no CoinGecko id to join on, but an
+   * exact match of BOTH of these against the audited subject's provider-
+   * resolved handle and official domain is the same identity doctrine the
+   * token binding uses (dexIdentity), so free protocol evidence no longer
+   * exists only for token-bearing projects.
+   */
+  officialTwitter: string | null;
+  officialUrl: string | null;
+  /**
    * First date in DeFiLlama's TVL series. Phrase user-facing claims as "TVL
    * history since YYYY": the series start can be backfilled when an old
    * protocol is listed late, so it bounds, not proves, protocol age.
@@ -356,6 +368,10 @@ export async function collectProtocolTvl(
       chains: chainBreakdown.map((entry) => entry.chain),
       chainBreakdown,
       geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
+      officialTwitter: typeof data.twitter === "string" && data.twitter.trim()
+        ? data.twitter.trim().replace(/^@/, "")
+        : null,
+      officialUrl: typeof data.url === "string" && data.url.trim() ? data.url.trim() : null,
       firstRecordedAt,
       change30dPct,
       trend,
@@ -533,6 +549,9 @@ export interface ProtocolFunding {
   name: string;
   /** CoinGecko identity carried by the same protocol document. */
   geckoId: string | null;
+  /** The protocol document's own X handle and official site (see ProtocolTvl). */
+  officialTwitter: string | null;
+  officialUrl: string | null;
   rounds: FundingRound[];
   /** sum of known round amounts */
   totalRaisedUsd: number;
@@ -624,6 +643,10 @@ export async function collectProtocolFunding(
       slug,
       name: typeof result.data.name === "string" ? result.data.name : projectName,
       geckoId: typeof result.data.gecko_id === "string" ? result.data.gecko_id : null,
+      officialTwitter: typeof result.data.twitter === "string" && result.data.twitter.trim()
+        ? result.data.twitter.trim().replace(/^@/, "")
+        : null,
+      officialUrl: typeof result.data.url === "string" && result.data.url.trim() ? result.data.url.trim() : null,
       rounds,
       totalRaisedUsd,
       leadInvestors,

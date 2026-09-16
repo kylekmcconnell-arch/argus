@@ -2363,6 +2363,16 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("6 of 6 areas have sources");
     expect(container.textContent).toContain("3 follow-up questions");
     expect(container.textContent).toContain("Follow up on: 3 important questions");
+    // The follow-up count is an in-place dropdown (the old #verification-next
+    // anchor targeted a section the current style hides), and every question
+    // carries its own input affordance routed to the report's assistant.
+    const followUp = container.querySelector<HTMLDetailsElement>("details#follow-up-questions");
+    expect(followUp).toBeTruthy();
+    const questionItems = followUp?.querySelectorAll('[aria-label="Open follow-up questions"] > li') ?? [];
+    expect(questionItems.length).toBe(3);
+    const inputButtons = [...(followUp?.querySelectorAll("button") ?? [])]
+      .filter((button) => button.textContent?.includes("Give input"));
+    expect(inputButtons.length).toBe(3);
     expect(container.textContent).toContain("The score may change as gaps are resolved");
     expect(container.textContent).toContain("This score uses the facts collected so far");
     expect(container.textContent).toContain("Current score 71");

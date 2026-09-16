@@ -100,8 +100,10 @@ import { collectFundScale } from "./adapters/fundScale";
 import { collectProjectTokenIdentity, collectVentureTokenIdentity, launchedProductSearchQueries } from "./adapters/projectToken";
 import {
   hydrateProjectTeamFromVerifiedFacts,
+  indexedProtocolRecordMatch,
   isInstitutionalOrganizationSubject,
   projectProviderBackedBasicFacts,
+  protocolRecordMatchesOfficialIdentity,
 } from "./basicFactsProjection";
 import { enforceProjectFactCoherence } from "./projectFactCoherence";
 import {
@@ -2313,15 +2315,12 @@ export function projectCompanyEnrichmentSections(
   evidence: Pick<CollectedEvidence, "projectToken" | "protocolFunding" | "profile" | "webTeam" | "basicFacts">,
 ): EnrichmentSection[] {
   const sections: EnrichmentSection[] = [];
-  const canonicalGeckoId = evidence.projectToken?.verified === true
-    ? evidence.projectToken.coingeckoId?.trim().toLowerCase()
-    : undefined;
-  const protocolGeckoId = evidence.protocolFunding?.geckoId?.trim().toLowerCase();
+  // Identity-bound indexed funding (CoinGecko-id join, or the tokenless
+  // official-identity join) with real rounds already answers the financing
+  // question; buying the licensed funding section again would be a duplicate.
   const hasEquivalentFunding = Boolean(
-    canonicalGeckoId
-    && protocolGeckoId
-    && canonicalGeckoId === protocolGeckoId
-    && evidence.protocolFunding?.rounds.length,
+    evidence.protocolFunding?.rounds.length
+    && indexedProtocolRecordMatch(evidence, evidence.protocolFunding),
   );
   if (!hasEquivalentFunding) sections.push("funding_detail");
 
@@ -2854,7 +2853,12 @@ export function collectFounderDecisionQuestionOutcomes(ctx: CollectContext): voi
   }
 }
 
-const PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
+// Covers both the human role words (advisor/backer/investor) and the
+// LinkedOrgRole vocabulary the deterministic twitterapi org path emits
+// ("backed-by" / "vc" / "fund" / "incubator"): a first-party "backed by @X"
+// post produced a verified backer row whose role never matched this regex, so
+// it silently didn't count toward the backing check.
+const PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor|backed-by|vc|fund|incubator)\b/i;
 const PROJECT_BACKING_PROVIDERS = new Set(["team-page", "twitterapi"]);
 const PROJECT_TRANSPARENCY_FACT_PREDICATES = new Set([
   "legal_entity",
@@ -3133,6 +3137,57 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
     recorded += 1;
   }
   return recorded;
+}
+
+/**
+ * Free protocol evidence for a TOKENLESS project. The cold-intake enrichment
+ * only runs behind a verified canonical token, so a pre-token protocol (the
+ * Ammalgam shape: $3.25M across two raises sitting in DeFiLlama's curated
+ * record) published "no funding found" while its rounds, lead investors, and
+ * TVL were one free keyless GET away. Binding is by exact official identity:
+ * the protocol document's own X handle / official site must match the audited
+ * subject's provider-resolved handle / official domain.
+ */
+async function collectTokenlessProtocolEvidence(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.projectToken?.verified) return;
+  const displayName = evidence.profile.display_name || ctx.handle.replace(/^@/, "");
+  const protocolLookupName = defiLlamaLookupName(displayName);
+  const [fundingOutcome, tvlOutcome] = await Promise.all([
+    evidence.protocolFunding ? Promise.resolve(null) : collectProtocolFunding(protocolLookupName),
+    evidence.protocolTvl ? Promise.resolve(null) : collectProtocolTvl(protocolLookupName),
+  ]);
+  if (
+    fundingOutcome?.available
+    && protocolRecordMatchesOfficialIdentity(fundingOutcome.value, ctx.handle, evidence.profile)
+  ) {
+    evidence.protocolFunding = { ...fundingOutcome.value };
+    const rounds = fundingOutcome.value.rounds;
+    const leads = fundingOutcome.value.leadInvestors;
+    ctx.emit({
+      phase: "Token",
+      label: `Protocol financing indexed · ${rounds.length} round${rounds.length === 1 ? "" : "s"}`,
+      detail: `DeFiLlama's curated record for "${fundingOutcome.value.name}" is identity-bound to this account by its own X handle/site (no token required)${leads.length ? `; led by ${leads.slice(0, 3).join(", ")}` : ""}.`,
+      source: "defillama",
+      tone: "good",
+    });
+  }
+  if (
+    tvlOutcome?.available
+    && protocolRecordMatchesOfficialIdentity(tvlOutcome.value, ctx.handle, evidence.profile)
+  ) {
+    evidence.protocolTvl = { ...tvlOutcome.value };
+    const incidentCount = recordProtocolSecurityIncidentFindings(evidence);
+    if (incidentCount > 0) {
+      ctx.emit({
+        phase: "Token",
+        label: `${incidentCount} protocol security incident${incidentCount === 1 ? "" : "s"} recorded`,
+        detail: "Frozen as verified counter-evidence alongside the identity-bound protocol record.",
+        source: "defillama",
+        tone: "warn",
+      });
+    }
+  }
 }
 
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
@@ -4273,20 +4328,28 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
           evidence.holderProfile = { ...holdersOutcome.value, capturedAt: holdersOutcome.value.sourceCapturedAt };
         }
         const canonicalGeckoId = evidence.projectToken.coingeckoId;
-        const tvlIdentityMatched = canonicalGeckoId !== undefined
-          && tvlOutcome.available
-          && protocolRecordMatchesCanonicalToken(tvlOutcome.value.geckoId, canonicalGeckoId);
-        const fundingIdentityMatched = canonicalGeckoId !== undefined
-          && fundingOutcome.available
-          && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, canonicalGeckoId);
+        // Identity join: the exact CoinGecko id of the verified canonical
+        // token, or (when the protocol document carries no gecko id, the
+        // tokenless-protocol shape) the document's own X handle / official
+        // domain matching the audited subject's provider-resolved identity.
+        const tvlIdentityMatched = tvlOutcome.available && (
+          (canonicalGeckoId !== undefined
+            && protocolRecordMatchesCanonicalToken(tvlOutcome.value.geckoId, canonicalGeckoId))
+          || protocolRecordMatchesOfficialIdentity(tvlOutcome.value, evidence.profile.handle, evidence.profile)
+        );
+        const fundingIdentityMatched = fundingOutcome.available && (
+          (canonicalGeckoId !== undefined
+            && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, canonicalGeckoId))
+          || protocolRecordMatchesOfficialIdentity(fundingOutcome.value, evidence.profile.handle, evidence.profile)
+        );
         // Slug similarity is discovery, not identity. A protocol document can
         // only lend TVL, fees, or funding to the audited project when its own
         // CoinGecko id joins the already verified canonical token.
-        if (feesOutcome.available && (tvlIdentityMatched || fundingIdentityMatched)) {
+        if (canonicalGeckoId !== undefined && feesOutcome.available && (tvlIdentityMatched || fundingIdentityMatched)) {
           evidence.protocolFees = {
             ...feesOutcome.value,
             binding: {
-              canonicalGeckoId: canonicalGeckoId!,
+              canonicalGeckoId,
               protocolSlug: feesOutcome.value.slug,
               method: "matched_protocol_gecko_id",
             },
@@ -4772,6 +4835,27 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
       emit({
         phase: "Token",
         label: "Recovered protocol incident lookup failed",
+        detail: String(error),
+        source: "defillama",
+        tone: "warn",
+      });
+    }
+  }
+  // A PROJECT with no verified token still gets the free protocol record when
+  // DeFiLlama's own identity surfaces (X handle / official site) exactly match
+  // the audited subject. Runs after role routing so it never fires for people.
+  if (
+    !evidence.projectToken?.verified
+    && evidence.roles.includes(SubjectClass.PROJECT)
+    && (!evidence.protocolFunding || !evidence.protocolTvl)
+    && capabilityIsAuthorized("token_and_market", "project_fundamentals")
+  ) {
+    try {
+      await collectTokenlessProtocolEvidence(ctx);
+    } catch (error) {
+      emit({
+        phase: "Token",
+        label: "Tokenless protocol lookup failed",
         detail: String(error),
         source: "defillama",
         tone: "warn",

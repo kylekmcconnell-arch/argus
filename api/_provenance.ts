@@ -548,7 +548,41 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
         }
       }
     }
-    const expectedAxisIds = Object.keys(roleAxes).sort();
+    // A role report may omit a canonical axis ONLY when the same immutable
+    // payload declares the omission itself: score_coverage.missingAxes records
+    // axes the analyst could not measure (partial scoring publishes PROVISIONAL,
+    // not INCOMPLETE), and axis_applicability records an axis the methodology
+    // set aside before scoring (a project with no applicable token omits
+    // P3_token_conduct). An undeclared gap is still a mangled set and still
+    // fails closed. Before this rule, every honestly partial PROJECT report
+    // (e.g. a tokenless protocol) failed persistence deterministically.
+    const scoreCoverage = asRecord(roleReport.score_coverage);
+    const declaredMissingAxes = strictStringArray(
+      scoreCoverage?.missingAxes ?? [],
+      "score_coverage.missingAxes",
+      { max: 16, itemMax: 80, pattern: AXIS_ID },
+    );
+    const applicability = asRecord(roleReport.axis_applicability) ?? {};
+    const applicabilityOmitted: string[] = [];
+    for (const [axisId, rawTreatment] of Object.entries(applicability)) {
+      if (!AXIS_ID.test(axisId) || !(axisId in roleAxes)) {
+        throw new Error("invalid axis evidence lineage: axis applicability names an unknown axis");
+      }
+      const treatment = asRecord(rawTreatment)?.axisTreatment;
+      if (typeof treatment !== "string" || !treatment) {
+        throw new Error("invalid axis evidence lineage: axis applicability treatment");
+      }
+      if (treatment !== "assess") applicabilityOmitted.push(axisId);
+    }
+    const allowedMissing = new Set([...declaredMissingAxes, ...applicabilityOmitted]);
+    for (const axisId of allowedMissing) {
+      if (!(axisId in roleAxes)) {
+        throw new Error("invalid axis evidence lineage: declared missing axis is not canonical");
+      }
+    }
+    const expectedAxisIds = Object.keys(roleAxes)
+      .filter((axisId) => !allowedMissing.has(axisId))
+      .sort();
     const receivedAxisIds = axisEntries.map(([axisId]) => axisId).sort();
     if (!isIncomplete && (
       expectedAxisIds.length !== receivedAxisIds.length
@@ -557,7 +591,14 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
       throw new Error(`invalid axis evidence lineage: ${role} axis set is incomplete or non-canonical`);
     }
     if (role === "PROJECT" && !isIncomplete) {
-      const expectedBandIds = Object.keys(roleAxes).sort();
+      // Bands are derived before the analyst runs, so the persisted band set
+      // covers every methodology-applicable axis (canonical minus the
+      // applicability omissions), including axes partial scoring left
+      // unmeasured — see reconcileScoredPacketLineage.
+      const applicabilitySet = new Set(applicabilityOmitted);
+      const expectedBandIds = Object.keys(roleAxes)
+        .filter((axisId) => !applicabilitySet.has(axisId))
+        .sort();
       const receivedBandIds = [...projectBands.keys()].sort();
       if (
         expectedBandIds.length !== receivedBandIds.length

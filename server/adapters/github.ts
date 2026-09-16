@@ -108,6 +108,67 @@ const apexOf = (value: string | undefined): string => {
   }
 };
 
+// github.com path segments that are product pages, never an org/user.
+const GITHUB_RESERVED_PATH = new Set([
+  "about", "apps", "collections", "contact", "customer-stories", "enterprise",
+  "events", "explore", "features", "home", "join", "login", "logout",
+  "marketplace", "new", "notifications", "organizations", "orgs", "pricing",
+  "readme", "resources", "search", "security", "settings", "signup", "site",
+  "solutions", "sponsors", "team", "topics", "trending",
+]);
+
+export interface SiteLinkedGithubOrg {
+  org: string;
+  sourceUrl: string;
+}
+
+/**
+ * The project-side GitHub doctrine is "the project must link the repo from a
+ * site it controls" (docs/GITHUB-ANALYSIS.md), but resolution only ever read
+ * the X bio string, so a GitHub link living in the project's docs-site header
+ * was invisible (docs.ammalgam.xyz links github.com/ammalgam-protocol; the
+ * report said the GitHub was missing). Read the controlled surfaces directly:
+ * the official site root, its docs subdomain, and the docs llms.txt. Bodies
+ * are read regardless of HTTP status: a docs app's 404 shell is still the
+ * project's own content and routinely carries the header GitHub link, while
+ * the root may sit behind a bot challenge.
+ */
+export async function githubOrgFromOfficialSite(
+  officialWebsite: string | null | undefined,
+  fetcher: typeof fetch = deadlineFetch,
+): Promise<SiteLinkedGithubOrg | null> {
+  const apex = apexOf(officialWebsite ?? undefined);
+  if (!apex) return null;
+  const candidates = [
+    `https://${apex}/`,
+    ...(apex.startsWith("docs.") ? [] : [`https://docs.${apex}/`, `https://docs.${apex}/llms.txt`]),
+  ];
+  for (const url of candidates) {
+    let body = "";
+    let landedHost = "";
+    try {
+      const response = await fetcher(url, {
+        signal: AbortSignal.timeout(8_000),
+        headers: { accept: "text/html,text/plain,*/*" },
+        redirect: "follow",
+      });
+      landedHost = response.url ? new URL(response.url).hostname.toLowerCase().replace(/^www\./, "") : "";
+      body = (await response.text()).slice(0, 600_000);
+    } catch {
+      continue;
+    }
+    // A redirect off the controlled apex (a parking page, a challenge portal)
+    // is no longer the project's own surface; its links prove nothing.
+    if (landedHost && landedHost !== apex && !landedHost.endsWith(`.${apex}`)) continue;
+    for (const match of body.matchAll(/github\.com\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)\b/gi)) {
+      const org = match[1];
+      if (GITHUB_RESERVED_PATH.has(org.toLowerCase())) continue;
+      return { org, sourceUrl: url };
+    }
+  }
+  return null;
+}
+
 // A display name is as often decoration as it is a name, and GitHub's user
 // search matches it literally: q="Hayden Adams 🦄" returns zero results while
 // q="Hayden Adams" returns haydenadams first. Fold accents onto their base
@@ -386,6 +447,54 @@ export const githubAdapter: Adapter = {
       accountCreatedAt: ctx.evidence.profile.account_created_at,
       coverage,
     });
+    // Without a gold personal match, the project's own controlled web surfaces
+    // (site root, docs subdomain) may still link the org — the doctrine's
+    // "linked from a site it controls" case that the bio string alone misses.
+    if (match?.confidence !== "gold") {
+      const profileResolved = ctx.evidence.profile.profile_collection_state === "resolved"
+        && ctx.evidence.profile.profile_provider === "twitterapi";
+      const siteOrg = profileResolved
+        ? await githubOrgFromOfficialSite(ctx.evidence.profile.website)
+        : null;
+      if (siteOrg) {
+        ctx.recordCheck?.({
+          id: "code-footprint-github",
+          status: "confirmed",
+          note: `github.com/${siteOrg.org} is linked from the subject's own verified web surface (${siteOrg.sourceUrl})`,
+          provider: "github/site-fetch",
+          sourceCount: 1,
+        });
+        if (!ctx.evidence.ventures.some((venture) => venture.project_name.toLowerCase() === siteOrg.org.toLowerCase())) {
+          ctx.evidence.ventures.push({
+            project_name: siteOrg.org,
+            role: "github organization",
+            period: "",
+            outcome: VentureOutcome.ACTIVE,
+            evidence_url: `https://github.com/${siteOrg.org}`,
+            notes: `GitHub: linked from ${siteOrg.sourceUrl}`,
+            provider: "github",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+          });
+          ctx.evidence.associates.push({
+            associate_handle: siteOrg.org,
+            relation: "github org",
+            evidence_url: `https://github.com/${siteOrg.org}`,
+            provider: "github",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+          });
+        }
+        ctx.emit({
+          phase: "P1 · Identity",
+          label: `GitHub linked from the project's own site · ${siteOrg.org}`,
+          detail: `github.com/${siteOrg.org} is linked from ${siteOrg.sourceUrl}, a surface this subject controls. Recorded as the project's code footprint.`,
+          source: "github",
+          tone: "good",
+        });
+        return;
+      }
+    }
     if (!match) {
       if (coverage.unavailable) {
         // A 401/403/429/5xx or timeout during resolution is an outage, not

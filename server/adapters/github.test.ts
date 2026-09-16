@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
-import { githubAdapter, searchQueryVariants } from "./github";
+import { githubAdapter, githubOrgFromOfficialSite, searchQueryVariants } from "./github";
 
 const json = (body: unknown) => new Response(JSON.stringify(body), {
   status: 200,
@@ -341,5 +341,52 @@ describe("GitHub squatter suppression", () => {
       id: "code-footprint-github",
       status: "unknown",
     }));
+  });
+});
+
+describe("GitHub org from the project's own web surfaces", () => {
+  const html = (body: string, status = 200, url = "") =>
+    Object.assign(new Response(body, { status, headers: { "content-type": "text/html" } }), url ? { url } : {});
+
+  it("finds the org in a docs-subdomain shell even when the site root is challenge-blocked", async () => {
+    // The Ammalgam shape: ammalgam.xyz root has no GitHub link, the docs root
+    // 403s behind a bot challenge, but the docs app shell (served even on its
+    // 404 page) carries the header link to github.com/ammalgam-protocol.
+    const fetcher = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://ammalgam.xyz/") return html("<html><body>DLEX protocol</body></html>");
+      if (url === "https://docs.ammalgam.xyz/") return html("challenge", 403);
+      if (url === "https://docs.ammalgam.xyz/llms.txt") {
+        return html('<a class="github-link" href="https://github.com/ammalgam-protocol">GitHub</a>', 404);
+      }
+      throw new Error(`unexpected ${url}`);
+    }) as typeof fetch;
+
+    await expect(githubOrgFromOfficialSite("https://ammalgam.xyz/", fetcher)).resolves.toEqual({
+      org: "ammalgam-protocol",
+      sourceUrl: "https://docs.ammalgam.xyz/llms.txt",
+    });
+  });
+
+  it("skips github.com product pages and off-domain redirects", async () => {
+    const fetcher = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://example.xyz/") {
+        return html('<a href="https://github.com/features">features</a> <a href="https://github.com/pricing">pricing</a>');
+      }
+      // The docs host redirects to a parking page off the controlled apex:
+      // whatever it links proves nothing about this subject.
+      if (url.startsWith("https://docs.example.xyz")) {
+        return html('<a href="https://github.com/someone-else">gh</a>', 200, "https://parking.example-registrar.com/lander");
+      }
+      throw new Error(`unexpected ${url}`);
+    }) as typeof fetch;
+
+    await expect(githubOrgFromOfficialSite("https://example.xyz/", fetcher)).resolves.toBeNull();
+  });
+
+  it("returns null without an official website", async () => {
+    await expect(githubOrgFromOfficialSite(undefined)).resolves.toBeNull();
+    await expect(githubOrgFromOfficialSite("")).resolves.toBeNull();
   });
 });
