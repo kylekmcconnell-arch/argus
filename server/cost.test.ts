@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addClaudeUsage,
   addGrokUsage,
+  aggregateStatus,
   getCost,
   grokSpendUsd,
   providerFailureLines,
@@ -201,5 +202,21 @@ describe("prompt-cache token pricing", () => {
     expect(line!.meta).toContain("cache r100000/w10000");
     // Uncached equivalent would price the same tokens 10x higher on the reads.
     expect(line!.usd).toBeLessThan((1_000 + 10_000 + 100_000) * 3 / 1e6 + 100 * 15 / 1e6);
+  });
+
+  // 2026-09-14 deep-dive OR-7: a line mixing live and cached reads was
+  // "partial", which flipped healthy scan receipts to degraded/provider_incomplete.
+  it("treats a cache hit as a successful answer when aggregating a line", () => {
+    expect(aggregateStatus({ calls: 2, succeeded: 1, failed: 0, cached: 1 })).toBe("succeeded");
+    expect(aggregateStatus({ calls: 2, succeeded: 0, failed: 0, cached: 2 })).toBe("cached");
+    expect(aggregateStatus({ calls: 2, succeeded: 1, failed: 1, cached: 0 })).toBe("partial");
+    expect(aggregateStatus({ calls: 2, succeeded: 0, failed: 2, cached: 0 })).toBe("failed");
+    const cost = withCostLedger(() => {
+      recordCall("defillama", "tvl", 0, "memo", "cached");
+      recordCall("defillama", "tvl", 0, "live", "succeeded");
+      return getCost();
+    });
+    expect(cost.calls).toContainEqual(expect.objectContaining({ provider: "defillama", op: "tvl", calls: 2, cached: 1, succeeded: 1, status: "succeeded" }));
+    expect(providerFailureLines(cost)).toEqual([]);
   });
 });

@@ -5,7 +5,7 @@ vi.mock("./_auth.js", () => ({
   serviceHeaders: vi.fn((_key: string, options?: { prefer?: string }) => ({ authorization: "Bearer secret", "content-type": "application/json", ...(options?.prefer ? { prefer: options.prefer } : {}) })),
 }));
 
-import { recordScanReceipt } from "./_scanReceipts";
+import { readScanReceipt, recordScanReceipt, scanReceiptClaimInputValid } from "./_scanReceipts";
 
 const auth = { userId: "00000000-0000-4000-8000-000000000010", organizationId: "00000000-0000-4000-8000-000000000001", role: "analyst", email: "a@example.com", displayName: "A" } as const;
 
@@ -68,5 +68,33 @@ describe("scan receipt storage", () => {
       displayQuery: "$ARGUS", status: "failed", startedAt: "2026-08-23T20:00:00Z",
     })).resolves.toBe(false);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  // 2026-09-14 deep-dive API-1: the reservation route validates the receipt
+  // input before debiting and reads back the row a duplicate collided with.
+  it("pre-validates a claim the write would refuse", () => {
+    const valid = { runKey: "scan-key-123", route: "/app/scan", canonicalRef: "0xabc", displayQuery: "$ARGUS", startedAt: "2026-08-23T20:00:00Z" };
+    expect(scanReceiptClaimInputValid(valid)).toBe(true);
+    expect(scanReceiptClaimInputValid({ ...valid, startedAt: "yesterday-ish" })).toBe(false);
+    expect(scanReceiptClaimInputValid({ ...valid, canonicalRef: "   " })).toBe(false);
+    expect(scanReceiptClaimInputValid({ ...valid, runKey: "short" })).toBe(false);
+  });
+
+  it("reads the tenant/run receipt with its initiator and distinguishes absence from an outage", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify([{
+      initiated_by: auth.userId, route: "/app/scan", kind: "token", canonical_ref: "0xabc", status: "running", report_version_id: null,
+    }]), { status: 200 }));
+    await expect(readScanReceipt(auth, "scan-key-123")).resolves.toEqual({
+      initiatedBy: auth.userId, route: "/app/scan", kind: "token", canonicalRef: "0xabc", status: "running", reportVersionId: null,
+    });
+    const [url] = vi.mocked(fetch).mock.calls[0] as unknown as [string];
+    expect(url).toContain(`organization_id=eq.${auth.organizationId}`);
+    expect(url).toContain("run_key=eq.scan-key-123");
+
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("[]", { status: 200 }));
+    await expect(readScanReceipt(auth, "scan-key-123")).resolves.toBeNull();
+
+    vi.mocked(fetch).mockResolvedValueOnce(new Response("down", { status: 503 }));
+    await expect(readScanReceipt(auth, "scan-key-123")).resolves.toBe("unavailable");
   });
 });

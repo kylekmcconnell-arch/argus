@@ -7,14 +7,29 @@
 // the whole batch, seconds instead of a 3-minute audit each. The scores/verdicts
 // are untouched; only the taxonomy filing changes.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { rejectSupplementalReservation, requireArgusAuth, reserveSupplementalBudget } from "./_auth.js";
 import { claudeMessages, claudeToolInput, grokChat, parseJsonObject, providerFallbacksEnabled } from "./_llm.js";
 
 export const config = { maxDuration: 60 };
 
 const ROLES = new Set(["FOUNDER", "PROJECT", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"]);
 
+function parseBody(req: VercelRequest): Record<string, unknown> | null {
+  try {
+    const value = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") { res.status(405).json({ error: "POST" }); return; }
+  if (req.method !== "POST") { res.status(405).setHeader("Allow", "POST").json({ error: "method_not_allowed" }); return; }
+  res.setHeader("cache-control", "private, no-store");
+  // Middleware gates this path to owners, but a handler that trusts the edge
+  // alone runs identity-less on the internal-secret branch. Verify here too.
+  const auth = await requireArgusAuth(req, res, "owner");
+  if (!auth) return;
   const xai = process.env.XAI_API_KEY;
   const anthropic = process.env.ANTHROPIC_API_KEY;
   if (!xai && !(providerFallbacksEnabled() && anthropic)) {
@@ -22,12 +37,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-  const subjects: { ref: string; query: string; summary: string; roles?: string[] }[] = (Array.isArray(body?.subjects) ? body.subjects : [])
+  const body = parseBody(req);
+  if (!body) { res.status(400).json({ error: "invalid_json_body" }); return; }
+  const subjects: { ref: string; query: string; summary: string; roles?: string[] }[] = (Array.isArray(body.subjects) ? body.subjects : [])
     .filter((s: any) => s && typeof s.ref === "string" && s.ref.trim())
     .slice(0, 60)
     .map((s: any) => ({ ref: String(s.ref).slice(0, 60), query: String(s.query ?? s.ref).slice(0, 60), summary: String(s.summary ?? "").slice(0, 400), roles: Array.isArray(s.roles) ? s.roles.slice(0, 6) : undefined }));
-  if (!subjects.length) { res.status(400).json({ error: "subjects required" }); return; }
+  if (!subjects.length) { res.status(400).json({ error: "subjects_required" }); return; }
+  // Validated and about to spend: take the daily supplemental unit only now.
+  if (rejectSupplementalReservation(res, await reserveSupplementalBudget(auth, "/api/reclassify"))) return;
 
   const system =
     "You are ARGUS taxonomy. Re-classify each audited subject's ROLE SET from its stored audit summary. Roles: " +
@@ -74,7 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const parsed = parseJsonObject(grok.text);
         input = parsed ?? {};
       } else if (!providerFallbacksEnabled() || !anthropic) {
-        res.status(200).json({ available: true, results: [], error: `analyst ${grok.status || "failed"}` });
+        res.status(503).json({ available: true, results: [], error: "analyst_provider_unavailable", note: `analyst ${grok.status || "failed"}` });
         return;
       }
     }
@@ -92,10 +110,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }],
         toolChoice: { type: "tool", name: "record_roles" },
       });
-      if (!claude.ok) { res.status(200).json({ available: true, results: [], error: `analyst ${claude.status || "failed"}` }); return; }
+      if (!claude.ok) { res.status(503).json({ available: true, results: [], error: "analyst_provider_unavailable", note: `analyst ${claude.status || "failed"}` }); return; }
       input = claudeToolInput(claude.data as { content?: Array<{ type?: unknown; name?: unknown; input?: unknown }> }, "record_roles");
     }
-    if (input == null) { res.status(200).json({ available: true, results: [], error: "analyst failed" }); return; }
+    if (input == null) { res.status(503).json({ available: true, results: [], error: "analyst_provider_unavailable", note: "analyst failed" }); return; }
     const raw: any[] = Array.isArray(input?.results) ? input.results : [];
     const byRef = new Map(subjects.map((s) => [s.ref.toLowerCase(), s]));
     const results = raw
@@ -109,6 +127,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     res.status(200).json({ available: true, results });
   } catch (e) {
-    res.status(200).json({ available: true, results: [], error: String(e) });
+    console.error("[reclassify] failed", e instanceof Error ? e.message : e);
+    res.status(502).json({ available: true, results: [], error: "reclassify_failed" });
   }
 }

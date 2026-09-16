@@ -11,6 +11,8 @@ export function runAudit(
   emit?: (step: TraceStep) => void,
   options?: {
     organizationId?: string;
+    /** Private run: the collector leaves no durable org-visible trace (no entity-facts write-back). */
+    privateRun?: boolean;
     analystDeadlineAt?: number;
     intent?: ResearchIntent;
     authorizedResearchScope?: {

@@ -77,7 +77,6 @@ async function withProviderDeadline(deadlineAt, work) {
     });
   } finally {
     clearTimeout(timer);
-    controller.abort();
   }
 }
 var deadlineFetch = (input, init) => {
@@ -8139,9 +8138,9 @@ var statusCounts = (status) => ({
   cached: status === "cached" ? 1 : 0
 });
 var aggregateStatus = (line) => {
-  if (line.succeeded === line.calls) return "succeeded";
-  if (line.failed === line.calls) return "failed";
   if (line.cached === line.calls) return "cached";
+  if (line.succeeded + line.cached === line.calls) return "succeeded";
+  if (line.failed === line.calls) return "failed";
   return "partial";
 };
 function mergeMeta(current, next) {
@@ -36431,16 +36430,17 @@ function recordProtocolSecurityIncidentFindings(evidence) {
   let recorded = 0;
   for (const incident of [...protocol.hacks].sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? ""))).slice(0, 5)) {
     const sourceDate = incident.date ?? protocol.capturedAt;
-    const duplicate = evidence.findings.some((finding) => finding.finding_type === "ProtocolSecurityIncident" && finding.source_url === protocol.sourceUrl && finding.source_date === sourceDate);
-    if (duplicate) continue;
     const amount = incident.amountUsd ? `$${(incident.amountUsd / 1e6).toFixed(incident.amountUsd % 1e6 === 0 ? 0 : 1)}M` : "an unquantified";
     const classification = incident.classification ? `${incident.classification.toLowerCase()} ` : "";
     const technique = incident.technique ? ` Technique recorded: ${incident.technique}.` : "";
     const recovery = incident.returnedFunds ? incident.returnedAmountUsd ? ` DeFiLlama records $${(incident.returnedAmountUsd / 1e6).toFixed(incident.returnedAmountUsd % 1e6 === 0 ? 0 : 1)}M returned.` : " DeFiLlama records the funds as returned." : " DeFiLlama does not record returned funds for this incident.";
     const fullReturnRecorded = incident.returnedFunds && (incident.returnedAmountUsd == null || incident.amountUsd == null || incident.returnedAmountUsd >= incident.amountUsd);
+    const claim = `DeFiLlama records ${amount} ${classification}security incident affecting ${protocol.name}${incident.date ? ` on ${incident.date}` : ""}.${technique}${recovery} This is evidence of protocol security and control failure, not by itself evidence of fraud or intentional misconduct.`;
+    const duplicate = evidence.findings.some((finding) => finding.finding_type === "ProtocolSecurityIncident" && finding.source_url === protocol.sourceUrl && finding.claim === claim);
+    if (duplicate) continue;
     evidence.findings.push({
       finding_type: "ProtocolSecurityIncident",
-      claim: `DeFiLlama records ${amount} ${classification}security incident affecting ${protocol.name}${incident.date ? ` on ${incident.date}` : ""}.${technique}${recovery} This is evidence of protocol security and control failure, not by itself evidence of fraud or intentional misconduct.`,
+      claim,
       source_url: protocol.sourceUrl,
       source_date: sourceDate,
       source_author: "defillama",
@@ -36937,6 +36937,33 @@ function downgradeFixtureEvidenceForLive(seed) {
     basicFactLeads: []
   };
 }
+var ADAPTER_DELEGATES = {
+  x: ["x-profile", "twitterapi", "official-x"],
+  github: ["github"],
+  peopledatalabs: ["peopledatalabs"],
+  "offchain-diligence": ["official-domain", "public-web", "independent-web", "adverse-search", "courtlistener", "opensanctions"],
+  dexscreener: ["dexscreener"],
+  coingecko: ["coingecko"],
+  onchain: ["direct-chain-rpc", "wallet-graph"],
+  // Arkham had no entry, so a wallet-graph or person scope never re-collected
+  // deployer attribution or exposure and the row read "outside the frozen
+  // gap-investigation authorization" for work the analyst had authorized.
+  arkham: ["wallet-graph", "arkham"],
+  "basic-facts": ["basic-facts"]
+};
+var COLD_INTAKE_CAPABILITIES = [
+  "role_resolution",
+  "identity_resolution",
+  "people_and_control",
+  "project_fundamentals",
+  "portfolio_and_outcomes",
+  "network_connections",
+  "counter_evidence"
+];
+function coldIntakeAuthorized(scope) {
+  if (!scope) return true;
+  return scope.capabilities.some((capability) => COLD_INTAKE_CAPABILITIES.includes(capability));
+}
 function mergeManagementIntoWebTeam(evidence, emit) {
   const enrichment = evidence.companyEnrichment;
   const officialWebsite = evidence.projectToken?.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
@@ -37024,17 +37051,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
   const authorizedCapabilitySet = authorizedCapabilities ? new Set(authorizedCapabilities) : null;
   const capabilityIsAuthorized = (...capabilities) => !authorizedCapabilitySet || capabilities.some((capability) => authorizedCapabilitySet.has(capability));
   const authorizedDelegates = options?.authorizedResearchScope ? new Set(options.authorizedResearchScope.delegates) : null;
-  const adapterDelegates = {
-    x: ["x-profile", "twitterapi", "official-x"],
-    github: ["github"],
-    peopledatalabs: ["peopledatalabs"],
-    "offchain-diligence": ["official-domain", "public-web", "independent-web", "adverse-search", "courtlistener", "opensanctions"],
-    dexscreener: ["dexscreener"],
-    coingecko: ["coingecko"],
-    onchain: ["direct-chain-rpc", "wallet-graph"],
-    "basic-facts": ["basic-facts"]
-  };
-  const adapterIsAuthorized = (adapter) => !authorizedDelegates || (adapterDelegates[adapter.id] ?? []).some((delegate) => authorizedDelegates.has(delegate));
+  const adapterIsAuthorized = (adapter) => !authorizedDelegates || (ADAPTER_DELEGATES[adapter.id] ?? []).some((delegate) => authorizedDelegates.has(delegate));
   resetDefiLlamaScanMemo();
   resetFollowScanMemo();
   resetReverseBioMemo();
@@ -37406,7 +37423,16 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     }
     evidence.roles = providerBackedRoles(evidence);
     recordOfficialXAccountStatusFinding(evidence);
-    await coldIntake(ctx, true);
+    if (coldIntakeAuthorized(options?.authorizedResearchScope)) {
+      await coldIntake(ctx, true);
+    } else {
+      emit({
+        phase: "Collect",
+        label: "Discovery intake skipped",
+        detail: "This scoped follow-up authorizes none of the discovery capabilities, so the collection budget goes to the authorized adapters; untouched evidence carries forward from the source version.",
+        tone: "neutral"
+      });
+    }
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
   try {
@@ -38329,32 +38355,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     });
   }
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} calls, \u2248${cost.sources} search sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
-  if (options?.organizationId) {
-    const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.predicate !== "legal_regulatory_event" && fact.providerProjection !== true);
-    const verifiedVentures = (evidence.ventures ?? []).filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
-    if (verifiedBasicFacts.length || verifiedVentures.length || evidence.projectToken?.verified === true) {
-      void writeEntityFacts(options.organizationId, canonicalEntityKey({ handle: evidence.profile.handle }), {
-        entityType: evidence.roles[0] ? String(evidence.roles[0]) : null,
-        handle: evidence.profile.handle,
-        displayName: evidence.profile.resolved_name || evidence.profile.display_name,
-        facts: {
-          schema: 1,
-          basicFacts: verifiedBasicFacts,
-          ventures: verifiedVentures,
-          roles: evidence.roles.map((role) => String(role)),
-          projectToken: evidence.projectToken?.verified ? evidence.projectToken : void 0,
-          // Who these facts were recorded for. A handle can change hands; the
-          // reader refuses the row when the live account no longer matches.
-          identity: {
-            ...evidence.profile.x_user_id ? { xUserId: evidence.profile.x_user_id } : {},
-            ...evidence.profile.account_created_at ? { accountCreatedAt: evidence.profile.account_created_at } : {},
-            ...evidence.profile.display_name ? { displayName: evidence.profile.display_name } : {},
-            ...canonicalOfficialWebsite(evidence.profile.website)?.domain ? { websiteDomain: canonicalOfficialWebsite(evidence.profile.website).domain } : {}
-          }
-        }
-      });
-    }
-  }
+  writeVerifiedEntityFacts(evidence, options);
   finishRuntimeStage("pipeline", runtimeStartedAt);
   return dossier;
 }
@@ -38383,6 +38384,33 @@ function reconcileScoredPacketLineage(input) {
     catalog: [...byId.values()],
     bands: { ...input.fullBands, ...input.scoredBands }
   };
+}
+function writeVerifiedEntityFacts(evidence, options) {
+  if (!options?.organizationId || options.privateRun) return false;
+  const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.predicate !== "legal_regulatory_event" && fact.providerProjection !== true);
+  const verifiedVentures = (evidence.ventures ?? []).filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
+  if (!verifiedBasicFacts.length && !verifiedVentures.length && evidence.projectToken?.verified !== true) return false;
+  void writeEntityFacts(options.organizationId, canonicalEntityKey({ handle: evidence.profile.handle }), {
+    entityType: evidence.roles[0] ? String(evidence.roles[0]) : null,
+    handle: evidence.profile.handle,
+    displayName: evidence.profile.resolved_name || evidence.profile.display_name,
+    facts: {
+      schema: 1,
+      basicFacts: verifiedBasicFacts,
+      ventures: verifiedVentures,
+      roles: evidence.roles.map((role) => String(role)),
+      projectToken: evidence.projectToken?.verified ? evidence.projectToken : void 0,
+      // Who these facts were recorded for. A handle can change hands; the
+      // reader refuses the row when the live account no longer matches.
+      identity: {
+        ...evidence.profile.x_user_id ? { xUserId: evidence.profile.x_user_id } : {},
+        ...evidence.profile.account_created_at ? { accountCreatedAt: evidence.profile.account_created_at } : {},
+        ...evidence.profile.display_name ? { displayName: evidence.profile.display_name } : {},
+        ...canonicalOfficialWebsite(evidence.profile.website)?.domain ? { websiteDomain: canonicalOfficialWebsite(evidence.profile.website).domain } : {}
+      }
+    }
+  });
+  return true;
 }
 function runAudit(rawHandle, emit, options) {
   return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   requireArgusAuth: vi.fn(),
   serviceCredentials: vi.fn(),
   listUsers: vi.fn(),
+  getUserById: vi.fn(),
   inviteUserByEmail: vi.fn(),
   resend: vi.fn(),
   from: vi.fn(),
@@ -111,12 +112,20 @@ describe("workspace member invitation recovery", () => {
       auth: {
         admin: {
           listUsers: mocks.listUsers,
+          getUserById: mocks.getUserById,
           inviteUserByEmail: mocks.inviteUserByEmail,
         },
         resend: mocks.resend,
       },
       from: mocks.from,
       rpc: mocks.rpc,
+    });
+    // Default: the individual lookup answers from whatever the paged listing
+    // holds, so the invitation cases below keep one source of auth users.
+    mocks.getUserById.mockImplementation(async (id: string) => {
+      const { data } = await mocks.listUsers({ page: 1, perPage: 1000 });
+      const user = (data?.users ?? []).find((candidate: { id: string }) => candidate.id === id) ?? null;
+      return user ? { data: { user }, error: null } : { data: { user: null }, error: { status: 404, message: "User not found" } };
     });
     mocks.resend.mockResolvedValue({ error: null });
     mocks.rpc.mockResolvedValue({ data: member, error: null });
@@ -262,6 +271,61 @@ describe("workspace member invitation recovery", () => {
 });
 
 describe("workspace member budgets", () => {
+  // 2026-09-14 deep-dive API-6: one page of 1000 was treated as the whole
+  // auth directory, so members past it had no email, could not be re-invited
+  // and could not be edited.
+  it("finds an already registered invitee on the second directory page", async () => {
+    vi.clearAllMocks();
+    mocks.requireArgusAuth.mockResolvedValue({ userId: OWNER_ID, email: "owner@example.com", organizationId: ORGANIZATION_ID, role: "owner", displayName: "Owner" });
+    mocks.serviceCredentials.mockReturnValue({ url: "https://database.example", key: "test-service-key" });
+    mocks.createClient.mockReturnValue({
+      auth: { admin: { listUsers: mocks.listUsers, getUserById: mocks.getUserById, inviteUserByEmail: mocks.inviteUserByEmail }, resend: mocks.resend },
+      from: mocks.from,
+      rpc: mocks.rpc,
+    });
+    mocks.resend.mockResolvedValue({ error: null });
+    mocks.rpc.mockResolvedValue({ data: member, error: null });
+    mocks.ensureGrowthProfile.mockResolvedValue(undefined);
+    mocks.ensureStartingCredits.mockResolvedValue(undefined);
+    usePostCount();
+    const filler = Array.from({ length: 1000 }, (_, index) => ({ id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, email: `user${index}@example.com` }));
+    mocks.listUsers.mockImplementation(async ({ page }: { page: number }) => ({
+      data: { users: page === 1 ? filler : page === 2 ? [authUser(true)] : [] },
+      error: null,
+    }));
+    const { res, captured } = response();
+
+    await handler(request("POST", { email: EMAIL }), res);
+
+    expect(captured.statusCode).toBe(200);
+    expect(mocks.inviteUserByEmail).not.toHaveBeenCalled();
+    expect(mocks.listUsers).toHaveBeenCalledWith({ page: 2, perPage: 1000 });
+    expect(captured.body).toMatchObject({ member: { email: EMAIL }, invitationSent: false });
+  });
+
+  it("edits a member by direct id lookup instead of scanning one directory page", async () => {
+    vi.clearAllMocks();
+    mocks.requireArgusAuth.mockResolvedValue({ userId: OWNER_ID, email: "owner@example.com", organizationId: ORGANIZATION_ID, role: "owner", displayName: "Owner" });
+    mocks.serviceCredentials.mockReturnValue({ url: "https://database.example", key: "test-service-key" });
+    mocks.createClient.mockReturnValue({
+      auth: { admin: { listUsers: mocks.listUsers, getUserById: mocks.getUserById, inviteUserByEmail: mocks.inviteUserByEmail }, resend: mocks.resend },
+      from: mocks.from,
+      rpc: mocks.rpc,
+    });
+    mocks.rpc.mockResolvedValue({ data: { ...member, role: "analyst" }, error: null });
+    useExistingMember();
+    mocks.listUsers.mockResolvedValue({ data: { users: [] }, error: null });
+    mocks.getUserById.mockResolvedValue({ data: { user: authUser(true) }, error: null });
+    const { res, captured } = response();
+
+    await handler(request("PUT", { userId: MEMBER_ID, role: "analyst" }), res);
+
+    expect(captured.statusCode).toBe(200);
+    expect(mocks.getUserById).toHaveBeenCalledWith(MEMBER_ID);
+    expect(mocks.listUsers).not.toHaveBeenCalled();
+    expect(captured.body).toMatchObject({ member: { email: EMAIL, role: "analyst" } });
+  });
+
   it("sums the append-only ledger and keeps the latest grant timestamp", () => {
     const budgets = summarizeMemberBudgets([
       { user_id: MEMBER_ID, amount_millis: 10_000, reason: "beta_start", created_at: "2026-08-01T00:00:00Z" },
