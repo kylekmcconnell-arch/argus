@@ -377,20 +377,74 @@ Neither is Pons, and both read as plain "uniswap" on DexScreener.
   on the NFPM resolving to the LaunchLocker. Launch read for FIH: first buy
   at block +38, no same-block cluster, 72 buyers in the first hour, deployer
   bought 2% at +3.5 min and later sold. Organic.
-- **RWAERC20LaunchpadFactory.** $WRESTLER (`0xab528169…`) was created through
-  verified `RWAERC20LaunchpadFactory`
+- **o1 Launchpad (first read as "RWAERC20LaunchpadFactory").** $WRESTLER
+  (`0xab528169…`) was created through
   `0xce9c48cfa068947f77738c81be406b53338e5b0d` (creator `0xaa8d6f5a…`),
-  which pools the full supply into a Uniswap v4 pool quoted in a tokenized
-  stock (GLXY) with no bonding curve; supply custodian
-  `0x0310cfebe1d7a69f2414f6595bbe9d17c5342acc`. Blockscout's
-  `getcontractcreation` reports a one-shot `contractFactory`
-  (`0xf86dfdb6…`) for it, so match on the creation tx `to` address, not the
-  reported factory. Launch read: first buy at +183, 5 buyers in the first
-  hour, pool still 94% full after an hour; the volume came with the
-  Altcoinist calls from Sep 7. Organic.
+  which Blockscout verifies under the source name `RWAERC20LaunchpadFactory`
+  and which o1's own contract registry lists as the current Robinhood Launch
+  Factory (identified 2026-09-16, see the o1 section below). It pools the
+  full supply into a Uniswap v4 pool quoted in a tokenized stock (GLXY) with
+  no bonding curve; the supply custodian `0x0310cfebe1d7a69f2414f6595bbe9d17c5342acc`
+  is the o1 Launch Hook. Blockscout's `getcontractcreation` reports the
+  one-shot Launch Token Deployer (`0xf86dfdb6…`) as `contractFactory` for it,
+  so the server matches both the factory and the token deployer. Launch read:
+  first buy at +183, 5 buyers in the first hour, pool still 94% full after an
+  hour; the volume came with the Altcoinist calls from Sep 7. Organic.
 
-Both belong in the `VENUES` table once a second token per venue confirms
-the fingerprint; recorded in `src/data/cabals.ts` (`altcoinist-ring`) for now.
+o1 is now in the `VENUES` table (`o1`) with server-side factory detection
+on Robinhood; the LaunchLocker factory still waits for a second token before
+it gets a venue entry. Both launches stay recorded in `src/data/cabals.ts`
+(`altcoinist-ring`).
+
+## o1 Launchpad (o1.exchange), read 2026-09-16 via $BRAINARM on Base
+
+One `launchpad-v4-minimal` suite on Base, Robinhood Chain, Monad and Arc, run
+by Jerry Pan (@stambouli_o1, @o1_exchange). Same model everywhere: no
+bonding curve, the creation tx mints the full supply and pools all of it into
+a Uniswap v4 pool under the o1 Launch Hook, quoted in ETH, USDC/USDG or a
+tokenized stock. Liquidity is documented as permanent; creator rights are fee
+claims only. Every swap pays 1%: creator 50 bps, platform 30 bps, referrer
+20 bps. Launch fee 0.001 ETH, anti-snipe window 20 seconds, optional atomic
+Dev Buy through the Launch-Buy Adapter.
+
+- **Contracts.** Machine-readable registry:
+  `https://docs.o1.exchange/launchpad/reference/launch-contract-suites.json`
+  (current and four historical suites per chain; o1 asks indexers to keep
+  every suite). Robinhood current: Launch Factory `0xce9c48cf…`, Hook
+  `0x0310cfeb…`, Fee Escrow `0xc5444b41…`, Launch Token Deployer
+  `0xf86dfdb6…`. Base current: Launch Factory
+  `0x1176122eb77ad6a2339322cda7c4d7ea9bfa63dc`, Hook `0x1f91c998…`, Fee
+  Escrow `0xb3f11a3fb06a88059b7f7f423ec0dda506356866`, Announcement
+  Registry `0xab1243c9…`. Platform fee receiver `0x1caa1962…`.
+- **Base tokens are native B20 assets.** The o1 factory calls Base's genesis
+  B20 Factory `0xb20f0000…0000`; the token lands at a system address
+  `0xb2000000…` with `eth_getCode` = `0xef` (one byte) and no creator or
+  creation tx on Blockscout (Basescan: "System Contract"). There is no custom
+  token code, no owner and no sell-path surface, so honeypot reads do not
+  apply; judge the launch on flows. The `0xb2` prefix marks the B20 standard,
+  which other apps also use, so it is not an o1 fingerprint. Recognise a Base
+  o1 launch by the creation tx calling the o1 Launch Factory (selector
+  `0x3feab1d8`) or by Fee Escrow `claimFor` activity for the token.
+- **Fee-farm read ($BRAINARM, `0xb2000000000000000000005a0c125da6cf531d01`).**
+  Launched 2026-09-14 22:14:45 UTC by thefear.base.eth (`0x010f94ba…`, a
+  Uniswap-wallet EIP-7702 account), whose launch tweet carried a referral
+  link to its own address, so it takes 70 of the 100 bps on every trade. Ten
+  `claimFor` calls between 09-15 02:30 and 09-16 04:10 UTC pulled 1.68 ETH
+  (about $4,000 against a $340k cap); the claims arrive as v4 ERC-6909 burns
+  paid out as internal ETH transfers, so Blockscout's tx list misses them.
+  Proceeds left through relayed 7702 executions (Multicall3 to the account's
+  execute) into two fresh wallets that swapped to USDC and hold 1,436.9 and
+  966.6 USDC plus 0.417 ETH. First buy landed at block +10 (20 s, the
+  anti-snipe boundary), 2.7x supply turnover in the first hour. Detection
+  recipe: creator address == referrer in the launch link, Fee Escrow claim
+  cadence of a few hours, proceeds to fresh wallets. Same shape as the Pons
+  PRISM farm, with the fee taken from the pool instead of a sell tax.
+- **Insider check.** jesse.base.eth (`0x2211d1d0…`, Jesse Pollak's Coinbase
+  Smart Wallet, paymaster-sponsored user operations) bought 0.0112% of
+  BRAINARM for 0.0102 ETH on 2026-09-15 16:40 UTC between three other small
+  memecoin buys. A Base insider buying pocket change through Base App is
+  their routine, not a team signal, and no Base or Coinbase staff account
+  posted about the token.
 
 ## PumpSwap drained-pool factory behind a pump.fun launch ($PARK, Solana, read 2026-09-16)
 

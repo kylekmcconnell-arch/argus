@@ -420,6 +420,8 @@ export const NOTABLE_ACCOUNTS: NotableAccount[] = [
   { handle: "KonstantinSebeo", label: "promo ring · Altcoinist co-founder (ALT BRAH)" },
   { handle: "theunipcs", label: "KOL · Unipcs (Bonk Guy)" },
   { handle: "wrestler_galaxy", label: "RH memecoin · $WRESTLER (Altcoinist ring)" },
+  { handle: "o1_exchange", label: "launchpad · o1 (Base B20, Robinhood, Monad, Arc; launched $WRESTLER)" },
+  { handle: "stambouli_o1", label: "launchpad · o1 founder (Jerry Pan)" },
   { handle: "TradeOnPrism", label: "RH project · Prism Finance (fee-farmed token)" },
   { handle: "synepsepad", label: "RH launchpad · Synapse (self-sniped launch)" },
   { handle: "Quantrhood", label: "RH project · QUANT" },
