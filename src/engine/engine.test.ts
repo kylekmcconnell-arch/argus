@@ -689,16 +689,19 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(report.composite_verdict).toBe("CAUTION");
   });
 
-  it("4 unconfirmed testimonials -> I4 capped low, no cap trigger", () => {
+  it("4 unconfirmed testimonials -> classified unconfirmed, no cap trigger", () => {
     const a = new Audit("@thin_fund", { subject_class: SubjectClass.INVESTOR });
     a.setIdentity("Confirmed");
+    const verdicts: string[] = [];
     for (let i = 0; i < 4; i++) {
-      a.addTestimonial({ claimed_endorser_handle: "@famous_founder", claimed_relationship: "portfolio", public_acknowledgment: "none", follows_subject: false });
+      verdicts.push(a.addTestimonial({ claimed_endorser_handle: "@famous_founder", claimed_relationship: "portfolio", public_acknowledgment: "none", follows_subject: false }));
     }
-    const [score, summary, cap] = a.corroborationAxis("I4_testimonial_corroboration");
-    expect(score).toBeLessThanOrEqual(5);
-    expect(summary.unconfirmed).toBe(4);
-    expect(cap).toBeNull();
+    expect(verdicts).toEqual(Array(4).fill(TV.UNCONFIRMED));
+    for (const [ax, s] of [["I1_identity_legitimacy", 12], ["I2_portfolio_quality", 18], ["I3_fund_scale_tier", 10], ["I4_testimonial_corroboration", 2], ["I5_reputation_fud", 15]] as [string, number][]) {
+      a.setAxis(ax, s);
+    }
+    const r = a.finalize();
+    expect(r.cap_applied).toBeNull();
   });
 
   it("contradicted testimonial cap = 15", () => {
@@ -809,13 +812,23 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(r.governing_score!).toBeLessThanOrEqual(25);
   });
 
-  it("3 unacknowledged advisory claims collapse AD3", () => {
+  it("3 unacknowledged advisory claims are classified unconfirmed without a cap", () => {
     const a = new Audit("@ghost_advisor", { subject_class: SubjectClass.ADVISOR });
     a.setIdentity("Confirmed");
-    for (let i = 0; i < 3; i++) a.addAdvisedProject({ project_name: "BigName", public_acknowledgment: "none", follows_subject: false });
-    const [score, summary] = a.advisoryCorroborationAxis("AD3_relationship_corroboration");
-    expect(score).toBeLessThanOrEqual(7);
-    expect(summary.unconfirmed).toBe(3);
+    const verdicts: string[] = [];
+    for (let i = 0; i < 3; i++) verdicts.push(a.addAdvisedProject({ project_name: "BigName", public_acknowledgment: "none", follows_subject: false }));
+    expect(verdicts).toEqual(Array(3).fill(TV.UNCONFIRMED));
+    expect(a.getAdvisedProjects().every((row) => row.corroboration_verdict === TV.UNCONFIRMED)).toBe(true);
+  });
+
+  it("dedupes a role held twice so score coverage is not doubled", () => {
+    const a = new Audit("@twice", { roles: [SubjectClass.FOUNDER, SubjectClass.FOUNDER] });
+    a.setIdentity("Confirmed");
+    expect(a.roles).toEqual([SubjectClass.FOUNDER]);
+    for (const [ax, s] of [["F1_identity_verifiability", 10], ["F2_track_record", 20], ["F3_repeat_backing", 10], ["F4_build_substance", 10], ["F5_reputation_integrity", 14], ["F6_network_quality", 8]] as [string, number][]) a.setAxis(ax, s);
+    const r = a.finalize();
+    expect(r.role_reports).toHaveLength(1);
+    expect(r.score_coverage).toMatchObject({ assessedAxes: 6, totalAxes: 6, assessedWeight: 100, totalWeight: 100 });
   });
 
   it("MULTI-ROLE builder + investor + advisor, pseudonymous", () => {

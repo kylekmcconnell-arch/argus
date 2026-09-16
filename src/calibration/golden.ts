@@ -112,6 +112,52 @@ function projectEvidence(
   return evidence;
 }
 
+const INVESTOR_FIXTURE_CAPTURED_AT = "2026-07-11T12:00:00.000Z";
+
+function adversePress(host: string, title: string, contentHash: string): CollectedEvidence["sourceArtifacts"][number] {
+  return {
+    kind: "press",
+    provider: "google-news",
+    title,
+    excerpt: `${title}. The report names Subject Capital directly.`,
+    sourceUrl: `https://${host}/story/${contentHash.slice(0, 8)}`,
+    capturedAt: INVESTOR_FIXTURE_CAPTURED_AT,
+    publishedAt: "2026-07-01T00:00:00.000Z",
+    contentHash,
+    match: "exact_name",
+  };
+}
+
+// A venture fund whose only reputation evidence is three unverified adverse
+// headlines from three distinct hosts. Every other axis is scored inside its
+// live band; I5 is scored low because adverse press is not reputation proof.
+const ADVERSE_PRESS_FUND: CollectedEvidence = (() => {
+  const evidence = ev("@subjectcapital", [SubjectClass.INVESTOR], "Confirmed", {
+    sourceArtifacts: [
+      adversePress("newswire.example", "SEC sues Subject Capital for fraud", "1".repeat(64)),
+      adversePress("ledger.example", "Subject Capital faces investor lawsuit over undisclosed conflict of interest", "2".repeat(64)),
+      adversePress("chainpaper.example", "Regulator sanctions Subject Capital partner in enforcement action", "3".repeat(64)),
+    ],
+    axes: [
+      { axis: "I1_identity_legitimacy", score: 11, rationale: "The fund's official account and domain are bound." },
+      { axis: "I2_portfolio_quality", score: 17, rationale: "Portfolio inclusion is source-bound; outcomes are thin." },
+      { axis: "I3_fund_scale_tier", score: 11, rationale: "One manager-reported fund close is verified." },
+      { axis: "I4_testimonial_corroboration", score: 12, rationale: "Two endorsers corroborated the relationship." },
+      { axis: "I5_reputation_fud", score: 8, rationale: "Three adverse headlines are unverified; no verified misconduct and no verified reputation support." },
+    ],
+  });
+  evidence.profile = {
+    ...evidence.profile,
+    display_name: "Subject Capital",
+    bio: "We invest in early-stage software companies.",
+    website: "https://subjectcapital.com",
+    profile_collection_state: "resolved",
+    profile_provider: "twitterapi",
+    profile_captured_at: INVESTOR_FIXTURE_CAPTURED_AT,
+  };
+  return evidence;
+})();
+
 export const GOLDEN: GoldenCase[] = [
   // ── the four curated dossiers ──
   {
@@ -500,6 +546,20 @@ export const GOLDEN: GoldenCase[] = [
       axes: completeAxes(SubjectClass.KOL, 0.9),
     }),
     expect: { verdict: "FAIL", governing: SubjectClass.KOL, cap: "wallet_sold_into_promo", score: { min: 30, max: 35 } },
+  },
+
+  {
+    // E2 (2026-09-14 deep-dive): the only press eligible for I5 is press that
+    // matches the material-reputation vocabulary, so three adverse headlines
+    // from three hosts used to mint a solid I5 floor (18-21 of 25) and force
+    // the analyst to score reputation high. Adverse press is unverified: it
+    // can neither raise reputation nor set a floor. The live band for this
+    // packet is asserted in calibration.test.ts.
+    name: "investor:fund-with-adverse-press-only",
+    note: "adverse press headlines are unverified: no reputation floor, low provisional-free score",
+    groundTruth: "clean",
+    evidence: ADVERSE_PRESS_FUND,
+    expect: { verdict: "CAUTION", governing: SubjectClass.INVESTOR, cap: null, score: { min: 55, max: 65 } },
   },
 
   // ── abstention controls ──
