@@ -197,7 +197,9 @@ than shipping teams over a quarter in which almost everything fell) and the
 numbers are far too few to reweight anything. Coverage is the limit, not the
 method: 11 of 33 subjects priced (GeckoTerminal rate-limits bursts and serves
 200 daily candles), and 4 failed at GitHub's edge (the wide GraphQL query
-times out on the largest organisations even at the five-repository fallback).
+timed out on the largest organisations even at the five-repository fallback; the
+collector now falls back a second time to a per-repository read, so those rows
+will fill on the next run).
 The set is skewed to blue chips because those are the tokens with verifiable
 GitHub organisations; the stalled and thin rows that would carry the finding
 are exactly the projects that rarely link a repository. Growing the set means
@@ -210,10 +212,6 @@ frozen summary on every saved report now does automatically.
    penalties remain judgement until stalled and thin rows number in the dozens;
    small tokens with linked repositories are the rows to add, and each saved
    report now contributes a frozen summary to that pool.
-2. **Very large organisations.** GitHub's edge returns 502 on the repository
-   query for the largest orgs even at the five-repository fallback. A
-   per-repository read path (one query per repo, no nested samples) would
-   close it at the cost of more calls.
-3. **Star lists.** Only a repository admin can read who starred. If a project
+2. **Star lists.** Only a repository admin can read who starred. If a project
    under review grants collaborator access, the stargazer sample input already
    runs the account-level StarScout read.

@@ -200,6 +200,50 @@ describe("GitHub shipping provider completeness", () => {
     expect(attachPanelCost).toHaveBeenCalledWith(ORGANIZATION_ID, VERSION_ID, expect.objectContaining({ calls: 6, status: "succeeded" }));
   });
 
+  it("falls back to a per-repository read when the organisation query times out twice", async () => {
+    let wide = 0;
+    const fetchMock = routedFetch([
+      (u, b) => (u.endsWith("/graphql") && b.includes("light: repositoryOwner(") ? gql({ light: { repositories: { totalCount: 40, nodes: [{ nameWithOwner: "acme/protocol" }, { nameWithOwner: "acme/sdk" }] } } }) : undefined),
+      (u, b) => (isOwnerQuery(u, b) ? (wide++, new Response("bad gateway", { status: 502 })) : undefined),
+      (u, b) => (u.endsWith("/graphql") && b.includes("repository(owner: $owner") && b.includes('"acme"') ? gql({ repository: repoNode({ nameWithOwner: JSON.parse(b).variables.name === "sdk" ? "acme/sdk" : "acme/protocol", pkg: null }) }) : undefined),
+      historyRoute([0, 1].map(commitNode)),
+      identityRoute,
+      weeklyRoute([]),
+    ]);
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+    await handler(request() as never, res as never);
+    expect(wide).toBe(2);
+    expect(captured.body).toMatchObject({ available: true, reposScanned: ["acme/protocol", "acme/sdk"] });
+    const input = captured.body?.input as { reposTotal: number; readNotes: string[] };
+    expect(input.reposTotal).toBe(40);
+    expect(input.readNotes.join(" ")).toMatch(/2 of 40 repositories were read one at a time/);
+  });
+
+  it("reads history one repository at a time when the batched read times out", async () => {
+    let batched = 0;
+    const fetchMock = routedFetch([
+      ownerRoute([repoNode({ pkg: null }), repoNode({ nameWithOwner: "acme/sdk", pkg: null })]),
+      (u, b) => {
+        if (!isHistoryQuery(u, b)) return undefined;
+        if (b.includes("r1: repository")) { batched++; return new Response("bad gateway", { status: 502 }); }
+        const name = JSON.parse(b).query.includes('name: "sdk"') ? "acme/sdk" : "acme/protocol";
+        if (name === "acme/sdk" && b.includes("history(first: 100")) return new Response("bad gateway", { status: 502 });
+        return gql({ r0: { nameWithOwner: name, defaultBranchRef: { target: { history: { nodes: [0, 1].map(commitNode) } } } } });
+      },
+      identityRoute,
+      weeklyRoute([]),
+    ]);
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+    await handler(request() as never, res as never);
+    expect(batched).toBe(1);
+    expect(captured.body).toMatchObject({ available: true, historyRepos: ["acme/protocol", "acme/sdk"] });
+    const input = captured.body?.input as { commits: unknown[]; readNotes: string[] };
+    expect(input.commits).toHaveLength(4);
+    expect(input.readNotes.join(" ")).toMatch(/read one at a time, 1 with 40 commits instead of 100/);
+  });
+
   it("reads PyPI and crates.io packages declared in pyproject.toml and Cargo.toml", async () => {
     const fetchMock = routedFetch([
       ownerRoute([repoNode({ pkg: null, pyproject: { text: '[build-system]\nrequires = ["hatchling"]\n\n[project]\nname = "acme-sdk"\nversion = "1.0"\n' }, cargo: { text: '[package]\nname = "acme-core"\nversion = "0.3.0"\n\n[dependencies]\nname = "not-this"\n' } })]),

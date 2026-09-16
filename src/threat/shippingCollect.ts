@@ -158,14 +158,6 @@ const REPO_FIELDS = `
   } } }
 `;
 
-const HISTORY_FIELDS = `
-  nameWithOwner
-  defaultBranchRef { target { ... on Commit { history(first: ${HISTORY_PER_REPO}, since: $since, until: $until) { nodes {
-    oid committedDate additions deletions changedFilesIfAvailable messageHeadline messageBody
-    author { name email user { login createdAt } }
-  } } } } }
-`;
-
 type Tree = { entries?: { name: string }[] } | null;
 type GqlRepo = {
   nameWithOwner: string; isFork: boolean; isTemplate?: boolean; isArchived?: boolean; description?: string | null;
@@ -289,18 +281,46 @@ function normaliseCommit(c: GqlCommit, repo: string): ShippingCommit {
 const alias = (i: number) => `r${i}`;
 const splitRepo = (full: string) => { const [owner, name] = full.split("/"); return { owner, name }; };
 
+/** The repositories alone, no nested samples: cheap enough that GitHub's edge answers it for any organisation. */
+async function readOwnerRepoList(owner: string, key: string, usage: CallCounter): Promise<{ names: string[]; total: number }> {
+  const q = `query($login: String!) { light: repositoryOwner(login: $login) { repositories(first: ${OWNER_REPOS}, orderBy: { field: PUSHED_AT, direction: DESC }, ownerAffiliations: OWNER, privacy: PUBLIC) { totalCount nodes { nameWithOwner } } } }`;
+  const d = await graphql<{ light?: { repositories?: { totalCount: number; nodes: { nameWithOwner: string }[] } } | null }>(q, { login: owner }, key, usage);
+  if (!d.light) throw new Error("owner_not_found");
+  return { names: (d.light.repositories?.nodes ?? []).map((n) => n.nameWithOwner), total: d.light.repositories?.totalCount ?? 0 };
+}
+
 async function readOwnerRepos(owner: string, since: string, until: string | null, key: string, usage: CallCounter, notes?: string[]): Promise<{ repos: ShippingRepo[]; total: number }> {
   const query = (first: number) => `query($login: String!, $since: GitTimestamp!, $until: GitTimestamp) { repositoryOwner(login: $login) { repositories(first: ${first}, orderBy: { field: PUSHED_AT, direction: DESC }, ownerAffiliations: OWNER, privacy: PUBLIC) { totalCount nodes { ${REPO_FIELDS} } } } }`;
   type Out = { repositoryOwner?: { repositories?: { totalCount: number; nodes: GqlRepo[] } } | null };
+  const edgeTimeout = (e: unknown) => /GraphQL 50[234]/.test(String(e));
   let d: Out;
   try {
     d = await graphql<Out>(query(OWNER_REPOS), { login: owner, since, until }, key, usage);
   } catch (e) {
+    if (!edgeTimeout(e)) throw e;
     // Large organisations time the wide query out at GitHub's edge (502/504).
     // Read fewer repositories rather than nothing, and say so.
-    if (!/GraphQL 50[234]/.test(String(e))) throw e;
-    d = await graphql<Out>(query(OWNER_REPOS_FALLBACK), { login: owner, since, until }, key, usage);
-    notes?.push(`GitHub timed out on the wide read; only the ${OWNER_REPOS_FALLBACK} most recently pushed repositories were reviewed.`);
+    try {
+      d = await graphql<Out>(query(OWNER_REPOS_FALLBACK), { login: owner, since, until }, key, usage);
+      notes?.push(`GitHub timed out on the wide read; only the ${OWNER_REPOS_FALLBACK} most recently pushed repositories were reviewed.`);
+    } catch (e2) {
+      if (!edgeTimeout(e2)) throw e2;
+      // Still too heavy: list the repositories with no nested samples, then
+      // read each of the busiest one at a time. More calls, never nothing.
+      const { names, total } = await readOwnerRepoList(owner, key, usage);
+      const repos: ShippingRepo[] = [];
+      for (const full of names.slice(0, OWNER_REPOS_FALLBACK)) {
+        try {
+          const one = await readSingleRepo(full, since, until, key, usage);
+          repos.push(...one.repos);
+        } catch (e3) {
+          if (!edgeTimeout(e3)) throw e3;
+          notes?.push(`${full} could not be read even on its own.`);
+        }
+      }
+      notes?.push(`GitHub timed out on the organisation read twice; ${repos.length} of ${total} repositories were read one at a time.`);
+      return { repos, total };
+    }
   }
   if (!d.repositoryOwner) throw new Error("owner_not_found");
   return { repos: (d.repositoryOwner.repositories?.nodes ?? []).map((r) => normaliseRepo(r, since)), total: d.repositoryOwner.repositories?.totalCount ?? 0 };
@@ -313,16 +333,54 @@ async function readSingleRepo(full: string, since: string, until: string | null,
   return d.repository ? { repos: [normaliseRepo(d.repository, since)], total: 1 } : { repos: [], total: 0 };
 }
 
-async function readHistory(repos: ShippingRepo[], since: string, until: string | null, key: string, usage: CallCounter): Promise<ShippingCommit[]> {
+const HISTORY_PER_REPO_FALLBACK = 40;
+const HISTORY_FIELDS_OF = (first: number) => `
+  nameWithOwner
+  defaultBranchRef { target { ... on Commit { history(first: ${first}, since: $since, until: $until) { nodes {
+    oid committedDate additions deletions changedFilesIfAvailable messageHeadline messageBody
+    author { name email user { login createdAt } }
+  } } } } }
+`;
+type HistoryNode = { nameWithOwner: string; defaultBranchRef?: { target?: { history?: { nodes: GqlCommit[] } } | null } | null } | null;
+
+async function readHistory(repos: ShippingRepo[], since: string, until: string | null, key: string, usage: CallCounter, notes?: string[]): Promise<ShippingCommit[]> {
   if (!repos.length) return [];
-  const parts = repos.map((r, i) => { const { owner, name } = splitRepo(r.nameWithOwner); return `${alias(i)}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${HISTORY_FIELDS} }`; });
-  const q = `query($since: GitTimestamp!, $until: GitTimestamp) { ${parts.join("\n")} }`;
-  const d = await graphql<Record<string, { nameWithOwner: string; defaultBranchRef?: { target?: { history?: { nodes: GqlCommit[] } } | null } | null } | null>>(q, { since, until }, key, usage);
-  const out: ShippingCommit[] = [];
-  for (const node of Object.values(d)) {
-    if (!node) continue;
-    for (const c of node.defaultBranchRef?.target?.history?.nodes ?? []) out.push(normaliseCommit(c, node.nameWithOwner));
+  const edgeTimeout = (e: unknown) => /GraphQL 50[234]/.test(String(e));
+  const collect = (d: Record<string, HistoryNode>) => {
+    const out: ShippingCommit[] = [];
+    for (const node of Object.values(d)) {
+      if (!node) continue;
+      for (const c of node.defaultBranchRef?.target?.history?.nodes ?? []) out.push(normaliseCommit(c, node.nameWithOwner));
+    }
+    return out;
+  };
+  const one = (r: ShippingRepo, i: number, first: number) => { const { owner, name } = splitRepo(r.nameWithOwner); return `${alias(i)}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { ${HISTORY_FIELDS_OF(first)} }`; };
+  try {
+    const q = `query($since: GitTimestamp!, $until: GitTimestamp) { ${repos.map((r, i) => one(r, i, HISTORY_PER_REPO)).join("\n")} }`;
+    return collect(await graphql<Record<string, HistoryNode>>(q, { since, until }, key, usage));
+  } catch (e) {
+    if (!edgeTimeout(e)) throw e;
   }
+  // The batched read timed out at GitHub's edge: read each repository on its
+  // own, and a repository that still times out with fewer commits. Fewer
+  // commits read is a coverage note; no commits read is not an answer.
+  const out: ShippingCommit[] = [];
+  let trimmed = 0;
+  for (const r of repos) {
+    let got: ShippingCommit[] | null = null;
+    for (const first of [HISTORY_PER_REPO, HISTORY_PER_REPO_FALLBACK]) {
+      try {
+        got = collect(await graphql<Record<string, HistoryNode>>(`query($since: GitTimestamp!, $until: GitTimestamp) { ${one(r, 0, first)} }`, { since, until }, key, usage));
+        if (first !== HISTORY_PER_REPO) trimmed++;
+        break;
+      } catch (e) {
+        if (!edgeTimeout(e)) throw e;
+      }
+    }
+    if (got) out.push(...got);
+    else notes?.push(`${r.nameWithOwner}'s commit history could not be read even on its own.`);
+  }
+  notes?.push(`GitHub timed out on the batched history read; repositories were read one at a time${trimmed ? `, ${trimmed} with ${HISTORY_PER_REPO_FALLBACK} commits instead of ${HISTORY_PER_REPO}` : ""}.`);
   return out;
 }
 
@@ -444,7 +502,7 @@ export async function collectShipping(opts: CollectShippingOptions): Promise<Shi
   // nothing else was touched in the window.
   const ranked = [...repos].sort((a, b) => Number(a.isFork) - Number(b.isFork) || (b.commitsInWindow ?? 0) - (a.commitsInWindow ?? 0));
   const active = ranked.filter((r) => (r.commitsInWindow ?? 0) > 0).slice(0, HISTORY_REPOS);
-  const commits = await readHistory(active, since, until, key, usage);
+  const commits = await readHistory(active, since, until, key, usage, readNotes);
 
   // Committer accounts: X handle, employer, public orgs. A failure here loses
   // the join, never the assessment.
