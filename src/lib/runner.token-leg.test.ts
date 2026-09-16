@@ -15,7 +15,7 @@ vi.mock("../threat/scan", () => ({ threatScan: mocks.threatScan }));
 // that reintroduces the import is caught by the assertion below.
 vi.mock("./resolveProjectToken", () => ({ resolveProjectToken: mocks.resolveProjectToken }));
 
-import { getRun, setOnComplete, startPersonAudit } from "./runner";
+import { cancelRun, getRun, setOnComplete, startPersonAudit } from "./runner";
 
 function anyoneDossier(): Dossier {
   return {
@@ -75,7 +75,7 @@ describe("project report token-safety leg", () => {
       kind: "token",
       ref: "0x1234567890abcdef1234567890abcdef12345678",
       via: "evm",
-    }, expect.any(Function));
+    }, expect.any(Function), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(mocks.resolveProjectToken).not.toHaveBeenCalled();
     expect(getRun("@AnyoneFDN")?.dossier?.threat).toBe(tokenSafety);
     expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("canonical $ANYONE project token");
@@ -166,9 +166,76 @@ describe("project report token-safety leg", () => {
       kind: "token",
       ref: "0x1234567890abcdef1234567890abcdef12345678",
       via: "evm",
-    }, expect.any(Function), { force: true });
+    }, expect.any(Function), expect.objectContaining({ force: true, signal: expect.any(AbortSignal) }));
     expect(getRun("@AnyoneFDN")?.dossier?.threat).toBe(tokenSafety);
     expect(getRun("@AnyoneFDN")?.steps.some((step) => step.label === "Retrying the token safety check")).toBe(true);
+  });
+
+  it("aborts a merely slow threat leg at the wall clock instead of overlapping it with a forced retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const dossier = anyoneDossier();
+      const signals: AbortSignal[] = [];
+      mocks.threatScan.mockImplementation((_input: unknown, _emit: unknown, options: { signal: AbortSignal }) => {
+        signals.push(options.signal);
+        // A scanner that only ends when it is told to stop.
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener("abort", () => reject(new Error("aborted by the runner")));
+        });
+      });
+      mocks.streamAudit.mockImplementation((
+        _handle: string,
+        _priv: boolean,
+        handlers: { onDone: (value: Dossier) => void },
+      ) => {
+        handlers.onDone(dossier);
+        return () => undefined;
+      });
+
+      startPersonAudit("@AnyoneFDN");
+      await vi.advanceTimersByTimeAsync(119_000);
+      expect(getRun("@AnyoneFDN")?.status).toBe("running");
+      expect(signals[0]?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.waitFor(() => expect(getRun("@AnyoneFDN")?.status).toBe("done"));
+
+      expect(signals[0]?.aborted).toBe(true);
+      // The slow leg was cut off, not retried alongside itself.
+      expect(mocks.threatScan).toHaveBeenCalledOnce();
+      expect(getRun("@AnyoneFDN")?.dossier?.threat).toBeNull();
+      expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("did not complete");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops the threat leg when the run is cancelled", async () => {
+    const signals: AbortSignal[] = [];
+    mocks.threatScan.mockImplementation((_input: unknown, _emit: unknown, options: { signal: AbortSignal }) => {
+      signals.push(options.signal);
+      return new Promise(() => {});
+    });
+    mocks.streamAudit.mockImplementation((
+      _handle: string,
+      _priv: boolean,
+      handlers: { onStep: (step: { phase: string; label: string; detail: string; source: string; token: unknown }) => void },
+    ) => {
+      handlers.onStep({
+        phase: "ARGUS", label: "token", detail: "announced", source: "argus",
+        token: { address: "0x1234567890abcdef1234567890abcdef12345678", via: "evm", source: "bio" },
+      });
+      return () => undefined;
+    });
+
+    startPersonAudit("@AnyoneFDN");
+    expect(signals).toHaveLength(1);
+    expect(signals[0].aborted).toBe(false);
+
+    cancelRun("@AnyoneFDN");
+
+    expect(signals[0].aborted).toBe(true);
+    expect(getRun("@AnyoneFDN")).toBeUndefined();
   });
 
   it("surfaces a final persistence failure instead of publishing the project-only version", async () => {

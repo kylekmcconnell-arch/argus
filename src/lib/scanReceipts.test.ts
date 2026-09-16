@@ -16,4 +16,12 @@ describe("client scan receipts", () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
     await expect(finishScanReceipt({ runKey: "scan-key-123", kind: "token", canonicalRef: "0xabc", displayQuery: "$ARGUS", privateRun: false, startedAt: Date.now(), status: "complete" })).resolves.toBe(false);
   });
+
+  it("reports zero charged credits when the reservation never took one", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await finishScanReceipt({ runKey: "scan-key-124", kind: "token", canonicalRef: "0xabc", displayQuery: "$ARGUS", privateRun: false, startedAt: Date.now(), status: "failed", failureCode: "credit_reservation_failed", failureDetail: "No credits left.", creditsCharged: 0 });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ failureCode: "credit_reservation_failed", creditsCharged: 0 });
+  });
 });

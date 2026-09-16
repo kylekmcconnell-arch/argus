@@ -37,14 +37,16 @@ const money = (n: number) =>
 export async function threatScan(
   input: ResolvedInput,
   emit?: (s: TraceStep) => void,
-  options?: { force?: boolean; chain?: string },
+  // `signal` lets the owning run cancel or time-box the leg; without it the
+  // person-audit runner could not stop a threat leg it had already given up on.
+  options?: { force?: boolean; chain?: string; signal?: AbortSignal },
 ): Promise<ThreatScan | null> {
   // auditToken needs an already-resolved runnable token (main tightened
   // RunnableTokenInput.via to solana|evm|dexscreener). A bare ticker or
   // address-candidate isn't runnable - the caller resolves those first.
   if (!isRunnableTokenInput(input)) return null;
 
-  const dossier = await auditToken(input, emit, { force: options?.force, chain: options?.chain });
+  const dossier = await auditToken(input, emit, { force: options?.force, chain: options?.chain, ...(options?.signal ? { signal: options.signal } : {}) });
   if (!dossier) return null;
   // The report must be about the token that was ASKED for. If the market
   // resolver ever falls back to a different base token (search fallback, stale

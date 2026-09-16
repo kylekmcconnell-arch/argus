@@ -24,25 +24,92 @@ import {
   type WebPerson,
 } from "../lib/investigation";
 
-const KEY = "argus:graphstore";
+// The working cache is ORGANIZATION-scoped. A single unscoped key let one
+// org's contributions survive sign-out on a shared machine and, on the next
+// sign-in, get backfilled by POST into whichever org that member belonged to,
+// where RingAlert, subjectConnections and the graph pages then read another
+// tenant's subjects and verdicts. Every cached row is stamped with the org it
+// was recorded or hydrated under; only rows stamped with the CURRENT org are
+// ever read or backfilled, and the cache is cleared on sign-out and org switch.
+const LEGACY_KEY = "argus:graphstore"; // pre-tenancy cache: unattributable, never read or backfilled
+const KEY_PREFIX = "argus:graphstore:";
 const CAP = 150; // working-cache size (the shared backend holds the full community set)
 const SYNC_URL = "/api/graph";
 
-export function getContributions(): GraphContribution[] {
+type StoredContribution = GraphContribution & { organizationId?: string };
+
+let currentOrganizationId: string | null = null;
+let hydrated = false;
+
+function storageKey(): string | null {
+  return currentOrganizationId ? `${KEY_PREFIX}${currentOrganizationId}` : null;
+}
+
+/** The organization whose graph cache this session reads and writes. */
+export function graphStoreOrganization(): string | null {
+  return currentOrganizationId;
+}
+
+/**
+ * Bind the cache to the signed-in member's organization. Must run before the
+ * community graph hydrates; switching organizations discards the previous
+ * tenant's working cache from this session's view and re-hydrates.
+ */
+export function setGraphStoreOrganization(organizationId: string | null | undefined): void {
+  const next = typeof organizationId === "string" && organizationId.trim() ? organizationId.trim() : null;
+  try { localStorage.removeItem(LEGACY_KEY); } catch { /* noop */ }
+  if (next === currentOrganizationId) return;
+  currentOrganizationId = next;
+  hydrated = false;
+  emitGraphChange();
+}
+
+/** Sign-out: drop this org's working cache from the browser and unbind. */
+export function clearGraphStoreForSignOut(): void {
+  const key = storageKey();
   try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as GraphContribution[]) : [];
+    if (key) localStorage.removeItem(key);
+    localStorage.removeItem(LEGACY_KEY);
+  } catch { /* noop */ }
+  currentOrganizationId = null;
+  hydrated = false;
+  emitGraphChange();
+}
+
+function readStored(): StoredContribution[] {
+  const key = storageKey();
+  if (!key) return [];
+  try {
+    const raw = localStorage.getItem(key);
+    const rows = raw ? (JSON.parse(raw) as StoredContribution[]) : [];
+    return Array.isArray(rows) ? rows : [];
   } catch {
     return [];
   }
+}
+
+function writeStored(rows: StoredContribution[]): void {
+  const key = storageKey();
+  if (!key) return;
+  localStorage.setItem(key, JSON.stringify(rows.slice(0, CAP)));
+}
+
+function stamp(c: GraphContribution): StoredContribution {
+  return currentOrganizationId ? { ...c, organizationId: currentOrganizationId } : { ...c };
+}
+
+export function getContributions(): GraphContribution[] {
+  // Only rows stamped with the current organization are visible; anything
+  // else in the slot (a hand-edited or pre-stamp row) is not this tenant's.
+  return readStored().filter((c) => c.organizationId === currentOrganizationId);
 }
 
 export function recordContribution(c: GraphContribution): void {
   if (!c.nodes.length) return;
   try {
     const all = getContributions().filter((x) => canonicalKey(x) !== canonicalKey(c)); // replace prior audit of the same subject
-    all.unshift(c);
-    localStorage.setItem(KEY, JSON.stringify(all.slice(0, CAP)));
+    all.unshift(stamp(c));
+    writeStored(all);
   } catch {
     /* storage unavailable — non-fatal */
   }
@@ -51,7 +118,8 @@ export function recordContribution(c: GraphContribution): void {
 }
 
 export function clearContributions(): void {
-  try { localStorage.removeItem(KEY); } catch { /* noop */ }
+  const key = storageKey();
+  try { if (key) localStorage.removeItem(key); } catch { /* noop */ }
   emitGraphChange();
 }
 
@@ -103,7 +171,7 @@ function mergeContribution(handle: string, addNodes: PanoptesNode[], addEdges: P
       const k = edgeKey(e);
       if (!haveE.has(k)) { haveE.add(k); existing.edges.push(e); }
     }
-    localStorage.setItem(KEY, JSON.stringify(all.slice(0, CAP)));
+    writeStored(all);
     void syncContribution(existing);
     emitGraphChange();
   } catch {
@@ -152,11 +220,14 @@ function emitGraphChange(): void {
 
 async function syncContribution(c: GraphContribution): Promise<boolean> {
   try {
+    // The server scopes the row to the authenticated org; the local stamp is
+    // a client-side tenancy guard and never part of the wire contract.
+    const { organizationId: _organizationId, ...body } = c as StoredContribution;
     // No keepalive: it caps the body at 64KB, which a large subgraph can exceed.
     const r = await fetch(SYNC_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(c),
+      body: JSON.stringify(body),
     });
     if (!r.ok) return false;
     const d = await r.json().catch(() => ({})) as { ok?: boolean };
@@ -166,26 +237,33 @@ async function syncContribution(c: GraphContribution): Promise<boolean> {
   }
 }
 
-let hydrated = false;
 // Pull the community graph and merge it into the local cache. Local-only entries
 // (recorded in a prior session whose POST never landed) win for their own
 // subjects AND get backfilled up, so the shared graph self-heals. Runs once per
-// session, on app mount. No-op when no backend is configured.
+// organization per session, after the store is bound to the signed-in org. A
+// no-op when no backend is configured or no organization is bound: an unbound
+// store has nothing it could safely attribute to a tenant.
 export async function hydrateCommunityGraph(): Promise<void> {
-  if (hydrated) return;
+  if (hydrated || !currentOrganizationId) return;
   hydrated = true;
+  const organizationId = currentOrganizationId;
   try {
     const r = await fetch(SYNC_URL, { signal: AbortSignal.timeout(9000) });
+    if (organizationId !== currentOrganizationId) return; // org switched mid-flight
     if (!r.ok) return;
     const d = await r.json() as { available?: boolean; contributions?: GraphContribution[] };
+    if (organizationId !== currentOrganizationId) return;
     if (d?.available === false) return; // backend not configured — stay local-only
     const remote: GraphContribution[] = Array.isArray(d?.contributions) ? d.contributions : [];
+    // getContributions() already yields only rows stamped with THIS org, so a
+    // row cached under another tenant (or before stamping) is never a
+    // "local-only" candidate for backfill into this org's shared graph.
     const local = getContributions();
     const remoteKeys = new Set(remote.map(canonicalKey));
     const localOnly = local.filter((c) => !remoteKeys.has(canonicalKey(c)));
     if (remote.length) {
-      const merged = [...localOnly, ...remote].slice(0, CAP);
-      localStorage.setItem(KEY, JSON.stringify(merged));
+      const merged = [...localOnly, ...remote].map(stamp);
+      writeStored(merged);
       emitGraphChange();
     }
     // Backfill contributions that exist locally but not in the shared graph

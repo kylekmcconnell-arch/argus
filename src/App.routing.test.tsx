@@ -208,6 +208,7 @@ vi.mock("./graph/store", () => ({
   investigationContribution: vi.fn(),
   personContribution: harness.personContribution,
   recordContribution: harness.recordContribution,
+  setGraphStoreOrganization: vi.fn(),
   tokenContribution: vi.fn(),
 }));
 
@@ -221,6 +222,8 @@ vi.mock("./lib/runner", () => ({
     harness.personOnComplete = callback;
   }),
   startPersonAudit: harness.startPersonAudit,
+  streamDropRecoveryDeadline: (run: { startedAt: number; serverDeadlineAt?: number }) =>
+    (run.serverDeadlineAt ?? run.startedAt + 600_000) + 45_000,
 }));
 
 vi.mock("./lib/scanrunner", () => ({
@@ -1214,6 +1217,30 @@ describe("App routing safety", () => {
     })));
   });
 
+  it("keeps a just-persisted session result when the durable projection lags behind activation", async () => {
+    const address = "0x3434343434343434343434343434343434343434";
+    harness.syncReport.mockResolvedValue({ state: "persisted", caseId: "case-lag", version: 3, reportVersionId: "version-lag-3", panelCostToken: "panel-lag" });
+    harness.recentRef = address;
+    const view = await renderApp();
+    await act(async () => {
+      harness.scanOnComplete?.({ id: "scan-lag", kind: "token", priv: false, result: tokenResult(address, "persisted in this tab") });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledTimes(1));
+    await settle();
+
+    // The case is open but the read model has not activated the version yet.
+    harness.fetchReportState.mockResolvedValue({ status: "open", report: null });
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='reopen-recent']")?.click());
+    await settle();
+
+    expect(view.textContent).not.toContain("immutable projection is temporarily unavailable");
+    expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({
+      headline: "persisted in this tab",
+      persistence: expect.objectContaining({ state: "persisted", reportVersionId: "version-lag-3" }),
+    }));
+  });
+
   it("prefers a scan that completes while durable report lookup is in flight", async () => {
     const address = "0x3333333333333333333333333333333333333333";
     let resolveLookup!: (value: Record<string, unknown>) => void;
@@ -1338,6 +1365,46 @@ describe("App routing safety", () => {
       expect.objectContaining({ team: { names: [] } }),
       "signed-investigation-capability",
     ));
+  });
+
+  it("never pays for team discovery against a model-suggested site that did not bind to the contract", async () => {
+    const address = "0x6767676767676767676767676767676767676767";
+    harness.syncReport.mockResolvedValue({
+      state: "persisted",
+      caseId: "00000000-0000-4000-8000-000000000267",
+      version: 1,
+      reportVersionId: "00000000-0000-4000-8000-000000000267",
+      panelCostToken: "signed-investigation-capability",
+    });
+    harness.fetchReconWebTeam.mockResolvedValue([{ name: "Namesake Founder", role: "founder" }]);
+    await renderApp();
+
+    await act(async () => {
+      harness.scanOnComplete?.({
+        id: "investigation-model-lead-scan",
+        kind: "investigation",
+        priv: false,
+        result: {
+          rootRef: address,
+          token: tokenResult(address, "investigation core"),
+          projectX: null,
+          siteUrl: "https://namesake-project.example",
+          siteUrlOrigin: "model_lead",
+          siteBinding: { origin: "model_lead", status: "unbound", note: "The suggested site does not publish this contract." },
+          recon: { team: { names: ["Namesake Founder"] }, socials: [] },
+          projectAccount: null,
+          founders: [],
+          founderNote: "A model-suggested site (unverified) names Namesake Founder.",
+          deployerTrail: null,
+          webTeam: [],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalled());
+    await settle();
+    expect(harness.fetchReconWebTeam).not.toHaveBeenCalled();
   });
 
   it("attaches persist receipt versionContext so a live investigation is immediately a saved report", async () => {
@@ -2030,5 +2097,75 @@ describe("App routing safety", () => {
 
     expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull();
     expect(view.textContent).not.toContain("The scan didn't finish");
+  });
+
+  /** A run whose only failure is the browser's stream: the server is still collecting. */
+  const droppedRun = () => ({
+    status: "error",
+    error: "the audit stream closed before finishing. The server is still collecting.",
+    errorKind: "stream_dropped",
+    startedAt: Date.now(),
+    serverDeadlineAt: Date.now() + 600_000,
+  });
+
+  it("treats a dropped stream as still collecting and re-attaches to the version the server saves later", async () => {
+    servePersonVersion(4);
+    harness.getRun.mockImplementation(droppedRun);
+
+    const view = await renderApp("/?s=persisted_person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='person-rescan']")?.click());
+    await settle();
+    expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='fail-person-run']")?.click());
+      // Well past the old six-second cut-off: still no relaunch offer.
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(view.textContent).toContain("the server is still collecting");
+      expect(view.textContent).toContain("Check for the saved report now");
+      expect(view.textContent).not.toContain("Run the scan again");
+      expect(view.textContent).not.toContain("nothing was saved");
+      expect(view.querySelector("[data-testid='stored-person-report']")).toBeNull();
+
+      // Minutes later the server persists the run's own version.
+      servePersonVersion(5);
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle();
+
+    expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull();
+    expect(view.textContent).not.toContain("still collecting");
+    // The disconnected run was re-attached, never relaunched.
+    expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a relaunch only once the disconnected run's server budget has passed", async () => {
+    servePersonVersion(4);
+    harness.getRun.mockImplementation(droppedRun);
+
+    const view = await renderApp("/?s=persisted_person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='person-rescan']")?.click());
+    await settle();
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='fail-person-run']")?.click());
+      await act(async () => { await vi.advanceTimersByTimeAsync(500_000); });
+      expect(view.textContent).not.toContain("Run the scan again");
+      await act(async () => { await vi.advanceTimersByTimeAsync(200_000); });
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle();
+
+    expect(view.textContent).toContain("The scan didn't finish");
+    expect(view.textContent).toContain("Run the scan again");
+    expect(view.textContent).toContain("Open last saved report");
+    expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
   });
 });
