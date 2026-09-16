@@ -7,7 +7,7 @@ import { assetIdentity } from "../lib/assetIdentity";
 // the receipts ledger so the module builds a public track record and remembers
 // deployers.
 
-import { auditToken, type TokenDossier } from "../token/audit";
+import { auditToken, deployerWalletAddress, SEVERE_RISK_CATEGORY, type TokenDossier } from "../token/audit";
 import { isRunnableTokenInput, type ResolvedInput } from "../lib/resolveInput";
 import type { TraceStep } from "../data/evidence";
 import type {
@@ -110,7 +110,9 @@ export async function threatScan(
       tone: posture.stance === "bullish" ? "good" : posture.stance === "bearish" ? "warn" : "neutral",
     });
   }
-  const sellers = await sellStructure(dossier.chain, dossier.address, dossier.deployer ?? null);
+  // A launchpad factory recorded as the "creator" is a contract, not a person:
+  // its sells are not a dev exit and its ledger history belongs to the venue.
+  const sellers = await sellStructure(dossier.chain, dossier.address, deployerWalletAddress(dossier));
   if (sellers) {
     if (sellers.devSold) emit?.({ phase: "ARGUS · Sellers", label: "Dev sold", detail: "The deployer/creator wallet has sold into the pool.", tone: "bad" });
     else if (sellers.badSellerCount > 0) emit?.({ phase: "ARGUS · Sellers", label: `${sellers.badSellerCount} flagged seller${sellers.badSellerCount === 1 ? "" : "s"}`, detail: "Snipers / deployer-seeded wallets have been exiting.", tone: "warn" });
@@ -152,7 +154,10 @@ export async function threatScan(
   // trap wearing a new ticker.
   const clones = fp ? await knownRugClones(fp.fingerprint, dossier.address) : [];
   if (clones.length) {
-    emit?.({ phase: "ARGUS · Fingerprint", label: "Known-rug clone", detail: `Byte-identical to ${clones.length} previously flagged token${clones.length === 1 ? "" : "s"} (${clones.slice(0, 3).map((c) => "$" + c.symbol).join(", ")}).`, tone: "bad" });
+    // A fingerprint identifies a template (see judge): only a confirmed trap
+    // on a non-launchpad token is a known-rug clone; the rest is a disclosure.
+    const trapClone = clones.some((c) => c.verdict === "RUG") && launch?.kind !== "launchpad";
+    emit?.({ phase: "ARGUS · Fingerprint", label: trapClone ? "Known-rug clone" : "Shared template", detail: `Byte-identical to ${clones.length} previously flagged token${clones.length === 1 ? "" : "s"} (${clones.slice(0, 3).map((c) => "$" + c.symbol).join(", ")})${trapClone ? "." : launch?.kind === "launchpad" ? ` - ${launch?.venue ?? "the launchpad"} mints every token from one template.` : " - flagged on market conduct, not a code trap."}`, tone: trapClone ? "bad" : "warn" });
   } else if (meta?.fakeToken) {
     emit?.({ phase: "ARGUS · Counterfeit", label: "Fake token", detail: "GoPlus flags this as a counterfeit of an established token.", tone: "bad" });
   }
@@ -202,7 +207,9 @@ export async function threatScan(
   recordReceipt({
     address: dossier.address, chain: dossier.chain, symbol: dossier.symbol,
     verdict: call.verdict, risk: call.risk, flaggedAt: scan.scannedAt,
-    liqThen: dossier.liquidityUsd ?? 0, deployer: dossier.deployer,
+    // Only a wallet goes into the ledger's deployer memory; a factory contract
+    // would index every token its venue minted under one "deployer".
+    liqThen: dossier.liquidityUsd ?? 0, deployer: deployerWalletAddress(dossier),
     codeVerified: code.verified, flagCount: code.flags.length,
     codeFingerprint: fp?.fingerprint ?? null,
   });
@@ -211,11 +218,15 @@ export async function threatScan(
 }
 
 async function deployerRep(d: TokenDossier): Promise<DeployerRep> {
-  const prior = d.deployer
-    ? (await sharedByDeployer(d.deployer, d.chain)).filter((r) => assetIdentity(r.chain, r.address) !== assetIdentity(d.chain, d.address))
+  // Ledger memory is wallet memory. A factory contract "deploys" every token
+  // its venue mints, so reading its history as one deployer's prior rugs would
+  // lend every flagged launchpad token's verdict to every sibling.
+  const wallet = deployerWalletAddress(d);
+  const prior = wallet
+    ? (await sharedByDeployer(wallet, d.chain)).filter((r) => assetIdentity(r.chain, r.address) !== assetIdentity(d.chain, d.address))
     : [];
   return {
-    address: d.deployer,
+    address: wallet,
     serialHoneypoter: d.safety.serialScammerCreator,
     priorScans: prior.map((r) => ({ address: r.address, symbol: r.symbol, verdict: r.verdict, at: r.flaggedAt })),
     priorRugs: prior.filter((r) => r.verdict === "RUG" || r.verdict === "DANGER").length,
@@ -299,6 +310,55 @@ export function judge( // exported for unit tests only
   if (rc?.rugged && !trap) { trap = true; flags.push("RugCheck marks this token as already RUGGED - the pull has happened"); }
   if (hp?.reason && trap) warnings.push(`Simulator's reason: ${hp.reason}`);
 
+  // --- the audit's own verdict caps ---
+  // The mechanical audit applies hard caps this judge never re-derives from raw
+  // flags: an OFAC SDN hit on the deployer or a top holder, a documented
+  // scanner-concealment quote in the source, a later-minted ticker collision,
+  // and severe Arkham funding paths. Every cap that forces the audit to AVOID
+  // is a trap here (RUG at 100); every cap below PASS is at least a flag. A
+  // sanctioned deployer must never scan SAFE, be receipted SAFE to the shared
+  // ledger, or be cached SAFE for the next analyst.
+  const sanctioned = capped("ofac_sanctioned_address") || (d.sanctionsScreen?.available === true && d.sanctionsScreen.sanctioned.length > 0);
+  if (sanctioned) {
+    trap = true;
+    const n = d.sanctionsScreen?.sanctioned.length ?? 1;
+    flags.push(n === 1
+      ? "OFAC SANCTIONS HIT - the deployer or a top holder is on the US Treasury SDN list; touching this token is legal exposure, not a trade"
+      : `OFAC SANCTIONS HIT - ${n} screened addresses (deployer / top holders) are on the US Treasury SDN list; touching this token is legal exposure, not a trade`);
+  }
+  if (d.verdict === "AVOID" && !trap) {
+    // Any other AVOID-level cap the audit applies (present or future) lands
+    // here rather than being silently dropped by a whitelist.
+    trap = true;
+    flags.push(`The mechanical audit returned AVOID${d.capApplied ? ` (${d.capApplied.replace(/_/g, " ")})` : ""} - a disqualifying finding no market signal can offset`);
+  }
+  const concealment = d.findings.find((f) => f.tone === "bad" && f.source === "contract source");
+  if (capped("documented_scanner_concealment") || concealment) {
+    add(20);
+    flags.push(concealment?.claim.replace(/\.$/, "") ?? "The deployer documented defeating a safety scanner in the contract source - the clean checks above prove less than they appear");
+  }
+  if (d.cloneCheck?.checked && d.cloneCheck.audited === "later" && d.cloneCheck.clones.length) {
+    add(25);
+    flags.push(`TICKER COLLISION - ${d.cloneCheck.note.replace(/\.$/, "")}. An earlier mint trades under this ticker; verify you are holding the address you meant to`);
+  }
+  if (d.deployerRisk?.available && d.deployerRisk.paths.length) {
+    const severe = d.deployerRisk.paths.filter((p) => SEVERE_RISK_CATEGORY.test(p.category ?? ""));
+    const lead = severe[0] ?? d.deployerRisk.paths[0];
+    const who = lead.seedName || lead.category || "a flagged entity";
+    const hops = lead.hops ? `, ${lead.hops} hop${lead.hops === 1 ? "" : "s"} away` : "";
+    if (severe.length) {
+      add(30);
+      flags.push(lead.direction === "backward"
+        ? `Deployer wallet was FUNDED by ${who}${hops} - launch capital traces to a ${lead.category ?? "flagged"} source`
+        : `Deployer wallet SENT funds to ${who}${hops} - a serious counterparty exposure`);
+    } else {
+      soft(6);
+      warnings.push(lead.direction === "backward"
+        ? `Deployer wallet received funds traceable to ${who}${hops} - worth scrutiny on where the launch capital came from`
+        : `Deployer wallet sent funds to ${who}${hops} - worth scrutiny on where the funds moved`);
+    }
+  }
+
   // --- counterfeit / known-rug clone (never relaxed - impersonation is intent) ---
   if (meta?.fakeToken) {
     add(45);
@@ -307,9 +367,25 @@ export function judge( // exported for unit tests only
       : "COUNTERFEIT - GoPlus flags this as a fake of an established token. You are not buying what you think.");
   }
   if (clones.length) {
-    add(50);
+    // The fingerprint is a hash of runtime bytecode, so it identifies a
+    // TEMPLATE, not a contract: every token a launchpad factory (Clanker, Pons,
+    // four.meme, Doppler) or an OpenZeppelin-template deployer mints shares it,
+    // and only storage differs. A prior DANGER earned on market conduct (dev
+    // sold, thin pool, fresh pair) says nothing about the code, so it cannot
+    // lend +50 to every sibling and cascade the org's ledger into DANGER. Only
+    // a confirmed code trap (RUG: honeypot-class) on a non-launchpad token is
+    // "the same trap redeployed"; everything else is a disclosure.
     const names = clones.slice(0, 3).map((c) => `$${c.symbol}`).join(", ");
-    flags.push(`Byte-identical to ${clones.length} token${clones.length === 1 ? "" : "s"} we already flagged (${names}) - the same trap redeployed under a new name`);
+    const traps = clones.filter((c) => c.verdict === "RUG");
+    const launchpadTemplate = launch?.kind === "launchpad";
+    if (traps.length && !launchpadTemplate) {
+      add(50);
+      flags.push(`Byte-identical to ${traps.length} confirmed trap${traps.length === 1 ? "" : "s"} we already flagged (${traps.slice(0, 3).map((c) => `$${c.symbol}`).join(", ")}) - the same trap redeployed under a new name`);
+    } else if (launchpadTemplate) {
+      warnings.push(`Shares its bytecode with ${clones.length} token${clones.length === 1 ? "" : "s"} we flagged (${names}) - ${launch?.venue ?? "launchpad"} mints every token from one template, so this is the venue's code, not evidence about this token; it is judged on its own signals`);
+    } else {
+      warnings.push(`Shares its bytecode with ${clones.length} token${clones.length === 1 ? "" : "s"} we flagged on market conduct (${names}) - a common template, not a confirmed code trap; the flags were about how those tokens traded, not what the code does`);
+    }
   }
   if (meta?.airdropScam) { add(30); flags.push("Flagged as an AIRDROP SCAM - the token was dusted to wallets to lure them to a drainer site"); }
   if (meta?.trustListed) positives.push("On GoPlus's trust list of established, reputable tokens");
@@ -428,7 +504,10 @@ export function judge( // exported for unit tests only
     // no longer flip). Renounced or established => disclosure, not risk points.
     // Fake-renounce is the exception that PROVES renounce state: if the chain
     // says the owner is already zero, the heuristic mis-read a custom renounce.
-    const disarmed = s.ownerRenounced || established;
+    // A renounce that a hidden owner or take-back path survives disarms
+    // nothing; an unmeasured owner is treated as live (ownerRenounced is
+    // false in both cases, and hiddenOwner is re-checked for frozen dossiers).
+    const disarmed = (s.ownerRenounced && !s.hiddenOwner && !s.takeBack) || established;
     for (const f of code.flags) {
       const cite = ` [${f.file.split("/").pop()}:${f.line}]`;
       const line = f.detail.replace(/\.$/, "") + cite;
@@ -580,8 +659,12 @@ export function judge( // exported for unit tests only
   // absolute check missed that case entirely. Established tokens are exempt
   // from the ratio read: their depth lives on CEXes, not the DEX pool.
   const liqRatio = mcap > 0 ? effectiveLiq / mcap : null;
-  if (effectiveLiq < 2500) { add(10); warnings.push(`Dust liquidity (${money(effectiveLiq)}) - the pool is too small to exit through at any size`); }
-  else if (!established && liqRatio != null && liqRatio < 0.05 && mcap >= 250_000) { add(15); warnings.push(`Liquidity is only ${(liqRatio * 100).toFixed(1)}% of the market cap (${money(effectiveLiq)} backing ${money(mcap)}) - the paper value cannot exit through this pool`); }
+  // The paper-value trap (a material cap with almost no depth) is worth 15; a
+  // dust pool is worth 10. A dust pool under a material cap is BOTH, so it can
+  // never score less than a slightly deeper pool under the same cap.
+  const paperValueTrap = !established && liqRatio != null && liqRatio < 0.05 && mcap >= 250_000;
+  if (effectiveLiq < 2500) { add(paperValueTrap ? 15 : 10); warnings.push(`Dust liquidity (${money(effectiveLiq)}) - the pool is too small to exit through at any size${paperValueTrap ? `, and it backs a ${money(mcap)} market cap that cannot exit through it` : ""}`); }
+  else if (paperValueTrap) { add(15); warnings.push(`Liquidity is only ${(liqRatio! * 100).toFixed(1)}% of the market cap (${money(effectiveLiq)} backing ${money(mcap)}) - the paper value cannot exit through this pool`); }
   else if (effectiveLiq < 15000 && (liqRatio == null || liqRatio < 0.3)) { add(10); warnings.push(`Thin liquidity (${money(effectiveLiq)}${xchain?.isOft ? " across all chains" : ""}) - easy to drain, brutal to exit`); }
   else if (effectiveLiq < 15000 && liqRatio != null && liqRatio >= 0.3) { positives.push(`Liquidity is ${(liqRatio * 100).toFixed(0)}% of market cap (${money(effectiveLiq)} vs ${money(mcap)}) - deep for the token's size; absolute depth still caps large positions`); }
 
@@ -659,7 +742,10 @@ export function judge( // exported for unit tests only
 
   // --- corroboration positives ---
   if (d.cg?.listed) positives.push(`Listed on CoinGecko${d.cg.rank ? ` (rank #${d.cg.rank})` : ""}${d.cg.cexCount ? `, ${d.cg.cexCount} CEX market${d.cg.cexCount === 1 ? "" : "s"}` : ""}`);
-  if (s.contractPropertiesAssessed !== false && s.ownerRenounced && !s.mintable && !s.freezable && !s.takeBack)
+  // "No owner powers remain" is only true when the owner was actually measured
+  // and no hidden owner or take-back path survives the renounce. Frozen
+  // dossiers from before ownerAssessed existed still carry the raw flags.
+  if (s.contractPropertiesAssessed !== false && s.ownerAssessed !== false && s.ownerRenounced && !s.mintable && !s.freezable && !s.takeBack && !s.hiddenOwner)
     positives.push(d.chain === "solana" ? "Mint and freeze authority revoked - the token is set in stone" : "Ownership renounced - no owner powers remain");
 
   // --- verdict ---
@@ -689,7 +775,7 @@ const UNCLASSIFIED: TokenClassification = { kind: "unknown", confidence: "low", 
 const EVM = (chain: string) => chain !== "solana";
 
 // ---- the transparent checklist: what was examined, including clean results ----
-function buildChecks(
+export function buildChecks( // exported for unit tests only
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
   tk: TokenomicsView, launch: LaunchProvenance | null, verification: RegistryVerification | null,
@@ -736,8 +822,20 @@ function buildChecks(
       na ? "na" : (sol ? s.freezable : s.pausable) ? "fail" : "pass",
       na ? "Unchecked" : (sol ? s.freezable : s.pausable) ? "Accounts/transfers can be frozen" : "No freeze power"),
     chk("owner", "authority", "Ownership",
-      na ? "na" : s.hiddenOwner || s.takeBack ? "fail" : s.ownerRenounced ? "pass" : "warn",
-      na ? "Unchecked" : s.hiddenOwner ? "Hidden owner detected" : s.takeBack ? "Renounce is reversible" : s.ownerRenounced ? "Renounced / authorities revoked" : "Owner is active"),
+      na ? "na" : s.hiddenOwner || s.takeBack ? "fail" : s.ownerAssessed === false ? "na" : s.ownerRenounced ? "pass" : "warn",
+      na ? "Unchecked" : s.hiddenOwner ? "Hidden owner detected" : s.takeBack ? "Renounce is reversible" : s.ownerAssessed === false ? "Owner not identified by the safety provider - owner powers treated as live" : s.ownerRenounced ? "Renounced / authorities revoked" : "Owner is active"),
+    chk("sanctions", "deployer", "OFAC sanctions screen",
+      d.sanctionsScreen?.available
+        ? (d.sanctionsScreen.sanctioned.length ? "fail" : "pass")
+        : d.capApplied === "ofac_sanctioned_address" ? "fail" : "na",
+      d.sanctionsScreen?.available
+        ? (d.sanctionsScreen.sanctioned.length
+          ? `${d.sanctionsScreen.sanctioned.length} of ${d.sanctionsScreen.checked} screened addresses (deployer + top holders) on the US Treasury SDN list`
+          : `${d.sanctionsScreen.checked} address${d.sanctionsScreen.checked === 1 ? "" : "es"} (deployer + top holders) screened; no SDN match`)
+        : d.capApplied === "ofac_sanctioned_address" ? "OFAC SDN hit recorded by the audit"
+        : d.sanctionsScreen?.reason === "no_screenable_addresses" ? "No deployer or holder address resolvable on this chain - nothing to screen (a coverage limit, not a clean result)"
+        : d.sanctionsScreen ? "Sanctions list unavailable - the screen did not finish"
+        : "Not run"),
     chk("lp", "liquidity", "Liquidity custody",
       na ? "na" : tk.lp.status === "burned" || tk.lp.status === "locked" || tk.lp.status === "launchpad-locked" ? "pass" : tk.lp.status === "unlocked" ? "fail" : tk.lp.status === "nft-position" || established ? "pass" : "warn",
       na ? "Unchecked"
@@ -795,8 +893,10 @@ function buildChecks(
       na ? "na" : (d.bundleRisk === "high" || (tk.realHolderTopPct) > 50 || (rc?.insiderPct ?? 0) >= 25) && !established ? "fail" : d.bundleRisk !== "low" || tk.realHolderTopPct > 25 || (rc?.insiderPct ?? 0) >= 10 ? "warn" : "pass",
       na ? "Unchecked" : `${s.holderCount.toLocaleString()} holders, top non-pool ${tk.realHolderTopPct.toFixed(0)}%${tk.pools.length ? `, ${tk.pools.length} pool(s) set aside` : ""}${rc?.insidersDetected ? `, insider net ${rc.insiderPct}%` : ""}`),
     chk("authenticity", "authority", "Authenticity",
-      meta == null ? "na" : meta.fakeToken || meta.airdropScam ? "fail" : meta.trustListed ? "pass" : "pass",
-      meta == null ? (sol ? "n/a on Solana" : "Unchecked") : meta.fakeToken ? "Counterfeit of an established token" : meta.airdropScam ? "Airdrop-scam pattern" : meta.trustListed ? "On GoPlus trust list" : "No counterfeit signal"),
+      d.cloneCheck?.checked && d.cloneCheck.audited === "later" && d.cloneCheck.clones.length ? "fail"
+        : meta == null ? "na" : meta.fakeToken || meta.airdropScam ? "fail" : meta.trustListed ? "pass" : "pass",
+      d.cloneCheck?.checked && d.cloneCheck.audited === "later" && d.cloneCheck.clones.length ? `Ticker collision - ${d.cloneCheck.note}`
+        : meta == null ? (sol ? "n/a on Solana" : "Unchecked") : meta.fakeToken ? "Counterfeit of an established token" : meta.airdropScam ? "Airdrop-scam pattern" : meta.trustListed ? "On GoPlus trust list" : "No counterfeit signal"),
     chk("cluster-selling", "market", "Launch cluster still selling",
       (() => {
         if (!sellers?.recentTape) return "na";
@@ -829,11 +929,21 @@ function buildChecks(
         return "No deployer, seller or contract match in the curated cluster registry";
       })()),
     chk("deployer", "deployer", "Deployer history",
-      s.serialScammerCreator || dep.priorRugs > 0 ? "fail" : dep.address ? "pass" : "na",
-      s.serialScammerCreator ? "Has shipped honeypots before" : dep.priorRugs > 0 ? `${dep.priorRugs} flagged tokens in ledger` : dep.address ? "No adverse history found" : "Deployer not resolvable"),
+      s.serialScammerCreator || dep.priorRugs > 0 || (d.deployerRisk?.available && d.deployerRisk.paths.some((p) => SEVERE_RISK_CATEGORY.test(p.category ?? ""))) ? "fail"
+        : d.deployerRisk?.available && d.deployerRisk.paths.length ? "warn"
+        : dep.address ? "pass" : "na",
+      s.serialScammerCreator ? "Has shipped honeypots before"
+        : dep.priorRugs > 0 ? `${dep.priorRugs} flagged tokens in ledger`
+        : d.deployerRisk?.available && d.deployerRisk.paths.length ? `Funding trace: ${d.deployerRisk.paths[0].direction === "backward" ? "funded via" : "exposed to"} ${d.deployerRisk.paths[0].seedName || d.deployerRisk.paths[0].category || "a flagged entity"}`
+        : dep.address ? "No adverse history found"
+        : d.deployer ? "Creator record is a factory contract - no wallet history to attribute" : "Deployer not resolvable"),
     chk("code", "code", "Source code read",
-      !code.checked ? "na" : code.verified ? (code.flags.some((f) => f.severity === "critical") ? "fail" : code.flags.some((f) => f.severity === "high") ? "warn" : "pass") : "warn",
-      !code.checked ? (sol ? "SPL - standard program, no per-token code" : "Not checked") : code.verified ? `${code.stats?.functions ?? 0} functions read, ${code.flags.length} flag${code.flags.length === 1 ? "" : "s"}` : "Source unverified - unreadable"),
+      !code.checked ? "na"
+        : d.capApplied === "documented_scanner_concealment" || d.findings.some((f) => f.tone === "bad" && f.source === "contract source") ? "fail"
+        : code.verified ? (code.flags.some((f) => f.severity === "critical") ? "fail" : code.flags.some((f) => f.severity === "high") ? "warn" : "pass") : "warn",
+      !code.checked ? (sol ? "SPL - standard program, no per-token code" : "Not checked")
+        : d.capApplied === "documented_scanner_concealment" || d.findings.some((f) => f.tone === "bad" && f.source === "contract source") ? "The source documents defeating a safety scanner"
+        : code.verified ? `${code.stats?.functions ?? 0} functions read, ${code.flags.length} flag${code.flags.length === 1 ? "" : "s"}` : "Source unverified - unreadable"),
     chk("market", "market", "Market conduct",
       d.findings.some((f) => /wash-trad/i.test(f.claim)) ? "fail" : (d.liquidityUsd ?? 0) < 15000 ? "warn" : "pass",
       d.findings.some((f) => /wash-trad/i.test(f.claim)) ? "Wash-trading signature" : `${money(d.liquidityUsd ?? 0)} liquidity, ${money(d.vol24 ?? 0)} 24h volume`),

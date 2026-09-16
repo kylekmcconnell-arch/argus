@@ -8,6 +8,7 @@
 import { apiFetch } from "./net";
 import { retryFetch, retryFetchWithFreshTimeout } from "../lib/retry";
 import { arr, bool, num, rec, str } from "../lib/json";
+import { largestInsiderClusterPercent, supplySharePercent } from "../token/sources";
 
 // ---- RugCheck (Solana) ----
 export interface RugcheckRisk {
@@ -21,8 +22,8 @@ export interface RugcheckReport {
   score: number; // normalized risk score, higher = riskier
   risks: RugcheckRisk[];
   rugged: boolean;
-  insidersDetected: number; // wallets in detected insider networks
-  insiderPct: number; // % of supply those networks hold
+  insidersDetected: number; // wallets RugCheck's transfer graph marks as insiders
+  insiderPct: number; // % of supply the LARGEST connected cluster holds
   lockerPct: number; // % of LP in known lockers
   lockerNames: string[];
 }
@@ -32,10 +33,29 @@ export async function rugcheckReport(mint: string): Promise<RugcheckReport | nul
     const res = await retryFetchWithFreshTimeout(`https://api.rugcheck.xyz/v1/tokens/${mint}/report`, 15_000);
     if (!res.ok) return null;
     const d = rec(await res.json());
-    const networks = arr(d.insiderNetworks).map(rec);
-    const insidersDetected = networks.reduce((total, network) => total + num(network.size ?? arr(network.wallets).length), 0);
-    const supply = num(rec(d.token).supply);
-    const insiderTokens = networks.reduce((total, network) => total + num(network.tokenAmount), 0);
+    const supply = rec(d.token).supply;
+    // Insider networks OVERLAP (one wallet sits in several), so summing their
+    // sizes or token amounts invents supply that does not exist: two 40%
+    // clusters read as 80%. The token lane (src/token/sources.ts) and
+    // api/holders.ts take the single largest cluster, range-checked; the threat
+    // lane reads the same payload the same way so the two can never disagree.
+    const networks = arr(d.insiderNetworks).map(rec).map((network) => {
+      const size = network.size ?? (Array.isArray(network.wallets) ? network.wallets.length : undefined);
+      return {
+        size: typeof size === "number" || typeof size === "string" ? num(size) : null,
+        percent: supplySharePercent(network.tokenAmount, supply),
+      };
+    });
+    const largestCluster = networks.reduce<{ size: number | null; percent: number | null } | null>(
+      (best, network) => (network.percent != null && (best?.percent == null || network.percent > best.percent) ? network : best),
+      null,
+    );
+    // RugCheck's own graph count is the wallet figure the cluster panel shows;
+    // the largest cluster's size is the floor when the graph count is absent.
+    const graphInsiders = d.graphInsidersDetected;
+    const insidersDetected = typeof graphInsiders === "number" || typeof graphInsiders === "string"
+      ? num(graphInsiders)
+      : largestCluster?.size ?? 0;
     const lockers = Object.values(rec(d.lockers)).map(rec);
     const lpLockedUsd = lockers.reduce((total, locker) => total + num(locker.usdcLocked), 0);
     const marketLpUsd = num(d.totalMarketLiquidity);
@@ -50,7 +70,7 @@ export async function rugcheckReport(mint: string): Promise<RugcheckReport | nul
       })),
       rugged: bool(d.rugged),
       insidersDetected,
-      insiderPct: supply > 0 ? Math.round((insiderTokens / supply) * 100) : 0,
+      insiderPct: Math.round(largestInsiderClusterPercent(networks) ?? 0),
       lockerPct: marketLpUsd > 0 ? Math.min(100, Math.round((lpLockedUsd / marketLpUsd) * 100)) : 0,
       lockerNames: [...new Set(lockers.map((locker) => str(locker.type) || "locker"))],
     };

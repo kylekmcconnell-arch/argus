@@ -32,7 +32,13 @@ export async function crossChain(chain: string, address: string, selfLiquidityUs
     // tradeable (native OFTs). Adapters / Solana-program peers return nothing.
     let liquidityUsd: number | null = null;
     try {
-      const pair = pickPair(await dexByToken(p.address), p.address);
+      // OFTs are routinely deployed at the SAME address on every chain, and
+      // dexByToken answers with pairs from all of them. Without the chain
+      // filter every peer leg resolved to the single deepest pool in the mesh,
+      // so a $500K Ethereum pool was counted once per peer and a $10K Base leg
+      // read as a $1M mesh. A leg with no pool on its own chain stays null
+      // (bridged but unresolved), never another chain's depth.
+      const pair = pickPair((await dexByToken(p.address)).filter((x) => x.chainId === p.chain), p.address);
       liquidityUsd = pair?.liquidity?.usd ?? null;
     } catch { /* leg shown as bridged-but-unresolved */ }
     legs.push({ chain: p.chain, address: p.address, liquidityUsd, self: false });
