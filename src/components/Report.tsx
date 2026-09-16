@@ -119,6 +119,7 @@ import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQue
 import { hasBoundProjectDescription, hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
 import { SocialActivityPanel } from "./SocialActivityPanel";
 import { reportOpeningNarrative } from "../lib/reportNarrative";
+import { requestChallenge } from "../lib/challenge";
 import { useReportLane } from "../reports/shared/ReportLaneContext";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import {
@@ -2885,7 +2886,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     } else if (auditFacts.length > 0) {
       heroProofChips.push({ key: "audits", label: "Audits cited", value: `x${auditFacts.length}`, tone: "neutral", href: "#basic-facts", title: "Audit claims verified on project materials; auditor-site confirmation not recorded." });
     } else if (auditQuestion && basicFactQuestionOutcome(auditQuestion) !== "checked_empty") {
-      heroProofChips.push({ key: "audits", label: "No audit on record", tone: "caution", href: "#verification-next", title: "No security audit could be verified for this project. This is a finding about the project, not a scan error; the audit search did not fully finish, so a rescan may still surface one." });
+      heroProofChips.push({ key: "audits", label: "No audit on record", tone: "caution", href: "#follow-up-questions", title: "No security audit could be verified for this project. This is a finding about the project, not a scan error; the audit search did not fully finish, so a rescan may still surface one." });
     } else if (auditQuestion) {
       heroProofChips.push({ key: "audits", label: "No audit published", tone: "caution", href: "#basic-facts", title: "A completed search found no independent security audit for this project." });
     }
@@ -2911,7 +2912,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         label: "Token claim unproven",
         ...(claimedSymbol ? { value: `$${claimedSymbol}` } : {}),
         tone: "caution",
-        href: "#verification-next",
+        href: "#follow-up-questions",
         title: `This account claims a token${claimedSymbol ? ` ($${claimedSymbol})` : ""} that no official site or registry record links to it. Anything sold under that name is unproven; this is the core scam vector, so verify before capital moves.`,
       });
     }
@@ -2999,8 +3000,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     { href: "#report-summary", label: "Decision", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
     ...(presentation.primaryScore && governingAxes.length > 0 ? [{ href: "#composition" as const, label: "Score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" /> }] : []),
     ...(roles.includes(SubjectClass.PROJECT)
-      ? [{ href: "#dossier-product" as const, label: "What the product is", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]
-      : [{ href: "#dossier" as const, label: "Summary", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]),
+      ? [{ href: "#basic-facts" as const, label: "What the product is", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]
+      : [{ href: "#report-summary" as const, label: "Summary", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]),
     ...(f.entityContinuity?.events.length ? [{ href: "#key-developments" as const, label: "Key developments", icon: <ArrowsClockwise aria-hidden="true" size={15} weight="bold" /> }] : []),
     { href: "#identity-evidence", label: "People", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
     ...(f.projectToken ? [{ href: "#project-token" as const, label: "Market", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
@@ -3425,7 +3426,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
               </span>
               {!legacyCoverageNotCaptured && diligenceChecks.length > 0 && (
                 <a
-                  href={decisionQuestionCount > 0 ? "#verification-next" : "#scan-methodology"}
+                  href={decisionQuestionCount > 0 ? "#follow-up-questions" : "#scan-methodology"}
                   className="ml-auto inline-flex min-h-8 items-center text-[11px] text-signal-lift underline-offset-2 hover:underline"
                 >
                   {decisionQuestionCount > 0
@@ -3827,7 +3828,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 )}
                 {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
                 {showBasicFacts && (
-                  <div className="mt-5">
+                  <div id="basic-facts" className="mt-5 scroll-mt-28">
                     <BasicFactsPanel
                       facts={basicFacts}
                       leads={basicFactLeads}
@@ -3856,7 +3857,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
             )}
             {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
             {showBasicFacts && (
-              <div className="mt-5">
+              <div id="basic-facts" className="mt-5 scroll-mt-28">
                 <BasicFactsPanel
                   facts={basicFacts}
                   leads={basicFactLeads}
@@ -4098,10 +4099,42 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 emptyCopy=""
               />
             )}
+            {/* Inline dropdown, not an anchor: the old link targeted
+                #verification-next, which the current presentation style hides
+                (display:none via legacy-reading-duplicate), so clicking it did
+                nothing. The questions now open in place, and every one carries
+                its own way to give input through the report's Eye. */}
             {!decisionFrameworkUnavailable && decisionQuestionCount > 0 && (
-              <p className="border-t border-line/60 py-3 text-[11.5px] text-ink-faint">
-                Follow up on: <a href="#verification-next" className="text-caution underline-offset-2 hover:underline">{decisionQuestionCount} important {decisionQuestionCount === 1 ? "question" : "questions"}</a>.
-              </p>
+              <details id="follow-up-questions" className="group scroll-mt-28 border-t border-line/60 py-3">
+                <summary className="flex cursor-pointer list-none flex-wrap items-center gap-1.5 text-[11.5px] text-ink-faint [&::-webkit-details-marker]:hidden">
+                  <span>
+                    Follow up on: <span className="text-caution underline-offset-2 group-hover:underline">{decisionQuestionCount} important {decisionQuestionCount === 1 ? "question" : "questions"}</span>.
+                  </span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-caution)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="transition-transform group-open:rotate-180"><path d="M6 9l6 6 6-6" /></svg>
+                  <span className="group-open:hidden">Open the list to read and address each one.</span>
+                </summary>
+                <ul className="mt-3 space-y-2.5" aria-label="Open follow-up questions">
+                  {allVerificationQuestions.map((item) => (
+                    <li key={item.id} className="text-[12.5px] leading-relaxed text-ink-dim">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                        <span className="min-w-0 text-ink">{item.title}</span>
+                        {item.provenance && <span className="mono text-[10px] uppercase tracking-[0.08em] text-ink-faint">{item.provenance}</span>}
+                        <button
+                          type="button"
+                          onClick={() => requestChallenge(`Open question: ${item.title}`)}
+                          className="btn-chip ml-auto shrink-0"
+                        >
+                          Give input
+                        </button>
+                      </div>
+                      {item.detail && <p className="mt-0.5 text-[11.5px] leading-snug text-ink-faint">{item.detail}</p>}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-3 text-[11px] leading-snug text-ink-faint">
+                  "Give input" opens this report's assistant with the question attached: state what you know and it is weighed against the report's frozen evidence. A verifiable link (GitHub, website, X account, contract) can also be added under "Add missing info".
+                </p>
+              </details>
             )}
           </div>
         </div>
