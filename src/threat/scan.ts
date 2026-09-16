@@ -24,6 +24,7 @@ import {
 import { crossChain } from "./crosschain";
 import { migrationCheck } from "./migration";
 import { launchProvenance } from "./launch";
+import { describeCabalHit, findCabalLaunch, findCabalWallet } from "../data/cabals";
 import { registryVerification } from "./verification";
 import { sellStructure } from "./sellers";
 import { siteSafety } from "./sitesafety";
@@ -233,6 +234,36 @@ async function deployerRep(d: TokenDossier): Promise<DeployerRep> {
 // ---- the judge: additive risk points + tiered plain-English strings ----
 // Wording rules (deliberate): second person, the scary word in CAPS, one
 // sentence per finding, no jargon without a translation.
+/**
+ * Which of the wallets selling on the recent 24h tape are tied to the launch:
+ * launch-block snipers and deployer-seeded wallets from the sell history, the
+ * deployer/creator itself, and wallets curated as farm or snipe-ring members.
+ * Exported for unit tests.
+ */
+export function clusterSelling(sellers: SellStructure | null, chain: string): { wallets: number; usd: number; kinds: string[] } {
+  const tape = sellers?.recentTape;
+  if (!sellers || !tape || !tape.topSellers.length) return { wallets: 0, usd: 0, kinds: [] };
+  const byWallet = new Map(sellers.topSellers.map((s) => [s.wallet.toLowerCase(), s]));
+  const kinds = new Set<string>();
+  let wallets = 0;
+  let usd = 0;
+  for (const t of tape.topSellers) {
+    const w = t.wallet.toLowerCase();
+    const h = byWallet.get(w);
+    const reg = findCabalWallet(chain, w);
+    const tied: string[] = [];
+    if (t.isDeployer || t.isCreator || h?.isDeployer) tied.push("deployer");
+    if (h?.sameBlockSniper) tied.push("launch-block sniper");
+    if (h?.deployerSeeded) tied.push("deployer-seeded");
+    if (reg && (reg.wallet.role === "sniper" || reg.wallet.role === "farm" || reg.wallet.role === "hub")) tied.push(`${reg.cabal.kind.replace(/-/g, " ")} wallet`);
+    if (!tied.length) continue;
+    wallets += 1;
+    usd += t.usd;
+    tied.forEach((k) => kinds.add(k));
+  }
+  return { wallets, usd, kinds: [...kinds] };
+}
+
 export function judge( // exported for unit tests only
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
@@ -440,6 +471,28 @@ export function judge( // exported for unit tests only
   if (s.serialScammerCreator) { add(45); flags.push("The deployer has shipped HONEYPOTS before - a serial scammer's wallet"); }
   if (dep.priorRugs > 0) { add(30); flags.push(`This deployer already has ${dep.priorRugs} flagged token${dep.priorRugs === 1 ? "" : "s"} in our ledger - a rug factory pattern`); }
   else if (dep.priorScans.length > 0) warnings.push(`Deployer seen before: ${dep.priorScans.length} prior scan${dep.priorScans.length === 1 ? "" : "s"} in the ledger, none flagged`);
+  // Curated cluster knowledge (src/data/cabals.ts): a deployer or a top seller
+  // that is a hand-traced farm wallet is the strongest prior the scanner has,
+  // stronger than the ledger, because the trace already established the
+  // operator's method. A benign promo ring is a disclosure, never a penalty.
+  const cabalDeployer = findCabalWallet(d.chain, dep.address);
+  const cabalToken = findCabalLaunch(d.chain, d.address);
+  const cabalSellers = (sellers?.topSellers ?? [])
+    .map((s) => findCabalWallet(d.chain, s.wallet))
+    .filter((h): h is NonNullable<typeof h> => h != null && h.cabal.intent === "nefarious");
+  if (cabalToken && cabalToken.cabal.intent === "nefarious") {
+    add(30); flags.push(`This contract is an indexed ${cabalToken.launch.outcome.replace(/-/g, " ")} launch by the ${cabalToken.cabal.name} - ${cabalToken.launch.note}`);
+  } else if (cabalToken) {
+    warnings.push(`Indexed as a token pushed by the ${cabalToken.cabal.name} (${cabalToken.cabal.kind.replace(/-/g, " ")}, read as ${cabalToken.cabal.intent}) - ${cabalToken.launch.note}`);
+  }
+  if (cabalDeployer && cabalDeployer.cabal.intent === "nefarious") {
+    add(30); flags.push(`The deployer is a known ${describeCabalHit(cabalDeployer)} - the same operation has been traced end to end`);
+  } else if (cabalDeployer) {
+    warnings.push(`The deployer is a ${describeCabalHit(cabalDeployer)}`);
+  }
+  if (cabalSellers.length && !(cabalDeployer && cabalDeployer.cabal.intent === "nefarious")) {
+    add(20); flags.push(`${cabalSellers.length} top seller${cabalSellers.length === 1 ? " is" : "s are"} known launch-farm wallets (${[...new Set(cabalSellers.map((h) => h.cabal.name))].join("; ")}) - a professional sniping operation is in this token`);
+  }
 
   // --- code review (the ARGUS engine) ---
   if (code.verified) {
@@ -573,6 +626,17 @@ export function judge( // exported for unit tests only
     else if (seeded.length === 1) { add(8); warnings.push("A wallet the deployer funded directly has sold into the pool"); }
     const sniperExits = sellers.topSellers.filter((s) => s.sameBlockSniper && s.realizedExitPct >= 80 && !s.isDeployer && !s.deployerSeeded);
     if (sniperExits.length >= 3 && !established) { add(8); warnings.push(`${sniperExits.length} launch-block snipers have exited ~all of their position - early coordinated money is leaving`); }
+    // Ongoing selling by launch-connected wallets. A launch-block sniper or a
+    // deployer-seeded wallet that is STILL selling on the recent tape, days
+    // after launch, means the launch cluster never left: it is feeding supply
+    // into every bid. Measured, not concluded: the count and USD are the claim.
+    const cs = clusterSelling(sellers, d.chain);
+    if (cs.wallets >= 2 && cs.usd >= 250 && !established) {
+      add(12);
+      flags.push(`Launch cluster still selling: ${cs.wallets} wallet${cs.wallets === 1 ? "" : "s"} tied to the launch (${cs.kinds.join(", ")}) sold ~$${Math.round(cs.usd).toLocaleString()} in the last 24h - the early coordinated money is exiting into current buyers`);
+    } else if (cs.wallets >= 1 && cs.usd >= 50) {
+      warnings.push(`${cs.wallets} launch-connected wallet${cs.wallets === 1 ? "" : "s"} (${cs.kinds.join(", ")}) sold ~$${Math.round(cs.usd).toLocaleString()} in the last 24h`);
+    }
     // Recent-tape demand read: sustained selling with no bids on a non-established
     // token is a dying market (holders exiting, nobody buying).
     const tp = sellers.recentTape;
@@ -652,6 +716,28 @@ export function judge( // exported for unit tests only
   if (cls.kind === "security-like") warnings.push("Dividend / revenue-share mechanics make this SECURITY-LIKE - securities-law exposure (delisting, enforcement) sits on top of ordinary market risk");
   if (cls.kind === "meme" && cls.confidence !== "low") positives.push("Assessed as a meme coin - judged on exit mechanics, liquidity custody and holder spread, not on utility it never claimed (an anon team is the norm in this class)");
 
+  // --- development vs the claim ---
+  // The frozen shipping summary from the scan-time GitHub lane. A token that
+  // claims to do something is judged on whether anyone is still building it;
+  // a meme never made the claim, so only the contradictions that cut across
+  // class (a rally with no code behind it, a departed lead, bought stars)
+  // score there. Absence is never penalised: no repository is "unread".
+  const ship = d.shipping;
+  if (ship && ship.grade !== "unknown") {
+    const claimsToBuild = cls.kind === "utility" || cls.kind === "rwa" || cls.kind === "security-like" || cls.kind === "equity";
+    if (claimsToBuild && ship.grade === "stalled") { soft(10); warnings.push(`Development has stalled in the linked GitHub (${ship.headline.replace(/\.$/, "")}) - a utility claim with nobody visibly building it`); }
+    else if (claimsToBuild && ship.grade === "thin") { soft(6); warnings.push(`Development is thin in the linked GitHub (${ship.headline.replace(/\.$/, "")}) - not enough visible work to carry the product claim`); }
+    if (ship.market === "price-without-shipping") { soft(8); warnings.push("Price rose over the quarter while commits fell - the move is not backed by visible development"); }
+    if (ship.leadDeparted) { soft(6); warnings.push("The lead committer of the prior two months has stopped while others continue - a departure signal on the team that ships"); }
+    if (ship.claimsUnsupported >= 2 && ship.claimsUnsupported > ship.claimsSupported) { soft(6); warnings.push(`${ship.claimsUnsupported} shipping claims in the project's posts have nothing in the repositories behind them`); }
+    if (ship.stars === "suspect") { soft(5); warnings.push("Star growth on the flagship repository has the timing and proportions of purchased stars"); }
+    if (ship.health === "poor") { soft(3); warnings.push("Repository health is poor - failing checks, no licence, or dependencies left unlocked for over a year"); }
+    if (ship.grade === "shipping-team") positives.push(`A team is shipping: ${ship.headline.replace(/\.$/, "")}`);
+    else if (ship.grade === "shipping-solo" && claimsToBuild) warnings.push(`Shipping, but one person: ${ship.headline.replace(/\.$/, "")} - key-person risk on the product claim`);
+    if (ship.live === "live") positives.push("Commits are followed by on-chain deploys or package publishes - the public code is what goes live");
+    if (ship.adoption === "used") positives.push("Outsiders contribute pull requests, issues or forks - the hardest attention signal to fake");
+  }
+
   // --- corroboration positives ---
   if (d.cg?.listed) positives.push(`Listed on CoinGecko${d.cg.rank ? ` (rank #${d.cg.rank})` : ""}${d.cg.cexCount ? `, ${d.cg.cexCount} CEX market${d.cg.cexCount === 1 ? "" : "s"}` : ""}`);
   // "No owner powers remain" is only true when the owner was actually measured
@@ -715,6 +801,15 @@ export function buildChecks( // exported for unit tests only
       posture == null
         ? "Not covered by major-venue chart data"
         : `${posture.stance.charAt(0).toUpperCase()}${posture.stance.slice(1)} - ${posture.readings[0]?.observations[0] ?? "no dominant signal"}`),
+    chk("shipping", "code", "Development",
+      d.shipping == null || d.shipping.grade === "unknown" ? "na"
+        : d.shipping.grade === "stalled" || d.shipping.market === "price-without-shipping" || d.shipping.leadDeparted ? "warn"
+          : "pass",
+      d.shipping == null
+        ? "No public repository is linked from the project's official sources; on-chain deploys and package publishes stand in for a code read"
+        : d.shipping.grade === "unknown"
+          ? "The linked GitHub could not be read"
+          : `${d.shipping.headline} Cadence ${d.shipping.cadenceStatus}; code ${d.shipping.live === "live" ? "reaches production" : d.shipping.live === "committed-only" ? "committed, not yet shipped" : d.shipping.live === "deploys-without-code" ? "ships from somewhere unseen" : "production status unknown"}; ${d.shipping.reposRead} repos read.`),
     chk("honeypot", "honeypot", "Can holders sell?",
       na ? "na" : s.honeypot || s.cannotSellAll || (hp?.siphoned ?? 0) > 0 ? "fail" : "pass",
       na ? "Not verifiable on this chain keyless" : s.honeypot ? "Selling is blocked" : (hp?.siphoned ?? 0) > 0 ? "Real holders' sells are siphoned" : hp && hp.holdersAnalyzed >= 5 ? `Sells simulated for ${hp.holdersAnalyzed} real holders` : s.simChecked ? "Real sell simulated successfully" : "No sell restriction found on-chain"),
@@ -800,6 +895,37 @@ export function buildChecks( // exported for unit tests only
         : meta == null ? "na" : meta.fakeToken || meta.airdropScam ? "fail" : meta.trustListed ? "pass" : "pass",
       d.cloneCheck?.checked && d.cloneCheck.audited === "later" && d.cloneCheck.clones.length ? `Ticker collision - ${d.cloneCheck.note}`
         : meta == null ? (sol ? "n/a on Solana" : "Unchecked") : meta.fakeToken ? "Counterfeit of an established token" : meta.airdropScam ? "Airdrop-scam pattern" : meta.trustListed ? "On GoPlus trust list" : "No counterfeit signal"),
+    chk("cluster-selling", "market", "Launch cluster still selling",
+      (() => {
+        if (!sellers?.recentTape) return "na";
+        const cs = clusterSelling(sellers, d.chain);
+        return cs.wallets >= 2 && cs.usd >= 250 ? "fail" : cs.wallets >= 1 ? "warn" : "pass";
+      })(),
+      (() => {
+        if (!sellers?.recentTape) return "No 24h trade tape available for this pair";
+        const cs = clusterSelling(sellers, d.chain);
+        return cs.wallets
+          ? `${cs.wallets} launch-connected wallet${cs.wallets === 1 ? "" : "s"} (${cs.kinds.join(", ")}) sold ~$${Math.round(cs.usd).toLocaleString()} in the last 24h`
+          : `None of the ${sellers.recentTape.distinctSellers} wallets selling in the last 24h is a launch-block sniper, deployer-seeded, the deployer, or a curated farm wallet`;
+      })()),
+    chk("cluster", "deployer", "Known launch cluster",
+      (() => {
+        const dh = findCabalWallet(d.chain, dep.address);
+        const th = findCabalLaunch(d.chain, d.address);
+        const sh = (sellers?.topSellers ?? []).some((s) => findCabalWallet(d.chain, s.wallet)?.cabal.intent === "nefarious");
+        if ((dh && dh.cabal.intent === "nefarious") || (th && th.cabal.intent === "nefarious") || sh) return "fail";
+        if (dh || th) return "warn";
+        return "pass";
+      })(),
+      (() => {
+        const dh = findCabalWallet(d.chain, dep.address);
+        const th = findCabalLaunch(d.chain, d.address);
+        if (th) return `${th.cabal.name} · ${th.launch.outcome.replace(/-/g, " ")}`;
+        if (dh) return describeCabalHit(dh);
+        const sh = (sellers?.topSellers ?? []).map((s) => findCabalWallet(d.chain, s.wallet)).filter((h) => h?.cabal.intent === "nefarious");
+        if (sh.length) return `${sh.length} top seller${sh.length === 1 ? "" : "s"} in a traced launch farm`;
+        return "No deployer, seller or contract match in the curated cluster registry";
+      })()),
     chk("deployer", "deployer", "Deployer history",
       s.serialScammerCreator || dep.priorRugs > 0 || (d.deployerRisk?.available && d.deployerRisk.paths.some((p) => SEVERE_RISK_CATEGORY.test(p.category ?? ""))) ? "fail"
         : d.deployerRisk?.available && d.deployerRisk.paths.length ? "warn"

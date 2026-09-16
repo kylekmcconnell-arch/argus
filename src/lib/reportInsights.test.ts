@@ -287,3 +287,35 @@ describe("isConcentratedLiquidityPool", () => {
     expect(isConcentratedLiquidityPool(undefined, undefined)).toBe(false);
   });
 });
+
+describe("deriveNoticedSignals · development", () => {
+  const shipping = (over: Record<string, unknown> = {}) => ({
+    version: 1 as const, target: "acme", capturedAt: "2026-09-15T00:00:00Z", windowDays: 90,
+    grade: "shipping-team" as const, headline: "Shipping as a team: 45 commits in 90 days from 3 people.",
+    cadenceStatus: "shipping" as const, totalCommits: 45, activeWeeks: 13, distinctHuman: 3, concentration: "team" as const,
+    authorship: "hand-authored" as const, origin: "original" as const, stars: "organic" as const, market: "mixed" as const,
+    claimsSupported: 0, claimsUnsupported: 0, live: "unknown" as const, adoption: "unknown" as const, health: "sound" as const,
+    leadDeparted: false, reposRead: 3, commitsRead: 45, releasesInWindow: 1,
+    ...over,
+  });
+
+  it("lifts a stall, a rally without code, a departed lead and bought stars into the noticed rail", () => {
+    const signals = deriveNoticedSignals({ shipping: shipping({ grade: "stalled", market: "price-without-shipping", leadDeparted: true, stars: "suspect" }), anchors: { development: "#development" } });
+    expect(signals.map((s) => [s.id, s.severity])).toEqual([
+      ["development-stalled", "alert"],
+      ["development-price-without-shipping", "alert"],
+      ["development-lead-departed", "watch"],
+      ["development-stars-suspect", "watch"],
+    ]);
+    expect(signals[0].anchor).toBe("#development");
+  });
+
+  it("notes a team whose code reaches production, and says nothing about an unread repository", () => {
+    const live = deriveNoticedSignals({ shipping: shipping({ live: "live", adoption: "used" }) });
+    expect(live.map((s) => s.id)).toEqual(["development-shipping-team"]);
+    expect(live[0].headline).toBe("A team is shipping and the code reaches production");
+    expect(live[0].detail).toContain("Outsiders contribute");
+    expect(deriveNoticedSignals({ shipping: shipping({ grade: "unknown" }) })).toEqual([]);
+    expect(deriveNoticedSignals({ shipping: shipping() })).toEqual([]);
+  });
+});

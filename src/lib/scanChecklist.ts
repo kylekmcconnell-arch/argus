@@ -276,6 +276,30 @@ export function chainDisplayName(chain: string | undefined): string {
   return CHAIN_DISPLAY_NAMES[key] ?? `the ${key} chain`;
 }
 
+/**
+ * The development row. A frozen shipping summary closes it; a linked GitHub
+ * that could not be read leaves it unavailable; no linked repository at all is
+ * an honest unknown, never a finding: teams build in private, and the on-chain
+ * deploy trail is the read that stands in.
+ */
+function shippingCheck(dossier: TokenDossier, outcomeNotRecorded: string): ScanCheck {
+  const ship = dossier.shipping;
+  const linked = (dossier.socials ?? []).some((x) => /github\.com\//i.test(x.url));
+  if (ship && ship.grade !== "unknown") {
+    const finding = ship.grade === "stalled" || ship.market === "price-without-shipping" || ship.leadDeparted || ship.stars === "suspect" || (ship.claimsUnsupported >= 2 && ship.claimsUnsupported > ship.claimsSupported);
+    return {
+      checkId: "github-forensics",
+      decisionCritical: true,
+      label: "GitHub forensics",
+      status: finding ? "finding" : "confirmed",
+      note: `${ship.headline} ${ship.distinctHuman} human committer${ship.distinctHuman === 1 ? "" : "s"}, cadence ${ship.cadenceStatus}, code ${ship.live === "live" ? "reaching production" : ship.live === "committed-only" ? "committed only" : ship.live === "deploys-without-code" ? "shipped from an unseen source" : "production status unread"}; ${ship.reposRead} repos and ${ship.commitsRead} commits read.`,
+    };
+  }
+  if (ship) return { checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unavailable", note: "a GitHub account is linked but could not be read" };
+  if (linked) return { checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unknown", note: `a GitHub account is linked; ${outcomeNotRecorded}` };
+  return { checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unknown", note: "no public repository is linked from the project's official sources; teams that build in private are read through on-chain deploys instead" };
+}
+
 // ── Token / investigation ────────────────────────────────────────────────
 export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
   const evm = dossier.chain !== "solana";
@@ -491,7 +515,7 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
 
   checks.push({ checkId: "documents-audits", decisionCritical: true, label: "Documents & audits", status: "unknown", note: `whitepaper, security audits, and documents; ${outcomeNotRecorded}` });
   checks.push({ checkId: "news-press", decisionCritical: true, label: "News & press", status: "unknown", note: outcomeNotRecorded });
-  checks.push({ checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unknown", note: `when a GitHub account is linked; ${outcomeNotRecorded}` });
+  checks.push(shippingCheck(dossier, outcomeNotRecorded));
   checks.push({ checkId: "trust-graph-connections", decisionCritical: true, label: "Trust-graph reconciliation", status: "unknown", note: `shared token creators or funders with flagged projects; ${outcomeNotRecorded}` });
 
   return checks;

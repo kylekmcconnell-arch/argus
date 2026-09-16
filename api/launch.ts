@@ -136,6 +136,23 @@ const PONS_FACTORIES = new Set([
   // (PonsV2LaunchLocker, per the verified ILaunchpadV2 source).
   "0x3711cea4feade896c913c68f01eda97cb06d1a42",
 ]);
+// o1 Launchpad (o1.exchange) on Robinhood Chain: no bonding curve, the full
+// supply goes into a Uniswap v4 pool under the o1 launch hook in the creation
+// tx, so the pool reads as plain uniswap on DexScreener and only the creating
+// contract gives it away. Every current and historical suite factory from o1's
+// machine-readable registry (docs.o1.exchange/launchpad/reference/
+// launch-contract-suites.json, lastUpdatedAt 2026-09-11) plus the current
+// Launch Token Deployer: Blockscout reports the one-shot token deployer, not
+// the factory, as contractFactory for $WRESTLER (read 2026-09-14). Blockscout
+// verifies the current factory under the source name RWAERC20LaunchpadFactory.
+const O1_FACTORIES = new Set([
+  "0xce9c48cfa068947f77738c81be406b53338e5b0d", // Launch Factory, launchpad-v4-minimal (current)
+  "0xf86dfdb678d8e5d932100ef479a59fa65a82a5eb", // Launch Token Deployer (current)
+  "0xe64ac4113848bbc1a6dde1a6d1da96720a36f297", // robinhood-rwa-timestamp-v4 factory (historical)
+  "0x411f21283d3e492bc395027329e08f9f4f560ba5", // robinhood-timestamp-v3 factory (historical)
+  "0x76f0923ac4df0a079a10f628a7bce6426ccd344a", // robinhood-block-v2 factory (historical)
+  "0x8b40fc20c405d47d725c9723d056a1c6f62bbccf", // robinhood-block-v1 factory (historical)
+]);
 // Bankr launches on Base/Robinhood run on Doppler protocol (not Clanker since
 // mid-2026): no vanity suffix, no fixed deployer EOA (per-user 4337 wallets) -
 // but Bankr's own keyless API resolves any of its Doppler tokens per-address.
@@ -170,6 +187,7 @@ export async function robinhoodCreatorVenue(token: string): Promise<string | nul
     const row = Array.isArray(d?.result) ? d.result[0] : null;
     const factory = String(row?.contractFactory ?? row?.contractCreator ?? "").toLowerCase();
     if (PONS_FACTORIES.has(factory)) return "pons";
+    if (O1_FACTORIES.has(factory)) return "o1";
     return null;
   } catch {
     return null;
