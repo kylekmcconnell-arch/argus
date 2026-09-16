@@ -39,8 +39,10 @@ const hostOf = (raw: string): string | null => {
 
 const escapeRe = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// The bare profile URL only: x.com/<handle>/status/123 is an embedded post,
+// which any page can quote, not a claim that the page belongs to the account.
 const handleBacklinkPattern = (account: string): RegExp =>
-  new RegExp(`(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${escapeRe(account)}(?:[/?#"'\\s<]|$)`, "i");
+  new RegExp(`(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${escapeRe(account)}/?(?=[?#"'\\s<)]|$)`, "i");
 
 export function isLinkHubUrl(value: unknown): boolean {
   if (typeof value !== "string" || !value.trim()) return false;

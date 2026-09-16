@@ -77,11 +77,17 @@ export interface SubjectProfile {
   website?: string;    // independently resolved first-party site, when available
   /**
    * Additional official websites unique-ID bound to this same X profile
-   * (twitterapi website + entity URLs from that exact profile record).
+   * (every URL in the twitterapi website field of that exact profile record).
    * Includes the primary `website` when it came from that record. Never
-   * search leads or model-suggested URLs.
+   * search leads, model-suggested URLs, or URLs typed into the bio text.
    */
   official_websites?: string[];
+  /**
+   * URLs the account typed into its bio description. Leads about the
+   * account only: a bio link is never a bind key, because any account can
+   * paste the real project's site into its bio.
+   */
+  bio_websites?: string[];
   /** What the profile website actually served when fetched (sitecheck outcome).
    * "live" means a substantial product surface was observed on the domain. */
   site_substance_status?: "live" | "coming_soon" | "unreachable" | "access_blocked" | "unavailable" | "client_rendered";
@@ -97,6 +103,8 @@ export interface SubjectProfile {
   joined: string;
   /** Raw ISO account creation time; `joined` is display-only and cannot be parsed. */
   account_created_at?: string;
+  /** Provider-frozen X user id. Stable across handle changes; the handle is not. */
+  x_user_id?: string;
   identity_confidence: IdentityConfidence;
   identity_note: string;
   /**

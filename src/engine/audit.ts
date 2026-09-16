@@ -180,6 +180,13 @@ export interface Venture extends EvidenceProvenance {
   project_name: string;
   x_handle?: string;   // the venture's own X account (canonical bridge key)
   domain?: string;     // the venture's website host (secondary bridge key)
+  /**
+   * Where `domain` came from. A model-supplied domain is a lead for the
+   * graph bridge only: it never becomes an official counterparty scope for
+   * fact verification, even after the venture itself is verified by a
+   * licensed employment record (which proves the employer, not its website).
+   */
+  domain_evidence_origin?: EvidenceOrigin;
   role: string;
   period: string;
   outcome: VentureOutcome;

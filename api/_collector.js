@@ -12626,9 +12626,9 @@ function defaultRequestForMode() {
 function defaultLookupForMode() {
   return evalMode() === "replay" ? replayLookup : defaultLookup;
 }
-async function readBoundedText(response) {
+async function readBoundedText(response, maxBytes = MAX_TEXT_BYTES) {
   const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_TEXT_BYTES) return null;
+  if (Number.isFinite(declared) && declared > maxBytes) return null;
   if (!response.body) return Buffer.alloc(0);
   const chunks = [];
   const reader = response.body.getReader();
@@ -12637,13 +12637,17 @@ async function readBoundedText(response) {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_TEXT_BYTES) {
+    if (total > maxBytes) {
       await reader.cancel();
       return null;
     }
     chunks.push(Buffer.from(value));
   }
   return Buffer.concat(chunks, total);
+}
+async function readBoundedResponseText(response, maxBytes = MAX_TEXT_BYTES) {
+  const bytes = await readBoundedText(response, maxBytes);
+  return bytes === null ? null : bytes.toString("utf8");
 }
 async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8", asset = false) {
   const request = dependencies.request ?? defaultRequestForMode();
@@ -13468,27 +13472,31 @@ async function publicXAccountState(handle, fetcher = deadlineFetch) {
     statusCapturedAt: captureTimestamp()
   };
 }
+var pushHttpUrl = (out) => (value) => {
+  if (typeof value === "string" && /^https?:\/\//i.test(value) && !out.includes(value)) {
+    out.push(value);
+  }
+};
+var entityBucketUrls = (bucket, push) => {
+  if (!Array.isArray(bucket)) return;
+  for (const entry of bucket) push(entry?.expanded_url ?? entry?.url);
+};
 function twitterapiOfficialUrls(p) {
   const out = [];
-  const push = (value) => {
-    if (typeof value === "string" && /^https?:\/\//i.test(value) && !out.includes(value)) {
-      out.push(value);
-    }
-  };
-  const takeEntityUrls = (entities) => {
-    for (const bucket of [entities?.url?.urls, entities?.description?.urls]) {
-      if (!Array.isArray(bucket)) continue;
-      for (const entry of bucket) {
-        push(entry?.expanded_url ?? entry?.url);
-      }
-    }
-  };
-  takeEntityUrls(p?.profile_bio?.entities);
-  takeEntityUrls(p?.entities);
+  const push = pushHttpUrl(out);
+  entityBucketUrls(p?.profile_bio?.entities?.url?.urls, push);
+  entityBucketUrls(p?.entities?.url?.urls, push);
   push(p?.url);
   push(p?.profile_url);
   push(p?.website);
   push(p?.link);
+  return out;
+}
+function twitterapiBioUrls(p) {
+  const out = [];
+  const push = pushHttpUrl(out);
+  entityBucketUrls(p?.profile_bio?.entities?.description?.urls, push);
+  entityBucketUrls(p?.entities?.description?.urls, push);
   return out;
 }
 function pickProfileWebsite(urls) {
@@ -13529,8 +13537,10 @@ async function getProfile2(handle) {
         bio: p.description,
         followers: p.followers ?? p.followers_count,
         createdAt: p.createdAt ?? p.created_at,
+        ...String(p.id ?? p.id_str ?? "").trim() ? { userId: String(p.id ?? p.id_str).trim() } : {},
         website: pickWebsite(p),
         officialWebsites: twitterapiOfficialUrls(p),
+        bioWebsites: twitterapiBioUrls(p),
         image
       };
     } catch {
@@ -14095,8 +14105,9 @@ ${corpus.map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "";
   const text2 = await generalWebSearch(system, `Project X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, builders, team members, and advisors of this exact project? Search the exact handle and inspect official-site "built by" attribution, founder interviews, podcasts, and ecosystem press. Give each person's precise role here AND their other projects.${postContext}`, { cacheKey: `team-x-v2:${h}` });
   return parseTeamJSON(text2, h, "X content");
 }
-async function findTeamOnSite(domain, projectName2) {
+async function findTeamOnSite(domain, projectName2, subjectHandle) {
   const clean4 = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  const subjectKey = (subjectHandle ?? "").replace(/^@/, "").toLowerCase();
   if (!clean4 && !projectName2) return [];
   const anchor = clean4 ? `website ${clean4}${projectName2 ? ` (${projectName2})` : ""}` : `project "${projectName2}"`;
   const system = `You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project: founders, cofounders, the WHOLE leadership team (CEO/CTO/COO/CFO/CMO), engineering and product leads, AND advisors/backers. DIG hard and be COMPLETE: inspect the official homepage and footer for founder, builder, creator, and 'built by' attribution; Google the exact domain and X handle with 'team'/'leadership'/'about'/'founder'; open the project's LinkedIn company page and read its 'People' tab (list the employees it shows); and check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people. Do NOT stop at one or two; keep going until you have the full public roster you can verify. Connect each name to their X handle and LinkedIn where possible. Include ONLY real people genuinely tied to THIS specific project (match the domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT. Do NOT downgrade a founder to advisor. For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal. This exposes serial founders and cross-project ties. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
@@ -14107,16 +14118,17 @@ async function findTeamOnSite(domain, projectName2) {
     ...project ? [`"${project}" founder LinkedIn`, `"${project}" cofounder`] : []
   ];
   const text2 = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for "built by", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, {
-    cacheKey: `team-site-v2:${clean4 || projectName2}`,
+    cacheKey: `team-site-v3:${subjectKey}:${clean4 || projectName2}`,
     queries: officialSiteQueries.length ? officialSiteQueries : void 0
   });
   return parseTeamJSON(text2, void 0, clean4 ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
-async function enrichTeamIdentities(project, people) {
+async function enrichTeamIdentities(project, people, subjectHandle) {
   if (!people.length) return [];
+  const subjectKey = (subjectHandle ?? "").replace(/^@/, "").toLowerCase();
   const system = `You are an OSINT researcher with live web and X search. For each named team member of the given project, find their X (Twitter) handle and LinkedIn profile. Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/..."}]}. Provide one entry per input name, with fields omitted when unknown. NEVER invent. Never use em dashes.`;
   const list = people.map((p) => `${p.name}${p.role ? ` (${p.role})` : ""}`).join("; ");
-  const text2 = await generalWebSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich:${project}:${people.map((p) => p.name).sort().join("|")}` });
+  const text2 = await generalWebSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich-v2:${subjectKey}:${project}:${people.map((p) => p.name).sort().join("|")}` });
   if (!text2) return [];
   const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -14139,6 +14151,26 @@ var connectorAllowed = (gap, allowed) => (gap.toLowerCase().match(/[a-z']+/g) ??
 var OPERATOR_VERB = "building|builder|build|built|we\\s+built|i\\s+built|dev(?:eloper)?|developing|creator|created|creating|founder|co-?founder|ceo|cto|coo|cfo|cmo|chief\\s+\\w+\\s+officer|behind|maker|making|shipping|ships|working\\s+on|work\\s+on|author\\s+of|team\\s+behind";
 var MAX_FOLLOWING_PAGES = 2;
 var FOLLOWING_PAGE_SIZE = 100;
+var ROLE_NEGATION_BEFORE = /\b(?:ex|former(?:ly)?|prev(?:iously)?|past|no\s+longer|not|never|until|retired|stepped\s+down\s+as|used\s+to\s+be)\b[\s:,-]*(?:the\s+|an?\s+)?$/i;
+var ROLE_NEGATION_WINDOW = 40;
+function roleClaimNegated(text2, roleStart) {
+  return ROLE_NEGATION_BEFORE.test(text2.slice(Math.max(0, roleStart - ROLE_NEGATION_WINDOW), roleStart));
+}
+function verbBelongsToNextHandle(text2, match) {
+  if (!/,/.test(match[0])) return false;
+  const tail = text2.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 40);
+  return /^[^@|\n]{0,30}@[A-Za-z0-9_]{2,30}/.test(tail);
+}
+function currentRoleMatch(text2, candidates) {
+  for (const candidate of candidates) {
+    const match = candidate.match;
+    if (!match) continue;
+    if (roleClaimNegated(text2, candidate.roleStart(match))) continue;
+    if (candidate.after && verbBelongsToNextHandle(text2, match)) continue;
+    return match;
+  }
+  return null;
+}
 function operatorClaimInBio(bio, subjectHandle, subjectName3) {
   const text2 = String(bio ?? "").replace(/\s+/g, " ").trim();
   if (!text2) return null;
@@ -14152,7 +14184,10 @@ function operatorClaimInBio(bio, subjectHandle, subjectName3) {
   const subject = `(?:@?(?:${names.join("|")}))`;
   const before = new RegExp(`\\b(${OPERATOR_VERB})\\b[^@|\\n]{0,40}${subject}\\b`, "i");
   const after = new RegExp(`${subject}\\b[^@|\\n]{0,16}\\b(${OPERATOR_VERB})\\b`, "i");
-  const match = text2.match(before) ?? text2.match(after);
+  const match = currentRoleMatch(text2, [
+    { match: text2.match(before), roleStart: (m) => m.index ?? 0, after: false },
+    { match: text2.match(after), roleStart: (m) => (m.index ?? 0) + m[0].length - (m[1] ?? "").length, after: true }
+  ]);
   if (!match) return null;
   const verb = (match[1] ?? "").toLowerCase().replace(/\s+/g, " ");
   const role = /co-?founder/.test(verb) ? "co-founder" : /founder/.test(verb) ? "founder" : /\bcoo\b|chief operating/.test(verb) ? "coo" : /\bceo\b|chief executive/.test(verb) ? "ceo" : /\bcto\b|chief technology/.test(verb) ? "cto" : /\bcfo\b|chief financial/.test(verb) ? "cfo" : /^(?:we built|i built|built)$/.test(verb) ? "founder" : /creator|created|creating|maker|making/.test(verb) ? "creator" : /dev/.test(verb) ? "developer" : "operator";
@@ -14173,7 +14208,10 @@ function projectRoleClaimInBio(bio, projectHandle) {
     `${at}\\b[^@\\n]{0,24}\\b((?:${PROJECT_BIO_ROLE})(?:\\s*[,/&]\\s*(?:${PROJECT_BIO_ROLE}))*)\\b`,
     "i"
   );
-  const match = text2.match(before) ?? text2.match(after);
+  const match = currentRoleMatch(text2, [
+    { match: text2.match(before), roleStart: (m) => m.index ?? 0, after: false },
+    { match: text2.match(after), roleStart: (m) => (m.index ?? 0) + m[0].length - (m[1] ?? "").length, after: true }
+  ]);
   if (!match) return null;
   const raw = (match[1] ?? "").toLowerCase().replace(/\s+/g, " ");
   const role = /we[- ]?built/.test(raw) ? "builder" : /co-?founder/.test(raw) ? /coo/.test(raw) ? "co-founder, coo" : "co-founder" : /founder/.test(raw) ? "founder" : /ceo/.test(raw) ? "ceo" : /coo/.test(raw) ? "coo" : /cto/.test(raw) ? "cto" : "founder";
@@ -14590,16 +14628,30 @@ async function twitterUserGraphPage(path, handle, key) {
     return null;
   }
 }
+var REVERSE_BIO_MEMO_TTL_MS = 10 * 6e4;
+var REVERSE_BIO_MEMO_MAX = 64;
 var reverseBioMemo = /* @__PURE__ */ new Map();
+function resetReverseBioMemo() {
+  reverseBioMemo.clear();
+}
 async function discoverReverseBioFromTwitterapi(subjectHandle, subjectName3, projectBio) {
   const memoKey = subjectHandle.replace(/^@/, "").toLowerCase() || "_";
   const hit = reverseBioMemo.get(memoKey);
-  if (hit) return hit;
+  if (hit && Date.now() - hit.at < REVERSE_BIO_MEMO_TTL_MS) return hit.pending;
+  if (hit) reverseBioMemo.delete(memoKey);
   const pending = discoverReverseBioFromTwitterapiUncached(subjectHandle, subjectName3, projectBio);
-  reverseBioMemo.set(memoKey, pending);
-  pending.catch(() => {
-    if (reverseBioMemo.get(memoKey) === pending) reverseBioMemo.delete(memoKey);
-  });
+  if (reverseBioMemo.size >= REVERSE_BIO_MEMO_MAX) {
+    const oldest = reverseBioMemo.keys().next().value;
+    if (oldest !== void 0) reverseBioMemo.delete(oldest);
+  }
+  const slot = { at: Date.now(), pending };
+  reverseBioMemo.set(memoKey, slot);
+  const forget = () => {
+    if (reverseBioMemo.get(memoKey) === slot) reverseBioMemo.delete(memoKey);
+  };
+  pending.then((result) => {
+    if (result.unavailable) forget();
+  }, forget);
   return pending;
 }
 async function discoverReverseBioFromTwitterapiUncached(subjectHandle, _subjectName, projectBio) {
@@ -14626,20 +14678,24 @@ async function discoverReverseBioFromTwitterapiUncached(subjectHandle, _subjectN
       tweetTexts: [...prev.tweetTexts ?? [], ...candidate.tweetTexts ?? []].slice(0, 8)
     });
   };
+  let unavailable = false;
   try {
-    const [mentionsSearch, tweetSearch, mentionTimeline, followings, followers] = await Promise.all([
+    const reads = await Promise.all([
       twitterSearchPayload(`@${handle}`, key),
       twitterSearchPayload(handle, key),
       twitterUserGraphPage("mentions", handle, key),
       twitterUserGraphPage("followings", handle, key),
       twitterUserGraphPage("followers", handle, key)
     ]);
+    const [mentionsSearch, tweetSearch, mentionTimeline, followings, followers] = reads;
+    unavailable = reads.some((payload) => payload === null);
     for (const candidate of candidatesFromTweetPayload(mentionsSearch, subject)) add(candidate);
     for (const candidate of candidatesFromTweetPayload(tweetSearch, subject)) add(candidate);
     for (const candidate of candidatesFromTweetPayload(mentionTimeline, subject)) add(candidate);
     for (const candidate of candidatesFromUserList(followings, ["followings", "users"])) add(candidate);
     for (const candidate of candidatesFromUserList(followers, ["followers", "users"])) add(candidate);
   } catch {
+    unavailable = true;
   }
   const team = [];
   const personKeys = /* @__PURE__ */ new Set();
@@ -14673,7 +14729,8 @@ async function discoverReverseBioFromTwitterapiUncached(subjectHandle, _subjectN
       handle: `@${userName}`,
       role: claim.role,
       kind: "team",
-      evidence: bioClaim ? `their current X bio states "${claim.phrase}"` : `their current X bio @-mentions @${handle} and they wrote "${claim.phrase}"`,
+      claimSurface: bioClaim ? "bio" : "tweet",
+      evidence: bioClaim ? `their current X bio states "${claim.phrase}"` : `their current X bio @-mentions @${handle} and they wrote "${claim.phrase}" (a tweet, not a standing role claim; lead only)`,
       source: "reverse-bio twitterapi",
       sourceUrl: `https://x.com/${userName}`,
       projects: otherProjectsInBio(bio, handle)
@@ -14719,8 +14776,9 @@ async function discoverReverseBioFromTwitterapiUncached(subjectHandle, _subjectN
     } catch {
     }
   }
-  return { team: team.slice(0, 8), orgs: orgs.slice(0, 8) };
+  return { team: team.slice(0, 8), orgs: orgs.slice(0, 8), ...unavailable ? { unavailable: true } : {} };
 }
+var reverseBioClaimIsStanding = (member) => member.claimSurface !== "tweet";
 var PLURAL_FOUNDER_ROLE = /^(?:co-?)?founders$/i;
 var LIST_JOIN_AFTER = /^(?:[\s,]+and\s*|,\s*(?:and\s*)?|[\s,]*and\s*)@([A-Za-z0-9_]{2,30})/;
 function isPluralFounderRole(role) {
@@ -14983,9 +15041,12 @@ var xAdapter = {
       ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
+      if (prof.userId) ctx.evidence.profile.x_user_id = prof.userId;
       ctx.evidence.profile.website = canonicalPublicProfileWebsite(prof.website) ?? ctx.evidence.profile.website;
       const officialWebsites = (prof.officialWebsites ?? []).map((url) => canonicalPublicProfileWebsite(url)).filter((url) => Boolean(url));
       if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
+      const bioWebsites = (prof.bioWebsites ?? []).map((url) => canonicalPublicProfileWebsite(url)).filter((url) => Boolean(url));
+      if (bioWebsites.length) ctx.evidence.profile.bio_websites = bioWebsites;
       ctx.evidence.profile.followers = fmtFollowers(prof.followers);
       if (prof.image) {
         ctx.evidence.profile.avatar_url = prof.image;
@@ -15096,6 +15157,7 @@ var xAdapter = {
 
 // server/adapters/teampage.ts
 var normalizedApex = (domain) => domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./i, "").toLowerCase();
+var TEAM_PAGE_MAX_BYTES = 15e5;
 async function fetchWithOneRetry(url, init) {
   try {
     return await deadlineFetch(url, init());
@@ -15182,7 +15244,11 @@ async function discoverTeamDocumentUrls(domain) {
         );
         return "";
       }
-      const text2 = await response.text();
+      const text2 = await readBoundedResponseText(response, TEAM_PAGE_MAX_BYTES);
+      if (text2 === null) {
+        recordCall("site-fetch", "team-doc-index", 0, "response_too_large", "failed");
+        return "";
+      }
       recordCall("site-fetch", "team-doc-index", 0, void 0, "succeeded");
       return text2.slice(0, 25e4);
     } catch {
@@ -15482,7 +15548,12 @@ async function fetchPage(url, expectedApex, purpose = "roster", recoverOfficialT
   }
   let raw;
   try {
-    raw = await response.text();
+    const bounded2 = await readBoundedResponseText(response, TEAM_PAGE_MAX_BYTES);
+    if (bounded2 === null) {
+      recordCall("site-fetch", op, 0, "response_too_large", "failed");
+      return null;
+    }
+    raw = bounded2;
   } catch {
     recordCall("site-fetch", op, 0, "response_text_error", "failed");
     return null;
@@ -15759,8 +15830,9 @@ function isAntiBotResponse(response, body) {
   const challenge = response.headers.get("x-datadome") ?? response.headers.get("x-captcha") ?? "";
   return /challenge|captcha/i.test(`${mitigation} ${challenge}`) || antiBotChallengeBody(response.headers.get("content-type") ?? "text/html", body);
 }
-async function readBody(response, maxBytes) {
-  if (maxBytes === void 0 || !response.body) {
+var SUBSTANCE_PAGE_MAX_BYTES = 15e5;
+async function readBody(response, maxBytes = SUBSTANCE_PAGE_MAX_BYTES) {
+  if (!response.body) {
     return { text: await response.text(), truncated: false };
   }
   const reader = response.body.getReader();
@@ -16109,7 +16181,7 @@ var hostOf = (raw) => {
   }
 };
 var escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var handleBacklinkPattern = (account) => new RegExp(`(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${escapeRe(account)}(?:[/?#"'\\s<]|$)`, "i");
+var handleBacklinkPattern = (account) => new RegExp(`(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${escapeRe(account)}/?(?=[?#"'\\s<)]|$)`, "i");
 function isLinkHubUrl(value) {
   if (typeof value !== "string" || !value.trim()) return false;
   const host2 = hostOf(value);
@@ -17941,7 +18013,8 @@ function parsePdlPerson(p) {
       title: optionalString(title?.name),
       start: optionalString(x.start_date),
       end: optionalString(x.end_date),
-      url: optionalString(company?.website) || optionalString(company?.linkedin_url) || null
+      url: optionalString(company?.website) || optionalString(company?.linkedin_url) || null,
+      website: optionalString(company?.website) || null
     }];
   });
   const emailCandidates = [
@@ -17976,6 +18049,16 @@ function parsePdlPerson(p) {
   return { person, issues };
 }
 var httpify = (u) => u ? /^https?:\/\//.test(u) ? u : "https://" + u : null;
+function registrableHost(website) {
+  const raw = httpify(website);
+  if (!raw) return null;
+  try {
+    const host2 = new URL(raw).hostname.replace(/^www\./i, "").toLowerCase();
+    return /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(host2) ? host2 : null;
+  } catch {
+    return null;
+  }
+}
 function socialHandle(value) {
   if (!value?.trim()) return null;
   const raw = value.trim().replace(/^@/, "");
@@ -18110,6 +18193,14 @@ var peopledatalabsAdapter = {
           ex.provider = "peopledatalabs";
           ex.evidence_origin = "deterministic";
           ex.artifact_verified = true;
+          const recordDomain = registrableHost(x.website);
+          if (recordDomain) {
+            ex.domain = recordDomain;
+            ex.domain_evidence_origin = "deterministic";
+          } else if (ex.domain_evidence_origin === "model_lead" || ex.domain && ex.evidence_origin !== "deterministic") {
+            delete ex.domain;
+            delete ex.domain_evidence_origin;
+          }
         }
         confirmed.push(company);
       } else {
@@ -18585,6 +18676,13 @@ async function collectProfilePhoto(ctx) {
 
 // server/adapters/teamEnrichment.ts
 var MAX_ENRICHED_MEMBERS = 15;
+function enrichmentErrorCode(error) {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "TimeoutError") return "timeout";
+  if (name === "AbortError") return "aborted";
+  if (name === "TypeError" || name === "FetchError") return "transport_error";
+  return "provider_error";
+}
 var ORGANIZATION_NAME2 = /\b(?:dao|foundation|collective|company|studio|studios|network|media|magazine|protocol|community)\b/i;
 var ORGANIZATION_BIO = /\b(?:nft\s+(?:project|collection|community)|digital\s+collectibles?|official\s+(?:account|community)|community[- ](?:led|owned)\s+(?:project|platform)|we\s+(?:build|are|create|represent)|our\s+(?:community|project|mission|platform|collection))\b/i;
 var COLLECTIVE_NAME = /^(?:women|men|builders|artists|developers|friends|fans|community)\s+(?:of|for)\b/i;
@@ -18648,7 +18746,7 @@ async function enrichFirstPartyTeamAvatars(ctx) {
       ctx.emit({
         phase: "P1 \xB7 Team",
         label: "Team enrichment error",
-        detail: `${member.name}${member.handle ? ` (${member.handle})` : ""}: ${String(error)}`,
+        detail: `${member.name}${member.handle ? ` (${member.handle})` : ""}: profile enrichment failed (${enrichmentErrorCode(error)}); the member stays on the roster without a photo or follower count.`,
         source: "twitterapi.io",
         tone: "warn"
       });
@@ -22334,7 +22432,7 @@ function documentLinksExactHandle(document, handle) {
   const normalized4 = document.text.replace(/\\\//g, "/");
   const account = escapedPattern(handle.replace(/^@/, ""));
   return new RegExp(
-    `(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${account}(?:[/?#"'\\s<]|$)`,
+    `(?:["']|\\]\\()\\s*(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${account}/?(?=[?#"'\\s)]|$)`,
     "i"
   ).test(normalized4);
 }
@@ -24490,10 +24588,10 @@ function evidenceUrlMatchesVentureIdentity(scope, venture) {
   return identityTokens.some((token) => hostLabels.includes(token));
 }
 function verifiedVentureOfficialScopes(venture) {
-  const domainScope = safeVentureScope(venture.domain);
+  const domainScope = venture.domain_evidence_origin === "model_lead" ? null : safeVentureScope(venture.domain);
   const evidenceScope = safeVentureScope(venture.evidence_url);
   return [.../* @__PURE__ */ new Set([
-    ...domainScope ? [domainScope] : [],
+    ...domainScope && evidenceUrlMatchesVentureIdentity(domainScope, venture) ? [domainScope] : [],
     ...evidenceScope && evidenceUrlMatchesVentureIdentity(evidenceScope, venture) ? [evidenceScope] : []
   ])];
 }
@@ -24586,9 +24684,9 @@ function verifiedOrganizationScope(scope, name) {
   const lastLabel = hostLabels.at(-1) ?? "";
   const penultimateLabel = hostLabels.at(-2) ?? "";
   const suffixWidth = hostLabels.length >= 3 && lastLabel.length === 2 && COMMON_COUNTRY_PUBLIC_SUFFIX_LABELS.has(penultimateLabel) ? 2 : 1;
-  const registrableHost2 = hostLabels.slice(-(suffixWidth + 1)).join(".");
-  if (!registrableHost2.includes(".")) return null;
-  return `${url.protocol}//${registrableHost2}/`;
+  const registrableHost3 = hostLabels.slice(-(suffixWidth + 1)).join(".");
+  if (!registrableHost3.includes(".")) return null;
+  return `${url.protocol}//${registrableHost3}/`;
 }
 function verifiedFactAssetRelationships(ctx, facts) {
   const aliases2 = subjectAliases(ctx);
@@ -24932,6 +25030,30 @@ function cachedFactClosesDiscovery(ctx, question, facts) {
   if (ALWAYS_REFRESH_PREDICATES.has(question.predicate)) return false;
   return deterministicQuestionAnswerRefs(ctx, question, facts).length > 0;
 }
+function storedEntityIdentityMatchesProfile(stored, profile) {
+  if (!stored || typeof stored !== "object") return true;
+  const identity = stored;
+  const storedId = typeof identity.xUserId === "string" ? identity.xUserId.trim() : "";
+  if (storedId && profile.x_user_id && storedId !== profile.x_user_id.trim()) return false;
+  const storedCreated = typeof identity.accountCreatedAt === "string" ? Date.parse(identity.accountCreatedAt) : NaN;
+  const liveCreated = Date.parse(profile.account_created_at ?? "");
+  if (Number.isFinite(storedCreated) && Number.isFinite(liveCreated) && storedCreated !== liveCreated) return false;
+  if (profile.profile_collection_state !== "resolved") return true;
+  const key = (value) => String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const host2 = (value) => {
+    try {
+      return new URL(String(value ?? "")).hostname.replace(/^www\./i, "").toLowerCase();
+    } catch {
+      return "";
+    }
+  };
+  const storedName = key(identity.displayName);
+  const storedHost = typeof identity.websiteDomain === "string" ? identity.websiteDomain.replace(/^www\./i, "").toLowerCase() : "";
+  if (!storedName && !storedHost) return true;
+  const liveName = key(profile.display_name);
+  const liveHost = host2(profile.website);
+  return Boolean(storedName) && storedName === liveName || Boolean(storedHost) && storedHost === liveHost;
+}
 async function loadReusableBasicFacts(ctx) {
   if (env("ARGUS_ENTITY_REUSE") !== "on") return [];
   const rec2 = await readEntityFacts(
@@ -24941,6 +25063,17 @@ async function loadReusableBasicFacts(ctx) {
   );
   const cached = rec2?.facts && typeof rec2.facts === "object" ? rec2.facts.basicFacts : void 0;
   if (!Array.isArray(cached)) return [];
+  const storedIdentity = rec2?.facts && typeof rec2.facts === "object" ? rec2.facts.identity : void 0;
+  if (!storedEntityIdentityMatchesProfile(storedIdentity, ctx.evidence.profile)) {
+    ctx.emit({
+      phase: "P1 \xB7 Facts",
+      label: "Stored facts belong to a different account",
+      detail: `The knowledge base holds verified facts under ${ctx.handle}, but they were recorded for a different X account (user id, creation date, name or website no longer match the live profile). Nothing was reused; the handle appears to have changed hands.`,
+      source: "entity store",
+      tone: "warn"
+    });
+    return [];
+  }
   const projectionLike = (fact) => fact.providerProjection === true || /^captured \d{4}-\d{2}-\d{2}$/.test(String(fact.qualifier ?? "")) || /operates a live on-chain protocol/.test(String(fact.value ?? ""));
   return cached.filter((fact) => Boolean(fact) && typeof fact === "object" && typeof fact.predicate === "string" && typeof fact.value === "string" && fact.artifact_verified === true && fact.predicate !== "legal_regulatory_event" && !projectionLike(fact) && reusableFactIsFresh(fact) && (researchAudience(ctx) === "project" || isOrganizationAccount(ctx.evidence) || Boolean(ctx.evidence.profile.identity_binding) || fact.predicate === "official_identity" && identityFactBindsExactAuditedHandle(ctx, fact)));
 }
@@ -25023,6 +25156,8 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   };
   const recoverOfficialSiteBindings = async (leads) => {
     if (canonicalOfficialWebsite(ctx.evidence.profile.website)) return [];
+    const profile = ctx.evidence.profile;
+    if (profile.profile_collection_state === "resolved" && profile.x_account_status === "active") return [];
     const candidates = /* @__PURE__ */ new Map();
     for (const lead of leads) {
       if (!OFFICIAL_SITE_BINDING_PREDICATES.has(lead.predicate)) continue;
@@ -26298,6 +26433,12 @@ var offchainAdapter = {
 var CDX = "https://web.archive.org/cdx/search/cdx";
 var ARQUIVO_CDX = "https://arquivo.pt/wayback/cdx";
 var MAX_CAPTURES_PER_PATH = 4;
+var X_LINK_TARGET = /(?:href|content|url)\s*=\s*["']?\s*((?:https?:)?\/\/(?:www\.)?(?:x|twitter)\.com\/[^"'\s<>)]*)/gi;
+function xLinkTargets(html) {
+  const out = /* @__PURE__ */ new Set();
+  for (const match of html.matchAll(X_LINK_TARGET)) out.add(match[1]);
+  return [...out];
+}
 function archiveCorroborationLabels(arch) {
   const labels = [`archived ${arch.where} page (${arch.year})`];
   if (arch.disappearance) {
@@ -26409,33 +26550,37 @@ async function readCapture(snap) {
     const response = await deadlineFetch(archiveUrl, { signal: AbortSignal.timeout(5e3) });
     if (!response.ok) {
       recordCall(snap.provider, "snapshot-fetch", 0, `http_${response.status}`, "failed");
-      return { snap, text: null };
+      return { snap, text: null, profileLinks: [] };
     }
     let text2;
+    let profileLinks;
     try {
-      text2 = htmlToText(await response.text());
+      const html = await response.text();
+      profileLinks = xLinkTargets(html);
+      text2 = htmlToText(html);
     } catch {
       recordCall(snap.provider, "snapshot-fetch", 0, "response_text_error", "failed");
-      return { snap, text: null };
+      return { snap, text: null, profileLinks: [] };
     }
     if (!text2.trim()) {
       recordCall(snap.provider, "snapshot-fetch", 0, "empty_snapshot", "partial");
-      return { snap, text: null };
+      return { snap, text: null, profileLinks: [] };
     }
-    return { snap, text: text2 };
+    return { snap, text: text2, profileLinks };
   } catch {
     recordCall(snap.provider, "snapshot-fetch", 0, "transport_error", "failed");
-    return { snap, text: null };
+    return { snap, text: null, profileLinks: [] };
   }
 }
 function captureDate(timestamp) {
   return `${timestamp.slice(0, 4)}-${timestamp.slice(4, 6)}-${timestamp.slice(6, 8)}`;
 }
-async function archivedAffiliation(domain, subjectName3, ventureName) {
+async function archivedAffiliation(domain, subjectName3, ventureName, subjectHandle) {
   const clean4 = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
   if (!clean4 || !subjectName3) return null;
   const subjectNeedles = nameNeedles(subjectName3);
   if (!subjectNeedles.length) return null;
+  const handleNeedle = handleBacklinkNeedle(subjectHandle);
   const domainRoot = clean4.split(".")[0] ?? "";
   const ventureNeedles = [ventureName.trim().toLowerCase(), domainRoot].filter((t) => t.length >= 3).map(needleRegex);
   if (!ventureNeedles.length) return null;
@@ -26450,7 +26595,8 @@ async function archivedAffiliation(domain, subjectName3, ventureName) {
     provider: read2.snap.provider,
     url: read2.snap.provider === "arquivo" ? `https://arquivo.pt/wayback/${read2.snap.timestamp}/${read2.snap.original}` : `https://web.archive.org/web/${read2.snap.timestamp}/${read2.snap.original}`,
     year: read2.snap.timestamp.slice(0, 4),
-    where
+    where,
+    handleBound: Boolean(handleNeedle && read2.text !== null && (handleNeedle.test(read2.text) || read2.profileLinks.some((link) => handleNeedle.test(link))))
   });
   const paths = [`${clean4}/team`, `${clean4}/about`];
   for (const p of paths) {
@@ -26478,6 +26624,15 @@ async function archivedAffiliation(domain, subjectName3, ventureName) {
     return out;
   }
   return null;
+}
+function handleBacklinkNeedle(handle) {
+  const account = (handle ?? "").replace(/^@/, "").trim();
+  if (!/^[A-Za-z0-9_]{1,30}$/.test(account)) return null;
+  const escaped = account.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `(?:(?:^|[^A-Za-z0-9_])@${escaped}(?![A-Za-z0-9_]))|(?:(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${escaped}/?(?=[?#"'\\s<)]|$))`,
+    "i"
+  );
 }
 function needleRegex(needle) {
   const parts = needle.split(/\s+/).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
@@ -29189,6 +29344,7 @@ var coingeckoThrottle = { backoffMs: 1500 };
 var MAX_HISTORY_POINTS = 90;
 var PRICE_TOLERANCE = 0.25;
 var MIN_POOL_LIQUIDITY_USD = 25e3;
+var SITE_DECLARATION_MAX_BYTES = 4e5;
 var EVM_ADDRESS3 = /^0x[a-fA-F0-9]{40}$/;
 var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 var PLATFORM_CHAIN = {
@@ -29494,10 +29650,14 @@ var officialHomepages = (details) => {
   );
 };
 var domainsMatch = (left, right) => left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
+var AFFILIATION_DISCLAIMER = /\b(?:not\s+(?:officially\s+)?affiliated|unaffiliated|no\s+affiliation|unofficial|fan[\s-]?(?:page|account|club|made|run|community)|fans\s+of|parody|satire|tribute|community[\s-]run|run\s+by\s+(?:the\s+)?community)\b/i;
+function profileDisclaimsAffiliation(profile) {
+  return AFFILIATION_DISCLAIMER.test(`${profile.display_name ?? ""} ${profile.bio ?? ""}`);
+}
 function profileOfficialScopes(ctx) {
   const profile = ctx.evidence.profile;
   const capturedAt = Date.parse(profile.profile_captured_at ?? "");
-  if (profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi" || !Number.isFinite(capturedAt)) return [];
+  if (profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi" || !Number.isFinite(capturedAt) || profileDisclaimsAffiliation(profile)) return [];
   const seen = /* @__PURE__ */ new Set();
   const scopes = [];
   for (const value of [profile.website, ...profile.official_websites ?? []]) {
@@ -29512,7 +29672,7 @@ var homepageOnProfileDomain = (scopes, homepages) => scopes.length ? homepages.f
   const tokenScope = canonicalOfficialWebsite(candidate);
   return tokenScope !== null && scopes.some((scope) => domainsMatch(scope.domain, tokenScope.domain));
 }) : void 0;
-function verifyIdentity(ctx, details) {
+function verifyIdentity(ctx, details, namesakes) {
   const links = isRecord4(details.links) ? details.links : {};
   const officialHandle = cleanText2(links.twitter_screen_name);
   const matchedX = matchedOfficialX(ctx, details);
@@ -29526,11 +29686,36 @@ function verifyIdentity(ctx, details) {
   }
   const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), homepages);
   if (!homepage) return null;
+  const registryHandles = registryOfficialXHandles(details);
+  if (registryHandles.length && !registryHandles.some((handle) => handle === normalizeHandle3(ctx.handle))) {
+    namesakes?.push({
+      name: cleanText2(details.name),
+      symbol: cleanText2(details.symbol).toUpperCase(),
+      homepage,
+      officialX: `@${officialHandle.replace(/^@/, "") || registryHandles[0]}`
+    });
+    return null;
+  }
   return {
     verification: "official_domain",
     homepage,
     ...officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}
   };
+}
+function registryOfficialXHandles(details) {
+  const links = isRecord4(details.links) ? details.links : {};
+  const out = /* @__PURE__ */ new Set();
+  const screenName = normalizeHandle3(cleanText2(links.twitter_screen_name).replace(/^@/, ""));
+  if (screenName) out.add(screenName);
+  for (const key of COINGECKO_LINK_ARRAYS) {
+    const value = links[key];
+    const rows = Array.isArray(value) ? value : value ? [value] : [];
+    for (const row of rows) {
+      const handle = xHandleFromUrl(row);
+      if (handle) out.add(handle);
+    }
+  }
+  return [...out];
 }
 var xHandleFromUrlRaw = officialXProfileHandle;
 var xHandleFromUrl = (value) => {
@@ -29587,27 +29772,170 @@ function dexIdentity(ctx, row) {
 var SITE_EVM_ADDRESS = /0x[a-fA-F0-9]{40}/g;
 var SITE_SOLANA_ADDRESS = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/g;
 var addressKey = (address) => address.startsWith("0x") ? address.toLowerCase() : address;
-function siteContractCandidates(html, limit = 10) {
+var INFRA_CONTRACTS = /* @__PURE__ */ new Set([
+  // Ethereum
+  "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  // USDC
+  "0xdac17f958d2ee523a2206206994597c13d831ec7",
+  // USDT
+  "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+  // WETH
+  "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+  // WBTC
+  "0x6b175474e89094c44da98b954eedeac495271d0f",
+  // DAI
+  "0xae7ab96520de3a18e5e111b5eaab095312d7fe84",
+  // stETH
+  "0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0",
+  // wstETH
+  "0x000000000022d473030f116ddee9f6b43ac78ba3",
+  // Permit2
+  "0xca11bde05977b3631167028862be2a173976ca11",
+  // Multicall3
+  "0x7a250d5630b4cf539739df2c5dacb4c659f2488d",
+  // Uniswap V2 router
+  "0xe592427a0aece92de3edee1f18e0157c05861564",
+  // Uniswap V3 router
+  "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
+  // Uniswap universal router
+  // Base / Optimism (OP-stack predeploys share addresses)
+  "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+  // USDC (Base)
+  "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",
+  // USDbC
+  "0x4200000000000000000000000000000000000006",
+  // WETH (OP stack)
+  "0x4200000000000000000000000000000000000042",
+  // OP
+  "0x50c5725949a6f0c72e6c4a641f24049a917db0cb",
+  // DAI (Base)
+  "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf",
+  // cbBTC
+  "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
+  // USDC (Optimism)
+  "0x7f5c764cbc14f9669b88837ca1490cca17c31607",
+  // USDC.e (Optimism)
+  "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58",
+  // USDT (Optimism)
+  "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+  // DAI (Optimism / Arbitrum)
+  // Arbitrum
+  "0xaf88d065e77c8cc2239327c5edb3a432268e5831",
+  // USDC
+  "0xff970a61a04b1ca14834a43f5de4533ebddb5cc8",
+  // USDC.e
+  "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9",
+  // USDT
+  "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+  // WETH
+  "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
+  // WBTC
+  "0x912ce59144191c1204e64559fe8253a0e49e6548",
+  // ARB
+  // Polygon
+  "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+  // USDC
+  "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
+  // USDC.e
+  "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
+  // USDT
+  "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",
+  // WETH
+  "0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270",
+  // WMATIC / WPOL
+  "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",
+  // WBTC
+  "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063",
+  // DAI
+  // BNB chain
+  "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+  // WBNB
+  "0x55d398326f99059ff775485246999027b3197955",
+  // USDT
+  "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+  // USDC
+  "0xe9e7cea3dedca5984780bafc599bd69add087d56",
+  // BUSD
+  "0x2170ed0880ac9a755fd29b2688956bd959f933f8",
+  // ETH
+  "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c",
+  // BTCB
+  "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3",
+  // DAI
+  // Avalanche
+  "0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7",
+  // WAVAX
+  "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+  // USDC
+  "0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7",
+  // USDT
+  "0x49d5c2bdffac6ce2bfdb6640f4f80f226bc10bab",
+  // WETH.e
+  // Solana
+  "So11111111111111111111111111111111111111112",
+  // wSOL
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  // USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+  // USDT
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  // Token program
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+  // Token-2022
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+  // Associated token program
+  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s",
+  // Metaplex metadata
+  "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+  // Raydium AMM v4
+  "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",
+  // Jupiter aggregator
+  "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+  // pump.fun
+]);
+function isInfrastructureContract(address) {
+  return INFRA_CONTRACTS.has(addressKey(address));
+}
+var SITE_CONTRACT_LABEL = /\b(?:contract(?:\s+address)?|token\s+(?:address|contract)|mint(?:\s+address)?|c\.a\.|ca)\b/i;
+var SITE_LABEL_WINDOW_BEFORE = 200;
+var SITE_LABEL_WINDOW_AFTER = 80;
+var PRESENTATION_ATTRIBUTES = /\s(?:class|style|data-[\w-]+|aria-[\w-]+|id|role|tabindex|type|target|rel)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+var ANY_SITE_ADDRESS = /0x[a-fA-F0-9]{40}|(?:^|[^1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![1-9A-HJ-NP-Za-km-z])/;
+function siteDeclaredContractCandidates(html, limit = 10) {
+  const text2 = html.replace(PRESENTATION_ATTRIBUTES, " ").replace(/\s+/g, " ");
   const out = [];
   const seen = /* @__PURE__ */ new Set();
-  const take = (address) => {
-    const key = addressKey(address);
-    if (!seen.has(key)) {
-      seen.add(key);
-      out.push(address);
-    }
-    return out.length >= limit;
+  const declared = (address, index) => {
+    const before = text2.slice(Math.max(0, index - SITE_LABEL_WINDOW_BEFORE), index);
+    const labelsBefore = [...before.matchAll(new RegExp(SITE_CONTRACT_LABEL.source, "gi"))];
+    const lastBefore = labelsBefore[labelsBefore.length - 1];
+    if (lastBefore && !ANY_SITE_ADDRESS.test(before.slice((lastBefore.index ?? 0) + lastBefore[0].length))) return true;
+    const after = text2.slice(index + address.length, index + address.length + SITE_LABEL_WINDOW_AFTER);
+    const firstAfter = after.match(SITE_CONTRACT_LABEL);
+    if (!firstAfter || ANY_SITE_ADDRESS.test(after.slice(0, firstAfter.index ?? 0))) return false;
+    const labelEnd = index + address.length + (firstAfter.index ?? 0) + firstAfter[0].length;
+    const nextAddress = text2.slice(labelEnd, labelEnd + SITE_LABEL_WINDOW_AFTER).match(ANY_SITE_ADDRESS);
+    return !nextAddress || addressKey(nextAddress[0].replace(/^[^0-9A-Za-z]/, "")) === addressKey(address);
   };
-  for (const match of html.matchAll(SITE_EVM_ADDRESS)) {
+  for (const match of text2.matchAll(SITE_EVM_ADDRESS)) {
     const address = match[0];
     if (/^0x0{40}$/i.test(address) || /^0x0{38}dead$/i.test(address)) continue;
-    if (take(address)) return out;
+    const key = addressKey(address);
+    if (seen.has(key) || isInfrastructureContract(address) || !declared(address, match.index ?? 0)) continue;
+    seen.add(key);
+    out.push(address);
+    if (out.length >= limit) return out;
   }
-  const rest2 = html.replace(SITE_EVM_ADDRESS, " ");
+  const rest2 = text2.replace(SITE_EVM_ADDRESS, (hit) => " ".repeat(hit.length));
   for (const match of rest2.matchAll(SITE_SOLANA_ADDRESS)) {
     const address = match[1];
     if (/^1+$/.test(address) || /^[0-9a-f]+$/i.test(address)) continue;
-    if (take(address)) break;
+    const key = addressKey(address);
+    const start = (match.index ?? 0) + match[0].length - address.length;
+    if (seen.has(key) || isInfrastructureContract(address) || !declared(address, start)) continue;
+    seen.add(key);
+    out.push(address);
+    if (out.length >= limit) break;
   }
   return out;
 }
@@ -29646,10 +29974,22 @@ async function dexSearch(query) {
   );
   return pairs;
 }
-function dexProjectCandidates(ctx, query, rows) {
+var MIN_NAME_RELEVANCE = 500;
+function tokenNameRelevance(query, name, symbol) {
   const cleanQuery = projectName(query);
   const queryKey = normalized3(cleanQuery);
+  if (!queryKey) return 0;
   const queryWords = cleanQuery.toLowerCase().split(/\s+/).filter((word) => word.length >= 3);
+  const nameKey = normalized3(name);
+  const symbolKey = normalized3(symbol);
+  let relevance = 0;
+  if (nameKey && nameKey === queryKey) relevance += 1e3;
+  else if (nameKey && (nameKey.includes(queryKey) || queryKey.includes(nameKey))) relevance += 600;
+  relevance += queryWords.filter((word) => name.toLowerCase().includes(word)).length * 80;
+  if (symbolKey && symbolKey === queryKey) relevance += 500;
+  return relevance;
+}
+function dexProjectCandidates(ctx, query, rows) {
   const candidates = rows.flatMap((row) => {
     const base = isRecord4(row.baseToken) ? row.baseToken : {};
     const name = cleanText2(base.name);
@@ -29658,15 +29998,9 @@ function dexProjectCandidates(ctx, query, rows) {
     const chain = cleanText2(row.chainId).toLowerCase();
     const pairAddress = cleanText2(row.pairAddress);
     const sourceUrl2 = cleanText2(row.url);
-    const nameKey = normalized3(name);
-    const symbolKey = normalized3(symbol);
-    let relevance = 0;
-    if (nameKey === queryKey) relevance += 1e3;
-    else if (nameKey && queryKey && (nameKey.includes(queryKey) || queryKey.includes(nameKey))) relevance += 600;
-    relevance += queryWords.filter((word) => name.toLowerCase().includes(word)).length * 80;
-    if (symbolKey && symbolKey === queryKey) relevance += 500;
+    const relevance = tokenNameRelevance(query, name, symbol);
     const addressValid = chain === "solana" ? SOLANA_ADDRESS3.test(address) : EVM_ADDRESS3.test(address);
-    if (!name || !symbol || !addressValid || !chain || !pairAddress || !sourceUrl2 || relevance < 500) return [];
+    if (!name || !symbol || !addressValid || !chain || !pairAddress || !sourceUrl2 || relevance < MIN_NAME_RELEVANCE) return [];
     const identity = dexIdentity(ctx, row);
     if (!identity) return [];
     const liquidity = isRecord4(row.liquidity) ? finiteNumber2(row.liquidity.usd) : void 0;
@@ -29776,6 +30110,7 @@ function dexHandleBoundHomepages(ctx, row) {
   return websites;
 }
 function officialWebsiteScopes(ctx, extraUrls = []) {
+  if (profileDisclaimsAffiliation(ctx.evidence.profile)) return [];
   const seen = /* @__PURE__ */ new Set();
   const scopes = [];
   const add = (value) => {
@@ -29787,15 +30122,20 @@ function officialWebsiteScopes(ctx, extraUrls = []) {
   add(ctx.evidence.profile.website);
   for (const url of ctx.evidence.profile.official_websites ?? []) add(url);
   for (const url of extraUrls) add(url);
-  for (const fact of ctx.evidence.basicFacts ?? []) {
-    if (fact.artifact_verified !== true) continue;
-    if (fact.status !== "verified" && fact.status !== "corroborated") continue;
-    for (const source2 of fact.sources) {
-      if (source2.sourceClass !== "official_subject" || source2.relation !== "supports" || source2.artifactVerified !== true) continue;
-      add(source2.url);
-    }
-  }
   return scopes;
+}
+function siteTokenRelatesToSubject(ctx, scope, name, symbol) {
+  const profile = ctx.evidence.profile;
+  const handle = ctx.handle.replace(/^@/, "");
+  const anchors = [
+    profile.display_name || "",
+    cleanRegistryName(profile.display_name || ""),
+    handle,
+    scope.domain.split(".")[0] ?? ""
+  ].filter((anchor) => normalized3(anchor).length >= 3);
+  if (anchors.some((anchor) => tokenNameRelevance(anchor, name, symbol) >= MIN_NAME_RELEVANCE)) return true;
+  const ticker = symbol.toUpperCase();
+  return Boolean(ticker) && bioTickerQueries(profile.bio).some((cashtag) => cashtag === ticker);
 }
 async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl2, recoverOfficialText) {
   let html;
@@ -29822,7 +30162,12 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl2, recoverOfficial
         return { state: "failed" };
       }
     } else {
-      html = (await response.text()).slice(0, 4e5);
+      const body = await readBoundedResponseText(response, SITE_DECLARATION_MAX_BYTES);
+      if (body === null) {
+        recordCall("site-fetch", "token-declaration", 0, "response_too_large", "failed");
+        return { state: "failed" };
+      }
+      html = body;
       identityCapturedAt = captureTimestamp();
     }
   } catch {
@@ -29835,7 +30180,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl2, recoverOfficial
     identityCapturedAt = captureTimestamp();
     recordCall("site-fetch", "token-declaration", 0, "reader_recovery_after_transport_error", "succeeded");
   }
-  const candidates = siteContractCandidates(html);
+  const candidates = siteDeclaredContractCandidates(html);
   if (!candidates.length) {
     recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
     return { state: "empty" };
@@ -29888,6 +30233,10 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl2, recoverOfficial
   if (!symbol || !chain) {
     recordCall("site-fetch", "token-declaration", 0, "candidate_metadata_incomplete", "failed");
     return { state: "failed" };
+  }
+  if (!siteTokenRelatesToSubject(ctx, scope, cleanText2(base.name), symbol)) {
+    recordCall("site-fetch", "token-declaration", 0, "declared_token_unrelated_to_subject", "succeeded");
+    return { state: "empty" };
   }
   const info = isRecord4(best.info) ? best.info : {};
   const priceUsd = finiteNumber2(best.priceUsd);
@@ -30321,6 +30670,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
   let search = null;
   const candidates = [];
   let inspected = [];
+  const registryNamesakes = [];
   let detailAttempts = 0;
   let contractLookupFailed = false;
   let seedPairAttempts = 0;
@@ -30377,7 +30727,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       const details2 = await coinDetails(candidate.id);
       if (!details2) return { details: null, selected: null };
       registryHomepages.push(...cgHandleBoundHomepages(ctx, details2));
-      const identity2 = verifyIdentity(ctx, details2);
+      const identity2 = verifyIdentity(ctx, details2, registryNamesakes);
       const contract2 = canonicalContract(details2);
       return {
         details: details2,
@@ -30470,7 +30820,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     }
     const declared = await collectSiteDeclaredToken(
       ctx,
-      fetch,
+      deadlineFetch,
       registryHomepages,
       dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery
     );
@@ -30553,10 +30903,21 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     const cgSamples = candidates.slice(0, 3).map((row) => `${row.name} ($${row.symbol.toUpperCase()})`);
     const alikeSamples = [.../* @__PURE__ */ new Set([...cgSamples, ...dexAlikes])].slice(0, 3);
     const alikeCount = Math.max(candidates.length + dexAlikeCount, alikeSamples.length);
+    const namesake = registryNamesakes[0];
+    if (namesake) {
+      ctx.emit({
+        phase: "P0 \xB7 Routing",
+        label: `Registry token belongs to a different X account \xB7 $${namesake.symbol}`,
+        detail: `CoinGecko lists ${namesake.name} ($${namesake.symbol}) with its homepage on this profile's declared domain, but names ${namesake.officialX}, not ${ctx.handle}, as the project's official X account. The domain link alone cannot bind that token here; this is a namesake or impersonation lead for the analyst, not a binding.`,
+        source: "coingecko",
+        tone: "warn"
+      });
+    }
+    const namesakeNote = namesake ? ` CoinGecko's ${namesake.name} ($${namesake.symbol}) record links this profile's declared domain but names ${namesake.officialX} as the official X account, so it was refused as a namesake or impersonation lead.` : "";
     ctx.recordCheck?.({
       id: "project-token-identity",
       status: "finding",
-      note: alikeCount > 0 ? `assessed token identity: CoinGecko and DexScreener searches completed. ${alikeCount} token${alikeCount === 1 ? " trades" : "s trade"} under a matching name (${alikeSamples.join(", ")}${alikeCount > alikeSamples.length ? ", and more" : ""}), and none links back to the official X account or website domain, so no official token was recorded. A null result on this axis, not adverse conduct evidence.` : "assessed token identity: CoinGecko and DexScreener searches completed and found no token under a matching name. A null result on this axis, not adverse conduct evidence.",
+      note: alikeCount > 0 ? `assessed token identity: CoinGecko and DexScreener searches completed. ${alikeCount} token${alikeCount === 1 ? " trades" : "s trade"} under a matching name (${alikeSamples.join(", ")}${alikeCount > alikeSamples.length ? ", and more" : ""}), and none links back to the official X account or website domain, so no official token was recorded.${namesakeNote} A null result on this axis, not adverse conduct evidence.` : `assessed token identity: CoinGecko and DexScreener searches completed and found no token under a matching name.${namesakeNote} A null result on this axis, not adverse conduct evidence.`,
       provider: "coingecko/dexscreener"
     });
     return {
@@ -32708,7 +33069,7 @@ async function fetchPageText(url, fetcher) {
     return null;
   }
 }
-var registrableHost = (url) => {
+var registrableHost2 = (url) => {
   try {
     return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
   } catch {
@@ -32719,14 +33080,14 @@ var hostMatchesDomain = (host2, domain) => host2 === domain || host2.endsWith(`.
 function outboundLinksTo(html, domains) {
   const links = [];
   for (const match of html.matchAll(/href=["']?(https?:\/\/[^"'\s>]+)/gi)) {
-    const host2 = registrableHost(match[1]);
+    const host2 = registrableHost2(match[1]);
     if (host2 && domains.some((domain) => hostMatchesDomain(host2, domain))) links.push(match[1]);
   }
   return [...new Set(links)];
 }
 var urlIdentityText = (rawUrl) => {
   const addresses = rawUrl.match(/0x[a-fA-F0-9]{40}/g) ?? [];
-  const host2 = registrableHost(rawUrl.replace(/[),.;]+$/, ""));
+  const host2 = registrableHost2(rawUrl.replace(/[),.;]+$/, ""));
   return ` ${[host2, ...addresses].filter(Boolean).join(" ")} `;
 };
 function htmlToText2(html) {
@@ -32770,7 +33131,7 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
   const fetcher = deps.fetcher ?? deadlineFetch;
   const capturedAt = captureTimestamp();
   const name = subjectName3.trim();
-  const officialHost2 = officialSite ? registrableHost(officialSite) : null;
+  const officialHost2 = officialSite ? registrableHost2(officialSite) : null;
   const empty2 = (note) => ({
     available: false,
     note,
@@ -32828,7 +33189,7 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
   const named = AUDITOR_REGISTRY.filter((auditor) => matchedPages.some((page) => page.named.includes(auditor)) || urlLeads.has(auditor.name));
   const selfAttested = named.map((auditor) => auditor.name);
   const isSubjectPage = (url) => {
-    const host2 = registrableHost(url);
+    const host2 = registrableHost2(url);
     return Boolean(host2 && officialHost2 && (host2 === officialHost2 || host2.endsWith(`.${officialHost2}`) || officialHost2.endsWith(`.${host2}`)));
   };
   const attestations = [];
@@ -34453,6 +34814,7 @@ async function resolveProfile(ctx) {
     ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
     ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
+    if (prof.userId) ctx.evidence.profile.x_user_id = prof.userId;
     if (prof.image) {
       ctx.evidence.profile.avatar_url = prof.image;
       ctx.evidence.profile.avatar_source_state = "resolved";
@@ -34465,6 +34827,8 @@ async function resolveProfile(ctx) {
     const profileWebsite = firstWebsite && canonicalOfficialWebsite(firstWebsite) ? firstWebsite : officialWebsites.find((url) => canonicalOfficialWebsite(url) !== null) ?? firstWebsite;
     ctx.evidence.profile.website = profileWebsite;
     if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
+    const bioWebsites = (prof.bioWebsites ?? []).map((url) => canonicalPublicProfileWebsite(url)).filter((url) => Boolean(url));
+    if (bioWebsites.length) ctx.evidence.profile.bio_websites = bioWebsites;
     if (isLinkHubUrl(profileWebsite)) {
       const hubResolved = await resolveLinkHubWebsite(profileWebsite, ctx.handle);
       if (hubResolved) {
@@ -34669,6 +35033,7 @@ function mergeDiscoveredAffiliations(ventures, discovered) {
       // it to the same project seen in another audit.
       x_handle: v.x_handle,
       domain: v.domain,
+      ...v.domain ? { domain_evidence_origin: "model_lead" } : {},
       role: v.role,
       period: v.year ?? "",
       outcome: "Active" /* ACTIVE */,
@@ -34772,7 +35137,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
     // domain or a project name — a big public project's roster lives off-X, and
     // many project accounts put no plain domain in the bio.
-    domain || ctx.evidence.profile.display_name ? findTeamOnSite(domain, ctx.evidence.profile.display_name) : Promise.resolve([]),
+    domain || ctx.evidence.profile.display_name ? findTeamOnSite(domain, ctx.evidence.profile.display_name, ctx.handle) : Promise.resolve([]),
     // Read the project's own /team page directly (Grok's summary can miss it).
     fetchTeamPage(teamDomain, ctx.evidence.profile.display_name),
     // Operator attribution: the accounts THIS account follows whose own bio
@@ -34994,14 +35359,16 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     }),
     // Reverse-bio twitterapi: the claimant's own bio @-mentions this subject
     // next to founder/COO/CEO/"we built @H" language. Handle is the unique id.
+    // A role read from a TWEET ("who is the founder of @proj?") is a lead;
+    // only a standing bio claim is a first-party artifact.
     ...reverseBioTwitter.team.map((member) => ({
       ...member,
-      evidence_origin: "deterministic",
-      artifact_verified: true,
+      evidence_origin: reverseBioClaimIsStanding(member) ? "deterministic" : "model_lead",
+      artifact_verified: reverseBioClaimIsStanding(member),
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic",
       projects_evidence_origin: "model_lead",
-      handleProvenance: member.handle ? "subject_first_party" : void 0
+      handleProvenance: member.handle && reverseBioClaimIsStanding(member) ? "subject_first_party" : void 0
     }))
   ];
   for (const t of teamCandidates) {
@@ -35186,7 +35553,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     }
   }
   const subj = norm2(ctx.handle);
-  const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || operatorTeam.length > 0 || amplifiedTeam.length > 0 || reverseBioTwitter.team.length > 0 || webTeam.some((t) => t.artifact_verified === true && norm2(t.handle) === subj);
+  const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || operatorTeam.length > 0 || amplifiedTeam.length > 0 || reverseBioTwitter.team.some(reverseBioClaimIsStanding) || webTeam.some((t) => t.artifact_verified === true && norm2(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
     for (const member of webTeam) {
@@ -35199,7 +35566,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   }
   const nameOnly = webTeam.filter((m) => !m.handle && !m.linkedin).slice(0, 15);
   if (nameOnly.length >= 1) {
-    const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })));
+    const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })), ctx.handle);
     let linked = 0;
     for (const f of found) {
       const m = byName.get(norm2(f.name));
@@ -35240,7 +35607,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       tone: "warn"
     });
     const isLeader = (r) => /founder|cofounder|co-founder|ceo|cto|coo|president|chief/i.test(r ?? "");
-    const backedTeam = [...domain ? pageTeam : [], ...postRoleTeam, ...reverseBioTwitter.team, ...operatorTeam, ...amplifiedTeam].filter(
+    const backedTeam = [...domain ? pageTeam : [], ...postRoleTeam, ...reverseBioTwitter.team.filter(reverseBioClaimIsStanding), ...operatorTeam, ...amplifiedTeam].filter(
       (candidate) => webTeam.some(
         (member) => !!candidate.handle && norm2(candidate.handle) === norm2(member.handle) || !!candidate.name && norm2(candidate.name) === norm2(member.name)
       )
@@ -35353,12 +35720,17 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         let archiveProvider = null;
         try {
           if (v.domain) {
-            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name);
+            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name, ctx.handle);
             if (arch) {
               corrob.push(...archiveCorroborationLabels(arch));
               rec2.evidence_url = arch.url;
-              archiveVerified = true;
-              archiveProvider = arch.provider;
+              if (arch.handleBound) {
+                archiveVerified = true;
+                archiveProvider = arch.provider;
+                rec2.domain_evidence_origin = "deterministic";
+              } else {
+                corrob.push("the archived page names the display name only, not this X account (namesake possible; lead, not verified)");
+              }
             }
           }
           if (xHandle) {
@@ -36640,7 +37012,13 @@ function mergeManagementIntoWebTeam(evidence, emit) {
     });
   }
 }
-async function runAuditWithLedger(rawHandle, emit, options) {
+function normalizeAuditHandle(rawHandle) {
+  const trimmed = rawHandle.trim();
+  const bare = trimmed.replace(/^@/, "");
+  return /^[A-Za-z0-9_]{1,30}$/.test(bare) ? bare.toLowerCase() : trimmed;
+}
+async function runAuditWithLedger(inputHandle, emit, options) {
+  const rawHandle = normalizeAuditHandle(inputHandle);
   const runtimeStartedAt = Date.now();
   const authorizedCapabilities = options?.authorizedResearchScope?.capabilities;
   const authorizedCapabilitySet = authorizedCapabilities ? new Set(authorizedCapabilities) : null;
@@ -36659,6 +37037,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const adapterIsAuthorized = (adapter) => !authorizedDelegates || (adapterDelegates[adapter.id] ?? []).some((delegate) => authorizedDelegates.has(delegate));
   resetDefiLlamaScanMemo();
   resetFollowScanMemo();
+  resetReverseBioMemo();
   const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
   const collectionDeadlineAt = analystDeadlineAt - (options?.collectionReserveMs ?? COLLECTION_ANALYST_RESERVE_MS);
   const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
@@ -37963,7 +38342,15 @@ async function runAuditWithLedger(rawHandle, emit, options) {
           basicFacts: verifiedBasicFacts,
           ventures: verifiedVentures,
           roles: evidence.roles.map((role) => String(role)),
-          projectToken: evidence.projectToken?.verified ? evidence.projectToken : void 0
+          projectToken: evidence.projectToken?.verified ? evidence.projectToken : void 0,
+          // Who these facts were recorded for. A handle can change hands; the
+          // reader refuses the row when the live account no longer matches.
+          identity: {
+            ...evidence.profile.x_user_id ? { xUserId: evidence.profile.x_user_id } : {},
+            ...evidence.profile.account_created_at ? { accountCreatedAt: evidence.profile.account_created_at } : {},
+            ...evidence.profile.display_name ? { displayName: evidence.profile.display_name } : {},
+            ...canonicalOfficialWebsite(evidence.profile.website)?.domain ? { websiteDomain: canonicalOfficialWebsite(evidence.profile.website).domain } : {}
+          }
         }
       });
     }

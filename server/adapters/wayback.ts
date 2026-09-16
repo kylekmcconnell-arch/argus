@@ -26,13 +26,33 @@ const MAX_CAPTURES_PER_PATH = 4;
 type ArchiveProvider = "wayback" | "arquivo";
 interface Snapshot { timestamp: string; original: string; provider: ArchiveProvider }
 /** One sampled capture and its stripped text, or null when we could not read it. */
-interface CaptureRead { snap: Snapshot; text: string | null }
+interface CaptureRead {
+  snap: Snapshot;
+  text: string | null;
+  /** x.com / twitter.com link targets found in the capture's markup, before tags were stripped. */
+  profileLinks: string[];
+}
+
+const X_LINK_TARGET = /(?:href|content|url)\s*=\s*["']?\s*((?:https?:)?\/\/(?:www\.)?(?:x|twitter)\.com\/[^"'\s<>)]*)/gi;
+
+function xLinkTargets(html: string): string[] {
+  const out = new Set<string>();
+  for (const match of html.matchAll(X_LINK_TARGET)) out.add(match[1]);
+  return [...out];
+}
 
 export interface ArchivedAffiliation {
   provider: ArchiveProvider;
   url: string;
   year: string;
   where: string;
+  /**
+   * True only when the cited capture also carries the audited account itself
+   * (an exact @handle or a bare x.com/<handle> backlink). A display-name match
+   * alone proves that SOMEONE with that name was on the page, never that it is
+   * the audited account: the display name is not a bind key.
+   */
+  handleBound: boolean;
   /**
    * Set only when a sampled capture names both parties and the newest capture we
    * actually READ does not. Two dates and a count, nothing more: archived pages
@@ -193,26 +213,31 @@ async function readCapture(snap: Snapshot): Promise<CaptureRead> {
     const response = await deadlineFetch(archiveUrl, { signal: AbortSignal.timeout(5000) });
     if (!response.ok) {
       recordCall(snap.provider, "snapshot-fetch", 0, `http_${response.status}`, "failed");
-      return { snap, text: null };
+      return { snap, text: null, profileLinks: [] };
     }
     let text: string;
+    let profileLinks: string[];
     try {
       // Strip markup and collapse whitespace before matching: a roster row like
       // "<span>John</span> <span>Smith</span>" must match, and a name-shaped
-      // substring inside a script, comment, or longer word must not.
-      text = htmlToText(await response.text());
+      // substring inside a script, comment, or longer word must not. The X
+      // link targets are read from the markup first, since stripping tags
+      // would drop the one place an account backlink usually lives (href).
+      const html = await response.text();
+      profileLinks = xLinkTargets(html);
+      text = htmlToText(html);
     } catch {
       recordCall(snap.provider, "snapshot-fetch", 0, "response_text_error", "failed");
-      return { snap, text: null };
+      return { snap, text: null, profileLinks: [] };
     }
     if (!text.trim()) {
       recordCall(snap.provider, "snapshot-fetch", 0, "empty_snapshot", "partial");
-      return { snap, text: null };
+      return { snap, text: null, profileLinks: [] };
     }
-    return { snap, text };
+    return { snap, text, profileLinks };
   } catch {
     recordCall(snap.provider, "snapshot-fetch", 0, "transport_error", "failed");
-    return { snap, text: null };
+    return { snap, text: null, profileLinks: [] };
   }
 }
 
@@ -230,11 +255,13 @@ export async function archivedAffiliation(
   domain: string,
   subjectName: string,
   ventureName: string,
+  subjectHandle?: string,
 ): Promise<ArchivedAffiliation | null> {
   const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
   if (!clean || !subjectName) return null;
   const subjectNeedles = nameNeedles(subjectName);
   if (!subjectNeedles.length) return null;
+  const handleNeedle = handleBacklinkNeedle(subjectHandle);
   // The venture is confirmed present when its brand name or its domain's root
   // label appears (both are on a venture's own site). Guard against 1-2 char roots.
   const domainRoot = clean.split(".")[0] ?? "";
@@ -261,6 +288,8 @@ export async function archivedAffiliation(
       : `https://web.archive.org/web/${read.snap.timestamp}/${read.snap.original}`,
     year: read.snap.timestamp.slice(0, 4),
     where,
+    handleBound: Boolean(handleNeedle && read.text !== null
+      && (handleNeedle.test(read.text) || read.profileLinks.some((link) => handleNeedle.test(link)))),
   });
 
   const paths = [`${clean}/team`, `${clean}/about`];
@@ -302,6 +331,18 @@ export async function archivedAffiliation(
     return out;
   }
   return null;
+}
+
+// The audited account itself on the archived page: "@handle" as a word or a
+// bare x.com / twitter.com profile link (a tweet link is not a profile link).
+function handleBacklinkNeedle(handle: string | undefined): RegExp | null {
+  const account = (handle ?? "").replace(/^@/, "").trim();
+  if (!/^[A-Za-z0-9_]{1,30}$/.test(account)) return null;
+  const escaped = account.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `(?:(?:^|[^A-Za-z0-9_])@${escaped}(?![A-Za-z0-9_]))|(?:(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${escaped}/?(?=[?#"'\\s<)]|$))`,
+    "i",
+  );
 }
 
 // A needle only matches as whole words separated by real whitespace, so

@@ -12,6 +12,15 @@ import { fetchTrustedProfileImage } from "./profilePhoto";
 
 const MAX_ENRICHED_MEMBERS = 15;
 
+/** Classify a thrown provider error without echoing its message. */
+export function enrichmentErrorCode(error: unknown): "timeout" | "aborted" | "transport_error" | "provider_error" {
+  const name = error instanceof Error ? error.name : "";
+  if (name === "TimeoutError") return "timeout";
+  if (name === "AbortError") return "aborted";
+  if (name === "TypeError" || name === "FetchError") return "transport_error";
+  return "provider_error";
+}
+
 const ORGANIZATION_NAME = /\b(?:dao|foundation|collective|company|studio|studios|network|media|magazine|protocol|community)\b/i;
 const ORGANIZATION_BIO = /\b(?:nft\s+(?:project|collection|community)|digital\s+collectibles?|official\s+(?:account|community)|community[- ](?:led|owned)\s+(?:project|platform)|we\s+(?:build|are|create|represent)|our\s+(?:community|project|mission|platform|collection))\b/i;
 const COLLECTIVE_NAME = /^(?:women|men|builders|artists|developers|friends|fans|community)\s+(?:of|for)\b/i;
@@ -85,10 +94,11 @@ export async function enrichFirstPartyTeamAvatars(ctx: CollectContext): Promise<
       if (result === "person") enriched++;
       if (result === "organization") reclassified++;
     } catch (error) {
+      // Raw provider error text never reaches the browser: a stable code only.
       ctx.emit({
         phase: "P1 · Team",
         label: "Team enrichment error",
-        detail: `${member.name}${member.handle ? ` (${member.handle})` : ""}: ${String(error)}`,
+        detail: `${member.name}${member.handle ? ` (${member.handle})` : ""}: profile enrichment failed (${enrichmentErrorCode(error)}); the member stays on the roster without a photo or follower count.`,
         source: "twitterapi.io",
         tone: "warn",
       });
