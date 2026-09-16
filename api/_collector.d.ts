@@ -35,6 +35,9 @@ export function collectSocialActivity(identity: {
   projectName?: string | null;
 }, options?: { fetchImpl?: typeof fetch; deadlineAt?: number }): Promise<SocialActivitySnapshot>;
 
+export function getRecentPostsMeta(handle: string, limit?: number): Promise<{ text: string; createdAt: number }[]>;
+export function collectShippingSummary(githubOrg: string, options?: { fetchImpl?: typeof fetch; deadlineAt?: number }): Promise<import("../src/threat/shipping").ShippingSummary | undefined>;
+
 export function resolveInput(raw: string): ResolvedInput;
 
 export function providerStatus(): Array<{

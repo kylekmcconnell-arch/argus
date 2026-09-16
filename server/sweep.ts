@@ -20,6 +20,7 @@ import { subjectConnections, type GraphContribution } from "../src/graph/network
 import type { RunnableTokenInput } from "../src/lib/resolveInput";
 import { normalizeSubjectRef } from "../src/lib/subjectRef";
 import { reportCompleteness } from "../src/lib/reports";
+import { collectShippingSummary } from "./shippingSummary";
 
 const MAX_TOKEN_CHECKS = 15; // bound one sweep's spend/time
 
@@ -29,9 +30,9 @@ interface WatchItem {
   label: string;
   chain?: string;
   via?: "evm" | "solana" | "dexscreener";
-  snapshot?: { verdict?: string; score?: number | null; liquidityUsd?: number };
+  snapshot?: { verdict?: string; score?: number | null; liquidityUsd?: number; shipping?: { grade: string; cadenceStatus: string; totalCommits: number; distinctHuman: number } };
 }
-export interface SweepAlert { subject: string; label: string; type: "drift" | "ring"; detail: string; at: number }
+export interface SweepAlert { subject: string; label: string; type: "drift" | "ring" | "stall"; detail: string; at: number }
 export interface SweepResult {
   checked: number;
   alerts: SweepAlert[];
@@ -49,6 +50,7 @@ export interface SweepOptions {
 }
 /** Per-check budget the sweep needs left on the clock before it starts another token audit. */
 const TOKEN_CHECK_RESERVE_MS = 20_000;
+const SHIPPING_GRADES = new Set(["shipping-team", "shipping-solo"]);
 
 // Same credential order as every other server module (api/_auth.ts,
 // server/cache.ts, server/entityStore.ts): the sb_secret_* key first, the
@@ -144,6 +146,7 @@ async function runSweepInLedger(organizationId: string, options: SweepOptions): 
       const input: RunnableTokenInput = { kind: "token", ref: w.id.includes(":") ? w.id.split(":")[1] : w.id, chain: w.chain, via: w.via ?? "evm" };
       const d = await auditToken(input, undefined, {
         skipSim: true,
+        collectShipping: collectShippingSummary,
         ...(deadlineAt != null ? { deadlineAt: Math.min(deadlineAt - TOKEN_CHECK_RESERVE_MS / 2, Date.now() + 60_000) } : {}),
       }).catch(() => null);
       if (d && w.snapshot) {
@@ -156,6 +159,23 @@ async function runSweepInLedger(organizationId: string, options: SweepOptions): 
         if (typeof s.liquidityUsd === "number" && s.liquidityUsd > 5000 && (d.liquidityUsd ?? 0) < s.liquidityUsd * 0.5) {
           found.push({ subject: w.id, label: w.label, type: "drift", detail: `liquidity halved: $${Math.round(s.liquidityUsd).toLocaleString()} → $${Math.round(d.liquidityUsd ?? 0).toLocaleString()}`, at: Date.now() });
         }
+        // ── development stall: the project was shipping at the last sweep and is not now ──
+        if (s.shipping && d.shipping) {
+          const was = s.shipping;
+          const now = d.shipping;
+          const stalled = SHIPPING_GRADES.has(was.grade) && (now.grade === "stalled" || now.grade === "thin" || now.cadenceStatus === "dormant" || now.cadenceStatus === "quiet");
+          const halved = was.totalCommits >= 10 && now.totalCommits <= was.totalCommits * 0.4;
+          const lost = was.distinctHuman >= 2 && now.distinctHuman <= Math.floor(was.distinctHuman / 2);
+          if (stalled || halved || lost || now.leadDeparted) {
+            const parts = [
+              stalled ? `grade ${was.grade} → ${now.grade}` : "",
+              halved ? `commits ${was.totalCommits} → ${now.totalCommits} per quarter` : "",
+              lost ? `human committers ${was.distinctHuman} → ${now.distinctHuman}` : "",
+              now.leadDeparted ? "lead committer has stopped" : "",
+            ].filter(Boolean);
+            found.push({ subject: w.id, label: w.label, type: "stall", detail: `development stalled: ${parts.join("; ")}`, at: Date.now() });
+          }
+        }
         // refresh the baseline so the same drift doesn't alert on every sweep
         const item = {
           ...w,
@@ -165,6 +185,7 @@ async function runSweepInLedger(organizationId: string, options: SweepOptions): 
             completenessState: reportCompleteness("token", d),
             liquidityUsd: d.liquidityUsd,
             mcap: d.mcap,
+            ...(d.shipping ? { shipping: { grade: d.shipping.grade, cadenceStatus: d.shipping.cadenceStatus, totalCommits: d.shipping.totalCommits, distinctHuman: d.shipping.distinctHuman, leadDeparted: d.shipping.leadDeparted } } : {}),
           },
         };
         await pg(c, "reports?on_conflict=organization_id,ref,kind", {
