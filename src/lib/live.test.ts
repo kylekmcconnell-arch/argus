@@ -129,7 +129,9 @@ describe("audit SSE liveness", () => {
     await vi.advanceTimersByTimeAsync(AUDIT_STREAM_INACTIVITY_TIMEOUT_MS);
 
     expect(requestSignal?.aborted).toBe(true);
-    expect(handlers.onError).toHaveBeenCalledWith("timed out: the audit stream stopped responding");
+    // A silent stream is a dropped connection, not a server rejection: the
+    // caller must keep polling for the server's own save, never relaunch.
+    expect(handlers.onError).toHaveBeenCalledWith("timed out: the audit stream stopped responding", { kind: "stream_dropped" });
     expect(handlers.onDone).not.toHaveBeenCalled();
   });
 });

@@ -8,7 +8,8 @@
 // to the report on completion; the data-side logging (log + persist + graph) runs
 // via onComplete regardless of what the user is looking at, so a backgrounded
 // audit still appears in Recent audits and Dossiers.
-import { streamAudit } from "./live";
+import { streamAudit, type LiveFailureKind } from "./live";
+import { DEEP_INVESTIGATION_MAX_DURATION_SECONDS } from "./investigationRuntime";
 import { threatScan } from "../threat/scan";
 import type { ThreatScan } from "../threat/types";
 import {
@@ -28,10 +29,34 @@ export interface BgRun {
   pct: number;
   status: "running" | "done" | "error";
   error?: string;
+  /**
+   * How a run reached `error`. "stream_dropped" means only the browser's
+   * connection died: the server keeps collecting and persists on its own, so
+   * the owner view re-attaches by polling for the saved version until
+   * `serverDeadlineAt` instead of relaunching a paid audit. "rejected" means
+   * the server declared the run dead. Absent for save failures.
+   */
+  errorKind?: LiveFailureKind;
   dossier?: Dossier;
   startedAt: number;
+  /** The instant the server's own collection budget for this run expires. */
+  serverDeadlineAt: number;
   priv?: boolean;   // private/incognito: never persisted, logged, graphed, or shown in the sidebar
   intent?: ResearchIntent;
+}
+
+/** How far past the server's own budget a dropped stream keeps being polled. */
+export const STREAM_DROP_RECOVERY_GRACE_MS = 45_000;
+
+/**
+ * The instant a run whose stream dropped can no longer produce a saved
+ * version: the server budget from the run's start plus persistence grace.
+ */
+export function streamDropRecoveryDeadline(run: Pick<BgRun, "startedAt" | "serverDeadlineAt">): number {
+  const serverDeadline = typeof run.serverDeadlineAt === "number" && Number.isFinite(run.serverDeadlineAt)
+    ? run.serverDeadlineAt
+    : run.startedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000;
+  return serverDeadline + STREAM_DROP_RECOVERY_GRACE_MS;
 }
 
 type Listener = () => void;
@@ -74,13 +99,15 @@ export function startPersonAudit(
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
 
+  const startedAt = Date.now();
   const run: BgRun = {
     handle: handle.startsWith("@") ? handle : "@" + key,
     key,
     steps: [],
     pct: 0,
     status: "running",
-    startedAt: Date.now(),
+    startedAt,
+    serverDeadlineAt: startedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000,
     priv,
     intent,
   };
@@ -99,6 +126,11 @@ export function startPersonAudit(
   let threatSettled = false;
   let threatNote = "";
   let threatFailure = "";
+  // Every threat-leg call is abortable: the wall clock below and cancelRun
+  // both stop the scanner instead of leaving it spending against a detached
+  // run, and a merely slow first leg is never overlapped by a forced retry.
+  const threatController = new AbortController();
+  let retryController: AbortController | null = null;
   const pushStep = (s: TraceStep) => {
     run.steps = [...run.steps, s];
     run.pct = Math.min(92, Math.max(run.pct, run.steps.length * 11));
@@ -109,7 +141,7 @@ export function startPersonAudit(
     threatCandidate = cand;
     threatNote = `Token attributed via ${cand.source}.`;
     pushStep({ phase: "ARGUS · Threat", label: "Token threat leg", detail: `Full scan includes the token threat pipeline - scanning ${cand.address.slice(0, 10)}… (${cand.via}) in parallel.`, source: "argus", tone: "neutral" });
-    threatLeg = threatScan({ kind: "token", ref: cand.address, via: cand.via }, pushStep)
+    threatLeg = threatScan({ kind: "token", ref: cand.address, via: cand.via }, pushStep, { signal: threatController.signal })
       .catch((error: unknown) => {
         threatFailure = error instanceof Error ? error.message : String(error);
         pushStep({
@@ -145,16 +177,15 @@ export function startPersonAudit(
       // Bounded wait: the threat scanner's own fetches are all timeout-capped,
       // so this only guards against a pathological hang - never block a
       // finished person audit indefinitely on the token leg.
-      let scan = await Promise.race([
-        threatLeg,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 120_000)),
-      ]);
+      let scan = await raceThreatLeg(threatLeg, threatController);
       // Newly launched tokens can reach the server's identity-bound search a
       // moment before DexScreener's by-token endpoint reaches the browser. The
       // first lookup then caches an empty result. Once the completed dossier
       // confirms the exact token, retry that resolution once without the null
-      // cache. A completed token assessment is never rerun here.
-      if (!scan) {
+      // cache. A completed token assessment is never rerun here, and a leg
+      // that was cut off by the wall clock (not settled) is never overlapped
+      // by a second concurrent scan of the same token.
+      if (!scan && threatSettled && !threatController.signal.aborted) {
         const retryCandidate = tokenFromVerifiedProjectToken(d.projectToken) ?? threatCandidate;
         if (retryCandidate) {
           const projectPairAddress = d.projectToken?.pairAddress?.trim();
@@ -173,14 +204,15 @@ export function startPersonAudit(
             source: "argus",
             tone: "neutral",
           });
-          scan = await threatScan(
-            retryInput,
-            pushStep,
-            { force: true },
-          ).catch((error: unknown) => {
-            threatFailure = error instanceof Error ? error.message : String(error);
-            return null;
-          });
+          retryController = new AbortController();
+          scan = await raceThreatLeg(
+            threatScan(retryInput, pushStep, { force: true, signal: retryController.signal })
+              .catch((error: unknown) => {
+                threatFailure = error instanceof Error ? error.message : String(error);
+                return null;
+              }),
+            retryController,
+          );
         }
       }
       d.threat = scan;
@@ -218,7 +250,7 @@ export function startPersonAudit(
     emit();
   };
 
-  const abort = streamAudit(key, priv, {
+  const abortStream = streamAudit(key, priv, {
     onStep: (s) => {
       run.steps = [...run.steps, s];
       // Open-ended progress: ramp asymptotically toward ~92% by step count.
@@ -228,15 +260,43 @@ export function startPersonAudit(
       if (s.token) startThreatLeg(s.token);
     },
     onDone: (d) => { void finalize(d); },
-    onError: (e) => {
+    onError: (e, failure) => {
       run.status = "error";
       run.error = e;
+      run.errorKind = failure?.kind;
       aborts.delete(key);
       emit();
     },
   }, intent);
-  aborts.set(key, abort);
+  // Cancelling a run stops both legs: the SSE stream and any threat scan
+  // still spending on its behalf.
+  aborts.set(key, () => {
+    abortStream();
+    threatController.abort();
+    retryController?.abort();
+  });
   return run;
+}
+
+/** The threat leg's wall clock: guards against a pathological hang without
+ * blocking a finished person audit indefinitely on the token leg. */
+export const THREAT_LEG_WALL_CLOCK_MS = 120_000;
+
+// Bounded wait on a threat leg. On timeout the leg is ABORTED, not merely
+// abandoned: previously the race resolved null while the scanner kept running
+// and the forced retry then ran concurrently against the same token.
+async function raceThreatLeg(leg: Promise<ThreatScan | null>, controller: AbortController): Promise<ThreatScan | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      leg,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => { controller.abort(); resolve(null); }, THREAT_LEG_WALL_CLOCK_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // Hard-stop and forget a run (used on explicit cancel / purge, never on nav).

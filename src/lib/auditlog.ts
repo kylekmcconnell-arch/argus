@@ -2,6 +2,7 @@
 // self-verification ("what did we actually return for that query?") and the
 // beginnings of the data asset. Persisted to localStorage until there is a
 // backend; capped so it cannot grow unbounded.
+import { normalizeSubjectRef } from "./subjectRef";
 
 export type AuditKind = "site" | "token" | "person";
 
@@ -257,14 +258,37 @@ function normalizeFamilyRef(value?: string): string {
 // server truth, so fold it back into the newest row. Only the newest matching
 // row is touched (older rows are the historical record), and only when a value
 // actually differs.
+// Server report rows carry chain-qualified token refs ("ethereum:0xabc…")
+// while audit-log rows written at run time carry the bare address, so a plain
+// string compare never matched a token case and the rail chip kept the stale
+// run outcome forever. Compare the address component when either side is
+// chain-qualified; handles and sites still compare whole.
+const AUDIT_ADDRESS = /^(?:0x[0-9a-f]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/;
+function auditRefParts(normalized: string): { chain: string | null; address: string } | null {
+  const qualified = normalized.match(/^([a-z0-9_-]+):(.+)$/);
+  const address = qualified ? qualified[2] : normalized;
+  return AUDIT_ADDRESS.test(address) ? { chain: qualified ? qualified[1] : null, address } : null;
+}
+export function sameAuditRef(left?: string, right?: string): boolean {
+  const a = normalizeSubjectRef(left);
+  const b = normalizeSubjectRef(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const partsA = auditRefParts(a);
+  const partsB = auditRefParts(b);
+  if (!partsA || !partsB || partsA.address !== partsB.address) return false;
+  // The same address on two different chains is two subjects; only a bare
+  // row (written before the chain was known) may adopt a qualified ref.
+  return partsA.chain === null || partsB.chain === null;
+}
+
 export function reconcileAuditOutcome(
   ref: string,
   kind: AuditKind,
   outcome: { verdict?: string; score?: number | null; coverage?: string; summary?: string },
   options: { persist?: boolean } = {},
 ): void {
-  const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^[@$]/, "");
-  const target = norm(ref);
+  const target = normalizeSubjectRef(ref);
   if (!target) return;
   const differs = (e: LogEntry): boolean =>
     (outcome.verdict !== undefined && e.verdict !== outcome.verdict)
@@ -278,7 +302,7 @@ export function reconcileAuditOutcome(
     ...(outcome.summary ? { summary: outcome.summary } : {}),
   });
   const reconcileNewest = (rows: LogEntry[], sharedRow: boolean): { rows: LogEntry[]; changed: boolean } => {
-    const index = rows.findIndex((e) => e.kind === kind && norm(e.ref ?? e.query) === target);
+    const index = rows.findIndex((e) => e.kind === kind && sameAuditRef(e.ref ?? e.query, target));
     if (index < 0 || !differs(rows[index])) return { rows, changed: false };
     const next = [...rows];
     next[index] = rewrite(rows[index]);

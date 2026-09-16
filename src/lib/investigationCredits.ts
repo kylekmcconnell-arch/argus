@@ -10,11 +10,16 @@ export async function reserveInvestigationCredit(
   displayQuery = canonicalRef,
   privateRun = false,
   startedAt = new Date().toISOString(),
+  // A stalled reservation must reject rather than hold the run open forever:
+  // the runner keys runs by subject, so an unresolved reservation blocked every
+  // later scan of that subject. Callers pass a wall-clock signal.
+  options?: { signal?: AbortSignal },
 ): Promise<CreditReservation> {
   const response = await fetch("/api/investigation-credit", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ idempotencyKey, kind, canonicalRef, displayQuery, privateRun, startedAt }),
+    ...(options?.signal ? { signal: options.signal } : {}),
   });
   const body = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
