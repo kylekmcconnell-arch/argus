@@ -27,7 +27,7 @@ const CAP_BOUNDARIES: Record<string, CapBoundaryRule> = {
     evidenceArea: "contract",
   },
   cannot_sell_all: {
-    ceiling: 15,
+    ceiling: 10,
     controllingFact: "The contract does not allow a holder to sell their full balance.",
     unlockCondition: "A fresh trade receipt must show a full-balance sell succeeds and the contract restriction no longer applies.",
     evidenceArea: "contract",
