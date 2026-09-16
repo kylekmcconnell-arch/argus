@@ -777,7 +777,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
 
           {/* unified project research: news & press, documents & resources, domain
               intelligence, and GitHub forensics — the same cluster every report uses */}
-          {showCurrentIntelligence && reconHost && <ProjectResearch name={(recon.title || reconHost).split(/[:|–\u2014·]/)[0].trim() || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} record={resultPolicy.canRecord} panelCostToken={resultPolicy.panelCostToken} />}
+          {showCurrentIntelligence && reconHost && <ProjectResearch name={(recon.title || reconHost).split(/[:|–\u2014·]/)[0].trim() || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} record={resultPolicy.canRecord} sectorText={recon.title} panelCostToken={resultPolicy.panelCostToken} />}
 
           {/* off-chain operator linking: shared analytics IDs / co-registered domains / hosting */}
           {showCurrentIntelligence && reconHost && <SiteInfra key={`${reconHost}:${resultPolicy.canRecord ? "record" : "read-only"}`} domain={reconHost} record={resultPolicy.canRecord} onAudit={onAudit ? (ref) => onAudit(ref, resultPolicy.displayedPrivate) : undefined} />}
