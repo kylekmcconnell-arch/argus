@@ -38,7 +38,11 @@ function chainFetch() {
   return vi.fn(async (input: unknown, init?: { body?: string }) => {
     const url = String(input);
     if (url.startsWith("https://api.helius.xyz/")) {
-      return new Response(JSON.stringify([{ type: "TOKEN_MINT", tokenTransfers: [{ mint: MINT }] }]), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify([
+        { type: "TOKEN_MINT", feePayer: DEPLOYER, tokenTransfers: [{ mint: MINT }] },
+        // An airdrop minted TO the deployer by someone else is not a launch it made.
+        { type: "TOKEN_MINT", feePayer: "AirdropperWallet1111111111111111111111111111", tokenTransfers: [{ mint: "airdrop-received" }] },
+      ]), { status: 200, headers: { "content-type": "application/json" } });
     }
     const body = JSON.parse(init?.body ?? "{}") as { method: string; params: unknown[] };
     if (body.method === "getSignaturesForAddress") {

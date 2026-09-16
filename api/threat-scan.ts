@@ -24,6 +24,13 @@ function creds() {
 }
 const headers = (key: string) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
 const norm = (s: unknown) => { const value = String(s ?? "").trim(); return /^0x[0-9a-f]+$/i.test(value) ? value.toLowerCase() : value; };
+const normChain = (s: unknown) => String(s ?? "").trim().toLowerCase();
+// The same EVM address exists on several chains (CREATE2 / same-nonce deploys,
+// for legitimate multichain tokens and scam clones alike). The row key is the
+// chain-scoped asset identity, exactly as the receipts ledger (_ledger.js
+// assetKey) keys it, so a Base scan can never be overwritten by - or served
+// as - the Ethereum token at the same address.
+const assetKey = (chain: string, address: string) => `${chain || "unknown"}:${address}`;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireArgusAuth(req, res, "analyst");
@@ -37,14 +44,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : {};
     const scan = body.scan;
     const address = norm(scan?.address);
-    if (!address || typeof scan?.scannedAt !== "number" || !scan?.call?.verdict) {
-      res.status(400).json({ error: "scan payload required" }); return;
+    const chain = normChain(scan?.chain);
+    if (!address || !chain || typeof scan?.scannedAt !== "number" || !scan?.call?.verdict) {
+      res.status(400).json({ error: "scan payload with address and chain required" }); return;
     }
     // Bound the stored blob; a full scan is tens of KB - reject absurd bodies.
     if (JSON.stringify(scan).length > 400_000) { res.status(413).json({ error: "too large" }); return; }
     const row = {
       organization_id: auth.organizationId,
-      ref: address, kind: KIND,
+      ref: assetKey(chain, address), kind: KIND,
       query: scan.symbol ? `$${scan.symbol}` : address,
       verdict: scan.call.verdict ?? null,
       score: typeof scan.call.risk === "number" ? scan.call.risk : null,
@@ -61,10 +69,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const address = norm(req.query.address);
+  const chain = normChain(req.query.chain);
   if (!address) { res.status(400).json({ error: "address required" }); return; }
+  // A lookup that does not say which chain it means cannot be matched to a
+  // chain-scoped row; it is a miss (the caller runs the scan live), never a
+  // guess at whichever chain's report happens to be stored.
+  if (!chain) { res.status(200).json({ available: true, hit: false, note: "chain required for a cached report" }); return; }
   try {
     const r = await fetch(
-      `${c.url}/rest/v1/reports?organization_id=eq.${encodeURIComponent(auth.organizationId)}&select=payload,ts&kind=eq.${KIND}&ref=eq.${encodeURIComponent(address)}&limit=1`,
+      `${c.url}/rest/v1/reports?organization_id=eq.${encodeURIComponent(auth.organizationId)}&select=payload,ts&kind=eq.${KIND}&ref=eq.${encodeURIComponent(assetKey(chain, address))}&limit=1`,
       { headers: headers(c.key), signal: AbortSignal.timeout(8000) },
     );
     if (!r.ok) { res.status(503).json({ available: false, hit: false }); return; }
@@ -73,7 +86,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const scannedAt = typeof row?.payload?.scannedAt === "number" ? row.payload.scannedAt : row?.ts ? Date.parse(row.ts) : 0;
     const ageMs = Date.now() - scannedAt;
     const staleBuild = (row?.payload?.__build ?? "") !== BUILD;
-    if (!row?.payload || staleBuild || !(ageMs >= 0 && ageMs < FRESH_MS)) { res.status(200).json({ available: true, hit: false }); return; }
+    // Belt and braces: a stored scan whose own chain disagrees with the request
+    // is the other chain's token, whatever row it was found under.
+    const wrongChain = normChain(row?.payload?.chain) !== chain;
+    if (!row?.payload || staleBuild || wrongChain || !(ageMs >= 0 && ageMs < FRESH_MS)) { res.status(200).json({ available: true, hit: false }); return; }
     const scan = { ...row.payload };
     delete scan.__build;
     res.status(200).json({ available: true, hit: true, ageMs, scan });

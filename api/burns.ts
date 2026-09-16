@@ -19,13 +19,14 @@ const ETHERSCAN_CHAINID: Record<string, number> = {
 const BLOCKSCOUT: Record<string, string> = {
   robinhood: "https://robinhoodchain.blockscout.com",
 };
+const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
 const BURN_ADDRS = [
   "0x000000000000000000000000000000000000dead",
-  "0x0000000000000000000000000000000000000000",
+  ZERO_ADDR,
 ];
 const DAY = 86_400_000;
 
-interface BurnTx { ts: number; amount: number }
+interface BurnTx { ts: number; amount: number; to: string }
 
 // --- Etherscan path ---
 // Returns the burn transfers (human units) AND the token's decimals as seen on
@@ -49,7 +50,7 @@ async function etherscanBurns(chainid: number, token: string, burn: string, key:
       if (decimals === null && Number.isFinite(dec)) decimals = dec;
       const amt = Number(t.value ?? 0) / 10 ** dec;
       const ts = Number(t.timeStamp ?? 0) * 1000;
-      if (amt > 0 && ts > 0) out.push({ ts, amount: amt });
+      if (amt > 0 && ts > 0) out.push({ ts, amount: amt, to: burn });
     }
     return { txs: out, decimals };
   } catch { return null; }
@@ -87,7 +88,7 @@ async function blockscoutBurns(base: string, token: string, burn: string, decima
         if (String(it.to?.hash ?? "").toLowerCase() !== burn) continue;
         const amt = Number(it.total?.value ?? 0) / 10 ** Number(it.total?.decimals ?? decimals);
         const ts = Date.parse(it.timestamp ?? "");
-        if (amt > 0 && Number.isFinite(ts)) out.push({ ts, amount: amt });
+        if (amt > 0 && Number.isFinite(ts)) out.push({ ts, amount: amt, to: burn });
       }
       const np = d.next_page_params;
       if (!np) break;
@@ -155,7 +156,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   events.sort((a, b) => a.ts - b.ts);
   const now = Date.now();
   const totalBurned = events.reduce((a, e) => a + e.amount, 0);
-  const burnedSupplyPct = supply && supply > 0 ? Math.min(100, (totalBurned / supply) * 100) : null;
+  // totalSupply() is the CURRENT supply. A burn() (ERC20Burnable) emits a
+  // Transfer to 0x0 AND reduces totalSupply, so dividing by the post-burn
+  // figure overstates the share (50% burned read as 100%). Transfers to 0xdead
+  // leave totalSupply untouched. The original supply is therefore the current
+  // supply plus everything sent to 0x0, and the share is measured against that.
+  const burnedToZero = events.filter((e) => e.to === ZERO_ADDR).reduce((a, e) => a + e.amount, 0);
+  const originalSupply = supply != null && supply > 0 ? supply + burnedToZero : null;
+  const burnedSupplyPct = originalSupply != null ? Math.min(100, (totalBurned / originalSupply) * 100) : null;
   const last30 = events.filter((e) => now - e.ts < 30 * DAY);
   const { cadence, medianIntervalDays, ongoing } = assess(events, now);
   const step = Math.max(1, Math.ceil(events.length / 60));
