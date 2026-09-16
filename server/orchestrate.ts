@@ -112,8 +112,10 @@ import {
   collectProtocolFunding,
   collectProtocolTvl,
   defiLlamaLookupName,
+  formatUsd,
   resetDefiLlamaScanMemo,
 } from "./adapters/defiLlama";
+import { collectCryptoRankFunding, cryptoRankConfigured } from "./adapters/cryptoRank";
 import { collectHolderProfile } from "./adapters/tokenHolders";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { buildMaterialReportDelta } from "../src/lib/reportDelta";
@@ -3188,6 +3190,78 @@ async function collectTokenlessProtocolEvidence(ctx: CollectContext): Promise<vo
       });
     }
   }
+  // Same fallback order as the token path: CryptoRank's index speaks only when
+  // DeFiLlama's record left funding unanswered, bound here by the record's own
+  // official X handle / official domain (no token exists to join on).
+  await collectCryptoRankFundingEvidence(ctx);
+}
+
+/**
+ * Second raises index: CryptoRank (keyed, plan-tiered). Runs only when the
+ * DeFiLlama record produced no identity-bound funding, so one project never
+ * carries two competing round lists. Binding doctrine matches the rest of the
+ * lane: an exact contract-address join to the verified canonical token, or the
+ * record's own official X handle / official domain. Never throws; a missing
+ * key is silence, an outage is a coverage warning, and a plan gate keeps
+ * whatever partial answer the configured plan gave.
+ */
+async function collectCryptoRankFundingEvidence(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.protocolFunding || evidence.cryptoRankFunding || !cryptoRankConfigured()) return;
+  const token = evidence.projectToken?.verified ? evidence.projectToken : undefined;
+  const subjectName = token?.name || evidence.profile.display_name || ctx.handle.replace(/^@/, "");
+  const outcome = await collectCryptoRankFunding({
+    name: subjectName,
+    symbol: token?.symbol ?? null,
+    contractAddress: token?.address ?? null,
+    chain: token?.chain ?? null,
+    matchesOfficialIdentity: (record) =>
+      protocolRecordMatchesOfficialIdentity(record, ctx.handle, evidence.profile),
+  });
+  if (!outcome.available) {
+    if (outcome.reason === "unavailable") {
+      ctx.emit({
+        phase: "Token",
+        label: "CryptoRank funding index unavailable",
+        detail: `${outcome.note} A missing index is a coverage gap for this scan, never evidence that the project is unfunded.`,
+        source: "cryptorank",
+        tone: "warn",
+      });
+    }
+    return;
+  }
+  evidence.cryptoRankFunding = { ...outcome.value };
+  const record = outcome.value;
+  const boundBy = record.binding.method === "canonical_token_address"
+    ? "the verified token's exact contract address"
+    : "its own official X handle/site";
+  if (record.rounds.length) {
+    const leads = [...new Set(record.rounds.flatMap((round) => round.leadInvestors))];
+    ctx.emit({
+      phase: "Token",
+      label: `Funding rounds indexed · ${record.rounds.length} round${record.rounds.length === 1 ? "" : "s"} (CryptoRank)`,
+      detail: `CryptoRank's record for "${record.name}" is identity-bound by ${boundBy}${record.totalRaisedUsd ? `; ${formatUsd(record.totalRaisedUsd)} disclosed` : ""}${leads.length ? `; led by ${leads.slice(0, 3).join(", ")}` : ""}.`,
+      source: "cryptorank",
+      tone: "good",
+    });
+  } else if (record.hasFundingRounds) {
+    const named = record.funds.slice(0, 3).map((fund) => fund.name);
+    ctx.emit({
+      phase: "Token",
+      label: "Funding rounds exist on CryptoRank · round detail not available to this scan",
+      detail: `The identity-bound record (${boundBy}) confirms recorded funding rounds${named.length ? ` and names backers including ${named.join(", ")}` : ""}, but the round-by-round detail sits behind a CryptoRank plan this deployment does not hold. Treat the total raised as unknown here, not zero.`,
+      source: "cryptorank",
+      tone: "neutral",
+    });
+  } else {
+    ctx.emit({
+      phase: "Token",
+      label: "CryptoRank also lists no funding rounds",
+      detail: `The identity-bound record (${boundBy}) carries no funding rounds, corroborating the empty DeFiLlama read rather than contradicting it.`,
+      source: "cryptorank",
+      tone: "neutral",
+    });
+  }
 }
 
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
@@ -4389,6 +4463,11 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
             tone: "warn",
           });
         }
+        // Second raises index: CryptoRank answers only when DeFiLlama's
+        // curated record produced no identity-bound rounds (one project never
+        // publishes two competing round lists), joined by the verified token's
+        // exact contract address.
+        await collectCryptoRankFundingEvidence(ctx);
         // Independent audits: bounded discovery leads plus the auditor-domain
         // corroboration hop. Wall-clock boxed: up to ~6
         // bounded fetches must degrade to a skipped enrichment, never a

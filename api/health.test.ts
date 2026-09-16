@@ -35,7 +35,7 @@ describe("provider readiness", () => {
     expect(captured.body).toMatchObject({
       available: true,
       mode: "configuration",
-      down: 9, // unconfigured required lanes only; retired and optional fallbacks are listed but not counted down
+      down: 10, // unconfigured required lanes only; retired and optional fallbacks are listed but not counted down
       services: [
         { id: "xai", ok: true },
         { id: "anthropic", ok: true },
@@ -48,6 +48,7 @@ describe("provider readiness", () => {
         { id: "pdl", ok: false, detail: "not configured in this deployment" },
         { id: "github", ok: false, detail: "not configured in this deployment" },
         { id: "coingecko", ok: false, detail: "not configured in this deployment" },
+        { id: "cryptorank", ok: false, detail: "not configured in this deployment" },
         // Retired adapters: commented out of the ADAPTERS registry, so a key
         // would not bring them back and their absence costs no coverage. They
         // stay listed because this endpoint answers which keys the build reads,
@@ -90,7 +91,7 @@ describe("provider readiness", () => {
         { id: "serper", ok: true },
         { id: "openrouter", ok: true },
         { id: "helius" }, { id: "etherscan" }, { id: "arkham" }, { id: "pdl" },
-        { id: "github" }, { id: "coingecko" }, { id: "crunchbase" }, { id: "reddit" }, { id: "gmgn" },
+        { id: "github" }, { id: "coingecko" }, { id: "cryptorank" }, { id: "crunchbase" }, { id: "reddit" }, { id: "gmgn" },
         { id: "safebrowsing" }, { id: "chart-signals" }, { id: "x-api-bearer" },
       ],
       extraction: { extractProvider: "openrouter", groundedSearchActive: true },

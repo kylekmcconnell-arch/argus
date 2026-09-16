@@ -8,6 +8,7 @@ import {
   type BasicFactPredicate,
   type BasicFactSource,
   type CollectedEvidence,
+  type CryptoRankFundingSnapshot,
 } from "../src/data/evidence";
 import { companyEnrichmentMatchesOfficialDomain } from "./adapters/monid";
 
@@ -133,6 +134,34 @@ export function indexedProtocolRecordMatch(
   if (canonicalProtocolIndexMatch(evidence, record.geckoId)) return true;
   return protocolRecordMatchesOfficialIdentity(
     { officialTwitter: record.officialTwitter ?? null, officialUrl: record.officialUrl ?? null },
+    evidence.profile.handle,
+    evidence.profile,
+  );
+}
+
+/**
+ * Whether a frozen CryptoRank record is still identity-bound to the audited
+ * subject. The binding frozen at collection time is re-validated here, never
+ * trusted: an exact contract-address binding must equal the verified canonical
+ * token's address, and an official-identity binding must pass the same
+ * handle/domain doctrine every other tokenless protocol record passes.
+ */
+export function cryptoRankRecordMatch(
+  evidence: Pick<CollectedEvidence, "projectToken" | "profile">,
+  record: CryptoRankFundingSnapshot | undefined,
+): boolean {
+  if (!record) return false;
+  if (record.binding.method === "canonical_token_address") {
+    const token = evidence.projectToken?.verified === true ? evidence.projectToken : undefined;
+    if (!token) return false;
+    const tokenAddress = token.address.trim();
+    const boundAddress = record.binding.address.trim();
+    return tokenAddress.startsWith("0x") && boundAddress.startsWith("0x")
+      ? tokenAddress.toLowerCase() === boundAddress.toLowerCase()
+      : tokenAddress === boundAddress;
+  }
+  return protocolRecordMatchesOfficialIdentity(
+    { officialTwitter: record.binding.officialTwitter, officialUrl: record.binding.officialUrl },
     evidence.profile.handle,
     evidence.profile,
   );
@@ -1034,8 +1063,16 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     && fact.sources.some((candidate) =>
       candidate.artifactVerified === true
       && candidate.provider !== "defillama"
+      && candidate.provider !== "cryptorank"
       && candidate.provider !== "monid"
       && candidate.relation === "supports"));
+  // The CryptoRank record only speaks after its frozen binding re-validates
+  // against the evidence in hand, exactly like the DeFiLlama re-join above it.
+  const cryptoRankRecord = isProject
+    && evidence.cryptoRankFunding
+    && cryptoRankRecordMatch(evidence, evidence.cryptoRankFunding)
+    ? evidence.cryptoRankFunding
+    : undefined;
   const fundingFact = !hasStrongerFundingFact
     && isProject
     && evidence.protocolFunding
@@ -1052,6 +1089,18 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
         ventureName: "",
         subjectLabel: evidence.profile.display_name || "The project",
       }
+    : !hasStrongerFundingFact && cryptoRankRecord && cryptoRankRecord.rounds.length
+      ? {
+          rounds: cryptoRankRecord.rounds.length,
+          totalRaisedUsd: cryptoRankRecord.totalRaisedUsd ?? 0,
+          leadInvestors: [...new Set(cryptoRankRecord.rounds.flatMap((round) => round.leadInvestors))],
+          sourceUrl: cryptoRankRecord.sourceUrl,
+          capturedAt: cryptoRankRecord.capturedAt,
+          provider: "cryptorank",
+          title: "CryptoRank funding record",
+          ventureName: "",
+          subjectLabel: evidence.profile.display_name || "The project",
+        }
     : (isProject || isFounderSubject) && enrichmentRecord && enrichmentRecord.funding
       ? {
           rounds: enrichmentRecord.funding.rounds.length,
@@ -1091,18 +1140,86 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     projected.push(projectedFundingFact);
   }
 
+  // A bound CryptoRank record whose round-by-round detail sits behind a plan
+  // gate can still confirm that rounds exist and name backer funds. That
+  // partial answer is published as the partial answer it is, never dressed up
+  // as round-level detail.
+  if (
+    !fundingFact
+    && !hasStrongerFundingFact
+    && cryptoRankRecord
+    && !cryptoRankRecord.rounds.length
+    && cryptoRankRecord.hasFundingRounds
+    && cryptoRankRecord.funds.length
+  ) {
+    const namedFunds = cryptoRankRecord.funds
+      .slice()
+      .sort((a, b) => Number(b.isLead) - Number(a.isLead))
+      .slice(0, 6)
+      .map((fund) => fund.name);
+    const partialFundingFact = makeFact(
+      evidence,
+      "funding",
+      `Funding rounds indexed · named backers include ${namedFunds.join(", ")}`,
+      [source({
+        url: cryptoRankRecord.sourceUrl,
+        title: "CryptoRank funding record",
+        excerpt: `CryptoRank's index confirms ${evidence.profile.display_name || "the project"} has recorded funding rounds and names backers including ${namedFunds.join(", ")}. Round-level amounts and dates are not in the index view available to this scan, so the total raised is unknown here, not zero.`,
+        capturedAt: cryptoRankRecord.capturedAt,
+        provider: "cryptorank",
+        sourceClass: "other_public",
+      })],
+    );
+    partialFundingFact.floorEligible = false;
+    projected.push(partialFundingFact);
+  }
+
   // "Who funded it?" is a project question of its own. The funding fact above
   // answers "how much?" and inlines the backers into its prose, so the investor
   // question resolved to nothing and an allocator got no named names. One fact
   // per distinct named backer resolves it, and each name carries the aggregator
-  // row it came from. DeFiLlama keeps leadInvestors and otherInvestors apart:
+  // row it came from. Both indexes keep leadInvestors and otherInvestors apart:
   // a name is published at the role the aggregator gave it and is never
-  // promoted to lead.
-  const indexedFunding = isProject
+  // promoted to lead. DeFiLlama's record speaks first; the CryptoRank record
+  // answers only when DeFiLlama has no identity-bound rounds, so one project
+  // never publishes two competing backer lists.
+  const defiLlamaIndexedFunding = isProject
     && evidence.protocolFunding
     && indexedProtocolRecordMatch(evidence, evidence.protocolFunding)
+    && evidence.protocolFunding.rounds.length
     ? evidence.protocolFunding
     : undefined;
+  const indexedFunding = defiLlamaIndexedFunding
+    ? {
+        rounds: defiLlamaIndexedFunding.rounds.map((round) => ({
+          roundLabel: round.round,
+          date: round.date,
+          amountUsd: round.amountUsd,
+          leadInvestors: round.leadInvestors,
+          otherInvestors: round.otherInvestors,
+        })),
+        sourceUrl: defiLlamaIndexedFunding.sourceUrl,
+        capturedAt: defiLlamaIndexedFunding.capturedAt,
+        provider: "defillama",
+        title: "DeFiLlama funding record",
+        indexName: "DeFiLlama's funding index",
+      }
+    : cryptoRankRecord?.rounds.length
+      ? {
+          rounds: cryptoRankRecord.rounds.map((round) => ({
+            roundLabel: round.stage,
+            date: round.date,
+            amountUsd: round.amountUsd,
+            leadInvestors: round.leadInvestors,
+            otherInvestors: round.otherInvestors,
+          })),
+          sourceUrl: cryptoRankRecord.sourceUrl,
+          capturedAt: cryptoRankRecord.capturedAt,
+          provider: "cryptorank",
+          title: "CryptoRank funding record",
+          indexName: "CryptoRank's funding index",
+        }
+      : undefined;
   if (indexedFunding?.rounds.length) {
     const backers = new Map<string, {
       name: string;
@@ -1118,7 +1235,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
           const name = named.trim();
           const key = normalizeValue(name);
           if (!name || !key || backers.has(key)) continue;
-          backers.set(key, { name, lead, round: round.round, date: round.date, amountUsd: round.amountUsd });
+          backers.set(key, { name, lead, round: round.roundLabel, date: round.date, amountUsd: round.amountUsd });
         }
       }
     }
@@ -1143,10 +1260,10 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
         backer.name,
         [source({
           url: indexedFunding.sourceUrl,
-          title: "DeFiLlama funding record",
-          excerpt: `DeFiLlama's funding index names ${backer.name} as ${role} in ${backer.round}${dated}${sized}. One aggregator naming a backer is an attribution, not a verified investment, and this index is not an exhaustive cap table.${capped}`,
+          title: indexedFunding.title,
+          excerpt: `${indexedFunding.indexName} names ${backer.name} as ${role} in ${backer.round}${dated}${sized}. One aggregator naming a backer is an attribution, not a verified investment, and this index is not an exhaustive cap table.${capped}`,
           capturedAt: indexedFunding.capturedAt,
-          provider: "defillama",
+          provider: indexedFunding.provider,
           sourceClass: "other_public",
         })],
         // Deliberately no qualifier. The fact sheet merges same-predicate rows
