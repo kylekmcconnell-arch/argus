@@ -797,7 +797,7 @@ var Audit = class {
       const graph = finding.trust_graph;
       const tieKey = typeof graph?.tie_key === "string" ? graph.tie_key.trim() : "";
       const hardKey = /^(?:code:|email:|wallet:|funder:|mint:|token:|ga:|gtm:|adsense:|fbpixel:).+/i.test(tieKey);
-      const weakKey = /^(?:holder|amm|dex|pool|lp|market)(?::|$)|^(?:ip|favicon):/i.test(tieKey);
+      const weakKey = /^(?:holder|amm|dex|pool|lp|market)(?::|$)|^(?:ip|favicon|name|ticker):|^\$/i.test(tieKey);
       const tieType = typeof graph?.tie_type === "string" ? graph.tie_type.trim() : "";
       const relationshipEdges = /* @__PURE__ */ new Set([
         "TEAM",
@@ -1068,7 +1068,7 @@ var Audit = class {
       edges.push({ src: this.handle, dst: key, type: edgeType, role: v.role, outcome: v.outcome, ...receipt(v, v.evidence_url) });
     }
     for (const p of this.promotions) {
-      const key = p.contract_address || "$" + (p.ticker ?? "").replace(/^\$+/, "");
+      const key = p.contract_address ? `token:${p.chain?.trim() ? `${p.chain.trim().toLowerCase()}:` : ""}${p.contract_address.trim()}` : "ticker:" + (p.ticker ?? "").replace(/^\$+/, "").trim().toLowerCase();
       nodes.push({ type: "Company", key, was_rug: !!p.outcome_was_rug });
       edges.push({ src: this.handle, dst: key, type: "PROMOTED" });
     }
@@ -1122,7 +1122,8 @@ function canonicalEntityKey(opts) {
   if (/^[a-z0-9_]{2,30}$/.test(h)) return "@" + h;
   const d = (opts.domain ?? "").replace(/^https?:\/\//i, "").replace(/^www\./, "").replace(/\/.*$/, "").trim().toLowerCase();
   if (d && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return d;
-  return (opts.name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  const n = (opts.name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  return n ? `name:${n}` : "";
 }
 
 // src/lib/investorSubject.ts
@@ -2013,7 +2014,17 @@ var structurallyStrictFundScaleArtifact = (value, now, context2) => {
     if (!namesExactlyMatch(value.subjectName, value.fundName)) return false;
     if (profile && ![profile.resolved_name, profile.display_name].some((name) => namesExactlyMatch(name, value.fundName))) return false;
   } else if (!hasCurrentAffiliationProof(value, capturedAt, now, profile)) return false;
-  if (sourceClass4 === "first_party_subject" || sourceClass4 === "first_party_investor") {
+  const firstPartyClass = sourceClass4 === "first_party_subject" || sourceClass4 === "first_party_investor";
+  if (value.attributedEntityName !== void 0 || !firstPartyClass) {
+    const attributed = comparable(value.attributedEntityName);
+    if (!attributed) return false;
+    const handleAliases = [
+      value.investorEntityHandle,
+      attribution === "direct_subject" ? value.subjectHandle : void 0
+    ].map(canonicalHandle).filter(Boolean);
+    if (attributed !== fundName && !handleAliases.some((handle) => comparable(handle) === attributed)) return false;
+  }
+  if (firstPartyClass) {
     const officialDomain = typeof value.investorEntityDomain === "string" ? cleanHost(value.investorEntityDomain) : "";
     if (!isCredibleOfficialDomain(officialDomain) || !hostMatches(sourceUrl2.hostname, officialDomain) || basis !== "manager_reported" || metric === "regulatory_aum" || sourceClass4 === "first_party_subject" !== (attribution === "direct_subject")) return false;
     if (sourceClass4 === "first_party_investor") {
@@ -2239,8 +2250,10 @@ function tieStrength(rawKey) {
   if (/^(ga:|gtm:|adsense:|fbpixel:)/.test(k)) return "hard";
   if (/^risk:/.test(k)) return "weak";
   if (/^(holder|amm|dex|pool|lp|market|ip:|favicon:)/.test(k)) return "weak";
+  if (NON_BINDING_KEY.test(k)) return "weak";
   return "medium";
 }
+var NON_BINDING_KEY = /^(?:name:|ticker:|\$)/i;
 function subjectConnections(handle, contributions, max = 12) {
   const resolve = buildAliasResolver(contributions);
   const me = resolve(handle);
@@ -2775,6 +2788,42 @@ function holderDistributionExcerpt(holders) {
 function rounded(value, digits = 4) {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+function parseRoundDateInterval(raw) {
+  const value = (raw ?? "").trim();
+  if (!value) return null;
+  const utc = (year, month, day) => Date.UTC(year, month, day);
+  const endOfDay = (time) => time + 864e5 - 1;
+  let match = value.match(/^(\d{4})$/);
+  if (match) {
+    const year = Number(match[1]);
+    return { precision: "year", native: match[1], start: utc(year, 0, 1), end: endOfDay(utc(year, 11, 31)) };
+  }
+  match = value.match(/^(\d{4})-(\d{2})$/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (month < 1 || month > 12) return null;
+    return { precision: "month", native: value, start: utc(year, month - 1, 1), end: endOfDay(utc(year, month, 0)) };
+  }
+  match = value.match(/^(?:Q([1-4])\s*(\d{4})|(\d{4})\s*[- ]?Q([1-4]))$/i);
+  if (match) {
+    const quarter = Number(match[1] ?? match[4]);
+    const year = Number(match[2] ?? match[3]);
+    const firstMonth = (quarter - 1) * 3;
+    return { precision: "quarter", native: `${year}-Q${quarter}`, start: utc(year, firstMonth, 1), end: endOfDay(utc(year, firstMonth + 3, 0)) };
+  }
+  match = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/);
+  if (match) {
+    const time = Date.parse(value.length === 10 ? `${value}T00:00:00.000Z` : value);
+    if (!Number.isFinite(time)) return null;
+    return { precision: "day", native: new Date(time).toISOString(), start: time, end: time };
+  }
+  return null;
+}
+function informativeMeasurement(measurement) {
+  if (measurement.valueType === "number") return Number.isFinite(measurement.value) && measurement.value !== 0;
+  return typeof measurement.value === "string" && measurement.value.trim().length > 0;
 }
 function uniqueSorted2(values) {
   return [...new Set(values)].sort((left, right) => left.localeCompare(right));
@@ -3665,18 +3714,23 @@ function buildMeasurements(evidence) {
       addNumber(measurements, disclosedRoundSumUsd, { id: "indexed_disclosed_round_sum_usd", domain: "funding", label: "Arithmetic sum of positive disclosed indexed round amounts", unit: "usd", entityKey, window: { kind: "instant", asOf: fundingRecord.capturedAt }, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
     }
     addNumber(measurements, uniqueSorted2(fundingRecord.leadInvestors).length, { id: "funding_lead_investor_count", domain: "funding", label: "Distinct indexed lead investors", unit: "count", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
-    const datedRounds = fundingRecord.rounds.flatMap((round) => round.date && Number.isFinite(Date.parse(round.date)) ? [{ round, time: Date.parse(round.date) }] : []).sort((left, right) => right.time - left.time || left.round.round.localeCompare(right.round.round));
+    const parsedRounds = fundingRecord.rounds.map((round) => ({ round, interval: parseRoundDateInterval(round.date) }));
+    const unparseableDates = parsedRounds.filter(({ round, interval }) => Boolean(round.date?.trim()) && !interval).length;
+    if (unparseableDates > 0) {
+      addNumber(measurements, unparseableDates, { id: "funding_round_unparseable_date_count", domain: "chronology", label: "Indexed funding rounds whose recorded date could not be parsed", unit: "count", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
+    }
+    const datedRounds = parsedRounds.flatMap(({ round, interval }) => interval ? [{ round, interval }] : []).sort((left, right) => right.interval.end - left.interval.end || right.interval.start - left.interval.start || left.round.round.localeCompare(right.round.round));
     const latest = datedRounds[0];
     if (latest) {
-      const date = new Date(latest.time).toISOString();
-      measurements.push({ id: "latest_funding_round_date", domain: "chronology", label: "Latest dated indexed funding round", unit: "date", valueType: "date", value: date, entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
+      measurements.push({ id: "latest_funding_round_date", domain: "chronology", label: `Latest dated indexed funding round (${latest.interval.precision} precision)`, unit: "date", valueType: "date", value: latest.interval.native, entityKey, window: { kind: "historical", start: new Date(latest.interval.start).toISOString(), end: new Date(latest.interval.end).toISOString() }, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
+      measurements.push({ id: "latest_funding_round_date_precision", domain: "chronology", label: "Precision of the latest indexed funding round date", unit: "text", valueType: "text", value: latest.interval.precision, entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
       measurements.push({ id: "latest_funding_round_type", domain: "funding", label: "Latest dated indexed funding round type", unit: "text", valueType: "text", value: latest.round.round, entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
       addNumber(measurements, latest.round.amountUsd, { id: "latest_funding_round_amount_usd", domain: "funding", label: "Latest dated indexed round disclosed amount", unit: "usd", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
       const latestValuation = "valuationUsd" in latest.round && typeof latest.round.valuationUsd === "number" ? latest.round.valuationUsd : null;
       addNumber(measurements, latestValuation, { id: "latest_funding_round_valuation_usd", domain: "funding", label: "Latest dated indexed round disclosed valuation", unit: "usd", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
       const capturedTime = Date.parse(fundingRecord.capturedAt);
-      if (Number.isFinite(capturedTime) && capturedTime >= latest.time) {
-        addNumber(measurements, rounded((capturedTime - latest.time) / 864e5, 1), { id: "days_since_latest_funding_round", domain: "chronology", label: "Days from latest dated indexed round to capture", unit: "days", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
+      if (latest.interval.precision === "day" && Number.isFinite(capturedTime) && capturedTime >= latest.interval.start) {
+        addNumber(measurements, rounded((capturedTime - latest.interval.start) / 864e5, 1), { id: "days_since_latest_funding_round", domain: "chronology", label: "Days from latest dated indexed round to capture", unit: "days", entityKey, evidenceState: "reported_context", sourceRefs: fundingRecord.sourceRefs });
       }
     }
   }
@@ -4172,10 +4226,13 @@ function buildQuestions(evidence, measurements, archetypes, forms) {
       const controlReadUnavailable2 = definition.id === "project.control" && identityBindings.evmControlMatched && evidence.evmControlReality?.state === "unavailable";
       if (relatedMeasurements.length > 0) {
         const hadBoundAnswer = question.answerRefs.length > 0 || question.sourceRefs.length > 0;
+        const informative = relatedMeasurements.some(informativeMeasurement);
+        const deterministic = relatedMeasurements.some((measurement) => informativeMeasurement(measurement) && measurement.evidenceState !== "reported_context");
+        const movesToPartial = question.state === "unavailable" ? deterministic : informative;
         questions[existingIndex] = {
           ...question,
-          state: question.state === "resolved" ? "resolved" : controlReadUnavailable2 && !hadBoundAnswer ? "unavailable" : "partial",
-          basis: question.state === "resolved" ? question.basis : controlReadUnavailable2 ? hadBoundAnswer ? `${question.basis} The fixed-block standard EVM read was unavailable, so the full control question remains open.` : "The fixed-block standard EVM read was unavailable, so no negative or complete control claim is inferred." : `${question.basis} Exact frozen measurements address part of the question but do not establish facet-level completeness.`,
+          state: question.state === "resolved" ? "resolved" : controlReadUnavailable2 && !hadBoundAnswer ? "unavailable" : movesToPartial ? "partial" : question.state,
+          basis: question.state === "resolved" ? question.basis : controlReadUnavailable2 ? hadBoundAnswer ? `${question.basis} The fixed-block standard EVM read was unavailable, so the full control question remains open.` : "The fixed-block standard EVM read was unavailable, so no negative or complete control claim is inferred." : movesToPartial ? `${question.basis} Exact frozen measurements address part of the question but do not establish facet-level completeness.` : question.basis,
           answerRefs: uniqueSorted2([
             ...question.answerRefs,
             ...relatedMeasurements.map((measurement) => measurement.id)
@@ -4199,8 +4256,9 @@ function buildQuestions(evidence, measurements, archetypes, forms) {
     const contradictionRefs = candidateFacts.flatMap((fact) => factContradictionSourceRefs(fact));
     const addressedByFact = exactFacts.length > 0 || conflictFacts.length > 0;
     const controlReadUnavailable = definition.id === "project.control" && identityBindings.evmControlMatched && evidence.evmControlReality?.state === "unavailable";
-    const derivedState = controlReadUnavailable && !addressedByFact ? "unavailable" : addressedByFact || relatedMeasurements.length > 0 ? "partial" : "not_collected";
-    const derivedBasis = controlReadUnavailable ? addressedByFact ? "Direct-subject control evidence is saved, but the fixed-block standard EVM read was unavailable and the full control question remains open." : "The fixed-block standard EVM read was unavailable, so no negative or complete control claim is inferred." : hasConflict ? "Saved sources conflict on this question, so the derived lane keeps it open." : hasConflictIntegrityGap ? malformedConflictBasis(conflictFacts) : addressedByFact ? "One or more exact-predicate facts address this question, but no frozen question-ledger completion establishes that the full question was answered." : relatedMeasurements.length > 0 ? "The scan contains related measurements, but they do not answer the full decision question." : "This decision question has no completed collection record in the frozen scan.";
+    const informativeMeasurements = relatedMeasurements.some(informativeMeasurement);
+    const derivedState = controlReadUnavailable && !addressedByFact ? "unavailable" : addressedByFact || informativeMeasurements ? "partial" : "not_collected";
+    const derivedBasis = controlReadUnavailable ? addressedByFact ? "Direct-subject control evidence is saved, but the fixed-block standard EVM read was unavailable and the full control question remains open." : "The fixed-block standard EVM read was unavailable, so no negative or complete control claim is inferred." : hasConflict ? "Saved sources conflict on this question, so the derived lane keeps it open." : hasConflictIntegrityGap ? malformedConflictBasis(conflictFacts) : addressedByFact ? "One or more exact-predicate facts address this question, but no frozen question-ledger completion establishes that the full question was answered." : informativeMeasurements ? "The scan contains related measurements, but they do not answer the full decision question." : "This decision question has no completed collection record in the frozen scan.";
     questions.push({
       id: definition.id,
       domain: definition.domain,
@@ -4222,12 +4280,16 @@ function buildQuestions(evidence, measurements, archetypes, forms) {
   }
   return questions.sort((left, right) => left.id.localeCompare(right.id));
 }
-function coverageState(questions, measurementCount) {
+function coverageState(questions, measurements) {
   const openQuestions = questions.filter(
     (question) => question.state === "reported" || question.state === "partial" || question.state === "unresolved" || question.state === "unavailable" || question.state === "not_collected"
   );
   const closedQuestions = questions.filter((question) => question.state === "resolved");
-  if (measurementCount > 0) return openQuestions.length > 0 ? "partial" : "measured";
+  const deterministic = measurements.some((measurement) => measurement.evidenceState !== "reported_context");
+  if (measurements.length > 0) {
+    if (openQuestions.length > 0) return "partial";
+    return deterministic ? "measured" : "reported";
+  }
   if (closedQuestions.length > 0 && openQuestions.length > 0) return "partial";
   if (questions.some((question) => question.state === "partial")) return "partial";
   const distinctOpenStates = new Set(openQuestions.map((question) => question.state));
@@ -4257,7 +4319,7 @@ function buildCoverage(measurements, questions, domains = DOMAIN_ORDER) {
     const openQuestionCount = domainQuestions.filter(
       (question) => question.state === "reported" || question.state === "partial" || question.state === "unresolved" || question.state === "unavailable" || question.state === "not_collected"
     ).length;
-    const state = coverageState(domainQuestions, domainMeasurements.length);
+    const state = coverageState(domainQuestions, domainMeasurements);
     return {
       domain,
       state,
@@ -5899,6 +5961,26 @@ function duplicateIds(items) {
   for (const item of items) counts.set(item.id, (counts.get(item.id) ?? 0) + 1);
   return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
 }
+function deterministicAnswerRefResolves(ref, evidence) {
+  const bare = (value) => value.trim().replace(/^@/, "").toLowerCase();
+  const profile = ref.match(/^profile:([^:]+):(.+)$/);
+  if (profile) {
+    return evidence.profile.profile_collection_state === "resolved" && bare(profile[2]) === bare(evidence.profile.handle) && profile[1] === (evidence.profile.profile_provider ?? "provider");
+  }
+  const token = ref.match(/^project-token:(.+)$/);
+  if (token) {
+    const projectToken = evidence.projectToken;
+    if (!projectToken?.verified) return false;
+    return projectToken.coingeckoId === token[1] || `${projectToken.chain}:${String(projectToken.address).toLowerCase()}` === token[1];
+  }
+  if (/^team:.+:(?:founder|executive)$/.test(ref)) {
+    return (evidence.webTeam ?? []).some((member) => member.artifact_verified === true && member.evidence_origin !== "model_lead");
+  }
+  if (/^venture:.+:.+$/.test(ref)) {
+    return evidence.ventures.some((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
+  }
+  return false;
+}
 function sanitizeIntelligenceSnapshot(snapshot, evidence, options = {}) {
   const duplicateSourceIds = duplicateIds(snapshot.sources);
   const sources = snapshot.sources.filter((source2) => !duplicateSourceIds.has(source2.id));
@@ -5935,7 +6017,7 @@ function sanitizeIntelligenceSnapshot(snapshot, evidence, options = {}) {
     return retained;
   }).map((question) => {
     const sourceRefs = question.sourceRefs.filter((sourceRef) => sourceIds.has(sourceRef));
-    const answerRefs = question.answerRefs.filter((answerRef) => measurementIds.has(answerRef) || validFactIds.has(answerRef) || answerRef.startsWith("fact:") && validFactIds.has(answerRef.slice("fact:".length)));
+    const answerRefs = question.answerRefs.filter((answerRef) => measurementIds.has(answerRef) || validFactIds.has(answerRef) || answerRef.startsWith("fact:") && validFactIds.has(answerRef.slice("fact:".length)) || deterministicAnswerRefResolves(answerRef, evidence));
     const lostLineage = sourceRefs.length !== question.sourceRefs.length || answerRefs.length !== question.answerRefs.length;
     if (!lostLineage) return question;
     downgradedQuestionCount += 1;
@@ -6158,10 +6240,18 @@ function rowFor(measurement, entityKey, role) {
     changeCondition: `Recompute when the source-bound ${measurement.label.toLowerCase()} record changes in a new report version.`
   };
 }
-function axisState(measurements, questionStates) {
-  if (measurements.some((measurement) => measurement.evidenceState === "verified")) return "established";
+function axisState(domains, measurements, questions) {
+  const closed = (state) => state === "resolved" || state === "not_applicable";
+  const verified = measurements.some((measurement) => measurement.evidenceState === "verified");
+  const openCritical = questions.some((question) => question.materiality === "critical" && !closed(question.state));
+  const covered = (domain) => {
+    const domainQuestions = questions.filter((question) => question.domain === domain);
+    if (domainQuestions.length === 0) return true;
+    return domainQuestions.every((question) => closed(question.state)) || measurements.some((measurement) => measurement.domain === domain && measurement.evidenceState !== "reported_context");
+  };
+  if (verified && !openCritical && domains.every(covered)) return "established";
   if (measurements.length > 0) return "partial";
-  if (questionStates.some((state) => state !== "not_collected")) return "open";
+  if (questions.some((question) => question.state !== "not_collected")) return "open";
   return "not_collected";
 }
 function buildEntityScorecards(snapshot, roles) {
@@ -6178,7 +6268,7 @@ function buildEntityScorecards(snapshot, roles) {
     return {
       id: definition.id,
       label: definition.label,
-      state: axisState(measurements, questions.map((question) => question.state)),
+      state: axisState(definition.domains, measurements, questions),
       ledgerRowIds: rows.map((row) => row.id),
       measurementRefs: measurements.map((measurement) => measurement.id),
       sourceRefs: [...new Set(measurements.flatMap((measurement) => measurement.sourceRefs))]
@@ -9376,7 +9466,8 @@ var SOURCE_ARTIFACT_FIELDS = [
   "fundScaleAsOf",
   "fundScaleTemporalState",
   "fundScaleSourceCount",
-  "fundScaleClaimId"
+  "fundScaleClaimId",
+  "attributedEntityName"
 ];
 var compactSourceArtifact = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
@@ -9736,7 +9827,7 @@ function deriveInvestorStrengthBands(evidenceJson, axisCatalog2) {
     const artifact = artifactFor(row);
     return artifact?.eligibleAxes.includes(axis) === true && isSubstantiveArtifact(artifact);
   });
-  const distinctSourceKey = (artifact) => {
+  const distinctSourceKey2 = (artifact) => {
     if (artifact.sourceUrl) {
       try {
         return new URL(artifact.sourceUrl).hostname.replace(/^www\./i, "").toLowerCase();
@@ -9773,7 +9864,7 @@ function deriveInvestorStrengthBands(evidenceJson, axisCatalog2) {
     const personIdentityBound = hasExactPersonIdentityBinding(profile);
     const organizationContext = investorOrganizationContext(investorAxes, profile);
     const identityBound = personIdentityBound || organizationContext && identityFacts.length > 0;
-    const verifiedIdentityProviders = new Set(verifiedIdentityArtifacts.map(distinctSourceKey));
+    const verifiedIdentityProviders = new Set(verifiedIdentityArtifacts.map(distinctSourceKey2));
     const limitingIdentity = identityArtifacts.filter((artifact) => isVerifiedCounterArtifact(artifact, identityAxis));
     const tier = limitingIdentity.length > 0 ? "adverse" : identityBound && identityFacts.length >= 2 && verifiedIdentityProviders.size >= 2 ? "exceptional" : identityBound || identityFacts.length > 0 ? "solid" : identityArtifacts.length > 0 ? "emerging" : "none";
     setBand(identityAxis, tier, [
@@ -9806,7 +9897,7 @@ function deriveInvestorStrengthBands(evidenceJson, axisCatalog2) {
       `${String(row.value ?? "")} ${String(row.claim ?? "")} ${String(row.title ?? "")}`
     ));
     const negativeOutcomes = outcomeRows.filter((row) => INVESTOR_NEGATIVE_OUTCOME.test(`${String(row.value ?? "")} ${String(row.claim ?? "")} ${String(row.title ?? "")}`));
-    const sourceCount = new Set(portfolioArtifacts.map(distinctSourceKey)).size;
+    const sourceCount = new Set(portfolioArtifacts.map(distinctSourceKey2)).size;
     const tier = negativeOutcomes.length >= 2 && positiveOutcomes.length === 0 ? "adverse" : investmentKeys.size >= 5 && positiveOutcomes.length >= 2 && sourceCount >= 2 ? "exceptional" : investmentKeys.size >= 3 && outcomeRows.length >= 1 || positiveOutcomes.length >= 2 ? "solid" : investmentKeys.size > 0 || outcomeRows.length > 0 ? "emerging" : "none";
     setBand(portfolioAxis, tier, [
       ...investmentKeys.size ? [`${investmentKeys.size} distinct source-bound portfolio inclusion${investmentKeys.size === 1 ? "" : "s"}`] : [],
@@ -9874,8 +9965,8 @@ function deriveInvestorStrengthBands(evidenceJson, axisCatalog2) {
     const positiveArtifacts = reputationArtifacts.filter((artifact) => !adversePressIds.has(artifact.artifactId));
     const verifiedPositiveArtifacts = positiveArtifacts.filter((artifact) => artifact.verification === "verified");
     const verifiedLimiting = reputationArtifacts.filter((artifact) => isVerifiedCounterArtifact(artifact, reputationAxis));
-    const sourceCount = new Set(positiveArtifacts.map(distinctSourceKey)).size;
-    const verifiedSourceCount = new Set(verifiedPositiveArtifacts.map(distinctSourceKey)).size;
+    const sourceCount = new Set(positiveArtifacts.map(distinctSourceKey2)).size;
+    const verifiedSourceCount = new Set(verifiedPositiveArtifacts.map(distinctSourceKey2)).size;
     const verifiedDirectCount = reputationArtifacts.filter((artifact) => artifact.verification === "verified" && (artifact.section === "findings" || artifact.section === "basicFacts")).length;
     const ladder = (artifactCount, sources) => verifiedDirectCount >= 3 && sources >= 3 ? "exceptional" : sources >= 3 || verifiedDirectCount >= 1 && sources >= 2 ? "solid" : artifactCount > 0 ? "emerging" : "none";
     const ceilingTier = ladder(positiveArtifacts.length, sourceCount);
@@ -11972,13 +12063,15 @@ function iso(value) {
   const date = value ? new Date(value) : /* @__PURE__ */ new Date();
   return Number.isFinite(date.getTime()) ? date.toISOString() : (/* @__PURE__ */ new Date()).toISOString();
 }
+var screenedNameKey = (value) => (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 function uniqueObservations(values) {
   const seen = /* @__PURE__ */ new Set();
   return values.filter((value) => {
     const key = `${value.id}
 ${value.provider}
 ${value.status}
-${value.note}`;
+${value.note}
+${screenedNameKey(value.screenedName)}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -11986,9 +12079,11 @@ ${value.note}`;
 }
 var NULL_FINDING_SUPERSEDED_BY_CONFIRMED = /* @__PURE__ */ new Set(["project-token-identity"]);
 function supersededObservations(id, observations) {
-  if (!NULL_FINDING_SUPERSEDED_BY_CONFIRMED.has(id)) return [...observations];
-  if (!observations.some((item) => item.status === "confirmed")) return [...observations];
-  return observations.filter((item) => item.status !== "finding");
+  const latestScreened = [...observations].reverse().find((item) => item.screenedName)?.screenedName;
+  const rows = latestScreened ? observations.filter((item) => !item.screenedName || screenedNameKey(item.screenedName) === screenedNameKey(latestScreened)) : [...observations];
+  if (!NULL_FINDING_SUPERSEDED_BY_CONFIRMED.has(id)) return rows;
+  if (!rows.some((item) => item.status === "confirmed")) return rows;
+  return rows.filter((item) => item.status !== "finding");
 }
 var PersonCheckTracker = class {
   observations = /* @__PURE__ */ new Map();
@@ -12001,6 +12096,8 @@ var PersonCheckTracker = class {
       sourceCount: observation.sourceCount == null ? void 0 : Math.max(0, Math.floor(observation.sourceCount)),
       completedAt: iso(observation.completedAt)
     };
+    if (observation.screenedName?.trim()) normalized4.screenedName = observation.screenedName.trim();
+    else delete normalized4.screenedName;
     if (!normalized4.note || !normalized4.provider) return;
     const current = this.observations.get(normalized4.id) ?? [];
     this.observations.set(normalized4.id, uniqueObservations([...current, normalized4]));
@@ -19589,7 +19686,7 @@ function validGithubResult(path, value) {
   if (/^\/users\/[^/]+$/.test(clean4)) return isRecord3(value) && typeof value.login === "string" && !!value.login.trim();
   return isRecord3(value) || Array.isArray(value);
 }
-async function ghJson(path, key) {
+async function ghFetch(path, key) {
   const op = path.split("?")[0].split("/").slice(1, 3).join("/") || "api";
   const tier = "subscription/keyed";
   let res;
@@ -19597,29 +19694,34 @@ async function ghJson(path, key) {
     res = await deadlineFetch(GH + path, { headers: headers2(key), signal: AbortSignal.timeout(8e3) });
   } catch {
     recordCall("github", op, 0, `${tier} \xB7 transport_error`, "failed");
-    return null;
+    return { status: "unavailable", detail: "transport_error" };
   }
   if (!res.ok) {
     if (res.status === 404) {
       recordCall("github", op, 0, `${tier} \xB7 no_record_404`, "succeeded");
-      return null;
+      return { status: "not_found" };
     }
     recordCall("github", op, 0, `${tier} \xB7 http_${res.status}`, "failed");
-    return null;
+    return { status: "unavailable", detail: `http_${res.status}` };
   }
   let value;
   try {
     value = await res.json();
   } catch {
     recordCall("github", op, 0, `${tier} \xB7 response_json_error`, "failed");
-    return null;
+    return { status: "unavailable", detail: "response_json_error" };
   }
   if (!validGithubResult(path, value)) {
     recordCall("github", op, 0, `${tier} \xB7 result_shape_error`, "partial");
-    return null;
+    return { status: "unavailable", detail: "result_shape_error" };
   }
   recordCall("github", op, 0, tier, "succeeded");
-  return value;
+  return { status: "ok", value };
+}
+async function ghJson(path, key, coverage) {
+  const result = await ghFetch(path, key);
+  if (result.status === "unavailable" && coverage) coverage.unavailable = true;
+  return result.status === "ok" ? result.value : null;
 }
 var apexOf = (value) => {
   if (!value?.trim()) return "";
@@ -19648,7 +19750,7 @@ async function resolveGithub(handle, name, key, subject) {
   for (const q of [name, handle.replace(/^@/, "")]) {
     if (!q) continue;
     for (const variant of searchQueryVariants(q)) {
-      const found = await ghJson(`/search/users?q=${encodeURIComponent(variant)}&per_page=5`, key);
+      const found = await ghJson(`/search/users?q=${encodeURIComponent(variant)}&per_page=5`, key, subject?.coverage);
       const items = found?.items ?? [];
       for (const it of items) candidates.add(it.login);
       if (items.length) break;
@@ -19659,7 +19761,7 @@ async function resolveGithub(handle, name, key, subject) {
   let claimed = null;
   let weak = null;
   for (const login of [...candidates].slice(0, 8)) {
-    const u = await ghJson(`/users/${encodeURIComponent(login)}`, key);
+    const u = await ghJson(`/users/${encodeURIComponent(login)}`, key, subject?.coverage);
     if (!u) continue;
     if ((u.twitter_username ?? "").toLowerCase() === h) {
       const subjectLinksBack = !!bioText && bioText.includes(`github.com/${u.login.toLowerCase()}`);
@@ -19677,10 +19779,15 @@ async function resolveGithub(handle, name, key, subject) {
 }
 async function githubAffiliations(login, key) {
   const out = /* @__PURE__ */ new Map();
-  const orgs = await ghJson(`/users/${encodeURIComponent(login)}/orgs`, key);
-  for (const o of orgs ?? []) out.set(o.login.toLowerCase(), { org: o.login, description: o.description, via: "public org member" });
-  const repos = await ghJson(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=all&per_page=30`, key);
-  for (const r of repos ?? []) {
+  const failures = [];
+  const orgs = await ghFetch(`/users/${encodeURIComponent(login)}/orgs`, key);
+  if (orgs.status === "unavailable") failures.push(`orgs ${orgs.detail}`);
+  for (const o of orgs.status === "ok" ? orgs.value : []) {
+    out.set(o.login.toLowerCase(), { org: o.login, description: o.description, via: "public org member" });
+  }
+  const repos = await ghFetch(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=all&per_page=30`, key);
+  if (repos.status === "unavailable") failures.push(`repos ${repos.detail}`);
+  for (const r of repos.status === "ok" ? repos.value : []) {
     if (r.fork) continue;
     const owner = r.owner;
     if (owner.type === "Organization" && owner.login.toLowerCase() !== login.toLowerCase()) {
@@ -19688,7 +19795,11 @@ async function githubAffiliations(login, key) {
       if (!out.has(k)) out.set(k, { org: owner.login, via: `repo ${r.name}` });
     }
   }
-  return [...out.values()].slice(0, 10);
+  return {
+    rows: [...out.values()].slice(0, 10),
+    unavailable: failures.length > 0,
+    ...failures.length ? { detail: failures.join("; ") } : {}
+  };
 }
 var MAX_TEAM = 5;
 var LEADER_RE = /founder|cofounder|co-?founder|ceo|cto|coo|president|chief|head of|\blead\b/i;
@@ -19699,6 +19810,7 @@ var yearsSince = (fromIso, toMs) => {
 function buildClaimChecks(bio, a) {
   const checks = [];
   const b = bio ?? "";
+  const repoCoverage = a.repoSampleState ?? "complete";
   const ym = b.match(/\b(?:since|est\.?|building since|from)\s*'?(\d{4})\b/i) ?? b.match(/\bsince\s*'?(\d{2})\b/i);
   if (ym && a.createdAt) {
     let claimedYear = parseInt(ym[1], 10);
@@ -19715,14 +19827,20 @@ function buildClaimChecks(bio, a) {
   if (/founder|co-?founder|builder|\bbuild|\bdev\b|developer|engineer|\bship|core contributor|hacker|programmer/i.test(b)) {
     const total = a.originalCount + a.forkCount;
     const claim = "Bio presents a builder/founder persona";
-    if (total === 0) {
+    if (repoCoverage === "unavailable") {
+      checks.push({ claim, observation: "GitHub repository list was unavailable; output could not be assessed", grade: "context" });
+    } else if (total === 0 && repoCoverage === "complete") {
       checks.push({ claim, observation: "GitHub account has no public repositories", grade: "unsupported" });
-    } else if (a.originalCount === 0) {
+    } else if (total === 0) {
+      checks.push({ claim, observation: "the account reports public repositories but none were returned in the sampled window", grade: "context" });
+    } else if (a.originalCount === 0 && repoCoverage === "complete") {
       checks.push({ claim, observation: `all ${total} public repos are forks - no original repositories`, grade: "contradicted" });
-    } else if (a.forkRatio >= 0.8) {
+    } else if (a.originalCount === 0) {
+      checks.push({ claim, observation: `the ${total} most recently pushed repos are all forks; older repositories were not sampled`, grade: "context" });
+    } else if (a.forkRatio >= 0.8 && repoCoverage === "complete") {
       checks.push({ claim, observation: `${a.forkCount} of ${total} repos are forks; ${a.originalCount} original with ${a.totalStarsOnOriginals}\u2605`, grade: "unsupported" });
     } else {
-      checks.push({ claim, observation: `${a.originalCount} original repos (${a.totalStarsOnOriginals}\u2605)`, grade: "consistent" });
+      checks.push({ claim, observation: `${a.originalCount} original repos (${a.totalStarsOnOriginals}\u2605)${repoCoverage === "sample" ? " in the sampled window" : ""}`, grade: "consistent" });
     }
   }
   return checks;
@@ -19732,7 +19850,9 @@ async function assessGithub(match, key, bio, opts) {
   const perPage = opts?.maxRepos ?? 30;
   const u = await ghJson(`/users/${encodeURIComponent(login)}`, key);
   if (!u) return null;
-  const repos = await ghJson(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=owner&per_page=${perPage}`, key) ?? [];
+  const repoList = await ghFetch(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=owner&per_page=${perPage}`, key);
+  const repos = repoList.status === "ok" ? repoList.value : [];
+  const repoSampleState = repoList.status === "unavailable" ? "unavailable" : typeof u.public_repos === "number" && repos.length < u.public_repos ? "sample" : "complete";
   const originals = repos.filter((r) => !r.fork);
   const forks = repos.filter((r) => r.fork);
   const total = repos.length;
@@ -19752,14 +19872,17 @@ async function assessGithub(match, key, bio, opts) {
     originalCount: originals.length,
     forkCount: forks.length,
     forkRatio: Math.round(forkRatio * 100) / 100,
-    totalStarsOnOriginals
+    totalStarsOnOriginals,
+    repoSampleState
   };
-  const summary = `github.com/${login}: ${ageY != null ? `~${Math.round(ageY)}y old, ` : ""}${originals.length} original + ${forks.length} fork repos${totalStarsOnOriginals ? `, ${totalStarsOnOriginals}\u2605 on originals` : ""}${topLanguages.length ? ` (${topLanguages.slice(0, 3).map((l) => l.language).join(", ")})` : ""}.`;
+  const repoSummary = repoSampleState === "unavailable" ? `repository list unavailable (${repoList.status === "unavailable" ? repoList.detail : "unknown"})` : `${originals.length} original + ${forks.length} fork repos${repoSampleState === "sample" ? ` in the ${total} most recently pushed of ${u.public_repos}` : ""}${totalStarsOnOriginals ? `, ${totalStarsOnOriginals}\u2605 on originals` : ""}${topLanguages.length ? ` (${topLanguages.slice(0, 3).map((l) => l.language).join(", ")})` : ""}`;
+  const summary = `github.com/${login}: ${ageY != null ? `~${Math.round(ageY)}y old, ` : ""}${repoSummary}.`;
   return {
     login,
     confidence: match.confidence === "gold" ? "gold" : "weak",
     ...base,
     publicRepos: u.public_repos ?? total,
+    sampledRepos: total,
     topLanguages,
     notableRepos,
     lastActivity: lastMs ? new Date(lastMs).toISOString() : void 0,
@@ -19777,12 +19900,24 @@ var githubAdapter = {
     if (!key) return;
     const name = ctx.evidence.profile.display_name;
     ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub resolution", detail: `Matching ${ctx.handle} to a GitHub account by linked X handle\u2026`, source: "github", tone: "neutral" });
+    const coverage = { unavailable: false };
     const match = await resolveGithub(ctx.handle, name, key, {
       bioText: [ctx.evidence.profile.bio, ctx.evidence.profile.website].filter(Boolean).join(" "),
       siteDomain: ctx.evidence.profile.website,
-      accountCreatedAt: ctx.evidence.profile.account_created_at
+      accountCreatedAt: ctx.evidence.profile.account_created_at,
+      coverage
     });
     if (!match) {
+      if (coverage.unavailable) {
+        ctx.recordCheck?.({
+          id: "code-footprint-github",
+          status: "unavailable",
+          note: "GitHub resolution was interrupted by a provider failure; no account could be confirmed or excluded",
+          provider: "github"
+        });
+        ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub unavailable", detail: "GitHub lookups failed during resolution; the code footprint could not be assessed.", source: "github", tone: "warn" });
+        return;
+      }
       ctx.recordCheck?.({
         id: "code-footprint-github",
         status: "checked-empty",
@@ -19832,7 +19967,8 @@ var githubAdapter = {
     const assessment = await assessGithub(match, key, ctx.evidence.profile.bio);
     if (assessment) {
       ctx.evidence.profile.githubAssessment = assessment;
-      ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub assessment", detail: assessment.summary, source: "github", tone: assessment.forkRatio > 0.8 || assessment.originalCount === 0 ? "warn" : "neutral" });
+      const measured = assessment.repoSampleState === "complete";
+      ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub assessment", detail: assessment.summary, source: "github", tone: measured && (assessment.forkRatio > 0.8 || assessment.originalCount === 0) ? "warn" : "neutral" });
       for (const c of assessment.claimChecks) {
         if (c.grade === "contradicted" || c.grade === "unsupported") {
           ctx.emit({ phase: "P1 \xB7 Identity", label: "Bio vs GitHub", detail: `${c.claim} - ${c.observation}.`, source: "github", tone: "warn" });
@@ -19855,8 +19991,19 @@ var githubAdapter = {
         ctx.emit({ phase: "P1 \xB7 Identity", label: "Team GitHubs", detail: assessed ? `${assessed} of ${leaders.length} leader X handle(s) linked to a GitHub (twitter_username match) and assessed.` : "No leader X handle linked back to a GitHub account.", source: "github", tone: assessed ? "good" : "neutral" });
       }
     }
-    const affs = await githubAffiliations(match.login, key);
+    const affiliations = await githubAffiliations(match.login, key);
+    const affs = affiliations.rows;
     if (!affs.length) {
+      if (affiliations.unavailable) {
+        ctx.recordCheck?.({
+          id: "affiliations-associates",
+          status: "unavailable",
+          note: `GitHub organization and repository lists were unavailable (${affiliations.detail ?? "provider failure"})`,
+          provider: "github"
+        });
+        ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub affiliations unavailable", detail: "GitHub organization and repository lists could not be fetched; affiliations were not assessed.", source: "github", tone: "warn" });
+        return;
+      }
       ctx.recordCheck?.({
         id: "affiliations-associates",
         status: "checked-empty",
@@ -19895,7 +20042,7 @@ var githubAdapter = {
     ctx.recordCheck?.({
       id: "affiliations-associates",
       status: "confirmed",
-      note: `${affs.length} public GitHub organization affiliation${affs.length === 1 ? "" : "s"} returned`,
+      note: `${affs.length} public GitHub organization affiliation${affs.length === 1 ? "" : "s"} returned${affiliations.unavailable ? ` (partial: ${affiliations.detail})` : ""}`,
       provider: "github",
       sourceCount: affs.length
     });
@@ -23372,9 +23519,9 @@ function legalEntityGovernsClaim(clause, lead) {
   const entityPatternText = loosePhrasePattern(lead.attributedEntity);
   const valuePatternText = loosePhrasePattern(lead.value);
   if (!entityPatternText || !valuePatternText) return false;
-  const entityPattern3 = new RegExp(`\\b${entityPatternText}\\b`, "i");
+  const entityPattern2 = new RegExp(`\\b${entityPatternText}\\b`, "i");
   const valuePattern = new RegExp(`\\b${valuePatternText}\\b`, "i");
-  const rawEntityMatch = entityPattern3.exec(clause);
+  const rawEntityMatch = entityPattern2.exec(clause);
   const rawValueMatch = valuePattern.exec(clause);
   if (rawValueMatch?.index !== void 0) {
     const afterValue = clause.slice(rawValueMatch.index + rawValueMatch[0].length);
@@ -23395,7 +23542,7 @@ function legalEntityGovernsClaim(clause, lead) {
     new RegExp(`\\b(?:founded|owned|led)\\s+by\\s+${entityPatternText}\\b`, "i"),
     new RegExp(`\\b${entityPatternText}\\b\\s+(?:and|with)\\s+[A-Z][A-Za-z0-9.'\u2019-]+\\s+(?:settled|was|is|entered|faced|received)\\b`, "i")
   ].some((pattern) => pattern.test(clause))) return false;
-  const entityMatch = entityPattern3.exec(sanitized);
+  const entityMatch = entityPattern2.exec(sanitized);
   const valueMatch = valuePattern.exec(sanitized);
   if (!entityMatch || entityMatch.index === void 0 || !valueMatch || valueMatch.index === void 0) return false;
   if (entityMatch.index <= valueMatch.index) {
@@ -25802,20 +25949,22 @@ var incompleteSingleNameQuery = (ctx, resolvedName) => {
     displayToken && !isPlausibleFullName(display) && handle.startsWith(displayToken) && handle.slice(displayToken.length).length >= 3
   );
 };
-var freezeNewsOutcome = (ctx, news, capturedAt, provisionalNameQuery) => {
+var freezeNewsOutcome = (ctx, news, capturedAt, provisionalNameQuery, screenedName) => {
   if (news.status !== "succeeded") {
     ctx.recordCheck?.({
       id: "news-press",
       status: "unavailable",
       note: failedCheckNote("Google News search", news.status, news.attempts),
-      provider: "google-news"
+      provider: "google-news",
+      screenedName
     });
   } else if (provisionalNameQuery && !news.value.articles.length) {
     ctx.recordCheck?.({
       id: "news-press",
       status: "unavailable",
       note: "single-name and handle search returned no matching article; a verified full-name search is still required",
-      provider: "google-news"
+      provider: "google-news",
+      screenedName
     });
   } else {
     ctx.recordCheck?.({
@@ -25823,11 +25972,13 @@ var freezeNewsOutcome = (ctx, news, capturedAt, provisionalNameQuery) => {
       status: news.value.articles.length ? "confirmed" : "checked-empty",
       note: news.value.articles.length ? `${news.value.articles.length} exact-name or exact-handle crypto press result${news.value.articles.length === 1 ? "" : "s"} frozen` : "exact-name and exact-handle crypto press searches returned no matching article",
       provider: "google-news",
-      sourceCount: news.value.articles.length
+      sourceCount: news.value.articles.length,
+      screenedName
     });
   }
   for (const article of news.value.articles) {
     if (!article.url) continue;
+    const match = news.matches[(article.url ?? article.title).toLowerCase()] ?? "exact_name";
     addArtifact2(ctx, {
       kind: "press",
       provider: "google-news",
@@ -25836,7 +25987,10 @@ var freezeNewsOutcome = (ctx, news, capturedAt, provisionalNameQuery) => {
       capturedAt,
       ...asIso(article.publishedAt) ? { publishedAt: asIso(article.publishedAt) } : {},
       excerpt: article.source,
-      match: news.matches[(article.url ?? article.title).toLowerCase()] ?? "exact_name"
+      match,
+      // A name-matched article belongs to the screened name; a handle match
+      // survives a later name refresh because the handle did not change.
+      ...match === "exact_name" ? { subjectName: screenedName } : {}
     });
   }
 };
@@ -25852,7 +26006,8 @@ var freezeLegalOutcome = (ctx, legal, name, capturedAt) => {
       status: "unavailable",
       note: inspectableCases.length !== exactCases.length ? "CourtListener returned a matching caption without an inspectable docket URL" : failedCheckNote("CourtListener search", legal.status, legal.attempts),
       provider: "courtlistener",
-      sourceCount: inspectableCases.length
+      sourceCount: inspectableCases.length,
+      screenedName: name
     });
   } else {
     ctx.recordCheck?.({
@@ -25860,7 +26015,8 @@ var freezeLegalOutcome = (ctx, legal, name, capturedAt) => {
       status: exactCases.length ? "finding" : "checked-empty",
       note: exactCases.length ? `${exactCases.length} CourtListener case caption${exactCases.length === 1 ? "" : "s"} contained the full resolved name; identity match requires review${legal.status === "partial" ? " (other returned rows were malformed)" : ""}` : "CourtListener returned no case caption containing the full resolved name",
       provider: "courtlistener",
-      sourceCount: exactCases.length
+      sourceCount: exactCases.length,
+      screenedName: name
     });
   }
   for (const item of inspectableCases) {
@@ -25872,7 +26028,8 @@ var freezeLegalOutcome = (ctx, legal, name, capturedAt) => {
       capturedAt,
       ...asIso(item.date) ? { publishedAt: asIso(item.date) } : {},
       excerpt: [item.court, item.docket == null ? "" : String(item.docket)].filter(Boolean).join(" \xB7 "),
-      match: "candidate"
+      match: "candidate",
+      subjectName: name
     });
     addFinding(ctx, {
       finding_type: "LegalCaseNameLead",
@@ -25894,7 +26051,8 @@ var freezeOfacOutcome = (ctx, ofac, name, capturedAt) => {
       id: "ofac-sanctions-name",
       status: "unavailable",
       note: failedCheckNote("OFAC name screen", ofac.status, ofac.attempts),
-      provider: "opensanctions"
+      provider: "opensanctions",
+      screenedName: name
     });
     return;
   }
@@ -25903,7 +26061,8 @@ var freezeOfacOutcome = (ctx, ofac, name, capturedAt) => {
     status: ofac.value.sanctioned ? "finding" : "checked-empty",
     note: ofac.value.sanctioned ? "exact full-name or alias match in the US Treasury OFAC SDN mirror; identity match requires review" : `exact full-name and reversed-name screen completed against ${ofac.value.listSize.toLocaleString()} OFAC SDN names with no match`,
     provider: "opensanctions",
-    sourceCount: 1
+    sourceCount: 1,
+    screenedName: name
   });
   addArtifact2(ctx, {
     kind: "sanctions_screen",
@@ -25913,6 +26072,9 @@ var freezeOfacOutcome = (ctx, ofac, name, capturedAt) => {
     capturedAt,
     excerpt: ofac.value.sanctioned ? `Exact name/alias match for ${name}; identity requires verification.` : `No exact full-name or reversed-name match for ${name} across ${ofac.value.listSize} indexed names.`,
     match: ofac.value.sanctioned ? "exact_name" : "no_match",
+    // The screened name is part of the artifact identity so that a later
+    // refresh for a different resolved name is never deduplicated away.
+    subjectName: name,
     ...ofac.indexHash ? { sourceContentHash: ofac.indexHash } : {}
   });
   if (ofac.value.sanctioned) {
@@ -25941,7 +26103,8 @@ var freezeIntlSanctionsOutcome = (ctx, collection, name, capturedAt) => {
     sourceUrl: matchedUrl,
     capturedAt,
     excerpt: sanctioned ? `Exact name or alias match for ${name} on ${matchedLists.join(", ")}; identity requires verification.` : `No exact full-name or reversed-name match for ${name} across the ${screenedLists.join(", ")}.`,
-    match: sanctioned ? "exact_name" : "no_match"
+    match: sanctioned ? "exact_name" : "no_match",
+    subjectName: name
   });
   if (sanctioned) {
     addFinding(ctx, {
@@ -26032,6 +26195,20 @@ async function screenOrganizationSanctions(ctx, legalEntity) {
 function resolvedOffchainName(ctx) {
   return resolvedRealName(ctx);
 }
+var sameScreenedName = (left, right) => Boolean(left && right && left.trim().toLowerCase().replace(/\s+/g, " ") === right.trim().toLowerCase().replace(/\s+/g, " "));
+function supersedeNameScreenEvidence(ctx, resolvedName) {
+  const superseded = /* @__PURE__ */ new Set();
+  ctx.evidence.sourceArtifacts = ctx.evidence.sourceArtifacts.filter((artifact) => {
+    const nameScreen = artifact.kind === "sanctions_screen" && artifact.provider === "opensanctions" || artifact.kind === "legal_case" && artifact.provider === "courtlistener" || artifact.kind === "press" && artifact.provider === "google-news" && artifact.match === "exact_name";
+    if (!nameScreen || !artifact.subjectName || sameScreenedName(artifact.subjectName, resolvedName)) return true;
+    superseded.add(artifact.subjectName);
+    return false;
+  });
+  if (superseded.size) {
+    ctx.evidence.findings = ctx.evidence.findings.filter((finding) => !(["SanctionsNameLead", "LegalCaseNameLead"].includes(finding.finding_type) && [...superseded].some((name) => finding.claim.startsWith(`${name} `))));
+  }
+  return [...superseded];
+}
 async function refreshResolvedNameOffchain(ctx) {
   const name = resolvedRealName(ctx);
   if (!name) return { state: "skipped", detail: "no newly resolved full name" };
@@ -26042,6 +26219,7 @@ async function refreshResolvedNameOffchain(ctx) {
     detail: `Refreshing exact-name news, US court, and OFAC outcomes for ${name}.`,
     tone: "neutral"
   });
+  supersedeNameScreenEvidence(ctx, name);
   const [news, legal, ofac, intlSanctions] = await Promise.all([
     collectNews(name, ctx.handle),
     collectLegalCases(name),
@@ -26052,7 +26230,7 @@ async function refreshResolvedNameOffchain(ctx) {
   recordAttempts(legal.attempts);
   recordAttempts(ofac.attempts);
   recordAttempts(intlSanctions.attempts);
-  freezeNewsOutcome(ctx, news, capturedAt, false);
+  freezeNewsOutcome(ctx, news, capturedAt, false, name);
   freezeLegalOutcome(ctx, legal, name, capturedAt);
   freezeOfacOutcome(ctx, ofac, name, capturedAt);
   freezeIntlSanctionsOutcome(ctx, intlSanctions, name, capturedAt);
@@ -26094,7 +26272,7 @@ var offchainAdapter = {
     if (legal) recordAttempts(legal.attempts);
     if (ofac) recordAttempts(ofac.attempts);
     if (intlSanctions) recordAttempts(intlSanctions.attempts);
-    freezeNewsOutcome(ctx, news, capturedAt, incompleteSingleNameQuery(ctx, name));
+    freezeNewsOutcome(ctx, news, capturedAt, incompleteSingleNameQuery(ctx, name), name ?? ctx.evidence.profile.display_name);
     if (legal && name) freezeLegalOutcome(ctx, legal, name, capturedAt);
     if (ofac && name) freezeOfacOutcome(ctx, ofac, name, capturedAt);
     if (intlSanctions && name) freezeIntlSanctionsOutcome(ctx, intlSanctions, name, capturedAt);
@@ -27417,12 +27595,7 @@ function portfolioEntityForLead(ctx, lead, now = /* @__PURE__ */ new Date()) {
   const directAliases = [directName, ctx.evidence.profile.display_name, ctx.handle.replace(/^@/, "")].filter((value) => Boolean(value?.trim()));
   const requested = lead.investorEntityName?.trim();
   const requestedHandle = lead.investorEntityHandle?.replace(/^@/, "").toLowerCase();
-  const matches = (values) => values.some((value) => {
-    if (!value || !requested) return false;
-    const left = compact(value);
-    const right = compact(requested);
-    return left === right || left.length >= 5 && right.length >= 5 && (left.includes(right) || right.includes(left));
-  });
+  const matches = (values) => values.some((value) => Boolean(value && requested && sameEntityName(value, requested)));
   if (!requested || matches(directAliases) || requestedHandle === ctx.handle.replace(/^@/, "").toLowerCase()) {
     const directDomainScope = likelyIndividualSubject(ctx) ? null : canonicalOfficialWebsite(ctx.evidence.profile.website);
     return {
@@ -27553,6 +27726,194 @@ function entitySpans(text2, entity) {
 function containsEntity(text2, entity) {
   return entitySpans(normalized(text2), entity).length > 0;
 }
+var LEGAL_FORM_SUFFIXES = /* @__PURE__ */ new Set([
+  "inc",
+  "incorporated",
+  "llc",
+  "llp",
+  "lp",
+  "ltd",
+  "limited",
+  "plc",
+  "corp",
+  "corporation",
+  "co",
+  "gmbh",
+  "ag",
+  "sa",
+  "pte",
+  "pty",
+  "nv",
+  "bv"
+]);
+function entityIdentityKey(value) {
+  if (!value) return "";
+  const words = entityWords(value);
+  for (; ; ) {
+    if (words.length > 1 && LEGAL_FORM_SUFFIXES.has(words[words.length - 1])) {
+      words.pop();
+      continue;
+    }
+    if (words.length > 2 && ["lp", "llc", "llp", "plc"].includes(words.slice(-2).join(""))) {
+      words.splice(-2, 2);
+      continue;
+    }
+    if (words.length > 3 && words.slice(-3).join("") === "llc") {
+      words.splice(-3, 3);
+      continue;
+    }
+    break;
+  }
+  if (words.length > 1 && words[0] === "the") words.shift();
+  return words.join(" ");
+}
+function sameEntityName(left, right) {
+  const a = entityIdentityKey(left);
+  const b = entityIdentityKey(right);
+  return Boolean(a && b && a === b);
+}
+var HEADLINE_WORDS = /* @__PURE__ */ new Set([
+  "raises",
+  "raised",
+  "raise",
+  "closes",
+  "closed",
+  "close",
+  "announces",
+  "announced",
+  "launches",
+  "launched",
+  "completes",
+  "completed",
+  "secures",
+  "secured",
+  "files",
+  "filed",
+  "reports",
+  "reported",
+  "says",
+  "said",
+  "seeks",
+  "targets",
+  "hits",
+  "tops",
+  "nears",
+  "eyes",
+  "plans",
+  "unveils",
+  "wraps",
+  "lands",
+  "bags",
+  "nabs",
+  "grabs",
+  "scores",
+  "adds",
+  "sets",
+  "gets",
+  "has",
+  "is",
+  "will",
+  "to",
+  "and",
+  "of",
+  "in",
+  "for",
+  "with",
+  "at",
+  "on",
+  "its",
+  "the",
+  "a",
+  "an",
+  "by",
+  "as",
+  "from",
+  "after",
+  "amid",
+  "over",
+  "up",
+  "now",
+  "today",
+  "led",
+  "leads",
+  "backs",
+  "backed",
+  "invests",
+  "invested",
+  "joins",
+  "joined",
+  "manages",
+  "managed",
+  "holds",
+  "held",
+  "reaches",
+  "reached",
+  "crosses",
+  "crossed",
+  "surpasses",
+  "surpassed",
+  "exceeds",
+  "exceeded",
+  "oversees",
+  "confirms",
+  "confirmed",
+  "aims",
+  "looks",
+  "expected",
+  "expects",
+  "reportedly",
+  "officially",
+  "just",
+  "finally",
+  "also"
+]);
+var VEHICLE_CONTINUATION = new RegExp(
+  "^\\s*(?:(?:Venture|Ventures|Growth|Seed|Opportunity|Opportunities|Crypto|Digital|Web3|Early[- ]Stage|Late[- ]Stage|Select|Special Situations|Credit|Liquid|Token|Ecosystem|Innovation|Strategic|Flagship|Core|Secondary|Secondaries|Expansion|Scout)\\s+){0,2}(?:Fund\\b|(?:[IVXL]{1,6}|\\d{1,3})(?=$|[^A-Za-z0-9]))"
+);
+function titleCaseSegment(segment) {
+  const words = segment.split(/\s+/).map((word) => word.replace(/[^A-Za-z]/g, "")).filter((word) => word.length >= 3);
+  if (words.length < 4) return false;
+  const capitalised = words.filter((word) => /^[A-Z]/.test(word)).length;
+  return capitalised / words.length >= 0.6;
+}
+function exactEntityMentions(segment, entity) {
+  const words = entityWords(entity);
+  const pattern = entityPattern(entity, true);
+  if (!pattern || !words.length) return [];
+  const shortSingleWord = words.length === 1 && words[0].length <= 4;
+  const headline = titleCaseSegment(segment);
+  const mentions = [];
+  for (const match of segment.matchAll(pattern)) {
+    const phrase = match[1] ?? "";
+    if (shortSingleWord && phrase !== entity.trim().replace(/^@/, "")) continue;
+    const start = (match.index ?? 0) + match[0].lastIndexOf(phrase);
+    const end = start + phrase.length;
+    const after = segment.slice(end);
+    const before = segment.slice(0, start);
+    const next = after.match(/^\s*([A-Z][A-Za-z0-9&'’.-]*)/);
+    if (next) {
+      const word = next[1].toLowerCase().replace(/[^a-z]/g, "");
+      const legalSuffix = LEGAL_FORM_SUFFIXES.has(word);
+      const permittedHeadlineWord = headline && HEADLINE_WORDS.has(word);
+      const vehicleContinuation = VEHICLE_CONTINUATION.test(after);
+      if (!legalSuffix && !permittedHeadlineWord && !vehicleContinuation) continue;
+    }
+    if (!headline) {
+      const previous = before.match(/(?:^|\s)([A-Z][A-Za-z0-9&'’.-]*)\s+$/);
+      const previousIsSegmentStart = Boolean(previous) && before.trim() === previous[1];
+      if (previous && !previousIsSegmentStart && !HEADLINE_WORDS.has(previous[1].toLowerCase().replace(/[^a-z]/g, ""))) continue;
+    }
+    mentions.push({ start, end, text: phrase });
+  }
+  return mentions;
+}
+function firstExactEntityMention(segment, aliases2) {
+  for (const alias2 of aliases2) {
+    const mention = exactEntityMentions(segment, alias2)[0];
+    if (mention) return mention;
+  }
+  return null;
+}
 function ambiguousSingleWord(entity) {
   const words = entityWords(entity);
   return words.length === 1 && words[0].length <= 4;
@@ -27646,7 +28007,7 @@ function supportsPortfolioRelationship(input) {
     if (!portfolioPage || !supportedSegment2) return { supported: false };
     return { supported: true, excerpt: supportedSegment2.slice(0, 700) };
   }
-  const supportedSegment = projectSegments.find((segment) => input.subjectAliases.some((alias2) => containsEntity(segment, alias2)) && RELATION.test(segment) && !NEGATED.test(segment));
+  const supportedSegment = projectSegments.find((segment) => firstExactEntityMention(segment, input.subjectAliases) && RELATION.test(segment) && !NEGATED.test(segment));
   if (!supportedSegment) return { supported: false };
   return { supported: true, excerpt: supportedSegment.slice(0, 700) };
 }
@@ -27913,24 +28274,6 @@ var SENSITIVE_URL_PARAM6 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[
 var clean3 = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
 var normalized2 = (value) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9@$._ -]+/g, " ").replace(/\s+/g, " ").trim();
 var compact2 = (value) => normalized2(value).replace(/[^a-z0-9]+/g, "");
-var regexEscape4 = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-function entityNamesMatch2(leftRaw, rightRaw) {
-  const left = compact2(leftRaw);
-  const right = compact2(rightRaw);
-  if (!left || !right) return false;
-  return left === right || Math.min(left.length, right.length) >= 5 && (left.includes(right) || right.includes(left));
-}
-function entityPattern2(entity, caseSensitive = false) {
-  const words = normalized2(entity.replace(/^@/, "")).split(/[^a-z0-9]+/).filter(Boolean);
-  if (!words.length || words.length === 1 && words[0].length < 2) return null;
-  const phrase = words.map(regexEscape4).join("[^A-Za-z0-9]+");
-  return new RegExp(`(?:^|[^A-Za-z0-9])${phrase}(?=$|[^A-Za-z0-9])`, caseSensitive ? "" : "i");
-}
-function containsEntity2(text2, entity) {
-  const words = normalized2(entity.replace(/^@/, "")).split(/[^a-z0-9]+/).filter(Boolean);
-  const caseSensitive = words.length === 1 && words[0].length <= 4;
-  return entityPattern2(entity, caseSensitive)?.test(text2) ?? false;
-}
 function safeCandidateUrl3(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
   try {
@@ -28176,8 +28519,8 @@ function supportsFundScaleClaim(input) {
   const matches = [];
   const seen = /* @__PURE__ */ new Set();
   for (const segment of segments) {
-    const entityMentioned = input.subjectAliases.some((alias2) => containsEntity2(segment, alias2));
-    if (!entityMentioned && (!firstParty || !hasExplicitFirstPersonOwnership(segment))) continue;
+    const mention = firstExactEntityMention(segment, input.subjectAliases);
+    if (!mention && (!firstParty || !hasExplicitFirstPersonOwnership(segment))) continue;
     for (const amount of parseUsdAmounts(segment)) {
       let metric = metricAroundAmount(segment, amount);
       if (!metric) continue;
@@ -28203,7 +28546,8 @@ function supportsFundScaleClaim(input) {
         ...asOf ? { asOf } : {},
         ...publishedAt ? { publishedAt } : {},
         temporalState,
-        eligibleForConfirmation
+        eligibleForConfirmation,
+        ...mention ? { attributedEntityName: mention.text } : {}
       });
       if (matches.length >= 8) return matches;
     }
@@ -28267,6 +28611,28 @@ function documentRegistrableDomain(document) {
     return "";
   }
 }
+function canonicalSourceUrlKey(raw) {
+  const url = new URL(raw);
+  url.hash = "";
+  url.hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+  for (const key of [...url.searchParams.keys()]) {
+    if (/^(?:utm_|fbclid$|gclid$|mc_cid$|mc_eid$|ref$|source$)/i.test(key)) url.searchParams.delete(key);
+  }
+  url.searchParams.sort();
+  url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+  return url.toString();
+}
+function sameRegistrableDomain(left, right) {
+  try {
+    return registrableApprox3(new URL(left).hostname) === registrableApprox3(new URL(right).hostname);
+  } catch {
+    return false;
+  }
+}
+function distinctSourceKey(document) {
+  const hash3 = /^[a-f0-9]{64}$/i.test(document.contentHash) ? document.contentHash.toLowerCase() : "";
+  return hash3 ? `${documentRegistrableDomain(document)}|${hash3}` : canonicalSourceUrlKey(document.url);
+}
 function syntheticPortfolioLead(lead) {
   return {
     projectName: lead.fundVehicleHint || `${lead.fundName} fund scale`,
@@ -28294,7 +28660,7 @@ function frozenInvestorDomainProof(artifact) {
 }
 function resolveFundEntity(ctx, lead, now) {
   const existing = ctx.evidence.sourceArtifacts.find(
-    (artifact) => artifact.kind === "portfolio_relationship" && artifact.match === "relationship_confirmed" && artifact.investorEntityName && entityNamesMatch2(artifact.investorEntityName, lead.fundName)
+    (artifact) => artifact.kind === "portfolio_relationship" && artifact.match === "relationship_confirmed" && artifact.investorEntityName && sameEntityName(artifact.investorEntityName, lead.fundName)
   );
   if (existing?.investorEntityName && existing.attribution) {
     const domainProof = frozenInvestorDomainProof(existing);
@@ -28378,7 +28744,7 @@ async function collectFundScale(ctx, dependencies = {}) {
   const investorDomainByEntity = /* @__PURE__ */ new Map();
   const sourceByUrl = /* @__PURE__ */ new Map();
   const fetchSourceOnce = (url) => {
-    const key = new URL(url).toString();
+    const key = canonicalSourceUrlKey(url);
     const existing = sourceByUrl.get(key);
     if (existing) return existing;
     const pending = fetchSource(url).then((result) => {
@@ -28515,7 +28881,7 @@ async function collectFundScale(ctx, dependencies = {}) {
     const authoritative = eligible.some((row) => row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor" || row.sourceClass === "public_primary");
     const pressConfirmed = pressGroupCorroborated(eligible);
     const confirmed = authoritative || pressConfirmed;
-    const sourceCount = new Set(eligible.filter((row) => row.sourceClass !== "other_public").map((row) => row.document.url)).size;
+    const sourceCount = new Set(eligible.filter((row) => row.sourceClass !== "other_public").map((row) => distinctSourceKey(row.document))).size;
     confirmations.set(claimKey, { confirmed, pressConfirmed, sourceCount });
     if (confirmed) confirmedClaims.add(claimKey);
   }
@@ -28563,11 +28929,12 @@ async function collectFundScale(ctx, dependencies = {}) {
       ...row.match.publishedAt ? { publishedAt: row.match.publishedAt } : {},
       fundScaleTemporalState: row.match.temporalState,
       fundScaleSourceCount: confirmation?.sourceCount ?? 0,
+      ...row.match.attributedEntityName ? { attributedEntityName: row.match.attributedEntityName } : {},
       fundScaleClaimId: row.claimKey
     };
     const artifact = { ...unhashed, contentHash: artifactHash2(unhashed) };
     const exists = ctx.evidence.sourceArtifacts.some(
-      (candidate) => candidate.kind === "fund_scale" && candidate.fundScaleClaimId === artifact.fundScaleClaimId && candidate.fundScaleMetric === artifact.fundScaleMetric && candidate.sourceUrl === artifact.sourceUrl
+      (candidate) => candidate.kind === "fund_scale" && candidate.fundScaleClaimId === artifact.fundScaleClaimId && candidate.fundScaleMetric === artifact.fundScaleMetric && (candidate.sourceUrl === artifact.sourceUrl || Boolean(candidate.sourceContentHash) && candidate.sourceContentHash?.toLowerCase() === artifact.sourceContentHash?.toLowerCase() && Boolean(candidate.sourceUrl && artifact.sourceUrl) && sameRegistrableDomain(candidate.sourceUrl ?? "", artifact.sourceUrl ?? ""))
     );
     if (!exists) ctx.evidence.sourceArtifacts.push(artifact);
   }
@@ -30677,8 +31044,9 @@ function profileSupportsVenture(evidence, venture, predicate) {
 }
 function mergeProjectedFact(evidence, fact) {
   const existing = evidence.basicFacts ?? (evidence.basicFacts = []);
+  const scope = (candidate) => candidate.attributionScope ?? "direct_subject";
   const same = existing.find(
-    (candidate) => candidate.predicate === fact.predicate && candidate.normalizedValue === fact.normalizedValue
+    (candidate) => candidate.predicate === fact.predicate && candidate.normalizedValue === fact.normalizedValue && scope(candidate) === scope(fact)
   );
   if (!same) {
     existing.push(fact);
@@ -36223,11 +36591,22 @@ function mergeManagementIntoWebTeam(evidence, emit) {
     if (!name) continue;
     const existing = webTeam.find((member) => norm2(member.name) === norm2(name));
     if (existing) {
+      const identityAlreadyDeterministic = existing.identity_link_evidence_origin === "deterministic" || existing.handleProvenance === "subject_first_party";
+      if (!identityAlreadyDeterministic) {
+        delete existing.handle;
+        delete existing.github;
+        delete existing.developerProfiles;
+        delete existing.avatarUrl;
+        delete existing.linkedin;
+      }
       if (!existing.linkedin && person.linkedin) {
         existing.linkedin = person.linkedin;
         existing.identity_link_evidence_origin = "deterministic";
       }
       if ((!existing.role || /^team$/i.test(existing.role)) && person.title) existing.role = person.title;
+      if (!existing.evidence && person.priorCompanies?.length) {
+        existing.evidence = `prior: ${person.priorCompanies.slice(0, 3).join(", ")}`;
+      }
       if (existing.artifact_verified !== true) {
         existing.evidence_origin = "deterministic";
         existing.artifact_verified = true;

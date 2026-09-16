@@ -13,6 +13,7 @@ import {
   classifyTestimonial,
   TestimonialVerdict as TV,
 } from "./index";
+import { canonicalEntityKey } from "./audit";
 
 const FOUNDER_AXES = [
   "F1_identity_verifiability",
@@ -435,6 +436,40 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(result.verdict).toBe("AVOID");
   });
 
+  it("never caps on a non-binding name or ticker tie, and keys promotions by contract", () => {
+    // Regression for INT-7: "John Smith" (no handle) on this report and
+    // @johnsmith on a failed report resolved to one node and capped at 69.
+    const audit = highScoringFounder();
+    audit.addFinding(trustGraphFinding({
+      tie_key: "name:john smith",
+      tie_type: "Person",
+      tie_strength: "medium",
+      subject_edge_types: ["TEAM"],
+      other_edge_types: ["TEAM"],
+    }) as never);
+    expect(audit.finalize().cap_applied).not.toBe("trust_graph_medium_link");
+
+    const ticker = highScoringFounder();
+    ticker.addFinding(trustGraphFinding({
+      tie_key: "$pepe",
+      tie_type: "Company",
+      tie_strength: "medium",
+      subject_edge_types: ["PROMOTED"],
+      other_edge_types: ["PROMOTED"],
+    }) as never);
+    expect(ticker.finalize().cap_applied).not.toBe("trust_graph_medium_link");
+
+    expect(canonicalEntityKey({ name: "John Smith" })).toBe("name:john smith");
+    expect(canonicalEntityKey({ handle: "@johnsmith", name: "John Smith" })).toBe("@johnsmith");
+
+    const kol = new Audit("@promoter", { subject_class: SubjectClass.KOL });
+    kol.setIdentity("Confirmed");
+    kol.addPromotion({ ticker: "$PEPE", contract_address: "0x6982508145454Ce325dDbE47a25d4ec3d2311933", chain: "ethereum", evidence_origin: "deterministic", artifact_verified: true } as never);
+    kol.addPromotion({ ticker: "$WIF", evidence_origin: "deterministic", artifact_verified: true } as never);
+    const keys = kol.toPanoptes().edges.filter((edge) => edge.type === "PROMOTED").map((edge) => String(edge.dst));
+    expect(keys).toEqual(["token:ethereum:0x6982508145454Ce325dDbE47a25d4ec3d2311933", "ticker:wif"]);
+  });
+
   it("downgrades an exact medium trust-graph predicate without treating it as hard identity proof", () => {
     const audit = highScoringFounder();
     audit.addFinding(trustGraphFinding({
@@ -601,8 +636,8 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     const audit = new Audit("@operator", { subject_class: SubjectClass.MEMBER });
     audit.addVenture({ project_name: "Paradigm", role: "CTO", period: "2022-2025", outcome: VentureOutcome.UNKNOWN });
     const graph = audit.toPanoptes();
-    expect(graph.edges).toContainEqual(expect.objectContaining({ dst: "paradigm", type: "WORKED_ON", role: "CTO" }));
-    expect(graph.edges).not.toContainEqual(expect.objectContaining({ dst: "paradigm", type: "FOUNDED" }));
+    expect(graph.edges).toContainEqual(expect.objectContaining({ dst: "name:paradigm", type: "WORKED_ON", role: "CTO" }));
+    expect(graph.edges).not.toContainEqual(expect.objectContaining({ dst: "name:paradigm", type: "FOUNDED" }));
   });
 
   it("preserves verified relationship receipts on graph edges", () => {
@@ -619,7 +654,7 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     });
 
     expect(audit.toPanoptes().edges).toContainEqual(expect.objectContaining({
-      dst: "receipt labs",
+      dst: "name:receipt labs",
       type: "FOUNDED",
       source_url: "https://receipt.example/team",
       provider: "official-site",
@@ -870,12 +905,13 @@ describe("handle normalization and associate keying", () => {
     a.addAssociate({ associate_handle: "solana-labs", relation: "github org" });
     a.addAssociate({ associate_handle: "matter-labs", relation: "github org" });
     const keys = a.getAssociates().map((as) => as.associate_key);
-    expect(keys).toEqual(["solana-labs", "matter-labs"]);
+    // Name-only keys are namespaced and non-binding (INT-7).
+    expect(keys).toEqual(["name:solana-labs", "name:matter-labs"]);
     // Neither key may be an X-handle-shaped "@labs" that a prior audit of the
     // real @labs account would falsely reconcile with.
     expect(keys.some((k) => k.startsWith("@"))).toBe(false);
     const graph = a.toPanoptes();
-    expect(graph.nodes.filter((n) => n.key === "solana-labs" || n.key === "matter-labs")).toHaveLength(2);
+    expect(graph.nodes.filter((n) => n.key === "name:solana-labs" || n.key === "name:matter-labs")).toHaveLength(2);
   });
 
   it("addAssociate with short-tailed org logins does not crash finalize", () => {
@@ -886,7 +922,7 @@ describe("handle normalization and associate keying", () => {
     a.addAssociate({ associate_handle: "x", relation: "github org" });
     const report = a.finalize();
     expect(report.audit_id).toMatch(/^PA-/);
-    expect(a.getAssociates().map((as) => as.associate_key)).toEqual(["company-x", "web-3", "x"]);
+    expect(a.getAssociates().map((as) => as.associate_key)).toEqual(["name:company-x", "name:web-3", "name:x"]);
   });
 
   it("addAssociate still normalizes X-handle-shaped associates to @keys", () => {

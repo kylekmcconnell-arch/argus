@@ -144,6 +144,40 @@ describe("portfolio relationship matching", () => {
     }).supported).toBe(true);
   });
 
+  it("does not read a regional affiliate or namesake as the subject", () => {
+    // Regression for INT-1: "Sequoia Capital China led the round" is not Sequoia Capital.
+    expect(supportsPortfolioRelationship({
+      document: document({
+        url: "https://techcrunch.com/acme-round",
+        host: "techcrunch.com",
+        text: "Acme Protocol announced a seed financing led by Sequoia Capital China.",
+      }),
+      sourceClass: "independent_press",
+      subjectAliases: ["Sequoia Capital", "sequoia"],
+      projectName: "Acme Protocol",
+    }).supported).toBe(false);
+    expect(supportsPortfolioRelationship({
+      document: document({
+        url: "https://techcrunch.com/acme-round",
+        host: "techcrunch.com",
+        text: "Acme Protocol announced a seed financing led by Sequoia Capital.",
+      }),
+      sourceClass: "independent_press",
+      subjectAliases: ["Sequoia Capital", "sequoia"],
+      projectName: "Acme Protocol",
+    }).supported).toBe(true);
+
+    const { ctx } = context("@sequoia", "Sequoia Capital");
+    const affiliate = portfolioEntityForLead(ctx, lead({ investorEntityName: "Sequoia Capital China" }), NOW);
+    expect(affiliate).toBeNull();
+    expect(portfolioEntityForLead(ctx, lead({ investorEntityName: "Pantera Capital Management" }), NOW)).toBeNull();
+    expect(portfolioEntityForLead(ctx, lead({ investorEntityName: "Sequoia Capital Operations, LLC" }), NOW)).toBeNull();
+    expect(portfolioEntityForLead(ctx, lead({ investorEntityName: "Sequoia Capital, L.P." }), NOW)).toMatchObject({
+      attribution: "direct_subject",
+      name: "Sequoia Capital",
+    });
+  });
+
   it("matches short project names on token boundaries rather than substrings", () => {
     expect(supportsPortfolioRelationship({
       document: document({ text: "Our investment database is available to partners." }),

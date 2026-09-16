@@ -541,7 +541,21 @@ const structurallyStrictFundScaleArtifact = (
     if (profile && ![profile.resolved_name, profile.display_name].some((name) => namesExactlyMatch(name, value.fundName))) return false;
   } else if (!hasCurrentAffiliationProof(value, capturedAt, now, profile)) return false;
 
-  if (sourceClass === "first_party_subject" || sourceClass === "first_party_investor") {
+  // The page must have named the bound fund itself: "Sequoia Capital China"
+  // never verifies "Sequoia Capital". Only first-person copy on a verified
+  // manager domain may omit the name, because the domain binds it there.
+  const firstPartyClass = sourceClass === "first_party_subject" || sourceClass === "first_party_investor";
+  if (value.attributedEntityName !== undefined || !firstPartyClass) {
+    const attributed = comparable(value.attributedEntityName);
+    if (!attributed) return false;
+    const handleAliases = [
+      value.investorEntityHandle,
+      attribution === "direct_subject" ? value.subjectHandle : undefined,
+    ].map(canonicalHandle).filter(Boolean);
+    if (attributed !== fundName && !handleAliases.some((handle) => comparable(handle) === attributed)) return false;
+  }
+
+  if (firstPartyClass) {
     const officialDomain = typeof value.investorEntityDomain === "string" ? cleanHost(value.investorEntityDomain) : "";
     if (
       !isCredibleOfficialDomain(officialDomain)

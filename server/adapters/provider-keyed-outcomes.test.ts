@@ -112,7 +112,8 @@ describe("keyed provider adapter outcome accounting", () => {
       result: await githubAffiliations("alice", "github-key"),
       cost: getCost(),
     }));
-    expect(captured.result).toEqual([]);
+    // A malformed orgs body is an outage on that list, never "no organizations".
+    expect(captured.result).toEqual({ rows: [], unavailable: true, detail: "orgs result_shape_error" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "github", op: "users/alice", calls: 2,
