@@ -1173,6 +1173,7 @@ export function InvestigationReport({
     fdvUsd: fullyDilutedValue ?? null,
     marketCapUsd: marketCap ?? null,
     volume24hUsd: token.vol24 ?? null,
+    shipping: token.shipping,
     nextUnlock: upcomingUnlocks
       ? { date: upcomingUnlocks.nextUnlockDate, amountUsd: upcomingUnlocks.unlockValueUsd, pctSupply: upcomingUnlocks.percentOfSupply }
       : null,
@@ -1187,7 +1188,7 @@ export function InvestigationReport({
       name: person.handle || person.name,
       role: person.role,
     })),
-    anchors: { market: "#investigation-visuals", team: "#investigation-team", account: "#investigation-people" },
+    anchors: { market: "#investigation-visuals", team: "#investigation-team", account: "#investigation-people", development: "#investigation-development" },
   });
   const decisionDiscovery = deriveDecisionDiscovery(noticedSignals);
   const materialChangeDiscovery = materialDeltaDiscovery(

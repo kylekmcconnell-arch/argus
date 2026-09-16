@@ -206,12 +206,20 @@ are exactly the projects that rarely link a repository. Growing the set means
 adding small tokens with linked repositories as they are scanned, which the
 frozen summary on every saved report now does automatically.
 
+## 4b. Third pass (2026-09-16): the frozen read carries the joins
+
+| Change | Where |
+| --- | --- |
+| **Chart and deploy trail in the scan-time read.** The summary lane now takes the token's address, chain and deployer. It joins the daily price series (GeckoTerminal, keyless) and the deployer's contract creations (`src/threat/deployTrail.ts`: Blockscout on Robinhood Chain and Gnosis without a key, Etherscan v2 elsewhere with one), so the frozen card says "shipping into weakness" and "live" without a click. The audit passes the token context from both collectors (browser `shippingClient.ts`, server `server/shippingSummary.ts`). Each join is best-effort and records a coverage note when it cannot run. | `api/shipping-summary.ts`, `src/token/audit.ts` |
+| **The set fills itself.** `scripts/backtest-from-reports.ts` turns every saved token or investigation report that carries a development read into a backtest subject (target, chain, address, `asOf` at capture), keeping the earliest capture per subject and skipping rows younger than 30 days. The rule is `src/threat/backtestSubjects.ts` and is tested; the script needs the service credentials, so it runs where the sweep runs, not on a laptop. | `scripts/backtest-from-reports.ts` |
+| **Noticed rail and text export.** A stall, a rally without code, a departed lead and bought stars are lifted into the noticed signals on token and investigation reports (the same rail that carries unlocked liquidity and holder concentration), and a shipping team whose code reaches production is noted. The plain-text token export carries a development line. The PDF already printed the scorecard because it is on the page; the case brief is analyst-authored and unchanged. | `src/lib/reportInsights.ts`, `src/components/TokenReport.tsx` |
+
 ## 5. Still open
 
 1. **Backtest breadth.** 33 subjects, 11 priced. The engine's development
-   penalties remain judgement until stalled and thin rows number in the dozens;
-   small tokens with linked repositories are the rows to add, and each saved
-   report now contributes a frozen summary to that pool.
+   penalties remain judgement until stalled and thin rows number in the dozens.
+   `scripts/backtest-from-reports.ts` adds every saved report's subject once it
+   is a month old; run it monthly where the service credentials live.
 2. **Star lists.** Only a repository admin can read who starred. If a project
    under review grants collaborator access, the stargazer sample input already
    runs the account-level StarScout read.

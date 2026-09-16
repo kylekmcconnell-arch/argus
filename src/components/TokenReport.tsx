@@ -132,6 +132,12 @@ export function tokenReportText(
     plainLanguageSummary(d.headline),
     "",
     ...findings,
+    ...(d.shipping && d.shipping.grade !== "unknown"
+      ? [
+          "",
+          `Development (github.com/${d.shipping.target}, read ${d.shipping.capturedAt.slice(0, 10)}): ${d.shipping.headline} Cadence ${d.shipping.cadenceStatus}; ${d.shipping.distinctHuman} human committer${d.shipping.distinctHuman === 1 ? "" : "s"}${d.shipping.leadDeparted ? ", lead has stopped" : ""}; code ${d.shipping.live === "live" ? "reaching production" : d.shipping.live === "committed-only" ? "committed only" : d.shipping.live === "deploys-without-code" ? "shipped from an unseen source" : "production status unread"}; ${d.shipping.market === "insufficient" ? "chart not compared" : `chart ${d.shipping.market.replace(/-/g, " ")}`}; stars ${d.shipping.stars}; ${d.shipping.reposRead} repos and ${d.shipping.commitsRead} commits read.`,
+        ]
+      : []),
     "",
     `Liquidity ${moneyShort(market.liquidityUsd ?? undefined)} · market cap ${moneyShort(market.marketCap ?? undefined)} · FDV ${moneyShort(market.fullyDilutedValuation ?? undefined)} · token age ${market.ageDays == null ? "unknown" : age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} centralized exchanges` : ""}`,
     d.address,
@@ -231,7 +237,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     marketCapUsd: d.mcap,
     volume24hUsd: d.vol24,
     athDrawdownPct: d.cg?.ath?.drawdownPct,
-    anchors: { market: "#token-market" },
+    shipping: d.shipping,
+    anchors: { market: "#token-market", development: "#development" },
   }));
   const materialChangeDiscovery = materialDeltaDiscovery(
     d.reportDelta,
