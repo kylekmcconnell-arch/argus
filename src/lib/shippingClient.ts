@@ -8,7 +8,13 @@ import type { ShippingSummary } from "../threat/shipping";
 export const collectTokenShipping: CollectTokenShippingFn = async (githubOrg, options) => {
   const fetchImpl = options?.fetchImpl ?? fetch;
   const budgetMs = options?.deadlineAt ? Math.max(3000, Math.min(28_000, options.deadlineAt - Date.now())) : 28_000;
-  const response = await fetchImpl(`/api/shipping-summary?org=${encodeURIComponent(githubOrg)}`, { signal: AbortSignal.timeout(budgetMs) });
+  const qs = new URLSearchParams({ org: githubOrg });
+  if (options?.token?.address && options.token.chain) {
+    qs.set("address", options.token.address);
+    qs.set("chain", options.token.chain);
+    if (options.token.deployer) qs.set("deployer", options.token.deployer);
+  }
+  const response = await fetchImpl(`/api/shipping-summary?${qs}`, { signal: AbortSignal.timeout(budgetMs) });
   if (!response.ok) return undefined;
   const body = (await response.json()) as { available?: boolean; summary?: ShippingSummary };
   return body.available && body.summary ? body.summary : undefined;

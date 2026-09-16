@@ -266,7 +266,15 @@ export interface DeployerRiskOutcome {
 }
 export type ScreenDeployerRiskFn = (address: string) => Promise<DeployerRiskOutcome | undefined>;
 /** Scan-time shipping summary for a linked GitHub owner; undefined when the lane is off or fails. */
-export type CollectTokenShippingFn = (githubOrg: string, options?: { fetchImpl?: typeof fetch; deadlineAt?: number }) => Promise<ShippingSummary | undefined>;
+export type CollectTokenShippingFn = (
+  githubOrg: string,
+  options?: {
+    fetchImpl?: typeof fetch;
+    deadlineAt?: number;
+    /** The token behind the project, so the lane can join its chart and its deployer's creations. */
+    token?: { address: string; chain: string; deployer?: string | null };
+  },
+) => Promise<ShippingSummary | undefined>;
 
 export type CollectTokenSocialActivityFn = (identity: {
   handle: string;
@@ -1258,7 +1266,7 @@ async function runTokenAudit(
   if (githubOrg && opts?.collectShipping) {
     step({ phase: "Corroborate", label: "Development", detail: `Reading github.com/${githubOrg}: cadence, committers, substance, whether the code reaches production.`, tone: "neutral" });
     opts?.signal?.throwIfAborted();
-    shipping = await opts.collectShipping(githubOrg, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt }).catch(() => undefined);
+    shipping = await opts.collectShipping(githubOrg, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt, token: { address, chain, deployer: deployerAttribution?.address ?? null } }).catch(() => undefined);
     if (shipping) {
       step({ phase: "Corroborate", label: "Development read", detail: shipping.headline, tone: shipping.grade === "stalled" ? "bad" : shipping.grade === "thin" ? "warn" : shipping.grade === "unknown" ? "neutral" : "good" });
       if (shipping.market === "price-without-shipping") findings.push({ claim: "The token's price rose over the last quarter while commits to the linked repositories fell: the move is not backed by visible development.", tone: "warn", source: "github" });
