@@ -4,11 +4,13 @@ import type { Dossier } from "../data/dossier";
 import type { Investigation } from "./investigation";
 import type { TokenDossier } from "../token/audit";
 import type { DecisionDiscovery } from "./reportInsights";
+import type { ShippingSummary } from "../threat/shipping";
 
 export type MaterialDeltaCategory =
   | "contract_control"
   | "liquidity_protection"
   | "holder_concentration"
+  | "development"
   | "verified_fact";
 
 export interface MaterialReportDelta {
@@ -26,6 +28,8 @@ export interface MaterialReportDelta {
     value: string;
   };
   current: { value: string };
+  /** The prior report's frozen shipping summary, when the category is development. */
+  previousShipping?: ShippingSummary;
 }
 
 export interface PriorReportSnapshot {
@@ -186,6 +190,55 @@ function holderDelta(
   }, `${before.toFixed(2)}%`, `${after.toFixed(2)}%`);
 }
 
+function shippingSummary(kind: "token" | "investigation", payload: unknown): ShippingSummary | null {
+  const token = tokenPayload(kind, payload);
+  const ship = token?.shipping;
+  return ship && ship.version === 1 && typeof ship.grade === "string" ? ship : null;
+}
+
+const SHIPPING = new Set(["shipping-team", "shipping-solo"]);
+
+/**
+ * Development changed materially between two saved reads of the same GitHub:
+ * a shipping project stalled or thinned, its commits fell by more than half,
+ * it lost half its human committers, or its lead stopped. Both reads must be
+ * of the same target; a re-linked repository is a different fact.
+ */
+function developmentDelta(
+  kind: "token" | "investigation",
+  previousPayload: unknown,
+  currentPayload: unknown,
+  prior: PriorReportSnapshot,
+): MaterialReportDelta | null {
+  const before = shippingSummary(kind, previousPayload);
+  const after = shippingSummary(kind, currentPayload);
+  if (!before || !after || before.target.toLowerCase() !== after.target.toLowerCase()) return null;
+  if (before.grade === "unknown" || after.grade === "unknown") return null;
+  const stalled = SHIPPING.has(before.grade) && (after.grade === "stalled" || after.grade === "thin");
+  const halved = before.totalCommits >= 10 && after.totalCommits <= before.totalCommits * 0.4;
+  const lost = before.distinctHuman >= 2 && after.distinctHuman <= Math.floor(before.distinctHuman / 2);
+  const departed = !before.leadDeparted && after.leadDeparted;
+  const resumed = (before.grade === "stalled" || before.grade === "thin") && SHIPPING.has(after.grade);
+  if (!stalled && !halved && !lost && !departed && !resumed) return null;
+  const describe = (s: ShippingSummary) => `${s.grade.replace(/-/g, " ")}, ${s.totalCommits} commits and ${s.distinctHuman} human committer${s.distinctHuman === 1 ? "" : "s"} in ${s.windowDays} days`;
+  const what = resumed ? "Development resumed" : stalled ? "Development stalled" : departed ? "The lead committer stopped" : lost ? "The team shrank" : "Commit cadence fell";
+  return {
+    ...makeDelta(prior, {
+      id: `delta-development-${resumed ? "resumed" : stalled ? "stalled" : departed ? "departed" : lost ? "shrank" : "fell"}`,
+      category: "development",
+      headline: `${what} in the linked GitHub since the last scan`,
+      consequence: resumed
+        ? `The prior report read ${describe(before)}; this scan reads ${describe(after)}. A project that was quiet is building again, which changes what the token's narrative can claim.`
+        : `The prior report read ${describe(before)}; this scan reads ${describe(after)}. ${departed ? "The person who wrote most of the code has stopped while the repository carried on." : "Less is being built than when the last decision was taken, whatever the chart has done since."}`,
+      reversalCondition: resumed
+        ? "A following scan reading the cadence back at quiet or dormant would reverse this change."
+        : "A following scan reading the same committers back at their prior cadence would reverse this change.",
+      evidenceHref: kind === "investigation" ? "#investigation-development" : "#development",
+    }, describe(before), describe(after)),
+    previousShipping: before,
+  };
+}
+
 function verifiedFactDelta(
   kind: "person" | "token" | "investigation",
   previousPayload: unknown,
@@ -225,6 +278,7 @@ export function buildMaterialReportDelta(
     return contractDelta(kind, prior.payload, currentPayload, prior)
       ?? liquidityDelta(kind, prior.payload, currentPayload, prior)
       ?? holderDelta(kind, prior.payload, currentPayload, prior)
+      ?? developmentDelta(kind, prior.payload, currentPayload, prior)
       ?? verifiedFactDelta(kind, prior.payload, currentPayload, prior);
   }
   return verifiedFactDelta(kind, prior.payload, currentPayload, prior);
