@@ -674,3 +674,52 @@ FomoScan's own unit accounting ran about fifteen percent above the
 documented prices (132,000 units left after 103,000 by list price), so
 budgets should carry that margin.
 
+## Base serial deployer: fees without a dump (BaseCat creator, read 2026-09-17)
+
+A question about who sold the apple-emoji token 0xb200...36601 on Base turned
+into a full read of the wallet behind it, 0x48c7ab8f. The wallet is indexed as
+`base-b20-basecat-creator`. Three things are worth keeping.
+
+**The identity link is a string, not just a sender.** The same wallet sent the
+createLaunch for the apple token (o1 Launchpad, 2026-09-08) and for BASECAT
+(B20 launchpad, 2026-08-15). Both calldatas carry the same embedded tag,
+`bc_4raffiaj`, and so does every one of the 169 fee-claim calls, where it sits
+in the third argument. A shared sender can be a relayer; a shared creator tag
+that also keys the fee claims is the operator.
+
+**Fee income, no supply.** The wallet took no allocation at any launch, never
+held BASECAT at all, and sold nothing into any of its own pools. Its income is
+creator fees: 233.234 ETH from BASECAT across 169 claims, measured by balance
+delta at each claim block because the Blockscout internal-transaction index
+returns only 19 of them. The gap is large enough to matter. The indexed view
+showed 28 ETH of income against 266 ETH of outflow, which is how the shortfall
+was noticed at all. On the apple token the fees accrue in AAPLc, the tokenized
+Apple stock the pool is paired against, and 16.87 of the 17.62 AAPLc collected
+went back into buying the token and burning it: 39,119,746 tokens, 3.91 percent
+of supply, still at the burn address. Proceeds leave through a sweep wallet
+0x60578f65 and the Relay depository.
+
+**Two attribution traps, both worth remembering.**
+
+- *ERC-4337 bundlers look like whales.* Resolving each sale to its transaction
+  sender produced a tidy cluster of 48 wallets with a 0x4337 vanity prefix
+  holding 48 percent of sells. They are bundler operators submitting `handleOps`
+  to the EntryPoint at 0x4337084d, so they appear as the sender of other
+  people's trades. Walking the token graph instead, hop by hop through the
+  routers inside each transaction, gives 1,415 sellers with the top ten at 11
+  percent.
+- *Bridge solvers look like a common funder.* Twenty-one of the forty largest
+  sellers, together 75 percent of supply sold, were funded by the same wallet
+  that had also sent the creator 5.5 ETH. That wallet, 0xf70da978, made 640 ETH
+  payouts to 285 distinct addresses in a three-hour window while calling the
+  Relay router and deposit contracts. It is a bridge filler paying out everyone
+  who bridges into Base, and it carries no attribution weight. This is the same
+  rule the Robinhood hot wallets taught: a shared funder is not an operator
+  link.
+
+The series itself reads as volume with one hit: ten tokens deployed through an
+unverified deployer between 2026-07-21 and 2026-08-12 and abandoned at the mint
+with no pool and no transfers, two launchpad launches that never traded, the
+apple token down 97.6 percent from a high set five hours after launch, and
+BASECAT alive a month later at about 615,000 USD of liquidity and 487,000 USD
+of daily volume.
