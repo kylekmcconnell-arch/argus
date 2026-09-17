@@ -60,6 +60,9 @@ type RoundItem = {
   announcementLink?: unknown;
   raise?: unknown;
   valuation?: unknown;
+  priceUSD?: unknown;
+  tokensForSale?: unknown;
+  allocationOfSupply?: unknown;
   funds?: unknown;
 };
 type RoundsData = { totalFundingRaise?: unknown; fundingRounds?: unknown };
@@ -90,6 +93,15 @@ const asString = (value: unknown): string | null =>
 
 const asNumberId = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
+
+/** Numeric field that may arrive as a decimal string or a number. */
+const usdNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  const text = asString(value);
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
 
 /** CryptoRank reports raise/valuation as absolute-USD decimal strings. */
 const usdFromString = (value: unknown): number | null => {
@@ -171,11 +183,17 @@ const mapRounds = (raw: unknown): CryptoRankFundingSnapshot["rounds"] => {
     // financing events; the DeFiLlama lane learned this the hard way.
     if (!stage && !amountUsd && !valuationUsd) continue;
     const funds = Array.isArray(entry.funds) ? entry.funds as RoundFundItem[] : [];
+    const tokenPrice = usdNumber(entry.priceUSD);
+    const tokensForSale = usdNumber(entry.tokensForSale);
+    const allocation = usdNumber(entry.allocationOfSupply);
     rounds.push({
       stage: stage ?? "Undisclosed",
       date: roundDateFromEpoch(entry.announcementDate),
       amountUsd,
       valuationUsd,
+      ...(tokenPrice !== null ? { tokenPriceUsd: tokenPrice } : {}),
+      ...(tokensForSale !== null ? { tokensForSale } : {}),
+      ...(allocation !== null ? { allocationOfSupplyPct: allocation } : {}),
       leadInvestors: funds.filter((fund) => fund.isLead === true).map((fund) => asString(fund.name)).filter((name): name is string => !!name),
       otherInvestors: funds.filter((fund) => fund.isLead !== true).map((fund) => asString(fund.name)).filter((name): name is string => !!name),
       announcementUrl: asString(entry.announcementLink),

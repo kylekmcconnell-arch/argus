@@ -1528,6 +1528,10 @@ export interface TeamMember {
    */
   claimSurface?: "bio" | "tweet";
   linkedin?: string;
+  /** Personal Telegram slug the first-party page ties to this person. */
+  telegram?: string;
+  /** Contact email the first-party page ties to this person (mailto anchor). */
+  email?: string;
   source?: string;
   sourceUrl?: string;
   projects?: { name: string; role?: string }[];

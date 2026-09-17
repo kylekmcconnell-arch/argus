@@ -245,6 +245,8 @@ export interface Dossier {
   /** Frozen public X conversation breadth and volume. Separate from the verdict. */
   socialActivity?: CollectedEvidence["socialActivity"];
   protocolFunding?: CollectedEvidence["protocolFunding"];
+  /** Frozen CryptoRank funding record (the second raises index), bound at capture. */
+  cryptoRankFunding?: CollectedEvidence["cryptoRankFunding"];
   /** Frozen protocol fee totals (DeFiLlama); the second dated usage metric for the charts. */
   protocolFees?: CollectedEvidence["protocolFees"];
   /** Frozen float-control profile (GoPlus holder register) for the concentration bar. */
@@ -349,7 +351,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     .map((member) => ({
       ...member,
       ...(member.identity_link_evidence_origin === "model_lead"
-        ? { handle: undefined, linkedin: undefined, github: undefined, developerProfiles: undefined }
+        ? { handle: undefined, linkedin: undefined, telegram: undefined, email: undefined, github: undefined, developerProfiles: undefined }
         : {}),
       ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
     }));
@@ -623,6 +625,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
         ...(ev.protocolTvl.hacks ? { hacks: ev.protocolTvl.hacks.map((incident) => ({ ...incident })) } : {}),
       },
     } : {}),
+    ...(ev.cryptoRankFunding ? { cryptoRankFunding: structuredClone(ev.cryptoRankFunding) } : {}),
     ...(ev.protocolFunding ? {
       protocolFunding: {
         ...ev.protocolFunding,

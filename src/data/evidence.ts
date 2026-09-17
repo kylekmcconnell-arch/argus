@@ -421,6 +421,11 @@ export interface CryptoRankFundingSnapshot {
     date: string | null;
     amountUsd: number | null;
     valuationUsd: number | null;
+    /** Token-sale terms when the index carries them: this is what makes a round readable as a token round. */
+    tokenPriceUsd?: number | null;
+    tokensForSale?: number | null;
+    /** Share of max supply sold in this round, percent. */
+    allocationOfSupplyPct?: number | null;
     leadInvestors: string[];
     otherInvestors: string[];
     announcementUrl: string | null;
@@ -955,6 +960,10 @@ export interface WebTeamMember {
   /** Person vs linked fund/incubator/VC. Unique-id is still the handle. */
   kind?: "person" | "org";
   linkedin?: string;
+  /** Personal Telegram slug the first-party page ties to this person. */
+  telegram?: string;
+  /** Contact email the first-party page ties to this person (mailto anchor). */
+  email?: string;
   evidence?: string;
   source: string; // where it came from: web/LinkedIn search, post role-scan, X content
   /** Exact fetched page that directly supports the person's project role. */
