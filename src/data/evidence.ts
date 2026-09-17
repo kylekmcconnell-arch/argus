@@ -1350,6 +1350,22 @@ export interface CollectedEvidence {
    * This lane is point-in-time context only and has no v1 scoring impact.
    */
   evmControlReality?: EvmControlRealitySnapshot;
+  /**
+   * The audited subject IS a launch venue (its verified official domain
+   * matches a documented venue domain). A launchpad without a native token is
+   * never judged on token metrics; it is judged on the launch mechanics it
+   * imposes on every token it releases, frozen here from the venue registry.
+   */
+  launchVenueSubject?: {
+    venue: string;
+    matchedDomain: string;
+    chains: string[];
+    lpDisposition: string;
+    lpNote: string;
+    platformPaysCreator: boolean;
+    feeNote: string;
+    capturedAt: string;
+  };
   /** Frozen point-in-time health of the verified listed security. Score-neutral context; never enters the scorer packet. */
   stockHealth?: StockHealthSnapshot;
   /** Frozen stock exposure behind the verified token (tokenized stock or stock-quoted pool). Score-neutral context. */

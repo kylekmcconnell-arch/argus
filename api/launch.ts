@@ -174,6 +174,49 @@ async function bankrDopplerCheck(token: string): Promise<boolean> {
   }
 }
 
+// o1 on Base cannot be read from the creating contract: Base o1 tokens are
+// native B20 assets minted through the chain's genesis B20 Factory, so
+// getcontractcreation names the B20 factory for every B20 asset, o1 or not.
+// What IS o1-specific is the suite's Announcement Registry: the launch tx
+// writes the token into it, so a log on that registry whose indexed topics
+// carry the token address is an o1 launch receipt. Registry address from o1's
+// machine-readable suite registry (docs.o1.exchange/launchpad/reference/
+// launch-contract-suites.json, lastUpdatedAt 2026-09-16, suite
+// base-mainnet-launchpad-v4-minimal). Historical Base suites can be added the
+// same way when a token from one surfaces.
+const O1_BASE_ANNOUNCEMENT_REGISTRIES = [
+  "0xab1243c97a37361115d5cef7666bf49ad2fb6baa",
+];
+// B20 system-address prefix (Base-native asset standard). Gates the log probe:
+// a non-B20 Base token cannot be an o1 launch, so it never spends the calls.
+const B20_SYSTEM_ADDRESS = /^0xb20/i;
+
+export async function o1BaseAnnouncementVenue(token: string, etherscanKey: string): Promise<string | null> {
+  if (!B20_SYSTEM_ADDRESS.test(token)) return null;
+  const paddedToken = `0x${"0".repeat(24)}${token.slice(2).toLowerCase()}`;
+  for (const registry of O1_BASE_ANNOUNCEMENT_REGISTRIES) {
+    // The event layout is not pinned, so both plausible indexed positions are
+    // tried; a miss on both is "not attributed", never a guess.
+    for (const topicPosition of ["topic1", "topic2"] as const) {
+      try {
+        const q = new URLSearchParams({
+          chainid: "8453", module: "logs", action: "getLogs",
+          address: registry, [topicPosition]: paddedToken,
+          fromBlock: "0", toBlock: "latest", page: "1", offset: "1",
+          apikey: etherscanKey,
+        });
+        const r = await fetch(`https://api.etherscan.io/v2/api?${q}`, { signal: AbortSignal.timeout(9000) });
+        if (!r.ok) continue;
+        const d = (await r.json()) as { result?: unknown };
+        if (Array.isArray(d.result) && d.result.length > 0) return "o1";
+      } catch {
+        continue;
+      }
+    }
+  }
+  return null;
+}
+
 export async function robinhoodCreatorVenue(token: string): Promise<string | null> {
   try {
     // The v2 REST route (/api/v2/addresses/{addr}) 500s on a LOWERCASE address
@@ -214,6 +257,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const addr = address.toLowerCase();
   if (!EVM.test(addr)) { res.status(400).json({ error: "bad address" }); return; }
   let creatorVenue = chain === "robinhood" ? await robinhoodCreatorVenue(addr) : null;
+  if (!creatorVenue && chain === "base" && key) {
+    // Base o1 launches are B20 assets announced in the suite's registry; the
+    // creating-contract probe cannot see them (see o1BaseAnnouncementVenue).
+    creatorVenue = await o1BaseAnnouncementVenue(addr, key);
+  }
   if (!creatorVenue && (chain === "base" || chain === "robinhood")) {
     creatorVenue = (await bankrDopplerCheck(addr)) ? "bankr" : null;
   }

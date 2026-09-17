@@ -44,6 +44,7 @@ import { teamCandidateSourceMatchesIdentity } from "../src/lib/teamCandidateIden
 import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 import { deriveTokenApplicability } from "./tokenApplicability";
+import { launchVenueForOfficialDomain } from "../src/threat/launch";
 import { deriveSubjectCategory } from "./subjectCategory";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, reverseBioClaimIsStanding, followsSubject, resetFollowScanMemo, resetReverseBioMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
@@ -3275,6 +3276,41 @@ async function collectCryptoRankFundingEvidence(ctx: CollectContext): Promise<vo
 }
 
 /**
+ * Venue-as-subject: when the audited account's verified official domain IS a
+ * documented launch venue (the "Long on Robinhood" case), freeze that fact
+ * with the venue's registered launch mechanics. A launchpad without a native
+ * token must never be judged on token metrics; what it answers for is what it
+ * does to every token it launches: who holds the liquidity, who gets the
+ * fees. Domain-exact recognition only; brand similarity never binds.
+ */
+function detectLaunchVenueSubject(ctx: CollectContext): void {
+  const evidence = ctx.evidence;
+  if (evidence.launchVenueSubject) return;
+  if (!evidence.roles.includes(SubjectClass.PROJECT) && !isOrganizationAccount(evidence)) return;
+  const officialDomain = canonicalOfficialWebsite(evidence.profile.website)?.domain;
+  if (!officialDomain) return;
+  const venue = launchVenueForOfficialDomain(officialDomain);
+  if (!venue) return;
+  evidence.launchVenueSubject = {
+    venue: venue.name,
+    matchedDomain: venue.matchedDomain,
+    chains: venue.chains,
+    lpDisposition: venue.lpDisposition,
+    lpNote: venue.lpNote,
+    platformPaysCreator: venue.platformPaysCreator,
+    feeNote: venue.feeNote,
+    capturedAt: new Date().toISOString(),
+  };
+  ctx.emit({
+    phase: "Research",
+    label: `Subject recognized as a launch venue · ${venue.name}`,
+    detail: `The verified official domain ${venue.matchedDomain} is the ${venue.name} launchpad. Token metrics do not apply to the venue itself; its launch mechanics (liquidity ${venue.lpDisposition}; ${venue.platformPaysCreator ? "creators are paid ongoing fees" : "no ongoing creator fee stream"}) are frozen with the report, and each launched token carries its own provenance when scanned.`,
+    source: "launch-venues",
+    tone: "neutral",
+  });
+}
+
+/**
  * Listed-security health: when a scan verified that the subject has a publicly
  * traded security (the SEC-registry public_security fact), read the stock's
  * own point-in-time health. This is the doctrine's stock leg — a company whose
@@ -4972,6 +5008,8 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
   await collectListedSecurityHealth(ctx);
   await collectTokenizedStockExposure(ctx);
   await collectCompanyRegistryEvidence(ctx);
+  // Venue-as-subject recognition rides on the finalized official domain.
+  detectLaunchVenueSubject(ctx);
   let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
   if (rolesAfterBasicFacts.includes(SubjectClass.PROJECT)) {

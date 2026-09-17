@@ -19,6 +19,13 @@ interface Venue {
   name: string;
   chain: "solana" | "evm" | "any";
   chains?: string[]; // restrict to specific EVM chains (dossier.chain values)
+  /**
+   * The venue's own official web domains, for recognizing the VENUE ITSELF as
+   * an audited subject (a launchpad scanned by its X account must never be
+   * judged on a native token it does not have). Only domains the venue's docs
+   * or a verified probe established; never guessed from the brand name.
+   */
+  domains?: string[];
   // matchers - ANY hit identifies the venue. NOTE (verified 2026-08-10):
   // DexScreener `labels` are AMM-type only ("v2"/"v3"/"CLMM"...), NEVER
   // launchpad names - launchpads surface via dexId (fourmeme, flapsh, pumpfun),
@@ -44,6 +51,7 @@ interface Venue {
 const VENUES: Venue[] = [
   {
     name: "pump.fun",
+    domains: ["pump.fun"],
     chain: "solana",
     mintSuffix: /pump$/,
     // Graduated tokens keep the old pumpfun pair ALONGSIDE the new pumpswap
@@ -62,6 +70,7 @@ const VENUES: Venue[] = [
     // (also Bankr and Raydium-native launches - see the generic entry below).
     // Suffix match only here.
     name: "bonk.fun",
+    domains: ["bonk.fun"],
     chain: "solana",
     mintSuffix: /bonk$/i,
     lpOnGraduation: "burned",
@@ -152,6 +161,7 @@ const VENUES: Venue[] = [
   },
   {
     name: "clanker",
+    domains: ["clanker.world"],
     chain: "evm",
     chains: ["base", "robinhood"],
     // Clanker v4 deployments carry a vanity address suffix ...b07 (verified).
@@ -172,6 +182,7 @@ const VENUES: Venue[] = [
     // creation), and neither creator nor Bankr can pull liquidity or change
     // the fee schedule.
     name: "bankr",
+    domains: ["bankr.bot"],
     chain: "evm",
     chains: ["base", "robinhood"],
     lpOnGraduation: "locked",
@@ -204,6 +215,7 @@ const VENUES: Venue[] = [
     // so there is no client fingerprint yet on Base. Verified on $WRESTLER
     // (Robinhood, 2026-09-14) and $BRAINARM (Base, 2026-09-16); see RESEARCH.md.
     name: "o1",
+    domains: ["o1.exchange"],
     chain: "evm",
     chains: ["base", "robinhood"],
     dexIds: [],
@@ -214,6 +226,7 @@ const VENUES: Venue[] = [
   },
   {
     name: "four.meme",
+    domains: ["four.meme"],
     chain: "evm",
     chains: ["bsc"],
     dexIds: ["fourmeme"],
@@ -225,6 +238,7 @@ const VENUES: Venue[] = [
   },
   {
     name: "flap.sh",
+    domains: ["flap.sh"],
     chain: "evm",
     chains: ["bsc", "robinhood"],
     dexIds: ["flapsh"],
@@ -269,6 +283,46 @@ export function matchVenue(chain: string, address: string, dexId: string, quote:
       || ((v.dexIds?.length ?? 0) > 0 && v.dexIds!.includes(dexId))
       || (quote != null && (v.quoteIs?.includes(quote) ?? false))),
   ) ?? null;
+}
+
+/**
+ * The venue itself, as an auditable subject. A launchpad scanned by its own X
+ * account must never be judged on a native token it does not have; what it CAN
+ * be judged on is the launch mechanics it imposes on every token it releases
+ * (who holds LP, who gets fees). This projection exposes exactly those fields.
+ */
+export interface LaunchVenueProfile {
+  name: string;
+  matchedDomain: string;
+  chains: string[];
+  lpDisposition: LaunchProvenance["lpDisposition"];
+  lpNote: string;
+  platformPaysCreator: boolean;
+  feeNote: string;
+}
+
+/**
+ * Recognize an audited subject as a launch venue by its verified official
+ * domain. Only exact apex agreement with a venue's documented domain binds;
+ * brand-name similarity never does.
+ */
+export function launchVenueForOfficialDomain(officialDomain: string): LaunchVenueProfile | null {
+  const apex = officialDomain.trim().toLowerCase().replace(/^www\./, "");
+  if (!apex) return null;
+  for (const venue of VENUES) {
+    const matched = venue.domains?.find((domain) => domain === apex);
+    if (!matched) continue;
+    return {
+      name: venue.name,
+      matchedDomain: matched,
+      chains: venue.chain === "solana" ? ["solana"] : venue.chains ?? [],
+      lpDisposition: venue.lpOnGraduation,
+      lpNote: venue.lpNote,
+      platformPaysCreator: venue.platformPaysCreator,
+      feeNote: venue.feeNote,
+    };
+  }
+  return null;
 }
 
 // Quote-asset ramifications that hold regardless of venue.

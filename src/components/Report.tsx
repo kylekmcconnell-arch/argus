@@ -115,6 +115,7 @@ import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
 import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
+import { LaunchVenuePanel } from "./LaunchVenuePanel";
 import { StockHealthPanel } from "./StockHealthPanel";
 import { TokenizedStockPairingPanel } from "./TokenizedStockPairingPanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
@@ -4167,6 +4168,10 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
 
         {f.tokenizedStockPairing && (
           <TokenizedStockPairingPanel snapshot={f.tokenizedStockPairing} />
+        )}
+
+        {f.launchVenueSubject && (
+          <LaunchVenuePanel snapshot={f.launchVenueSubject} />
         )}
 
         <div id="decision-basis" className="legacy-reading-duplicate scroll-mt-28">
