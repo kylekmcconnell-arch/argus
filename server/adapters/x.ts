@@ -2781,8 +2781,17 @@ const HANDLE_TOKEN = "@([A-Za-z0-9_]{2,30})";
  * Official-account posts naming an incubator / team-behind / backed-by
  * @handle. Unique-id is the handle; display names never bind. These are
  * linked orgs, never founder people.
+ *
+ * OWNERSHIP GATE (the CZ-as-Definitive-backer fix, #459): the phrase alone is
+ * not evidence about the SUBJECT. The corpus is keyword-fished for "backed by"
+ * and keeps quote-posts and replies, so a project congratulating another
+ * project ("congrats @other, backed by @cz_binance!") used to mint @cz_binance
+ * as the audited project's own backer, stamped first-party-verified. A backer,
+ * incubator, or team-behind claim binds only when the clause is about the
+ * subject itself: first-person framing (we/we're/us/our) or the project's own
+ * name adjacent to the claim. Everything else stays a discovery lead.
  */
-export function scanPostsForLinkedOrgs(posts: string[]): LinkedOrg[] {
+export function scanPostsForLinkedOrgs(posts: string[], projectName?: string): LinkedOrg[] {
   const out: LinkedOrg[] = [];
   const seen = new Set<string>();
   const add = (handle: string, role: LinkedOrgRole, evidence: string) => {
@@ -2797,13 +2806,23 @@ export function scanPostsForLinkedOrgs(posts: string[]): LinkedOrg[] {
       source: "post org-scan",
     });
   };
+  const project = projectName?.trim() ? regexEscape(projectName.trim()) : "";
+  const OWNER = new RegExp(`\\b(?:we|we'?re|we\\s+are|we\\s+were|us|our${project ? `|${project}` : ""})\\b`, "i");
+  const claimIsSubjectOwned = (post: string, index: number, length: number): boolean => {
+    // Same clause only: an ownership token in a different sentence ("We are
+    // hiring! Congrats @other, backed by @X") must not leak in.
+    const clauseStart = Math.max(...[".", "!", "?", "\\n"].map((ch) => post.lastIndexOf(ch, index)), -1) + 1;
+    const clauseEndAt = post.slice(index + length).search(/[.!?\n]/);
+    const clauseEnd = clauseEndAt === -1 ? post.length : index + length + clauseEndAt;
+    return OWNER.test(post.slice(clauseStart, clauseEnd));
+  };
   const patterns: Array<{ re: RegExp; role: LinkedOrgRole; evidence: (h: string) => string }> = [
     { re: new RegExp(`\\bincubated\\s+by\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "incubator", evidence: (h) => `the official account named @${h} as its incubator` },
     { re: new RegExp(`\\bincubator\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "incubator", evidence: (h) => `the official account named @${h} as its incubator` },
     { re: new RegExp(`${HANDLE_TOKEN}\\s+(?:is\\s+)?(?:the\\s+|an?\\s+)?incubator\\b`, "gi"), role: "incubator", evidence: (h) => `the official account named @${h} as its incubator` },
     { re: new RegExp(`\\b(?:the\\s+)?team\\s+behind(?:\\s+(?:this|us|(?:the\\s+)?project))?\\s+(?:is\\s+)?${HANDLE_TOKEN}\\b`, "gi"), role: "team-behind", evidence: (h) => `the official account named @${h} as the team behind the project` },
     { re: new RegExp(`${HANDLE_TOKEN}\\s+is\\s+(?:the\\s+)?team\\s+behind\\b`, "gi"), role: "team-behind", evidence: (h) => `the official account named @${h} as the team behind the project` },
-    { re: new RegExp(`\\bbacked\\s+by\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "backed-by", evidence: (h) => `the official account named @${h} as a backer` },
+    { re: new RegExp(`\\bbacked\\s+by\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "backed-by", evidence: (h) => `the official account stated, about itself, that it is backed by @${h}` },
   ];
   for (const raw of posts.slice(0, 80)) {
     const p = String(raw ?? "");
@@ -2811,6 +2830,7 @@ export function scanPostsForLinkedOrgs(posts: string[]): LinkedOrg[] {
       for (const match of p.matchAll(re)) {
         const handle = match[1];
         if (!handle) continue;
+        if (!claimIsSubjectOwned(p, match.index ?? 0, match[0].length)) continue;
         add(handle, role, evidence(handle));
       }
     }
@@ -2841,8 +2861,8 @@ export function officialXNamedTeam(posts: string[], projectName?: string, subjec
 }
 
 /** First-party linked-org rows from the official twitterapi corpus. Handle is the unique id. */
-export function officialXNamedOrgs(posts: string[]): LinkedOrg[] {
-  return scanPostsForLinkedOrgs(posts);
+export function officialXNamedOrgs(posts: string[], projectName?: string): LinkedOrg[] {
+  return scanPostsForLinkedOrgs(posts, projectName);
 }
 
 
