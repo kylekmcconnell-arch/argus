@@ -67,6 +67,8 @@ import { DossierReport } from "./DossierReport";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
 import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
+import { ChallengeDialog } from "./ChallengeDialog";
+import { canonicalOfficialWebsite } from "../lib/fundScaleEvidence";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
@@ -5075,6 +5077,18 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 reportVersionId={evidenceReportVersionId}
               />
             </div>
+          )}
+
+          {/* structured challenge dialog: who is challenging (team-verified by
+              company-domain email, or community), the correction, evidence
+              files, and the system-learning note. Opens on the shared
+              challenge event from any "Challenge"/"Give input" affordance. */}
+          {!shareView && (
+            <ChallengeDialog
+              subject={report.handle}
+              reportVersionId={evidenceReportVersionId}
+              officialDomain={canonicalOfficialWebsite(f.website)?.domain ?? null}
+            />
           )}
 
           {/* analyst augmentation — add a piece the scan missed (verified
