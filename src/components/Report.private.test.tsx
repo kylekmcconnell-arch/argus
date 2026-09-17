@@ -272,6 +272,42 @@ describe("private person report evidence boundary", () => {
     expect(container.textContent).not.toContain("Non-Web3");
   });
 
+  it("renders the fundraising and backers section from the frozen funding records", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: { ...base.report, roles: [SubjectClass.PROJECT] },
+      protocolFunding: {
+        slug: "ammalgam",
+        name: "Ammalgam",
+        geckoId: null,
+        rounds: [{ date: "2024-06-01", round: "Seed", amountUsd: 2_500_000, leadInvestors: ["Lightspeed Faction"], otherInvestors: ["Framework Ventures"], valuationUsd: 25_000_000 }],
+        totalRaisedUsd: 2_500_000,
+        leadInvestors: ["Lightspeed Faction"],
+        sourceUrl: "https://defillama.com/protocol/ammalgam",
+        capturedAt: "2026-09-17T00:00:00.000Z",
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const panel = container.querySelector('[data-testid="fundraising"]');
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toContain("Who funded it, when, and on what terms");
+    expect(panel!.textContent).toContain("2024-06-01");
+    expect(panel!.textContent).toContain("$2.50M");
+    expect(panel!.textContent).toContain("Lightspeed Faction");
+    expect(panel!.textContent).toContain("Framework Ventures · Venture fund");
+    expect(panel!.textContent).toContain("not a cap");
+    // No funding records means no section at all.
+    act(() => {
+      root.render(<Report dossier={base} onReset={() => {}} onAudit={() => {}} />);
+    });
+    expect(container.querySelector('[data-testid="fundraising"]')).toBeNull();
+  });
+
   it("uses the linked token scan as Style 2's separate second score", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
