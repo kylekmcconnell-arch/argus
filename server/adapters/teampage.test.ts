@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { recordCall } from "../cost";
 import {
   bindOfficialPortrait,
+  bindContactAnchor,
   bindProfileAnchor,
   officialPortraitAnchors,
   profileAnchors,
@@ -313,6 +314,36 @@ describe("profile anchors on a team page", () => {
       "@avermeulen",
     ]);
     expect(anchors.some((a) => a.value.includes("company"))).toBe(false);
+  });
+
+  it("reads per-person contact anchors and binds them only by name agreement, never by position", () => {
+    const contactRoster = `
+    <div class="member">
+      <h3>Niklas Homan</h3><p>Founder &amp; Chief Executive Officer</p>
+      <a href="https://t.me/niklashoman">Telegram</a>
+      <a href="mailto:niklas@orbitgroup.ai">Email Niklas</a>
+    </div>
+    <div class="member">
+      <h3>Alexander Vermeulen</h3><p>Founder &amp; Chief Technology Officer</p>
+    </div>
+    <div class="footer">
+      <a href="mailto:info@orbitgroup.ai">Contact us</a>
+      <a href="https://t.me/orbitgroup_announcements">Announcements</a>
+      <a href="https://t.me/share?url=x">Share</a>
+    </div>`;
+    const anchors = profileAnchors(contactRoster);
+    expect(anchors.filter((a) => a.kind === "telegram").map((a) => a.value))
+      .toEqual(["niklashoman", "orbitgroup_announcements"]);
+    expect(anchors.filter((a) => a.kind === "email").map((a) => a.value))
+      .toEqual(["niklas@orbitgroup.ai", "info@orbitgroup.ai"]);
+
+    // Niklas gets HIS telegram slug and HIS address (local part carries the name).
+    expect(bindContactAnchor("Niklas Homan", anchors, "telegram")).toBe("niklashoman");
+    expect(bindContactAnchor("Niklas Homan", anchors, "email")).toBe("niklas@orbitgroup.ai");
+    // Alexander sits nearest to the footer, but a page-level contact must
+    // never become a person's personal address: no nearness fallback exists.
+    expect(bindContactAnchor("Alexander Vermeulen", anchors, "telegram")).toBeUndefined();
+    expect(bindContactAnchor("Alexander Vermeulen", anchors, "email")).toBeUndefined();
   });
 
   it("binds a profile by nearby position, by anchor text, and by slug", () => {
