@@ -265,15 +265,17 @@ function parseThesis(v: unknown): FomoThesis | null {
   const id = str(o.id);
   if (!id) return null;
   const author = (o.author && typeof o.author === "object") ? o.author as Record<string, unknown> : {};
-  const postedRaw = o.postedAt ?? o.createdAt ?? o.timestamp;
+  // Documented shape: { id, authorHandle, thesis, fomoCreatedAt (epoch millis) }
+  // plus optional authorId/tokenAddress/tokenNetwork/symbol on some routes.
+  const postedRaw = o.fomoCreatedAt ?? o.postedAt ?? o.createdAt ?? o.timestamp;
   return {
     id,
     authorId: str(o.authorId) ?? str(author.id),
     authorHandle: str(o.authorHandle) ?? str(author.handle),
     tokenAddress: str(o.tokenAddress),
-    tokenNetwork: str(o.tokenNetwork),
+    tokenNetwork: str(o.tokenNetwork) ?? str(o.network),
     symbol: str(o.symbol),
-    text: str(o.text) ?? str(o.body) ?? str(o.content),
+    text: str(o.thesis) ?? str(o.text) ?? str(o.body) ?? str(o.content),
     postedAt: str(postedRaw) ?? (num(postedRaw) != null ? new Date(num(postedRaw)!).toISOString() : null),
   };
 }

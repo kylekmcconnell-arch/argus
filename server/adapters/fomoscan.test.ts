@@ -133,11 +133,11 @@ describe("FomoScan numbers are FomoScan's and say what they are", () => {
     vi.stubEnv("FOMOSCAN_API_KEY", "fsk_live_secret");
     const fetchImpl = vi.fn(async () => json({
       tokenAddress: "0xcd4e70bfd73952123449e453f08c12e44ab89e58", tokenNetwork: "robinhood", symbol: "IDX", updatedAt: 1, count: 1, hasMore: false, nextBefore: null,
-      items: [{ id: "t1", authorId: "u1", text: "IDX is the benchmark", postedAt: "2026-09-16T11:11:00Z" }],
+      items: [{ id: "t1", authorHandle: "YusufGemz", thesis: "IDX is the benchmark", fomoCreatedAt: Date.UTC(2026, 8, 16, 11, 11) }],
     })) as unknown as typeof fetch;
     const res = await fetchFomoTokenTheses("0xCd4E70bfd73952123449E453f08c12e44aB89E58", { fetchImpl });
     expect(res.state).toBe("hit");
-    expect(res.value?.[0]).toMatchObject({ id: "t1", authorId: "u1", postedAt: "2026-09-16T11:11:00Z" });
+    expect(res.value?.[0]).toMatchObject({ id: "t1", authorHandle: "YusufGemz", text: "IDX is the benchmark", postedAt: "2026-09-16T11:11:00.000Z" });
     expect(res.cu).toBe(FOMOSCAN_CU.thesisPage);
   });
 });
