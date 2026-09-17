@@ -35,7 +35,7 @@ describe("provider readiness", () => {
     expect(captured.body).toMatchObject({
       available: true,
       mode: "configuration",
-      down: 10, // unconfigured required lanes only; retired and optional fallbacks are listed but not counted down
+      down: 11, // unconfigured required lanes only; retired and optional fallbacks are listed but not counted down
       services: [
         { id: "xai", ok: true },
         { id: "anthropic", ok: true },
@@ -56,6 +56,7 @@ describe("provider readiness", () => {
         { id: "crunchbase", ok: false, retired: true, detail: "retired: DeFiLlama and Monid/Akta cover funding and backing" },
         { id: "reddit", ok: false, retired: true, detail: "retired: Reddit API access was not approved" },
         { id: "gmgn", ok: false, detail: "not configured in this deployment" },
+        { id: "fomoscan", ok: false, detail: "not configured in this deployment" },
         { id: "resend", ok: false, optional: true, detail: "optional fallback not configured" },
         { id: "companies-house", ok: false, optional: true, detail: "optional fallback not configured" },
         { id: "opencorporates", ok: false, optional: true, detail: "optional fallback not configured" },
@@ -94,7 +95,7 @@ describe("provider readiness", () => {
         { id: "serper", ok: true },
         { id: "openrouter", ok: true },
         { id: "helius" }, { id: "etherscan" }, { id: "arkham" }, { id: "pdl" },
-        { id: "github" }, { id: "coingecko" }, { id: "cryptorank" }, { id: "crunchbase" }, { id: "reddit" }, { id: "gmgn" },
+        { id: "github" }, { id: "coingecko" }, { id: "cryptorank" }, { id: "crunchbase" }, { id: "reddit" }, { id: "gmgn" }, { id: "fomoscan" },
         { id: "resend" }, { id: "companies-house" }, { id: "opencorporates" },
         { id: "safebrowsing" }, { id: "chart-signals" }, { id: "x-api-bearer" },
       ],

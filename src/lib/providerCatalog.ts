@@ -265,6 +265,18 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     env: ["GMGN_API_KEY"],
   },
   {
+    id: "fomoscan",
+    label: "FomoScan",
+    powers: "FOMO trader identity: the wallet a FOMO account verified for itself, the X account it links, trader cash-flow numbers, and posted theses on a token",
+    limits: "A match is FomoScan's claim and is recorded as InvestigatorAttributed, never SelfDoxxed. PnL is sold minus bought, not realized profit. Metered in compute units; wallet-to-trader resolution costs 50,000 CU and is never called from an audit.",
+    source: "api.fomoscan.sh",
+    tier: "optional",
+    kind: "evidence",
+    lifecycle: "active",
+    category: "Blockchain activity",
+    env: ["FOMOSCAN_API_KEY"],
+  },
+  {
     id: "chart-signals",
     label: "Chart signals (self-hosted)",
     powers: "Generic technical posture for tickers listed on major venues: trend state, breakout and reversal formations, momentum and volume readings",
