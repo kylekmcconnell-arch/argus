@@ -119,7 +119,6 @@ import {
 import { collectCryptoRankFunding, cryptoRankConfigured } from "./adapters/cryptoRank";
 import { collectHolderProfile } from "./adapters/tokenHolders";
 import { collectStockHealth, resolveTokenizedStockUnderlying, tokenizedStockPairingSnapshot } from "./adapters/stockHealth";
-<<<<<<< HEAD
 import {
   collectCompaniesHouseRecord,
   collectOpenCorporatesRecord,
@@ -128,8 +127,6 @@ import {
   companiesHouseConfigured,
   openCorporatesConfigured,
 } from "./adapters/companyRegistries";
-=======
->>>>>>> origin/main
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { buildMaterialReportDelta } from "../src/lib/reportDelta";
 import { collectSecurityAudits } from "./adapters/securityAudits";
@@ -3381,7 +3378,6 @@ async function collectTokenizedStockExposure(ctx: CollectContext): Promise<void>
   }
 }
 
-<<<<<<< HEAD
 /**
  * Company-registry pass: real registries answer the legal-entity questions for
  * every company subject, crypto or not. The SEC EDGAR record joins by the CIK
@@ -3490,8 +3486,6 @@ async function collectCompanyRegistryEvidence(ctx: CollectContext): Promise<void
   }
 }
 
-=======
->>>>>>> origin/main
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
@@ -4977,10 +4971,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
   // paired against a tokenized stock gets the underlying stock's health too.
   await collectListedSecurityHealth(ctx);
   await collectTokenizedStockExposure(ctx);
-<<<<<<< HEAD
   await collectCompanyRegistryEvidence(ctx);
-=======
->>>>>>> origin/main
   let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
   if (rolesAfterBasicFacts.includes(SubjectClass.PROJECT)) {
