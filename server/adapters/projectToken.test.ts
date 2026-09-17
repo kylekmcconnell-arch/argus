@@ -433,6 +433,8 @@ describe("verified project-token collection", () => {
           [200, 0.02, 0.04, 0.015, 0.03, 800],
         ] } },
       });
+      // Reciprocity: the subject's own site adopts the contract.
+      if (url.startsWith("https://ponsfamily.com/")) return new Response(`Token contract: ${PONS_TOKEN}`);
       throw new Error(`unexpected URL ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -445,7 +447,8 @@ describe("verified project-token collection", () => {
     expect(captured.result).toMatchObject({
       state: "executed",
       detail: expect.stringContaining("identity-bound DEX pair"),
-      attempts: 3,
+      // CoinGecko search + DexScreener search + reciprocity site fetch + OHLCV history.
+      attempts: 4,
     });
     expect(evidence.projectToken).toMatchObject({
       verified: true,
@@ -516,6 +519,58 @@ describe("verified project-token collection", () => {
     }));
   });
 
+  it("refuses a namesake token whose DexScreener listing declares the subject's account but nothing of the subject's adopts it", async () => {
+    // The $CZ shape: anyone can deploy a token and attach any X account and
+    // website to its DexScreener profile. The listing alone must never bind;
+    // reciprocity (bio CA, own posts, or the official site publishing the
+    // contract) is required, and a refused contender is recorded as a namesake.
+    const NAMESAKE_TOKEN = "0x6412beD99AE9Fd8bcc8eA8fbC1a1e5B4A4d4C7a1";
+    const { ctx, evidence } = context("@cz_binance", "CZ", "https://www.binance.com/");
+    evidence.profile.bio = "Former CEO of Binance. Now focused on education.";
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({
+        pairs: [{
+          chainId: "bsc",
+          pairAddress: "0xPoolCz00000000000000000000000000000000cz",
+          url: "https://dexscreener.com/bsc/0xpoolcz00000000000000000000000000000000cz",
+          baseToken: { address: NAMESAKE_TOKEN, name: "CZ", symbol: "CZ" },
+          quoteToken: { address: OTHER_TOKEN, symbol: "WBNB" },
+          priceUsd: "0.002",
+          marketCap: 1_800_000,
+          fdv: 1_800_000,
+          volume: { h24: 240_000 },
+          liquidity: { usd: 320_000 },
+          info: {
+            websites: [{ url: "https://www.binance.com/", label: "Website" }],
+            socials: [{ url: "https://x.com/cz_binance", type: "twitter" }],
+          },
+        }],
+      });
+      // The subject's real site never publishes that contract.
+      if (url.startsWith("https://www.binance.com/")) return new Response("<html>Exchange the world.</html>");
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await collectProjectTokenIdentity(ctx);
+
+    expect(evidence.projectToken).toBeUndefined();
+    expect(evidence.namesakeTokens).toEqual([expect.objectContaining({
+      name: "CZ",
+      symbol: "CZ",
+      address: NAMESAKE_TOKEN,
+      chain: "bsc",
+      declaredX: "@cz_binance",
+    })]);
+    expect(ctx.emit).toHaveBeenCalledWith(expect.objectContaining({
+      tone: "warn",
+      label: expect.stringContaining("Namesake token"),
+      detail: expect.stringContaining("launched by someone else"),
+    }));
+  });
+
   it("retries the DEX search without the display name's generic suffix when the full name misses the token", async () => {
     // The $GWOOD shape: the X account is "Greenwood Finance" but the token is
     // named just "Greenwood", and DexScreener's search for the two-word name
@@ -549,6 +604,9 @@ describe("verified project-token collection", () => {
         return json({ pairs: q === "Greenwood" ? [gwoodPair] : [] });
       }
       if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      // Reciprocity: the official site publishes the contract, closing the
+      // two-way link a deployer-supplied DexScreener profile cannot fake.
+      if (url.startsWith("https://greenwood.fi")) return new Response(`Token contract: ${GWOOD_TOKEN}`);
       throw new Error(`unexpected URL ${url}`);
     }));
 
@@ -1954,6 +2012,8 @@ describe("official-domain gates read every credible domain on the frozen profile
         }],
       });
       if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      // Reciprocity: the subject's own site adopts the contract.
+      if (url.startsWith("https://ponsfamily.com/")) return new Response(`Token contract: ${PONS_TOKEN}`);
       throw new Error(`unexpected URL ${url}`);
     }));
 

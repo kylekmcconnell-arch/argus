@@ -271,6 +271,8 @@ export interface Dossier {
   companyRegistry?: CollectedEvidence["companyRegistry"];
   /** The subject's own published backer wall, from the bound official site. */
   siteBackers?: CollectedEvidence["siteBackers"];
+  /** Name-alike tokens refused for lacking the subject's own adoption; launched by someone else. */
+  namesakeTokens?: CollectedEvidence["namesakeTokens"];
   /** Frozen Web3 / non-Web3 market categorization for a company subject. */
   subjectCategory?: CollectedEvidence["subjectCategory"];
   /**
@@ -694,6 +696,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {}),
     ...(ev.companyRegistry ? { companyRegistry: structuredClone(ev.companyRegistry) } : {}),
     ...(ev.siteBackers ? { siteBackers: structuredClone(ev.siteBackers) } : {}),
+    ...(ev.namesakeTokens ? { namesakeTokens: structuredClone(ev.namesakeTokens) } : {}),
     ...(ev.subjectCategory ? { subjectCategory: structuredClone(ev.subjectCategory) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
