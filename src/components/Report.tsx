@@ -2407,13 +2407,26 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   ].filter((item, index, items) => items.findIndex((candidate) =>
     candidate.title.toLowerCase().replace(/[^a-z0-9]+/g, " ")
       === item.title.toLowerCase().replace(/[^a-z0-9]+/g, " ")) === index).slice(0, 6);
-  const intelligenceContextNarrative: ReportCanvasNarrativeItem[] = intelligenceBrief.context.map((item) => ({
+  // Namesake tokens the scan refused to bind: their DexScreener listings
+  // declare this subject's account, but nothing of the subject's own (bio,
+  // posts, official site) adopts the contract. Stated so a reader who finds
+  // "$CZ" trading never attributes it to the subject.
+  const namesakeTokenNarrative: ReportCanvasNarrativeItem[] = (f.namesakeTokens ?? []).length > 0 && !f.projectToken
+    ? [{
+      id: "namesake-tokens-refused",
+      title: `Token${(f.namesakeTokens ?? []).length === 1 ? "" : "s"} trading under this name (${(f.namesakeTokens ?? []).slice(0, 3).map((token) => `$${token.symbol}`).join(", ")}) ${(f.namesakeTokens ?? []).length === 1 ? "was" : "were"} launched by someone else.`,
+      detail: `${(f.namesakeTokens ?? []).slice(0, 3).map((token) => `$${token.symbol} on ${token.chain} (${token.address.slice(0, 10)}…)`).join(", ")} ${(f.namesakeTokens ?? []).length === 1 ? "lists" : "list"} this account as its own social link, but anyone can attach any account to a token they deploy. Neither the subject's bio, own posts, nor official site adopts ${(f.namesakeTokens ?? []).length === 1 ? "that contract" : "those contracts"}, so ${(f.namesakeTokens ?? []).length === 1 ? "it has" : "they have"} nothing to do with the subject.`,
+      provenance: "DexScreener listing, binding refused",
+      href: "#decision-intelligence" as `#${string}`,
+    }]
+    : [];
+  const intelligenceContextNarrative: ReportCanvasNarrativeItem[] = [...namesakeTokenNarrative, ...intelligenceBrief.context.map((item) => ({
     id: item.id,
     title: plainLanguageSummary(item.title),
     detail: plainLanguageSummary(item.detail),
     provenance: item.provenance,
     href: "#decision-intelligence" as `#${string}`,
-  }));
+  }))];
 
   // Real countervailing signals only: hard caps, coverage shortfalls,
   // contradictions, and mixed evidence. Collection gaps are NOT thesis risks;
