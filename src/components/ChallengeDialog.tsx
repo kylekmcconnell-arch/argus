@@ -165,7 +165,7 @@ export function ChallengeDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Challenge this report" data-testid="challenge-dialog">
-      <div className="panel mt-10 w-full max-w-xl bg-paper px-5 py-4">
+      <div className="panel mt-10 w-full max-w-xl px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="font-semibold text-ink">Challenge this report</h3>
@@ -177,7 +177,7 @@ export function ChallengeDialog({
         <label className="mt-3 block text-[12px] font-medium text-ink" htmlFor="challenge-role">Who is challenging?</label>
         <select
           id="challenge-role"
-          className="input mt-1 w-full text-[13px]"
+          className="field mt-1 w-full px-3 py-2 text-[13px]"
           value={role}
           onChange={(event) => setRole(event.target.value === "team" ? "team" : "community")}
         >
@@ -195,7 +195,7 @@ export function ChallengeDialog({
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <input
                 type="email"
-                className="input min-w-[14rem] flex-1 text-[13px]"
+                className="field min-w-[14rem] flex-1 px-3 py-2 text-[13px]"
                 placeholder={officialDomain ? `you@${officialDomain}` : "you@company.com"}
                 value={email}
                 onChange={(event) => { setEmail(event.target.value); if (verify.step !== "idle") setVerify({ step: "idle" }); }}
@@ -219,7 +219,7 @@ export function ChallengeDialog({
         <label className="mt-3 block text-[12px] font-medium text-ink" htmlFor="challenge-whats-wrong">What&apos;s wrong here?</label>
         <textarea
           id="challenge-whats-wrong"
-          className="input mt-1 w-full text-[13px]"
+          className="field mt-1 w-full px-3 py-2 text-[13px]"
           rows={4}
           placeholder="What the report gets wrong, and what the correct information is."
           value={whatsWrong}
@@ -230,7 +230,7 @@ export function ChallengeDialog({
         <p className="text-[11px] text-ink-dim">Optional: how ARGUS&apos;s logic made this mistake. This goes to overall system learning, beyond this one report, so the same mistake is not repeated anywhere.</p>
         <textarea
           id="challenge-where-wrong"
-          className="input mt-1 w-full text-[13px]"
+          className="field mt-1 w-full px-3 py-2 text-[13px]"
           rows={3}
           placeholder="For example: the system trusted a namesake account, or read a paused program as active."
           value={whereWrong}

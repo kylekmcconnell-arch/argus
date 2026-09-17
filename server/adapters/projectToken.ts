@@ -126,6 +126,26 @@ interface DexFallbackResult {
   /** Name-matched DEX tokens that failed the identity gate, for the assessed-null disclosure. */
   nameMatches?: string[];
   nameMatchCount?: number;
+  /** Candidates refused for lacking reciprocity: their own listings claim the audited account, the subject claims nothing back. */
+  namesakes?: DexNamesakeToken[];
+}
+
+/**
+ * A token whose OWN listing claims the audited account as its social. Anyone
+ * can attach any social link and any website to a token they deploy, so the
+ * listing is the deployer's claim, never the subject's: absent the subject's
+ * own bio or official site adopting the exact contract, the token was
+ * launched by someone else and has nothing to do with the subject. Frozen so
+ * the report can say exactly that ($CZ against @cz_binance was bound this way).
+ */
+export interface DexNamesakeToken {
+  name: string;
+  symbol: string;
+  address: string;
+  chain: string;
+  declaredX: string;
+  sourceUrl: string;
+  liquidityUsd?: number;
 }
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -1024,7 +1044,70 @@ async function collectDexProjectToken(
   if (!rows) {
     return { state: "failed", attempts: 1, detail: "DexScreener project search failed" };
   }
-  const candidate = dexProjectCandidates(ctx, query, rows)[0];
+  const candidates = dexProjectCandidates(ctx, query, rows);
+  // Reciprocity gate: DexScreener token-profile websites and socials are
+  // supplied by the token's own deployer, so a candidate that merely points
+  // its metadata at the audited account proves nothing. The bind completes
+  // only when a surface the SUBJECT controls adopts the exact contract: the
+  // provider-frozen bio declares it, or the official site publishes it.
+  const bioDeclared = declaredTokenFromBio(ctx.evidence.profile.bio ?? "");
+  // The subject's own provider-frozen surfaces beyond the bio: recent own
+  // posts routinely carry the CA even when the bio does not. First-party text
+  // only; a third party posting the address never counts.
+  const ownText = `${ctx.evidence.profile.bio ?? ""}\n${ctx.evidence.profile.self_post_sample ?? ""}`;
+  const ownTextAdopts = (address: string): boolean => {
+    if (!address) return false;
+    return address.startsWith("0x")
+      ? ownText.toLowerCase().includes(address.toLowerCase())
+      : ownText.includes(address);
+  };
+  let siteAddresses: string[] | null = null;
+  let siteAttempts = 0;
+  const officialSiteAddresses = async (): Promise<string[]> => {
+    if (siteAddresses) return siteAddresses;
+    siteAddresses = [];
+    // Same official scopes the identity gate reads: the primary website plus
+    // every provider-frozen official_websites entry (a project's site can sit
+    // in official_websites while the primary link is a Telegram).
+    for (const scope of profileOfficialScopes(ctx).slice(0, 2)) {
+      siteAttempts += 1;
+      try {
+        const response = await fetch(scope.canonicalUrl, {
+          headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" },
+          signal: AbortSignal.timeout(9_000),
+        });
+        if (response.ok) {
+          const body = await readBoundedResponseText(response, SITE_DECLARATION_MAX_BYTES);
+          if (body) siteAddresses.push(...siteDeclaredContractCandidates(body));
+        }
+      } catch { /* an unreadable site is simply no reciprocity */ }
+    }
+    return siteAddresses;
+  };
+  const namesakes: DexNamesakeToken[] = [];
+  let candidate: DexProjectCandidate | undefined;
+  for (const contender of candidates.slice(0, 3)) {
+    if (bioDeclared && sameAddress(bioDeclared.address, contender.address)) { candidate = contender; break; }
+    if (ownTextAdopts(contender.address)) { candidate = contender; break; }
+    if ((await officialSiteAddresses()).some((address) => sameAddress(address, contender.address))) { candidate = contender; break; }
+    namesakes.push({
+      name: contender.name,
+      symbol: contender.symbol,
+      address: contender.address,
+      chain: contender.chain,
+      declaredX: contender.officialX ?? "",
+      sourceUrl: contender.sourceUrl,
+      ...(contender.liquidityUsd !== undefined ? { liquidityUsd: contender.liquidityUsd } : {}),
+    });
+  }
+  if (!candidate && namesakes.length) {
+    return {
+      state: "empty",
+      attempts: 1 + siteAttempts,
+      detail: "DexScreener candidates refused: their listings claim this account, but neither the bio nor the official site adopts their contract",
+      namesakes,
+    };
+  }
   if (!candidate) {
     // Disclose what the search DID see: tokens trading under a matching name
     // that no official account or domain links back to. Naming them is what
@@ -1059,7 +1142,7 @@ async function collectDexProjectToken(
     || candidate.volume24hUsd !== undefined;
   return {
     state: "matched",
-    attempts: 1 + historyResult.attempts,
+    attempts: 1 + siteAttempts + historyResult.attempts,
     detail: `verified $${candidate.symbol} by ${candidate.verification} with an identity-bound DEX pair`,
     snapshot: {
       verified: true,
@@ -2009,6 +2092,7 @@ export async function collectProjectTokenIdentity(
     let dexAttempts = 0;
     let dexSearchEverFailed = false;
     const dexNameMatches = new Set<string>();
+    const dexNamesakes = new Map<string, DexNamesakeToken>();
     let dexNameMatchCount = 0;
     let dexQueriesSkipped = 0;
     for (const fallbackQuery of dexQueries) {
@@ -2022,8 +2106,9 @@ export async function collectProjectTokenIdentity(
       dexAttempts += retry.attempts;
       if (retry.state === "failed") dexSearchEverFailed = true;
       if (retry.state === "empty") {
-        if (!(retry.nameMatchCount ?? 0) && !(retry.nameMatches?.length)) emptyLedger.dexscreener.add(queryKey);
+        if (!(retry.nameMatchCount ?? 0) && !(retry.nameMatches?.length) && !(retry.namesakes?.length)) emptyLedger.dexscreener.add(queryKey);
         for (const match of retry.nameMatches ?? []) dexNameMatches.add(match);
+        for (const namesake of retry.namesakes ?? []) dexNamesakes.set(namesake.address.toLowerCase(), namesake);
         dexNameMatchCount = Math.max(dexNameMatchCount, retry.nameMatchCount ?? 0);
       }
       if (retry.state === "matched") dexFallback = retry;
@@ -2192,6 +2277,19 @@ export async function collectProjectTokenIdentity(
     const cgSamples = candidates.slice(0, 3).map((row) => `${row.name} ($${row.symbol.toUpperCase()})`);
     const alikeSamples = [...new Set([...cgSamples, ...dexAlikes])].slice(0, 3);
     const alikeCount = Math.max(candidates.length + dexAlikeCount, alikeSamples.length);
+    if (dexFallback.state !== "matched" && dexNamesakes.size) {
+      const refused = [...dexNamesakes.values()].slice(0, 5);
+      const capturedAt = captureTimestamp();
+      ctx.evidence.namesakeTokens = refused.map((entry) => ({ ...entry, capturedAt }));
+      const listed = refused.map((entry) => `$${entry.symbol} (${entry.chain} ${entry.address.slice(0, 10)}…)`).join(", ");
+      ctx.emit({
+        phase: "Token",
+        label: `Namesake token${refused.length === 1 ? "" : "s"} refused · ${refused.map((entry) => `$${entry.symbol}`).slice(0, 3).join(", ")}`,
+        detail: `${listed} ${refused.length === 1 ? "declares" : "declare"} ${ctx.handle} as ${refused.length === 1 ? "its" : "their"} own social link, but anyone can attach any account to a token they deploy. Nothing on this subject's own bio or official site adopts ${refused.length === 1 ? "that contract" : "those contracts"}: ${refused.length === 1 ? "it was" : "they were"} launched by someone else and ${refused.length === 1 ? "has" : "have"} nothing to do with the subject.`,
+        source: "dexscreener",
+        tone: "warn",
+      });
+    }
     const namesake = registryNamesakes[0];
     if (namesake) {
       ctx.emit({

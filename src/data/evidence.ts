@@ -1355,6 +1355,23 @@ export interface CollectedEvidence {
   /** A bio-declared contract the identity search completed without binding. Mutually exclusive with projectToken. */
   unresolvedProjectToken?: UnresolvedProjectTokenSnapshot;
   /**
+   * Name-alike tokens whose OWN listings claim the audited account as their
+   * social link. The listing is the deployer's claim, never the subject's:
+   * absent the subject's own bio or official site adopting the exact
+   * contract, these were launched by someone else and have nothing to do
+   * with the subject. Frozen so the report states that explicitly.
+   */
+  namesakeTokens?: Array<{
+    name: string;
+    symbol: string;
+    address: string;
+    chain: string;
+    declaredX: string;
+    sourceUrl: string;
+    liquidityUsd?: number;
+    capturedAt: string;
+  }>;
+  /**
    * Fixed-block direct RPC observations for the verified canonical EVM token.
    * This lane is point-in-time context only and has no v1 scoring impact.
    */
