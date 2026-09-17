@@ -343,6 +343,28 @@ export const CABALS: Cabal[] = [
       { chain: SOL, address: "5mwnJgccHmRBv5HkqaQ3zs83nnGABR6p2L9UscRSBAGS", symbol: "Dunworm", name: "DUNE SANDWORM", launchedAt: "2026-09-15T21:32:33Z", venue: "PumpSwap create_pool by a throwaway wallet (no pump.fun curve), fake launchpad address suffix", outcome: "liquidity-pulled", note: "pool opened with 415.4 SOL by ECmgGJqYLD… naming the PARK creator as coin_creator; drained to 0.00 SOL within minutes; DexScreener still quoted a multi-million market cap on zero liquidity on 2026-09-16", evidence: "create_pool tx 54Jx3m4ExoAi… at 2026-09-15T21:32:33Z; pool WSOL vault balance 0.00 read 2026-09-16 16:00 UTC" },
     ],
   },
+  {
+    id: "rh-farm-idx9000",
+    name: "IDX9000 self-launch and dividend pivot",
+    kind: "launch-farm",
+    intent: "nefarious",
+    summary:
+      "One operator launched the same IDX token twice on Pons V2 within fifteen minutes, buying 36% and then 30% of supply in the creation transactions and selling every token back into the curve within minutes, then claimed the confiscated creator tax and bridged 2.59 ETH to BNB Chain. An hour before the last exit the deployer redirected the token's creator-fee stream to a Pons holder-rewards escrow, and the website, X account and a paid caller appeared after that, selling the token as a SPY-dividend index. The exit wallet re-entered with a small position nine minutes before the domain was registered.",
+    firstSeen: "2026-09-14",
+    lastSeen: "2026-09-16",
+    wallets: [
+      { chain: RH, address: "0x5cfdc3ee06936ea4d0522eaa444a863d89bf39d6", role: "deployer", label: "IDX deployer (EIP-7702 account, 69 txs)", evidence: "funded 0.5 ETH at 2026-09-14 03:50 UTC from the 5,845 ETH hot wallet 0x53091256…; launched 0x8db9cbfa… at 04:52 with a 36.4% dev buy for 2.516 SPY and sold it by 04:57; launched 0xcd4e70bf… at 05:02:50 via PonsV2LaunchAndBuy with a 30.11% dev buy for 1.898 SPY (tx 0xff312ea8…), sold 7.53%, 7.45% and 5.13% into the curve at 05:04 to 05:05, 7.49% at 14:39 to 14:48 and 2.51% into the graduated pool at 15:40; six PonsV2FeeEscrow claimToken calls took 1.137 SPY plus 0.132 SPY on the first token; called PonsV2LaunchFactory.transferCreatorFeeRecipient to escrow 0xaa10a1ca… at 16:37:05; last tx 16:40; holds 0" },
+      { chain: RH, address: "0xe00244b4f2f63b034dbf9d3e88cdfd606ad950df", role: "off-ramp", label: "exit wallet on BNB Chain and Robinhood, serial Pons sniper", evidence: "recipient of all seven deployer RelayDepository deposits (2.5946 ETH, 9.07 BNB) resolved via api.relay.link on 2026-09-16; the same address on Robinhood Chain has 1,587 txs since 2026-07-09, 34 Relay bridge-outs and approvals on dozens of PonsV2LauncherTokens; bought 0.39% of IDX at 2026-09-14 17:37 UTC and held 0.37% on 2026-09-16 while receiving the SPY holder drips" },
+    ],
+    accounts: [
+      { handle: "IDX_RH", role: "project", label: "$IDX9000 project account (appeared after the exit)", evidence: "joined September 2026; 45 posts by 2026-09-16 in a two-hour cadence framing IDX9000 as an index; follows MEADGod, ponsdotfamily, RobinhoodApp and RobinhoodCrypto; domain index9000.xyz registered on Namecheap 2026-09-14 17:46 UTC, 66 minutes after the deployer's last transaction" },
+      { handle: "YusufGemz", role: "kol", label: "Yusuf · paid caller (34.4k followers, Telegram channel)", evidence: "five $IDX calls between 2026-09-15 20:00 and 2026-09-16 18:00 UTC ('$1M next', 'Quant told me next phase coming'), riding the cap from $227k to $435k; bio 'Alpha Frontrunner', private Telegram" },
+    ],
+    launches: [
+      { chain: RH, address: "0x8db9cbfa0c1a4bb474db19c5d92590f5b03f70eb", symbol: "IDX", name: "IDX (first attempt)", launchedAt: "2026-09-14T04:52:36Z", venue: "pons-v2", outcome: "self-sniped-and-dumped", note: "36.4% dev buy for 2.516 SPY in the creation tx, sold in two transactions at 04:56 and 04:57 UTC, creator tax claimed at 04:57 and 0.367 ETH bridged out at 04:58; never graduated, no DexScreener pair", evidence: "deployer token-transfer history on Blockscout read 2026-09-16" },
+      { chain: RH, address: "0xcd4e70bfd73952123449e453f08c12e44ab89e58", symbol: "IDX", name: "IDX9000", launchedAt: "2026-09-14T05:02:50Z", venue: "pons-v2", outcome: "self-sniped-and-dumped", note: "curve quoted in tokenized SPY; 30.11% dev buy sold in full by 15:40 UTC; 25 wallets took 23.97% in blocks +54 to +61 and three later buy clusters landed within four blocks of each dev sell; graduated 15:40 UTC with 8.16% in PonsV2LaunchLocker (position 2697526); creator-fee recipient moved to the Pons holder-rewards escrow 0xaa10a1ca… at 16:37, which has paid SPY to holders every 90 minutes since; on 2026-09-16 Robinhood-app retail bought 18.5% of supply in 24 h through RobinHoodSettler while aggregator and MEV bots sold 53%", evidence: "transfer logs from block 62544585 read 2026-09-16 via rpc.mainnet.chain.robinhood.com; PonsV2LaunchFactory.transferCreatorFeeRecipient decoded on Blockscout; DexScreener 2026-09-16: $358k cap, $49k liquidity, $235k 24h volume, 540 holders" },
+    ],
+  },
 ];
 
 // ---- lookups ----

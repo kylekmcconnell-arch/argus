@@ -498,3 +498,44 @@ Curated in `src/data/cabals.ts` (`sol-park-pumpswap-pool-factory`).
 Public Solana RPCs reject `getTokenLargestAccounts` for Token-2022 mints and
 cap `getSignaturesForAddress` pagination in practice; use the bonding-curve
 account for the launch window and Solscan's holder page for the snapshot.
+
+## Pons V2 self-launch with a dividend pivot ($IDX9000, Robinhood Chain, read 2026-09-16)
+
+$IDX / IDX9000 (`0xcd4e70bfd73952123449e453f08c12e44ab89e58`) is the LEBRON shape
+with two new moves. Curated in `src/data/cabals.ts` (`rh-farm-idx9000`).
+
+- **Rehearsal launch.** The deployer (`0x5cfdc3ee…`, an EIP-7702 account funded
+  0.5 ETH from a 5,845 ETH hot wallet 73 minutes earlier) launched an
+  identical IDX (`0x8db9cbfa…`) at 04:52 UTC with a 36.4% dev buy, sold it
+  all by 04:57, claimed the tax and bridged, then launched the live token at
+  05:02:50 with a 30.11% dev buy paid in tokenized SPY. A dead twin with the
+  same name and symbol a few minutes before the live token is a deployer
+  fingerprint worth checking on every Pons scan: read the deployer's token
+  transfers for a second PonsV2LauncherToken.
+- **Dump into the curve, not the pool.** 20.1% went back into the curve inside
+  three minutes of launch (blocks +767 to +1706) and 7.5% more before
+  graduation; the last 2.5% hit the graduated pool. Each dev sell was met
+  within four blocks by a cluster of buys from wallets funded hours earlier
+  from Robinhood-scale hot wallets, so the curve absorbed the dump. Recipe:
+  align deployer sells with buy clusters in the following four blocks.
+- **Creator-fee redirect.** At 16:37 UTC, three minutes before the last bridge
+  exit, the deployer called `PonsV2LaunchFactory.transferCreatorFeeRecipient`
+  and pointed the fee stream at an escrow created through Pons's own
+  `EscrowProxy` (`0x70e95cc5…`, deployed by the same address as
+  PonsV2LaunchLocker, 68k txs). That escrow pays the 5% sell tax to holders
+  in SPY every 90 minutes. A "fees go to holders" claim on a Pons token is
+  therefore checkable: look for that call and for `Claimed` events on the
+  recipient escrow. Here the claim became true only after the operator had
+  taken its 2.59 ETH.
+- **Brand after exit.** index9000.xyz was registered 66 minutes after the
+  deployer's last transaction, the X account posts lore every two hours and
+  follows only the Pons team and Robinhood, and a paid caller (@YusufGemz)
+  pushed the token from a $227k to a $435k cap the next day. The BNB Chain
+  address that received the bridged proceeds also exists on Robinhood Chain,
+  is a serial Pons sniper since July, and bought back 0.39% nine minutes
+  before the domain was registered. Same key on two chains is the one hard
+  link between the exit and the marketing phase.
+- **Who buys now.** 18.5% of supply in 24 hours through RobinHoodSettler, the
+  Robinhood app's swap router, into fresh 7702 app wallets; sells come from
+  aggregator and MEV contracts and the July sniper farm. When the settler is
+  the only buyer, the bid is retail from a call channel.
