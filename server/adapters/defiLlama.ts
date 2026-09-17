@@ -35,6 +35,55 @@ export function defiLlamaLookupName(name: string): string {
   return normalized.replace(/\s+protocol$/i, "").trim() || normalized;
 }
 
+/**
+ * Slug candidates from the subject's own identity surfaces, strongest first.
+ * A display name is decoration ("Definitive | DeFi for institutions" slugs to
+ * nothing DeFiLlama knows), while the official domain's label and the X handle
+ * are identity: definitive.fi -> "definitive" is exactly the slug that carried
+ * Definitive's $4.1M BlockTower seed while the display-name guess missed it.
+ * Discovery only; the caller still identity-joins whatever document comes back.
+ */
+export function defiLlamaSlugCandidates(
+  name: string,
+  officialWebsite?: string | null,
+  handle?: string | null,
+): string[] {
+  const out: string[] = [];
+  const push = (value: string) => {
+    const slug = defiLlamaSlug(value);
+    if (slug && !out.includes(slug)) out.push(slug);
+  };
+  push(defiLlamaLookupName(name));
+  if (officialWebsite?.trim()) {
+    try {
+      const host = new URL(/^https?:\/\//i.test(officialWebsite) ? officialWebsite : `https://${officialWebsite}`).hostname;
+      const label = host.toLowerCase().replace(/^www\./, "").split(".")[0];
+      if (label) push(label);
+    } catch { /* not a candidate */ }
+  }
+  const cleanHandle = (handle ?? "").replace(/^@/, "").trim();
+  if (cleanHandle) push(cleanHandle);
+  return out.slice(0, 3);
+}
+
+/**
+ * Resolve which candidate slug DeFiLlama actually knows, spending at most one
+ * bounded read per candidate (the per-scan memo absorbs the repeats when the
+ * collectors fetch the same document again). Returns the first slug whose
+ * protocol document exists; null when none does or the provider is down.
+ */
+export async function resolveDefiLlamaSlug(
+  candidates: string[],
+  fetcher: typeof fetch = deadlineFetch,
+): Promise<string | null> {
+  for (const slug of candidates) {
+    const result = await fetchProtocol(slug, fetcher);
+    if (result.ok) return slug;
+    if (!result.notFound) return null; // outage: stay fail-visible, never guess on
+  }
+  return null;
+}
+
 type ProtocolDocument = {
   name?: unknown;
   symbol?: unknown;
