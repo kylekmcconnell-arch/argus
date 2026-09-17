@@ -428,7 +428,8 @@ export function describePnl(pnl: FomoPnl): string {
  */
 export function fomoRecordBindsToSubject(user: FomoUser, subjectHandle: string): "x-confirmed" | "handle-only" | "other-person" {
   const subject = normalizeHandle(subjectHandle);
-  const twitter = user.twitter ? normalizeHandle(user.twitter) : null;
+  const x = xUsernameFromFomo(user.twitter);
+  const twitter = x ? normalizeHandle(x) : null;
   if (twitter) return twitter === subject ? "x-confirmed" : "other-person";
   return normalizeHandle(user.handle) === subject ? "handle-only" : "other-person";
 }
