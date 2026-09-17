@@ -114,8 +114,10 @@ import {
   collectProtocolFunding,
   collectProtocolTvl,
   defiLlamaLookupName,
+  defiLlamaSlugCandidates,
   formatUsd,
   resetDefiLlamaScanMemo,
+  resolveDefiLlamaSlug,
 } from "./adapters/defiLlama";
 import { collectCryptoRankFunding, cryptoRankConfigured } from "./adapters/cryptoRank";
 import { collectHolderProfile } from "./adapters/tokenHolders";
@@ -3194,9 +3196,14 @@ async function collectTokenlessProtocolEvidence(ctx: CollectContext): Promise<vo
   if (evidence.projectToken?.verified) return;
   const displayName = evidence.profile.display_name || ctx.handle.replace(/^@/, "");
   const protocolLookupName = defiLlamaLookupName(displayName);
+  const protocolSlug = await resolveDefiLlamaSlug(defiLlamaSlugCandidates(
+    displayName,
+    evidence.profile.website,
+    ctx.handle,
+  )) ?? undefined;
   const [fundingOutcome, tvlOutcome] = await Promise.all([
-    evidence.protocolFunding ? Promise.resolve(null) : collectProtocolFunding(protocolLookupName),
-    evidence.protocolTvl ? Promise.resolve(null) : collectProtocolTvl(protocolLookupName),
+    evidence.protocolFunding ? Promise.resolve(null) : collectProtocolFunding(protocolLookupName, { slug: protocolSlug }),
+    evidence.protocolTvl ? Promise.resolve(null) : collectProtocolTvl(protocolLookupName, { slug: protocolSlug }),
   ]);
   if (
     fundingOutcome?.available
@@ -3554,15 +3561,20 @@ async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Prom
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
   const protocolLookupName = defiLlamaLookupName(token.name);
+  const protocolSlug = await resolveDefiLlamaSlug(defiLlamaSlugCandidates(
+    token.name,
+    token.homepage ?? ctx.evidence.profile.website,
+    ctx.handle,
+  )) ?? undefined;
   // A project whose canonical token is recovered late should get the same free
   // protocol evidence as a token resolved during cold intake. Fetch funding in
   // parallel with TVL: an exact CoinGecko-id join can answer financing without
   // paying Monid for a duplicate funding section.
   const [outcome, fundingOutcome] = await Promise.all([
-    collectProtocolTvl(protocolLookupName),
+    collectProtocolTvl(protocolLookupName, { slug: protocolSlug }),
     ctx.evidence.protocolFunding
       ? Promise.resolve(null)
-      : collectProtocolFunding(protocolLookupName),
+      : collectProtocolFunding(protocolLookupName, { slug: protocolSlug }),
   ]);
   if (
     fundingOutcome?.available
@@ -4673,11 +4685,18 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     if (evidence.projectToken?.verified && capabilityIsAuthorized("token_and_market", "project_fundamentals")) {
       const projectName = evidence.projectToken.name;
       const protocolLookupName = defiLlamaLookupName(projectName);
+      // Discovery by identity surfaces, not display-name guessing: the domain
+      // label and handle resolve the slug when the name is decorated.
+      const protocolSlug = await resolveDefiLlamaSlug(defiLlamaSlugCandidates(
+        projectName,
+        evidence.projectToken.homepage ?? evidence.profile.website,
+        ctx.handle,
+      )) ?? undefined;
       try {
         const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome] = await Promise.all([
-          collectProtocolTvl(protocolLookupName),
-          collectProtocolFunding(protocolLookupName),
-          collectProtocolFees(protocolLookupName),
+          collectProtocolTvl(protocolLookupName, { slug: protocolSlug }),
+          collectProtocolFunding(protocolLookupName, { slug: protocolSlug }),
+          collectProtocolFees(protocolLookupName, { slug: protocolSlug }),
           // Float control (free, keyless): who holds the supply, is the LP
           // locked. Answers the reader's dump/rug question for project tokens.
           evidence.projectToken.address
@@ -4759,7 +4778,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
         // bounded fetches must degrade to a skipped enrichment, never a
         // stalled audit.
         {
-          const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
+          const auditLinks = await collectProtocolAuditLinks(protocolLookupName, { slug: protocolSlug });
           const auditsResult = await withWallClockBox(
             (fetcher) => collectSecurityAudits(
               projectName,
