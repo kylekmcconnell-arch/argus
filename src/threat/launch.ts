@@ -325,6 +325,11 @@ export function launchVenueForOfficialDomain(officialDomain: string): LaunchVenu
   return null;
 }
 
+/** Venue names for backer classification: a backer named like a launch venue is a launchpad, not a fund. */
+export function launchVenueNames(): string[] {
+  return VENUES.map((venue) => venue.name);
+}
+
 // Quote-asset ramifications that hold regardless of venue.
 export function genericQuoteNote(quote: string, sol: boolean): string | null {
   const q = quote.toUpperCase();

@@ -421,6 +421,11 @@ export interface CryptoRankFundingSnapshot {
     date: string | null;
     amountUsd: number | null;
     valuationUsd: number | null;
+    /** Token-sale terms when the index carries them: this is what makes a round readable as a token round. */
+    tokenPriceUsd?: number | null;
+    tokensForSale?: number | null;
+    /** Share of max supply sold in this round, percent. */
+    allocationOfSupplyPct?: number | null;
     leadInvestors: string[];
     otherInvestors: string[];
     announcementUrl: string | null;
