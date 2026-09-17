@@ -152,7 +152,13 @@ function verdictHeadline(
       if (supportDifference !== 0) return supportDifference;
       return (right.score / right.weight) - (left.score / left.weight);
     })[0];
-  const lead = strongest ? `${strongest.label.replace(/\s*&\s*/g, " and ")} has the most recorded supporting evidence.` : "Read the saved findings alongside the score.";
+  // Absolute terms only: an investor reading this one report does not care how
+  // areas rank against each other (or against other scans). Say whether the
+  // area is documented and how much saved evidence stands behind it.
+  const supportCount = strongest?.supportCount ?? 0;
+  const lead = strongest
+    ? `${strongest.label.replace(/\s*&\s*/g, " and ")} is ${supportCount >= 5 ? "well documented" : "documented"}, with ${supportCount} saved supporting source${supportCount === 1 ? "" : "s"}.`
+    : "Read the saved findings alongside the score.";
   if (adverseCount > 0) return `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`;
   if (nextSteps[0]) return `${lead} Next to check: ${sentence(nextSteps[0].label)}`;
   return `${lead} ${checksComplete ? "Required checks finished; this does not mean they all passed." : "Review the check register for work that remains open."}`;
@@ -701,12 +707,15 @@ export function KyleIntelligenceDecisionCanvas({
         </div>
       </header>
 
+      {/* Meta-information about reading the report, not report content: it
+          renders a quarter smaller than findings so the eye seeking actionable
+          information never competes with methodology notes. */}
       <section className="panel my-4 px-5 py-4" aria-label="How to read this score">
-        <h3 className="font-semibold">How to read this score</h3>
-        <p className="mt-2 text-[13.5px] leading-relaxed">Higher scores mean a stronger result under ARGUS checks. The number is not a percentage chance of success or a prediction of returns. A serious finding can still control the verdict.</p>
-        <p className="mt-2 text-[13.5px] leading-relaxed">{scoreIsProvisional ? "The score uses the areas assessed so far; open checks may change it." : "A finished check can still find a risk."} Missing information limits the assessment; it is not proof of wrongdoing.</p>
-        <p className="mt-2 text-[13.5px] leading-relaxed"><strong>Where the data comes from:</strong> <a href={sourceOverviewHref ?? evidenceHref} className="text-signal-lift underline">Review the saved sources</a> behind this report. Measurements, statements by the subject and independently confirmed facts are different kinds of evidence. If a source was not saved, its verification cannot be established from this report.</p>
-        <div className="flex flex-wrap items-center gap-3">
+        <h3 className="text-[11px] font-semibold">How to read this score</h3>
+        <p className="mt-2 text-[10px] leading-relaxed">Higher scores mean a stronger result under ARGUS checks. The number is not a percentage chance of success or a prediction of returns. A serious finding can still control the verdict.</p>
+        <p className="mt-2 text-[10px] leading-relaxed">{scoreIsProvisional ? "The score uses the areas assessed so far; open checks may change it." : "A finished check can still find a risk."} Missing information limits the assessment; it is not proof of wrongdoing.</p>
+        <p className="mt-2 text-[10px] leading-relaxed"><strong>Where the data comes from:</strong> <a href={sourceOverviewHref ?? evidenceHref} className="text-signal-lift underline">Review the saved sources</a> behind this report. Measurements, statements by the subject and independently confirmed facts are different kinds of evidence. If a source was not saved, its verification cannot be established from this report.</p>
+        <div className="flex flex-wrap items-center gap-3 text-[10px]">
           {applicable > 0 ? <a href={methodologyHref} className="text-signal-lift underline">See finished checks and data gaps</a> : <span>No check results were saved for this score.</span>}
           <ReportChallengeButton context={`${scoreLabel} · ${score == null ? "not measured" : `${score}/100`}`} anchorId={challengeAnchorId} label="Challenge this score" />
           {dualScore && <ReportChallengeButton context={`${dualScore.label} · ${dualScore.score == null ? "not measured" : `${dualScore.score}/100`}`} anchorId={challengeAnchorId} label={`Challenge ${dualScore.label.toLowerCase()}`} />}

@@ -7,10 +7,12 @@ import {
   collectProtocolTvl,
   defiLlamaLookupName,
   defiLlamaSlug,
+  defiLlamaSlugCandidates,
   describeFunding,
   formatTvlUsd,
   formatUsd,
   resetDefiLlamaScanMemo,
+  resolveDefiLlamaSlug,
 } from "./defiLlama";
 
 // Every test below is its own "scan": the read memo must not carry a document
@@ -508,5 +510,53 @@ describe("collectProtocolFees", () => {
       fetcher: fetcherReturning(() => jsonResponse({ total30d: 30_000, change_30dover30d: 250_000 })),
     });
     expect(absurd.available && absurd.value.change30dOver30dPct).toBe(null);
+  });
+});
+
+describe("identity-derived slug discovery (the Definitive miss)", () => {
+  it("builds candidates from the lookup name, the official-domain label, and the handle, deduplicated", () => {
+    expect(defiLlamaSlugCandidates("Definitive | DeFi for institutions", "https://www.definitive.fi/", "@DefinitiveFi"))
+      .toEqual(["definitive-defi-for-institutions", "definitive", "definitivefi"]);
+    expect(defiLlamaSlugCandidates("Aave", "https://aave.com/", "@aave")).toEqual(["aave"]);
+    expect(defiLlamaSlugCandidates("Aave", "not a url", null)).toEqual(["aave"]);
+  });
+
+  it("resolves the first slug DeFiLlama actually knows and stays fail-visible on outages", async () => {
+    resetDefiLlamaScanMemo();
+    const fetcher = ((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/protocol/definitive-defi-for-institutions")) {
+        return Promise.resolve(new Response("{}", { status: 400 }));
+      }
+      if (url.endsWith("/protocol/definitive")) {
+        return Promise.resolve(jsonResponse(protocolBody({ name: "Definitive", twitter: "DefinitiveFi" })));
+      }
+      throw new Error(`unexpected ${url}`);
+    }) as unknown as typeof fetch;
+    await expect(resolveDefiLlamaSlug(["definitive-defi-for-institutions", "definitive"], fetcher))
+      .resolves.toBe("definitive");
+
+    resetDefiLlamaScanMemo();
+    const outage = ((input: string | URL | Request) => {
+      void input;
+      return Promise.resolve(new Response("boom", { status: 503 }));
+    }) as unknown as typeof fetch;
+    await expect(resolveDefiLlamaSlug(["a", "b"], outage)).resolves.toBeNull();
+  });
+
+  it("the resolved slug feeds funding with the handle-bindable identity surfaces intact", async () => {
+    resetDefiLlamaScanMemo();
+    const fetcher = fetcherReturning(() => jsonResponse(protocolBody({
+      name: "Definitive",
+      twitter: "DefinitiveFi",
+      url: "https://app.definitive.fi",
+      raises: [{ date: 1699401600, round: "Seed", amount: 4.1, leadInvestors: ["BlockTower Capital"], otherInvestors: ["Nascent", "Coinbase Ventures", "CMT Digital"], valuation: null }],
+    })));
+    const out = await collectProtocolFunding("Definitive | DeFi for institutions", { fetcher, slug: "definitive" });
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.totalRaisedUsd).toBe(4_100_000);
+    expect(out.value.leadInvestors).toEqual(["BlockTower Capital"]);
+    expect(out.value.officialTwitter).toBe("DefinitiveFi");
   });
 });

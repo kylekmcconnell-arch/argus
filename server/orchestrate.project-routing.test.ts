@@ -1085,3 +1085,76 @@ describe("discovered-affiliation merge", () => {
     expect(pending[0].rec).toBe(ventures[0]);
   });
 });
+
+describe("individual humans never route as the companies they lead (PA-14D1862DDA8E49EF86B0)", () => {
+  function famousFounderEvidence() {
+    const evidence = emptyEvidence("@cz_binance");
+    evidence.profile.bio = "Co-Founder & CEO of Binance. Building the world's leading crypto exchange platform.";
+    evidence.profile.website = "https://www.binance.com/";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-09-17T10:00:00.000Z";
+    evidence.profile.resolved_name = "Changpeng Zhao";
+    evidence.profile.identity_binding = "licensed_exact_social";
+    return evidence;
+  }
+
+  it("routes a famous founder as FOUNDER even when company vocabulary outscores the person words", () => {
+    const roles = providerBackedRoles(famousFounderEvidence());
+    expect(roles).toContain(SubjectClass.FOUNDER);
+    expect(roles).not.toContain(SubjectClass.PROJECT);
+  });
+
+  it("still routes an actual brand account as PROJECT from the same vocabulary", () => {
+    const evidence = emptyEvidence("@definitivefi");
+    evidence.profile.bio = "The institutional DeFi trading platform. Trade perps on-chain with our app.";
+    evidence.profile.website = "https://www.definitive.fi/";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-09-17T10:00:00.000Z";
+    expect(providerBackedRoles(evidence)).toContain(SubjectClass.PROJECT);
+  });
+
+  it("a namesake token pointing its socials at the person never makes the person a PROJECT", () => {
+    const evidence = famousFounderEvidence();
+    evidence.profile.bio = "Father. Coffee. Building education.";
+    // The scam-token shape: someone launches "$CZ" and declares the real
+    // person's X profile as the token's official account; the exact-handle
+    // match then "verifies" the token against the person.
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "CZ",
+      symbol: "CZ",
+      rank: null,
+      address: "0x00000000000000000000000000000000000000cz".slice(0, 42),
+      chain: "bsc",
+      officialX: "@cz_binance",
+      sourceUrl: "https://dexscreener.com/bsc/0xcz",
+      capturedAt: "2026-09-17T10:00:00.000Z",
+    };
+    const roles = providerBackedRoles(evidence);
+    expect(roles).not.toContain(SubjectClass.PROJECT);
+  });
+
+  it("an unroutable person falls to the FOUNDER orientation, never the live-site PROJECT fallback", () => {
+    const evidence = emptyEvidence("@quietfounder");
+    evidence.profile.bio = "gm.";
+    evidence.profile.website = "https://quietfounder.example/";
+    evidence.profile.site_substance_status = "live";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-09-17T10:00:00.000Z";
+    evidence.subjectOrientation = {
+      kind: "FOUNDER",
+      what: "An individual who leads a payments company.",
+      audience: "",
+      boundHandle: "@quietfounder",
+      boundDomain: "quietfounder.example",
+      sourceUrls: ["https://quietfounder.example/"],
+    };
+    const roles = providerBackedRoles(evidence);
+    expect(roles).toContain(SubjectClass.FOUNDER);
+    expect(roles).not.toContain(SubjectClass.PROJECT);
+  });
+});
