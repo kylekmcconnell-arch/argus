@@ -69,6 +69,7 @@ import { LinkEntity } from "./LinkEntity";
 import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
 import { ChallengeDialog } from "./ChallengeDialog";
 import { canonicalOfficialWebsite } from "../lib/fundScaleEvidence";
+import { TeamMemberEmail } from "./TeamMemberEmail";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
@@ -117,6 +118,7 @@ import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
 import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
+import { FundraisingPanel } from "./FundraisingPanel";
 import { LaunchVenuePanel } from "./LaunchVenuePanel";
 import { StockHealthPanel } from "./StockHealthPanel";
 import { TokenizedStockPairingPanel } from "./TokenizedStockPairingPanel";
@@ -3621,11 +3623,27 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                             letterClass="text-[13px]"
                           />
                           <span className="text-[16px] font-semibold text-ink">{person.name}</span>
-                          {person.handle && <span className="mono text-[12px] text-ink-faint">{person.handle}</span>}
+                          {person.handle && (
+                            <a
+                              href={`https://x.com/${encodeURIComponent(person.handle.replace(/^@/, ""))}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mono text-[12px] text-ink-faint underline-offset-2 hover:underline"
+                            >
+                              {person.handle}
+                            </a>
+                          )}
                           <span className="team-person-role">
                             <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(person.role)}</span>
                           </span>
                           {person.biography && <span className="team-person-evidence text-[13px] leading-relaxed text-ink-dim">{person.biography}</span>}
+                          {person.linkedin && (
+                            <a href={`https://${person.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[12px]">LinkedIn</a>
+                          )}
+                          {person.telegram && (
+                            <a href={`https://t.me/${encodeURIComponent(person.telegram)}`} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Telegram</a>
+                          )}
+                          {person.email && <TeamMemberEmail email={person.email} />}
                           {roleProof && <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Open role source</a>}
                           {continuityLabel && (
                             <span className={`chip ${continuity?.state === "current" ? "tint-pass" : continuity?.state === "departed" ? "tint-caution" : ""}`}>
@@ -4164,6 +4182,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           <EvmControlSurfacePanel snapshot={f.evmControlReality} />
         )}
 
+        <FundraisingPanel dossier={f} />
+
         {f.stockHealth && (
           <StockHealthPanel snapshot={f.stockHealth} />
         )}
@@ -4290,7 +4310,16 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                         letterClass="text-[13px]"
                       />
                       <span className="text-[15.5px] font-medium text-ink">{p.name}</span>
-                      {p.handle && <span className="mono text-[11.5px] text-ink-faint">{p.handle}</span>}
+                      {p.handle && (
+                        <a
+                          href={`https://x.com/${encodeURIComponent(p.handle.replace(/^@/, ""))}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mono text-[11.5px] text-ink-faint underline-offset-2 hover:underline"
+                        >
+                          {p.handle}
+                        </a>
+                      )}
                       <span className="team-person-role">
                         <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(p.role)}</span>
                       </span>
@@ -4298,6 +4327,10 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                       {p.linkedin && (
                         <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                       )}
+                      {p.telegram && (
+                        <a href={`https://t.me/${encodeURIComponent(p.telegram)}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">Telegram</a>
+                      )}
+                      {p.email && <TeamMemberEmail email={p.email} />}
                       {roleProof && (
                         <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">Open role source</a>
                       )}

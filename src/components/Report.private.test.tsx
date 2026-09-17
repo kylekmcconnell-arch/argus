@@ -272,6 +272,42 @@ describe("private person report evidence boundary", () => {
     expect(container.textContent).not.toContain("Non-Web3");
   });
 
+  it("renders the fundraising and backers section from the frozen funding records", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: { ...base.report, roles: [SubjectClass.PROJECT] },
+      protocolFunding: {
+        slug: "ammalgam",
+        name: "Ammalgam",
+        geckoId: null,
+        rounds: [{ date: "2024-06-01", round: "Seed", amountUsd: 2_500_000, leadInvestors: ["Lightspeed Faction"], otherInvestors: ["Framework Ventures"], valuationUsd: 25_000_000 }],
+        totalRaisedUsd: 2_500_000,
+        leadInvestors: ["Lightspeed Faction"],
+        sourceUrl: "https://defillama.com/protocol/ammalgam",
+        capturedAt: "2026-09-17T00:00:00.000Z",
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const panel = container.querySelector('[data-testid="fundraising"]');
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toContain("Who funded it, when, and on what terms");
+    expect(panel!.textContent).toContain("2024-06-01");
+    expect(panel!.textContent).toContain("$2.50M");
+    expect(panel!.textContent).toContain("Lightspeed Faction");
+    expect(panel!.textContent).toContain("Framework Ventures · Venture fund");
+    expect(panel!.textContent).toContain("not a cap");
+    // No funding records means no section at all.
+    act(() => {
+      root.render(<Report dossier={base} onReset={() => {}} onAudit={() => {}} />);
+    });
+    expect(container.querySelector('[data-testid="fundraising"]')).toBeNull();
+  });
+
   it("uses the linked token scan as Style 2's separate second score", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
@@ -1048,9 +1084,11 @@ describe("private person report evidence boundary", () => {
       webTeam: [{
         name: "Ada Example",
         handle: "@ada_example",
-        role: "Chief Technology Officer",
+        role: "Co-Founder & Chief Technology Officer",
         avatarUrl: "https://pbs.twimg.com/profile_images/1/ada.jpg",
         linkedin: "linkedin.com/in/ada-example",
+        telegram: "ada_example",
+        email: "ada@fixture.example",
         evidence: "Named on the saved official team page.",
         source: "official team page",
         sourceUrl: "https://fixture.example/team",
@@ -1096,12 +1134,24 @@ describe("private person report evidence boundary", () => {
     expect(container.textContent).toContain("1 verified · 0 to verify");
     expect(container.textContent).not.toContain("Probable");
     expect(container.querySelector(".team-person-card")?.textContent).toContain("Ada Example");
-    expect(container.querySelector(".team-person-card")?.textContent).toContain("Chief Technology Officer");
+    // The FULL evidenced title renders, compound roles included, and every
+    // evidenced contact is a working affordance: the handle links to the
+    // profile, Telegram links to the DM page, and the email carries a copy
+    // button plus a mailto button.
+    expect(container.querySelector(".team-person-card")?.textContent).toContain("Co-Founder & Chief Technology Officer");
     expect(container.querySelector(".team-person-role .chip-wrap")).not.toBeNull();
+    const card = container.querySelector(".team-person-card")!;
+    expect(card.querySelector('a[href="https://x.com/ada_example"]')?.textContent).toBe("@ada_example");
+    expect(card.querySelector('a[href="https://t.me/ada_example"]')?.textContent).toBe("Telegram");
+    const emailBlock = card.querySelector('[data-testid="team-member-email"]')!;
+    expect(emailBlock.textContent).toContain("ada@fixture.example");
+    expect(emailBlock.querySelector('button[aria-label="Copy ada@fixture.example"]')).not.toBeNull();
+    expect(emailBlock.querySelector('a[href="mailto:ada%40fixture.example"]')).not.toBeNull();
     expect(container.querySelector('img[src="https://pbs.twimg.com/profile_images/1/ada.jpg"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://fixture.example/team"]')?.textContent).toContain("Open role source");
     expect(container.querySelector('a[href="https://github.com/ada-example"]')?.textContent).toContain("GitHub");
-    expect(container.querySelector('a[href="https://x.com/ada_example"]')?.textContent).toContain("profile link proof");
+    expect([...container.querySelectorAll('a[href="https://x.com/ada_example"]')]
+      .some((anchor) => anchor.textContent?.includes("profile link proof"))).toBe(true);
     expect(container.querySelector(".team-person-card")?.textContent).toContain("current in provider record");
     expect(container.textContent).toContain("Leadership records to reconcile");
     expect(container.textContent).toContain("provider record ends Mar 1, 2024");
