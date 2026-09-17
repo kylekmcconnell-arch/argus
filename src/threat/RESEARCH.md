@@ -604,6 +604,73 @@ before the public post was collected and intersected. After removing
 contracts, routers and bots with more than 5,000 transactions, no wallet
 bought a meaningful size (0.05% of supply or more) ahead of three or more of
 his calls, and only two drained EIP-7702 wallets did so ahead of two
-(0x52a5e2e0… on OPTIMUS and PONSAN, 0x40efc800… on UBIK and PONSAN). Either
-he does not buy what he posts, or he buys through the Robinhood app from a
-fresh wallet each time; the on-chain trail does not yet give him a wallet.
+(0x52a5e2e0… on OPTIMUS and PONSAN, 0x40efc800… on UBIK and PONSAN). The
+intersection missed him because the threshold was set at three calls: the
+FomoScan read below gives him a wallet, and that wallet sits in the IDX and
+PONSAN pre-call sets, not in the others.
+
+Wallet found (2026-09-17, via FomoScan): FOMO account "YusufGemz" (bio
+"$500-$10K challenge", no X link stored) verified EVM wallet 0xde42eaab… and
+Solana wallet EkeSXXNq…. From the IDX Transfer logs already collected:
+
+| UTC | Direction | IDX | Counterparty |
+| --- | --- | --- | --- |
+| 09-14 16:35 | in | 7,952,438 | RelayRouterV3 0xb92fe925 (bridged buy) |
+| 09-14 16:55 | in | 3,036,553 | RelayRouterV3 |
+| 09-14 17:17 | out | 10,988,991 | 0xff218593 (his second wallet) |
+| 09-14 17:22 to 17:42 | in | 5,524,642 | RelayRouterV3, three buys |
+| 09-14 19:19 | out | 5,524,643 | 0xff218593 |
+| 09-14 19:58 | in | 6,294,052 | RelayRouterV3 |
+| 09-14 20:12 | | | first public $IDX call |
+| 09-15 18:46 to 09-16 13:15 | out | 6,089,100 | 0xff218593, five moves |
+
+The second wallet 0xff218593… is an EIP-7702 account (delegate 0xe8b12077…,
+57 txs, 0.47 ETH) that received IDX only from him and from router
+0x8366a39c…, and sold 23.8M IDX in round 1,000,000-token lots to contract
+0x36dc95f1… from 2026-09-15 14:32 UTC, eighteen hours after the first call,
+through the second (09-16 11:11) and third (09-16 17:09) calls. He therefore
+held about 22.8M IDX (2.3% of supply) at the moment of the call he framed as
+a tip from "my $SPX friend", and the position was liquidated into the demand
+the three calls created. This is the K2 pattern with the wallet attached.
+The PONSAN pre-call receipt (555K tokens) is small and the other five calls
+do not show this wallet, so the Robinhood-app fresh-wallet reading may still
+hold for those.
+
+## FomoScan cross-comparison of the registry (run 2026-09-17)
+
+FomoScan (api.fomoscan.sh) indexes FOMO (fomo.family) trader accounts: the
+wallet each account verified for itself, the X account it links, cash-flow
+numbers and posted "theses". PR #462 wires it in as provider `fomoscan`
+(server/adapters/fomoscan.ts) and adds scripts/fomoscan-sweep.ts. First
+sweep, results in eval/fomoscan/:
+
+- Handles (13 registry accounts, 13,750 CU): three are FOMO traders with
+  verified wallets: Altcoinist (Solana DVFYHVKF…, EVM 0xccdeb774…),
+  lowcap_hunter (Solana 4CH1wgHq…, EVM 0x517b826b…, X link stored) and
+  YusufGemz (Solana EkeSXXNq…, EVM 0xde42eaab…). The ten project and
+  cofounder handles are not on FOMO. All three traders are net cash-out on
+  FOMO (Altcoinist -$7.6k all time, lowcap_hunter -$32.7k on $1.4M volume,
+  YusufGemz -$985 on $94k), which is FomoScan's sold-minus-bought figure,
+  not realized profit.
+- Wallets (84 registry wallets plus 216 traced wallets, 74,750 CU): zero
+  resolve to a FOMO trader. Deployers, snipers, hubs, fee sinks and the
+  IDX launch-bundle buyers are not FOMO identities. One registry address is
+  a stored prefix (0x252e7031, rh-farm-prism) and could not be queried.
+- Theses (28 registry launches, 7,000 CU): 13 launches carry FOMO posts.
+  Altcoinist wrote 8 of the FIH and WRESTLER theses himself. $IDX collected
+  25 theses in five hours on 2026-09-17 (08:40 to 13:42 UTC) in English,
+  Chinese and Hebrew with the same "imaginary benchmark" framing, from
+  accounts with no other thesis on our launches: a paid or scripted wave
+  three days after the operator's exit. $PRISM theses turn from "dev is
+  shipping" to "smells like a rug pull" on 2026-09-16 and tag @ogle and
+  @unipcs as hoped-for backers. $DOGEGPT's four theses are all "can't sell".
+
+Method notes: FOMO handles are not X handles, so a record binds to a
+subject only when FOMO's stored X link (a username or a full x.com URL)
+names the audited handle; name-only matches are recorded as such. Wallets
+from FomoScan enter the registry as `kol-wallet` with FomoScan named in the
+evidence, and as InvestigatorAttributed in audits, never SelfDoxxed.
+FomoScan's own unit accounting ran about fifteen percent above the
+documented prices (132,000 units left after 103,000 by list price), so
+budgets should carry that margin.
+
