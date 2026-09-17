@@ -123,6 +123,7 @@ import {
 import { collectCryptoRankFunding, cryptoRankConfigured } from "./adapters/cryptoRank";
 import { collectHolderProfile } from "./adapters/tokenHolders";
 import { collectStockHealth, resolveTokenizedStockUnderlying, tokenizedStockPairingSnapshot } from "./adapters/stockHealth";
+import { collectSiteBackers } from "./adapters/siteBackers";
 import {
   collectCompaniesHouseRecord,
   collectOpenCorporatesRecord,
@@ -3249,6 +3250,48 @@ async function collectTokenlessProtocolEvidence(ctx: CollectContext): Promise<vo
   // DeFiLlama's record left funding unanswered, bound here by the record's own
   // official X handle / official domain (no token exists to join on).
   await collectCryptoRankFundingEvidence(ctx);
+  // Independent audits are not a token property: a tokenless protocol still
+  // publishes its audit history (Ammalgam lists its audits and bug bounty on
+  // docs.ammalgam.xyz/docs/security, and the lane never ran because it lived
+  // inside the verified-token block). Same wall-clock box, no contract anchor.
+  if (!evidence.securityAudits) {
+    const officialWebsite = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+    if (officialWebsite) {
+      const auditLinks = await collectProtocolAuditLinks(protocolLookupName, { slug: protocolSlug });
+      const auditsResult = await withWallClockBox(
+        (fetcher) => collectSecurityAudits(
+          displayName,
+          officialWebsite,
+          auditLinks.available ? auditLinks.value.auditLinks : [],
+          { fetcher },
+        ),
+        SECURITY_AUDITS_BUDGET_MS,
+      );
+      if (auditsResult?.available) {
+        evidence.securityAudits = {
+          securityPageUrl: auditsResult.securityPageUrl,
+          selfAttested: auditsResult.selfAttested,
+          attestations: auditsResult.attestations.map((attestation) => ({ ...attestation })),
+          corroborated: auditsResult.corroborated.map((entry) => ({
+            ...entry,
+            matchedIdentityAnchor: { ...entry.matchedIdentityAnchor },
+          })),
+          capturedAt: auditsResult.capturedAt,
+        };
+        ctx.emit({
+          phase: "Token",
+          label: auditsResult.corroborated.length
+            ? `Independent audits confirmed · ${auditsResult.corroborated.map((entry) => entry.auditor).slice(0, 3).join(", ")}`
+            : "Audit leads found · confirmation pending",
+          detail: auditsResult.corroborated.length
+            ? `${auditsResult.corroborated.length} auditor-domain page${auditsResult.corroborated.length === 1 ? "" : "s"} carried explicit audit context plus a canonical identity anchor for ${displayName}; audits apply to the protocol whether or not a token exists.`
+            : `${auditsResult.selfAttested.length} unverified auditor lead${auditsResult.selfAttested.length === 1 ? " came" : "s came"} from bounded first-party disclosures; confirmation is pending.`,
+          source: "security-audits",
+          tone: auditsResult.corroborated.length ? "good" : "neutral",
+        });
+      }
+    }
+  }
 }
 
 /**
@@ -3564,6 +3607,30 @@ async function collectCompanyRegistryEvidence(ctx: CollectContext): Promise<void
   if (snapshot.sec || snapshot.companiesHouse || snapshot.openCorporates || snapshot.siteDeclaredRegistrations.length) {
     evidence.companyRegistry = snapshot;
   }
+}
+
+/**
+ * The subject's own backer wall: a "Backed by ..." section on the bound
+ * official site is the project's self-published investor list. It renders
+ * with its provenance and feeds P4 as reported evidence (never a floor), and
+ * it exists whether or not any aggregator indexed the round.
+ */
+async function collectSiteBackersEvidence(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.siteBackers) return;
+  if (!evidence.roles.includes(SubjectClass.PROJECT) && !isOrganizationAccount(evidence)) return;
+  const officialWebsite = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+  if (!officialWebsite) return;
+  const outcome = await collectSiteBackers(officialWebsite);
+  if (!outcome.available || !outcome.value) return;
+  evidence.siteBackers = { ...outcome.value, names: [...outcome.value.names] };
+  ctx.emit({
+    phase: "Research",
+    label: `Self-published backers found · ${outcome.value.names.length} name${outcome.value.names.length === 1 ? "" : "s"}`,
+    detail: `The official site's "${outcome.value.heading}" section names ${outcome.value.names.slice(0, 5).join(", ")}${outcome.value.names.length > 5 ? " and more" : ""}. Self-published by the subject; recorded with that provenance and never treated as independent confirmation.`,
+    source: "site fetch",
+    tone: "neutral",
+  });
 }
 
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
@@ -5067,6 +5134,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
   await collectListedSecurityHealth(ctx);
   await collectTokenizedStockExposure(ctx);
   await collectCompanyRegistryEvidence(ctx);
+  await collectSiteBackersEvidence(ctx);
   // Venue-as-subject recognition rides on the finalized official domain.
   detectLaunchVenueSubject(ctx);
   let rolesAfterBasicFacts = providerBackedRoles(evidence);

@@ -236,9 +236,16 @@ export async function collectSecurityAudits(
     try {
       const base = new URL(officialSite);
       conventionCandidates.push(new URL("/security", base).toString());
+      // Docs-first projects publish their audit list on the docs host, not the
+      // marketing site (Ammalgam: docs.ammalgam.xyz/docs/security).
+      const apex = base.hostname.replace(/^www\./, "");
+      if (!apex.startsWith("docs.")) {
+        conventionCandidates.push(`https://docs.${apex}/docs/security`);
+        conventionCandidates.push(`https://docs.${apex}/security`);
+      }
     } catch { /* not a URL; skip the convention candidate */ }
   }
-  const candidates = [...new Set([...candidateUrls, ...conventionCandidates])].slice(0, 4);
+  const candidates = [...new Set([...candidateUrls, ...conventionCandidates])].slice(0, 6);
   if (!candidates.length) return empty("No candidate security pages.");
 
   // URL-level lead discovery (no fetch). Blue chips publish audits as PDFs or

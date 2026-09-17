@@ -125,7 +125,7 @@ describe("Kyle intelligence report opening", () => {
     />));
 
     expect(container.textContent).toContain(
-      "Team and leadership is documented, with 3 saved supporting sources. Next to check: Establish a complete independent security history.",
+      "Team and leadership is documented, with 3 saved supporting sources. No leading concern is on record.",
     );
     expect(container.textContent).not.toContain("Independent evidence remains incomplete.");
   });
@@ -160,7 +160,10 @@ describe("Kyle intelligence report opening", () => {
       ]}
     />));
 
-    expect(container.textContent).toContain("Next to check: Verify current customer adoption and recurring usage.");
+    // The open-work pointer is navigation, not a verdict: it lives in Verify
+    // Next, never in the headline.
+    expect(container.textContent).not.toContain("Next to check:");
+    expect(container.textContent).toContain("Verify current customer adoption and recurring usage");
     expect(container.textContent).not.toContain("still lacks independent usage and market evidence");
     expect(container.textContent).not.toContain("still lacks independent security and governance evidence");
   });

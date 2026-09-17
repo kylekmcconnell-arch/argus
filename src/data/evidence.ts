@@ -1379,6 +1379,18 @@ export interface CollectedEvidence {
   stockHealth?: StockHealthSnapshot;
   /** Frozen stock exposure behind the verified token (tokenized stock or stock-quoted pool). Score-neutral context. */
   tokenizedStockPairing?: TokenizedStockPairingSnapshot;
+  /**
+   * The subject's OWN published backer wall ("Backed by ..."), read from the
+   * bound official site. A self-published claim: rendered with its provenance,
+   * feeds P4 as reported evidence, never a score floor.
+   */
+  siteBackers?: {
+    heading: string;
+    names: string[];
+    excerpt: string;
+    sourceUrl: string;
+    capturedAt: string;
+  };
   /** Frozen registry records (SEC EDGAR, Companies House, OpenCorporates) joined by CIK or site-declared numbers. */
   companyRegistry?: CompanyRegistrySnapshot;
   /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */

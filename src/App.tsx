@@ -46,6 +46,7 @@ import type { ResearchIntent } from "./lib/researchDirector";
 import { fetchReconWebTeam } from "./lib/reconSupplements";
 import { recentReportKind } from "./lib/recentReportRoute";
 import { consumeStaleChunkReloadNotice } from "./components/AppErrorBoundary";
+import { startVersionHeartbeat } from "./lib/versionHeartbeat";
 import { finishScanReceipt } from "./lib/scanReceipts";
 import { normalizedReportLane, REPORT_VIEW_QUERY_KEY } from "./reports/shared/resolveReportLane";
 
@@ -515,6 +516,12 @@ export default function App() {
   // was running an older build, a lazy page chunk 404'd, and the app reloaded
   // itself - silently dropping the user on the home screen mid-task. Say so.
   const [staleReloadNotice, setStaleReloadNotice] = useState(() => consumeStaleChunkReloadNotice());
+  // A tab open across a deploy keeps its old build forever (the CDN never
+  // fails its old chunks), so staleness must be detected, not awaited. The
+  // heartbeat only shows a notice: reloading is the reader's call, because a
+  // reload drops this tab's live scan streams (server collection continues).
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  useEffect(() => startVersionHeartbeat(() => setUpdateAvailable(true)), []);
 
   const leaveEvidenceReview = useCallback(() => {
     if (!evidenceReviewVersionId) return;
@@ -1851,6 +1858,14 @@ export default function App() {
   return (
     <AppShell onNav={onNav} onAudit={onSafeAudit} onOpenRecent={onOpenRecent} activeHandle={activeHandle} view={view}>
       <Suspense fallback={<RouteLoading />}>
+      {updateAvailable && (
+        <div className="tint-signal mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-[12.5px]" role="status">
+          <span className="font-medium text-signal-lift">A new ARGUS version is live</span>
+          <span className="text-ink-dim">This tab is still running the older build, so new features and fixes are not visible here yet. Reload when convenient; background scans keep running on the server.</span>
+          <button type="button" onClick={() => window.location.reload()} className="btn-chip ml-auto font-medium">Reload now</button>
+          <button type="button" aria-label="Dismiss update notice" onClick={() => setUpdateAvailable(false)} className="btn-chip">Later</button>
+        </div>
+      )}
       {staleReloadNotice && (
         <div className="tint-signal mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-[12.5px]" role="status">
           <span className="font-medium text-signal-lift">ARGUS updated while this tab was open</span>

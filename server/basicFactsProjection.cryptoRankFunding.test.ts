@@ -168,3 +168,30 @@ describe("projectProviderBackedBasicFacts · CryptoRank funding", () => {
     expect((evidence.basicFacts ?? []).some((fact) => fact.predicate === "funding" || fact.predicate === "investor")).toBe(false);
   });
 });
+
+describe("self-published site backers", () => {
+  it("mints reported-tier investor facts from the official site's backer wall, deduplicated against indexed names", () => {
+    const evidence = projectEvidence();
+    withVerifiedToken(evidence);
+    evidence.cryptoRankFunding = cryptoRankSnapshot();
+    evidence.siteBackers = {
+      heading: "Backed by the best in DeFi",
+      names: ["Lightspeed Faction", "Selini Capital", "Robot Ventures"],
+      excerpt: "Backed by the best in DeFi · Lightspeed Faction, Selini Capital, Robot Ventures",
+      sourceUrl: "https://ammalgam.xyz/",
+      capturedAt: "2026-09-17T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const investors = (evidence.basicFacts ?? []).filter((fact) => fact.predicate === "investor");
+    const byName = new Map(investors.map((fact) => [fact.value, fact]));
+    // The indexed round already names Lightspeed Faction; the wall adds only
+    // the names no index attributed.
+    expect(investors.filter((fact) => fact.value === "Lightspeed Faction")).toHaveLength(1);
+    expect(byName.get("Selini Capital")?.sources[0].sourceClass).toBe("official_subject");
+    expect(byName.get("Selini Capital")?.floorEligible).toBe(false);
+    expect(byName.get("Selini Capital")?.sources[0].excerpt).toContain("Self-published by the subject");
+    expect(byName.get("Robot Ventures")).toBeDefined();
+  });
+});
