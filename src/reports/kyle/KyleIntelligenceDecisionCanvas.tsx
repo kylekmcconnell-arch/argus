@@ -139,12 +139,7 @@ function cleanName(value: string | undefined): string {
   return (value ?? "ARGUS subject").replace(/[.\s]+$/, "").trim() || "ARGUS subject";
 }
 
-function verdictHeadline(
-  rows: CompositionRow[],
-  adverseCount: number,
-  nextSteps: KyleDecisionItem[],
-  checksComplete: boolean,
-): string {
+function verdictHeadline(rows: CompositionRow[], adverseCount: number): string {
   const strongest = [...rows]
     .filter((row) => row.applicability === undefined && row.weight > 0 && (row.supportCount ?? 0) > 0)
     .sort((left, right) => {
@@ -152,16 +147,17 @@ function verdictHeadline(
       if (supportDifference !== 0) return supportDifference;
       return (right.score / right.weight) - (left.score / left.weight);
     })[0];
-  // Absolute terms only: an investor reading this one report does not care how
-  // areas rank against each other (or against other scans). Say whether the
-  // area is documented and how much saved evidence stands behind it.
+  // Absolute terms only, and both halves of the investor's first question: how
+  // solid is the best-evidenced area, and is anything alarming on record. The
+  // open-work pointer ("Next to check") is navigation, not a verdict, and
+  // lives in Verify Next; putting it in the headline read as unintelligible.
   const supportCount = strongest?.supportCount ?? 0;
   const lead = strongest
     ? `${strongest.label.replace(/\s*&\s*/g, " and ")} is ${supportCount >= 5 ? "well documented" : "documented"}, with ${supportCount} saved supporting source${supportCount === 1 ? "" : "s"}.`
     : "Read the saved findings alongside the score.";
-  if (adverseCount > 0) return `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`;
-  if (nextSteps[0]) return `${lead} Next to check: ${sentence(nextSteps[0].label)}`;
-  return `${lead} ${checksComplete ? "Required checks finished; this does not mean they all passed." : "Review the check register for work that remains open."}`;
+  return adverseCount > 0
+    ? `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`
+    : `${lead} No leading concern is on record.`;
 }
 
 function ClaimLabel({ type, strength }: { type: "FACT" | "SIGNAL" | "INFERENCE"; strength: string }) {
@@ -623,7 +619,7 @@ export function KyleIntelligenceDecisionCanvas({
   const summary = sentence(neutralizeProductCopy(subjectSummary ?? ""));
   const checksComplete = applicable > 0 && successful >= applicable;
   const nextCheckFallback = checksComplete ? "No required check remains open." : "Review the check ledger for evidence gaps; a specific next step was not recorded.";
-  const headline = verdictHeadline(composition, adverseCount, nextSteps, checksComplete);
+  const headline = verdictHeadline(composition, adverseCount);
 
   const sortedComposition = useMemo(() => [...composition].sort((left, right) => right.weight - left.weight), [composition]);
   const totalPossible = assessedPoints(composition);

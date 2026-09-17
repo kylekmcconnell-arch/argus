@@ -1334,6 +1334,38 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     }
   }
 
+  // The subject's OWN backer wall: self-published names from the bound
+  // official site. Each renders with that provenance and can be cited, but a
+  // subject's claim about its investors is never independent confirmation and
+  // never a score floor. Names an index already attributed are not repeated.
+  if (isProject && evidence.siteBackers?.names.length) {
+    const alreadyNamed = new Set(
+      [...(evidence.basicFacts ?? []), ...projected]
+        .filter((fact) => fact.predicate === "investor")
+        .map((fact) => normalizeValue(fact.value)),
+    );
+    for (const name of evidence.siteBackers.names) {
+      const key = normalizeValue(name);
+      if (!key || alreadyNamed.has(key)) continue;
+      alreadyNamed.add(key);
+      const backerFact = makeFact(
+        evidence,
+        "investor",
+        name,
+        [source({
+          url: evidence.siteBackers.sourceUrl,
+          title: "Official site backer wall",
+          excerpt: `The project's own site ("${evidence.siteBackers.heading}") lists ${name} as a backer. Self-published by the subject; not independently confirmed, and never a substitute for a funding record.`,
+          capturedAt: evidence.siteBackers.capturedAt,
+          provider: "official-site",
+          sourceClass: "official_subject",
+        })],
+      );
+      backerFact.floorEligible = false;
+      projected.push(backerFact);
+    }
+  }
+
   // On-chain TVL → traction (P5). Security incidents from the same document
   // become standalone negative facts below. A $295M exploit must never be
   // buried inside the source excerpt for an otherwise positive TVL metric.

@@ -269,6 +269,8 @@ export interface Dossier {
   tokenizedStockPairing?: CollectedEvidence["tokenizedStockPairing"];
   /** Frozen registry records (SEC EDGAR / Companies House / OpenCorporates). */
   companyRegistry?: CollectedEvidence["companyRegistry"];
+  /** The subject's own published backer wall, from the bound official site. */
+  siteBackers?: CollectedEvidence["siteBackers"];
   /** Frozen Web3 / non-Web3 market categorization for a company subject. */
   subjectCategory?: CollectedEvidence["subjectCategory"];
   /**
@@ -691,6 +693,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.stockHealth ? { stockHealth: structuredClone(ev.stockHealth) } : {}),
     ...(ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {}),
     ...(ev.companyRegistry ? { companyRegistry: structuredClone(ev.companyRegistry) } : {}),
+    ...(ev.siteBackers ? { siteBackers: structuredClone(ev.siteBackers) } : {}),
     ...(ev.subjectCategory ? { subjectCategory: structuredClone(ev.subjectCategory) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
