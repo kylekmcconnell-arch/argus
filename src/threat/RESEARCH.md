@@ -597,3 +597,13 @@ discovery. Score it as K2 exit-liquidity behaviour with the private-group
 front-run pattern (public post after the private call, "already up Nx"),
 and treat any token he touches in its first day as one being sold to his
 audience.
+
+Wallet search: for seven of his Robinhood calls (UBIK, OPTIMUS, PONSAN, 4AI,
+IDX, CASHCAT, INDEX) every wallet that received the token in the eight hours
+before the public post was collected and intersected. After removing
+contracts, routers and bots with more than 5,000 transactions, no wallet
+bought a meaningful size (0.05% of supply or more) ahead of three or more of
+his calls, and only two drained EIP-7702 wallets did so ahead of two
+(0x52a5e2e0… on OPTIMUS and PONSAN, 0x40efc800… on UBIK and PONSAN). Either
+he does not buy what he posts, or he buys through the Robinhood app from a
+fresh wallet each time; the on-chain trail does not yet give him a wallet.
