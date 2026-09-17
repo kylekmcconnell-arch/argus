@@ -263,6 +263,8 @@ export interface Dossier {
   stockHealth?: CollectedEvidence["stockHealth"];
   /** Frozen stock exposure behind the verified token (score-neutral). */
   tokenizedStockPairing?: CollectedEvidence["tokenizedStockPairing"];
+  /** Frozen registry records (SEC EDGAR / Companies House / OpenCorporates). */
+  companyRegistry?: CollectedEvidence["companyRegistry"];
   /**
    * Deterministic, score-neutral decision intelligence built from this exact
    * evidence capture. Older reports omit it and must not reconstruct it from
@@ -680,6 +682,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {}),
     ...(ev.stockHealth ? { stockHealth: structuredClone(ev.stockHealth) } : {}),
     ...(ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {}),
+    ...(ev.companyRegistry ? { companyRegistry: structuredClone(ev.companyRegistry) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),

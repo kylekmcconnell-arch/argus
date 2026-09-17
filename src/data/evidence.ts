@@ -1163,6 +1163,67 @@ export interface StockHealthSnapshot {
 }
 
 /**
+ * Frozen company-registry evidence: real registries, not search leads, answer
+ * the legal-entity questions for ALL companies, crypto or not. The SEC record
+ * is joined by the CIK a verified public_security fact already carries; the
+ * Companies House / OpenCorporates records are joined by registration numbers
+ * the subject's OWN bound official site declares. Names never join.
+ */
+export interface CompanyRegistrySnapshot {
+  sec?: {
+    cik: number;
+    entityName: string;
+    tickers: string[];
+    exchanges: string[];
+    sicDescription: string | null;
+    stateOfIncorporation: string | null;
+    ein: string | null;
+    lei: string | null;
+    /** The registrant's own declared website; frozen agreement check against the subject's official domain. */
+    registrantWebsite: string | null;
+    websiteAgreesWithOfficialDomain: boolean | null;
+    latestFilings: Array<{ form: string; filedAt: string }>;
+    lastAnnualReportAt: string | null;
+    lastQuarterlyReportAt: string | null;
+    lastFilingAt: string | null;
+    sourceUrl: string;
+    capturedAt: string;
+  };
+  companiesHouse?: {
+    companyNumber: string;
+    companyName: string;
+    status: string | null;
+    type: string | null;
+    incorporatedOn: string | null;
+    jurisdiction: string | null;
+    registeredOffice: string | null;
+    /** The bound official-site page that declared this number. */
+    declaredOn: string;
+    sourceUrl: string;
+    capturedAt: string;
+  };
+  openCorporates?: {
+    jurisdiction: string;
+    companyNumber: string;
+    companyName: string;
+    status: string | null;
+    incorporatedOn: string | null;
+    companyType: string | null;
+    declaredOn: string;
+    sourceUrl: string;
+    capturedAt: string;
+  };
+  /** Every registration number the bound official site declared about itself. */
+  siteDeclaredRegistrations: Array<{
+    number: string;
+    jurisdiction: string | null;
+    sourceUrl: string;
+    excerpt: string;
+  }>;
+  capturedAt: string;
+}
+
+/**
  * Frozen stock exposure carried by a token: either the token IS a tokenized
  * stock (xStocks, Dinari dShares, Backed, native stock-token chains) or its
  * price-corroborated pool QUOTES in one (StonkBroker-class venues pair tokens
@@ -1273,6 +1334,8 @@ export interface CollectedEvidence {
   stockHealth?: StockHealthSnapshot;
   /** Frozen stock exposure behind the verified token (tokenized stock or stock-quoted pool). Score-neutral context. */
   tokenizedStockPairing?: TokenizedStockPairingSnapshot;
+  /** Frozen registry records (SEC EDGAR, Companies House, OpenCorporates) joined by CIK or site-declared numbers. */
+  companyRegistry?: CompanyRegistrySnapshot;
   /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */
   protocolFunding?: ProtocolFundingSnapshot;
   /** Frozen CryptoRank funding record; the second raises index, used when the DeFiLlama record is absent. Feeds P4 at reported tier. */

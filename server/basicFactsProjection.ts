@@ -1052,6 +1052,61 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       })],
     ));
   }
+  // Registry-backed legal entity: a real registry record (SEC EDGAR by the
+  // verified listing's CIK, or Companies House / OpenCorporates by a number
+  // the official site itself declares) answers the legal-entity question with
+  // registry provenance. One fact, strongest join first, and never on top of a
+  // legal_entity answer the search lane already verified.
+  const hasVerifiedLegalEntity = (evidence.basicFacts ?? []).some((fact) =>
+    fact.predicate === "legal_entity"
+    && (fact.status === "verified" || fact.status === "corroborated"));
+  const registry = evidence.companyRegistry;
+  if (!hasVerifiedLegalEntity && registry && (isProject || organizationAccount)) {
+    const registryFact = registry.sec
+      ? {
+          value: `${registry.sec.entityName} (SEC CIK ${registry.sec.cik}${registry.sec.stateOfIncorporation ? `, incorporated in ${registry.sec.stateOfIncorporation}` : ""})`,
+          url: registry.sec.sourceUrl,
+          title: "SEC EDGAR registrant record",
+          excerpt: `SEC EDGAR lists ${registry.sec.entityName} as CIK ${registry.sec.cik}${registry.sec.stateOfIncorporation ? `, incorporated in ${registry.sec.stateOfIncorporation}` : ""}${registry.sec.lastAnnualReportAt ? `, latest annual report filed ${registry.sec.lastAnnualReportAt}` : ""}. Joined by the CIK of the verified public listing, never by name.`,
+          capturedAt: registry.sec.capturedAt,
+          provider: "sec-edgar",
+        }
+      : registry.companiesHouse
+        ? {
+            value: `${registry.companiesHouse.companyName} (Companies House No. ${registry.companiesHouse.companyNumber}${registry.companiesHouse.status ? `, ${registry.companiesHouse.status}` : ""})`,
+            url: registry.companiesHouse.sourceUrl,
+            title: "Companies House record",
+            excerpt: `Companies House lists ${registry.companiesHouse.companyName} under number ${registry.companiesHouse.companyNumber}${registry.companiesHouse.incorporatedOn ? `, incorporated ${registry.companiesHouse.incorporatedOn}` : ""}${registry.companiesHouse.status ? `, status ${registry.companiesHouse.status}` : ""}. Joined by the registration number the official site itself declares (${registry.companiesHouse.declaredOn}).`,
+            capturedAt: registry.companiesHouse.capturedAt,
+            provider: "companies-house",
+          }
+        : registry.openCorporates
+          ? {
+              value: `${registry.openCorporates.companyName} (${registry.openCorporates.jurisdiction.toUpperCase()} registry No. ${registry.openCorporates.companyNumber}${registry.openCorporates.status ? `, ${registry.openCorporates.status}` : ""})`,
+              url: registry.openCorporates.sourceUrl,
+              title: "OpenCorporates registry record",
+              excerpt: `OpenCorporates lists ${registry.openCorporates.companyName} under ${registry.openCorporates.jurisdiction.toUpperCase()} number ${registry.openCorporates.companyNumber}. Joined by the registration number the official site itself declares (${registry.openCorporates.declaredOn}).`,
+              capturedAt: registry.openCorporates.capturedAt,
+              provider: "opencorporates",
+            }
+          : null;
+    if (registryFact) {
+      projected.push(makeFact(
+        evidence,
+        "legal_entity",
+        registryFact.value,
+        [source({
+          url: registryFact.url,
+          title: registryFact.title,
+          excerpt: registryFact.excerpt,
+          capturedAt: registryFact.capturedAt,
+          provider: registryFact.provider,
+          sourceClass: "regulatory_or_onchain",
+        })],
+      ));
+    }
+  }
+
   const enrichmentRecord = domainBoundEnrichment?.funding
     && domainBoundEnrichment.funding.rounds.length
     ? domainBoundEnrichment
