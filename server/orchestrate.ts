@@ -2061,6 +2061,24 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // Unique-id: a PROJECT-bound handle is the brand/protocol account. Display
   // name never binds a person. Founder facts describe some OTHER handle.
   const projectBound = projectOrientationBound(evidence);
+  // An individual human: the account is bridged to a person (identity binding
+  // or a licensed resolved name, both of which only ever attach to people) or
+  // the orientation model read it as a person. Deliberately NOT gated on
+  // isOrganizationAccount, which reads the CURRENT roles and would let an
+  // earlier wrong PROJECT refresh disable this guard forever. A famous
+  // founder's bio is full of product vocabulary about the companies they lead
+  // ("exchange", "platform", "our mission"), and that vocabulary must classify
+  // the VENTURE, never turn the person into a PROJECT: CZ was scored as a
+  // company because "exchange" outscored "CEO" and the weakest-lens rule then
+  // let the thin company read govern (PA-14D1862DDA8E49EF86B0). Unique-id
+  // binds (a PROJECT-bound orientation, a canonical token on the exact handle
+  // with no resolved person name, a bio-declared labelled contract) still
+  // route PROJECT below: those prove the handle IS the brand, which
+  // vocabulary never does.
+  const individualHuman =
+    Boolean(evidence.profile.identity_binding)
+    || Boolean(evidence.profile.resolved_name?.trim())
+    || (evidence.subjectOrientation?.kind === "FOUNDER" && orientationHandleBound(evidence));
   // A canonical token can bind the audited handle to the project even when
   // the orientation model mistakes a project bio that names a developer for
   // that developer's personal account. The exact official-X match is a
@@ -2086,13 +2104,14 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     // Strict margin required: on a PROJECT/INVESTOR tie the fund lens keeps
     // governing, so a real fund with product-ish vocabulary never flips.
     bioPrimaryProjectVerified = projectProfileVerified
+      && !individualHuman
       && classification.subject_class === SubjectClass.PROJECT
       && classification.scores[SubjectClass.PROJECT] > classification.scores[SubjectClass.INVESTOR];
     profileRoles.forEach((role) => {
       // classifySubject(bio) founder/CEO/"building" language describes a person.
       // It must not put FOUNDER methodology on a PROJECT-bound brand handle.
       if (role === SubjectClass.FOUNDER && projectBound) return;
-      if (role !== SubjectClass.PROJECT || projectProfileVerified) roles.add(role);
+      if (role !== SubjectClass.PROJECT || (projectProfileVerified && !individualHuman)) roles.add(role);
     });
     // A verified brand profile can mention the community it serves without
     // becoming one person inside that community. Once PROJECT is the primary
@@ -2172,6 +2191,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     // website never becomes a PROJECT methodology by accident.
     if (
       fact.predicate === "official_identity"
+      && !individualHuman
       && verifiedOfficialProjectIdentity(evidence, [fact]) !== null
     ) {
       roles.add(SubjectClass.PROJECT);
@@ -2180,7 +2200,14 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
     roles.add(SubjectClass.AGENCY);
   }
-  if (evidence.projectToken?.verified === true) {
+  // A verified project token routes PROJECT for a brand account, but never for
+  // an individual human: anyone can launch a "$CZ" on a memepad and point its
+  // declared socials at the real person's profile, and that token has nothing
+  // to do with them unless their OWN account endorsed it. A person's real
+  // token relationship (CZ and BNB) flows through their verified ventures
+  // (ventureToken), which binds through the venture's identity, not the
+  // person's celebrity.
+  if (evidence.projectToken?.verified === true && !individualHuman) {
     roles.add(SubjectClass.PROJECT);
   }
   // A fund's brand account can use project-like language, but its governing
@@ -2206,6 +2233,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // subject is unroutable and publishes as an empty INCOMPLETE shell with no
   // methodology at all, which helps no one deciding on the subject.
   if (roles.size === 0
+    && !individualHuman
     && evidence.profile.profile_collection_state === "resolved"
     && evidence.profile.profile_provider === "twitterapi"
     && canonicalOfficialWebsite(evidence.profile.website) !== null

@@ -123,15 +123,49 @@ export interface SiteLinkedGithubOrg {
 }
 
 /**
+ * Rank a sitemap's same-apex pages by how likely they are to carry a code
+ * link: developer/API/docs surfaces first (a footer GitHub link often lives
+ * only on the prerendered product subpages, not the client-rendered home),
+ * then about/company pages, then the shallowest paths. Exported for tests.
+ */
+export function sitemapCandidateUrls(sitemapXml: string, apex: string, cap = 4): string[] {
+  const urls = new Set<string>();
+  for (const match of sitemapXml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)) {
+    try {
+      const url = new URL(match[1]);
+      const host = url.hostname.toLowerCase().replace(/^www\./, "");
+      if (host !== apex && !host.endsWith(`.${apex}`)) continue;
+      if (url.pathname === "/" || url.pathname === "") continue;
+      urls.add(url.toString());
+    } catch {
+      continue;
+    }
+  }
+  const priority = (value: string): number => {
+    const path = value.toLowerCase();
+    if (/(api|developer|docs|build|sdk|github|open[- ]?source)/.test(path)) return 0;
+    if (/(about|company|team|faq)/.test(path)) return 1;
+    return 2;
+  };
+  const depth = (value: string): number => value.split("/").length;
+  return [...urls]
+    .sort((left, right) => priority(left) - priority(right) || depth(left) - depth(right) || left.localeCompare(right))
+    .slice(0, cap);
+}
+
+/**
  * The project-side GitHub doctrine is "the project must link the repo from a
  * site it controls" (docs/GITHUB-ANALYSIS.md), but resolution only ever read
  * the X bio string, so a GitHub link living in the project's docs-site header
  * was invisible (docs.ammalgam.xyz links github.com/ammalgam-protocol; the
  * report said the GitHub was missing). Read the controlled surfaces directly:
- * the official site root, its docs subdomain, and the docs llms.txt. Bodies
- * are read regardless of HTTP status: a docs app's 404 shell is still the
- * project's own content and routinely carries the header GitHub link, while
- * the root may sit behind a bot challenge.
+ * the official site root, its docs subdomain, the docs llms.txt, and, when
+ * those carry nothing, the site's own sitemap: definitive.fi's home is
+ * client-rendered with no link in the raw HTML, while its sitemap lists
+ * /flash-api whose footer links github.com/DefinitiveCo (missed live,
+ * 2026-09-17). Bodies are read regardless of HTTP status: a docs app's 404
+ * shell is still the project's own content and routinely carries the header
+ * GitHub link, while the root may sit behind a bot challenge.
  */
 export async function githubOrgFromOfficialSite(
   officialWebsite: string | null | undefined,
@@ -143,6 +177,22 @@ export async function githubOrgFromOfficialSite(
     `https://${apex}/`,
     ...(apex.startsWith("docs.") ? [] : [`https://docs.${apex}/`, `https://docs.${apex}/llms.txt`]),
   ];
+  // The sitemap is the site's own index of its controlled pages; walk a few
+  // of the likeliest ones when the primary surfaces carry no link.
+  try {
+    const sitemapResponse = await fetcher(`https://${apex}/sitemap.xml`, {
+      signal: AbortSignal.timeout(8_000),
+      headers: { accept: "application/xml,text/xml,*/*" },
+      redirect: "follow",
+    });
+    const landed = sitemapResponse.url ? new URL(sitemapResponse.url).hostname.toLowerCase().replace(/^www\./, "") : "";
+    if (sitemapResponse.ok && (!landed || landed === apex || landed.endsWith(`.${apex}`))) {
+      const xml = (await sitemapResponse.text()).slice(0, 600_000);
+      candidates.push(...sitemapCandidateUrls(xml, apex));
+    }
+  } catch {
+    // No sitemap is no signal; the primary surfaces still run.
+  }
   for (const url of candidates) {
     let body = "";
     let landedHost = "";
