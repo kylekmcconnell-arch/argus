@@ -1,0 +1,2745 @@
+{
+  "generatedAt": "2026-09-17T13:58:45.216Z",
+  "spentCu": 7000,
+  "rows": [
+    {
+      "chain": "robinhood",
+      "address": "0xd553996e73a50501a940ea771b328998a7ac2478",
+      "symbol": "LEBRON",
+      "cabal": "rh-farm-lebron",
+      "outcome": "self-sniped-and-dumped",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "4a83b721-0cea-4ded-be4c-29496dfddf9b",
+          "authorId": "854fb852-a523-5399-a456-5289cb8c38cf",
+          "authorHandle": "GoblinTrades",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Better take what’s left and run",
+          "postedAt": "2026-09-12T19:06:49.572Z"
+        },
+        {
+          "id": "846a78f9-2836-489a-b777-c5f631ddb46c",
+          "authorId": "06e33544-5017-587c-adf8-9a2f1192c21e",
+          "authorHandle": "popsh63",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Rug pull",
+          "postedAt": "2026-09-12T18:59:56.995Z"
+        },
+        {
+          "id": "75426fcf-6216-409d-af5e-7ca7f03c598d",
+          "authorId": "e6e38176-3d19-53f7-99c7-5354925b5e64",
+          "authorHandle": "that_one_guy719",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "I knew it was fake smh",
+          "postedAt": "2026-09-12T18:57:59.212Z"
+        },
+        {
+          "id": "65356283-2f2d-4d74-b23a-711d74e0ddd2",
+          "authorId": "ecb772ee-9d48-56d4-be55-e2d7967b86ae",
+          "authorHandle": "justcompostit",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "How do they link this to his Twitter account?😝😝😝😝",
+          "postedAt": "2026-09-12T18:47:18.221Z"
+        },
+        {
+          "id": "7d565d62-1138-4d01-aec6-a633a0c712b7",
+          "authorId": "d0c6d6f8-a43c-5bbd-ad8b-c30ec6da2011",
+          "authorHandle": "leodegods",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "HOLD",
+          "postedAt": "2026-09-12T18:44:10.293Z"
+        },
+        {
+          "id": "2a6cc944-ef58-457c-8273-842adc2023e1",
+          "authorId": "7db7a4f3-2bd1-509f-be9a-78b485f3c47a",
+          "authorHandle": "Swerv2Xtraa",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "That was the last of my money 😮‍💨😮‍💨😮‍💨😒😒😒 highly pissed",
+          "postedAt": "2026-09-12T18:43:57.116Z"
+        },
+        {
+          "id": "06300f85-3d19-48d7-b526-6e1e627269d0",
+          "authorId": "7db7a4f3-2bd1-509f-be9a-78b485f3c47a",
+          "authorHandle": "Swerv2Xtraa",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Wowwwww fuck market makers fr",
+          "postedAt": "2026-09-12T18:42:47.552Z"
+        },
+        {
+          "id": "4de668c1-f205-44e5-adb5-f295c1015907",
+          "authorId": "26106557-2922-565b-884c-76730d529400",
+          "authorHandle": "wildanibnthaha",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "smartmoney enter here",
+          "postedAt": "2026-09-12T18:40:36.201Z"
+        },
+        {
+          "id": "3d8449cd-ab62-4fa0-b4b3-fab592c1a946",
+          "authorId": "74daf22d-7538-5a38-b332-a43c0db41ae2",
+          "authorHandle": "AllitTakesIsOneBadDay",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "1.4 mil to 2k market speed run",
+          "postedAt": "2026-09-12T18:40:18.975Z"
+        },
+        {
+          "id": "24067bfa-1259-4512-ae75-8ff0e13a2300",
+          "authorId": "7db7a4f3-2bd1-509f-be9a-78b485f3c47a",
+          "authorHandle": "Swerv2Xtraa",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Why are we starting at high mc ?",
+          "postedAt": "2026-09-12T18:39:27.136Z"
+        },
+        {
+          "id": "0129d616-a5f9-41eb-b5a3-87093dc7507c",
+          "authorId": "04fcc762-937f-5815-bebc-d0e4c6730754",
+          "authorHandle": "mooik",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Buy guysss. BUYYYYYY",
+          "postedAt": "2026-09-12T18:38:43.656Z"
+        },
+        {
+          "id": "989de499-1457-48ac-ab23-a4023ec7f174",
+          "authorId": "83857745-10eb-5ec4-a8f2-c6395662fa0b",
+          "authorHandle": "DeVries",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "If this shi don’t retire my whole family I don’t know what will",
+          "postedAt": "2026-09-12T18:38:15.082Z"
+        },
+        {
+          "id": "f9121143-473e-40dc-87be-7b1d71b4e587",
+          "authorId": "3b37d430-66cc-5d0e-b692-bb883b9cbb46",
+          "authorHandle": "dresko2x",
+          "tokenAddress": "0xd553996e73a50501a940ea771b328998a7ac2478",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Bron bron",
+          "postedAt": "2026-09-12T18:34:39.427Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 13 recent FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+      "symbol": "PRISM",
+      "cabal": "rh-farm-prism",
+      "outcome": "fee-farmed",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "b90ae17c-e006-44bf-905d-b652e6c8ef64",
+          "authorId": "ddd324f4-e291-5cbc-a301-4532f0a40f3c",
+          "authorHandle": "Kaelth",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "👎No matter how good the project is, let the market cap do the talking. If it doesn’t get pumped, it’s all garbage. Eventually, no one pays attention to it and it becomes a scam.\n\nThey’re both called PRISM, yet one keeps making new highs while the other keeps making fucking new lows.\n\nFuck you, fuck…",
+          "postedAt": "2026-09-17T12:42:47.016Z"
+        },
+        {
+          "id": "62c39252-8245-484f-bcec-e539b34e214e",
+          "authorId": "4bd6175f-b13d-534b-a5e7-4f7a85f2242f",
+          "authorHandle": "eltrencher",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "this is a $10m market cap coin larping as a $60k market cap coin\n\nshould reprice aggressively upwards with the rest of the RH eco system soon",
+          "postedAt": "2026-09-17T07:00:57.986Z"
+        },
+        {
+          "id": "d17cb13e-bca1-412b-a1ca-468271eeb2e7",
+          "authorId": "4bd6175f-b13d-534b-a5e7-4f7a85f2242f",
+          "authorHandle": "eltrencher",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "bullish on coins with active teams even when the price keeps going down, im building a small position in $prism",
+          "postedAt": "2026-09-17T05:08:26.163Z"
+        },
+        {
+          "id": "c3b4494f-4cff-4e22-9f39-bfa0a6b55501",
+          "authorId": "ddd324f4-e291-5cbc-a301-4532f0a40f3c",
+          "authorHandle": "Kaelth",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Another few hours of deep-dive and brainstorming.\n\nI’m officially declaring this: I’m not selling a single PRISM token until the market cap hits $100M.✊\n\nI’ve compared PRISM with similar projects using both AI analysis and manual research, and the potential ahead looks absolutely massive.\n\nBut what …",
+          "postedAt": "2026-09-17T02:26:28.663Z"
+        },
+        {
+          "id": "61213066-0480-43ab-91b2-1c908c08a569",
+          "authorId": "27aa4009-0d33-5abd-9a85-cdf81a0efe64",
+          "authorHandle": "Bullki",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Every dip is an opportunity",
+          "postedAt": "2026-09-16T22:58:40.570Z"
+        },
+        {
+          "id": "1b987b0b-bb0d-4cd1-b33b-a0ab41e98442",
+          "authorId": "354928d7-9ce4-5e82-9f40-1454e1331464",
+          "authorHandle": "brutalcrypto0",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "This project and token is as they say \n\nFuck around and find out but in the positive way",
+          "postedAt": "2026-09-16T20:31:31.960Z"
+        },
+        {
+          "id": "c8809b56-be8b-4b0f-b059-7573e4054bce",
+          "authorId": "354928d7-9ce4-5e82-9f40-1454e1331464",
+          "authorHandle": "brutalcrypto0",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Prism is my play I feel it",
+          "postedAt": "2026-09-16T20:30:30.597Z"
+        },
+        {
+          "id": "f117eea7-f126-42d5-9e49-edcc724c9c64",
+          "authorId": "05d98d76-f402-582d-ba8c-8996cd2bc1a8",
+          "authorHandle": "Dug7",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "It very much smells like a rug pull and scam and I'm very much hoping that I'm wrong as I was really believing the project could do it's best from the beginning.",
+          "postedAt": "2026-09-16T17:25:11.434Z"
+        },
+        {
+          "id": "140d4e9a-b732-41eb-b2db-9f3227078bae",
+          "authorId": "05d98d76-f402-582d-ba8c-8996cd2bc1a8",
+          "authorHandle": "Dug7",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "@kaelth oh as I'm seeing you have started giving morals to those who invested real money and lost a lot! As I remember you had a different narrative couple of days ago till it would be pumped by @ogle",
+          "postedAt": "2026-09-16T17:23:58.781Z"
+        },
+        {
+          "id": "a8b20c89-5e60-4c82-9f41-80da364e4445",
+          "authorId": "05d98d76-f402-582d-ba8c-8996cd2bc1a8",
+          "authorHandle": "Dug7",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "ah it so much looks like what people have been talking about! rug pull scam like process so far",
+          "postedAt": "2026-09-16T14:35:02.239Z"
+        },
+        {
+          "id": "f5f24aa6-d9b2-48b5-a878-381072b9c556",
+          "authorId": "05d98d76-f402-582d-ba8c-8996cd2bc1a8",
+          "authorHandle": "Dug7",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "I'm very much hopeful that what nanobittrex has been saying is not going to be true! what we are seeing is dev shipping and @ogle being supportive, hoping that is not just a theatre",
+          "postedAt": "2026-09-16T10:22:05.668Z"
+        },
+        {
+          "id": "1368be0c-800d-4159-8fd9-517466865484",
+          "authorId": "2edc72c8-9568-5134-86cc-834a9d3e0196",
+          "authorHandle": "adaaaau",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "10m",
+          "postedAt": "2026-09-16T09:22:08.130Z"
+        },
+        {
+          "id": "be4b60fd-328f-4c50-ad6e-3cb5635b32c1",
+          "authorId": "ddd324f4-e291-5cbc-a301-4532f0a40f3c",
+          "authorHandle": "Kaelth",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Only play with capital you can afford to lose. Never touch your living funds. Every project can go to zero. Remember, only risk what you can lose.🙏",
+          "postedAt": "2026-09-16T09:12:15.571Z"
+        },
+        {
+          "id": "f66726d7-0705-4854-87a9-679d990b62aa",
+          "authorId": "82c6e5f6-d754-5d97-8a66-ea5876a47ae4",
+          "authorHandle": "nanobittrex",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Ok i am done with crypto forever. Dont want to créate a fake thesis. Lost 15 k in como, 7 k of ten are from debut bank. Believe this last try could ron because cryptoogre promote it. But obvious is a scam and team is selling all his bags (Perphas is a scam created by cryptoogree to dump with seconda…",
+          "postedAt": "2026-09-16T07:05:23.323Z"
+        },
+        {
+          "id": "79bd0623-baa8-4e5a-86dd-841b71913c93",
+          "authorId": "82c6e5f6-d754-5d97-8a66-ea5876a47ae4",
+          "authorHandle": "nanobittrex",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "The team Didnt stop work. More than 99% project s in robinhood. All We nenes is robinhood coins up again for this go to ath that is q 50x since here",
+          "postedAt": "2026-09-16T01:11:59.111Z"
+        },
+        {
+          "id": "83c73643-d50e-4f15-88e7-39e9021b21ac",
+          "authorId": "82c6e5f6-d754-5d97-8a66-ea5876a47ae4",
+          "authorHandle": "nanobittrex",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "This deserves at least 10 million",
+          "postedAt": "2026-09-16T01:10:31.122Z"
+        },
+        {
+          "id": "00c86af1-66da-4f3b-8078-4b995b27797b",
+          "authorId": "c93feb0f-fc7f-5668-8d9c-0a3afd5ab188",
+          "authorHandle": "lichuan68",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2\nFresh stealth accumulation spotted.\nSmart money builds positions while the market remains unaware.\nGrab the early alpha signal. DYOR, not financial advice.",
+          "postedAt": "2026-09-15T18:38:08.541Z"
+        },
+        {
+          "id": "a78e8f07-e8df-4e5b-9026-cba63d3f8d64",
+          "authorId": "82c6e5f6-d754-5d97-8a66-ea5876a47ae4",
+          "authorHandle": "nanobittrex",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "This deserves 4 million again at\nLeast . And it would be cheap. Only reason of a dump is all robinhood eco system is Down but it will come back soon",
+          "postedAt": "2026-09-15T18:15:16.536Z"
+        },
+        {
+          "id": "3fc938b3-7a71-403e-a9be-bc26c4a648f6",
+          "authorId": "05d98d76-f402-582d-ba8c-8996cd2bc1a8",
+          "authorHandle": "Dug7",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "@brutalcrypto0 well, it is very much understandable,  we all want to be convinced that the project is going the right way, I guess dev has to maintain that trust!",
+          "postedAt": "2026-09-15T16:00:20.359Z"
+        },
+        {
+          "id": "69b00f96-6d0e-4b61-8326-a6ffd0765fd4",
+          "authorId": "354928d7-9ce4-5e82-9f40-1454e1331464",
+          "authorHandle": "brutalcrypto0",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "@dug7 ogle already tagged uni and he has clearly no intention to buy think he first wanna see alot of Action and time to trust this project",
+          "postedAt": "2026-09-15T15:08:32.324Z"
+        },
+        {
+          "id": "538de2cf-2f8d-4ab0-a3a5-6c65fe89f712",
+          "authorId": "05d98d76-f402-582d-ba8c-8996cd2bc1a8",
+          "authorHandle": "Dug7",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "@ogle you should lead this, possibly pair up with @unipcs the project has a potential to go to $80M MC+",
+          "postedAt": "2026-09-15T14:11:04.659Z"
+        },
+        {
+          "id": "7f7912a4-9da4-4598-bb2e-80b66b11a6df",
+          "authorId": "2d8e3edc-a3a3-55dc-afeb-1a40cfdb891b",
+          "authorHandle": "3LUEKEK",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Dev is shipping, used the product. I like it. Guud tec.",
+          "postedAt": "2026-09-15T11:15:12.466Z"
+        },
+        {
+          "id": "d1af048a-6bbf-4bc4-83b7-20c9f0fa464f",
+          "authorId": "1f2efaa4-3fc9-500b-9de3-d054c13e986d",
+          "authorHandle": "YaHomeboyy",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Way undervalued",
+          "postedAt": "2026-09-15T10:03:29.450Z"
+        },
+        {
+          "id": "c29c2eb5-0d8f-4e5a-912c-b572aa8c2b0e",
+          "authorId": "05d98d76-f402-582d-ba8c-8996cd2bc1a8",
+          "authorHandle": "Dug7",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Now whether we should be on 212K or 212M MC you determine! Dev and team has started shipping enough for us to start moving to millions I guess! let's illustrate that on price🚀",
+          "postedAt": "2026-09-15T07:43:04.049Z"
+        },
+        {
+          "id": "17a1a20b-c967-4772-9900-c4c459f51262",
+          "authorId": "05d98d76-f402-582d-ba8c-8996cd2bc1a8",
+          "authorHandle": "Dug7",
+          "tokenAddress": "0x71d389c48e29996bd8e20778f87fb915c1ffdcc2",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "The place which is sitting way below 1M MC which has a community that has not left the place despite of that fact and place that can go 100M+\nWhat's the thesis?? @unipcs aka Bonkguy knows",
+          "postedAt": "2026-09-15T07:24:55.113Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 25 recent FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+      "symbol": "SYNAPSE",
+      "cabal": "rh-farm-synapse-hub",
+      "outcome": "curve-scalped",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "06cbb039-8373-4488-bf88-438755e910ac",
+          "authorId": "fd2d85c8-9dcc-5aaa-a306-3646f8a3ee07",
+          "authorHandle": "theexcalibur17",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "The Price fractal matches that of STONKS in its early days, just a bit more patience.. keep buying...",
+          "postedAt": "2026-09-17T12:13:00.268Z"
+        },
+        {
+          "id": "a9dff4a7-2da8-4a56-9280-8048fbff75b2",
+          "authorId": "fd2d85c8-9dcc-5aaa-a306-3646f8a3ee07",
+          "authorHandle": "theexcalibur17",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "People will regret not buying this",
+          "postedAt": "2026-09-16T19:39:21.023Z"
+        },
+        {
+          "id": "9100fe41-2bc1-49a3-b508-64768a17e525",
+          "authorId": "fd2d85c8-9dcc-5aaa-a306-3646f8a3ee07",
+          "authorHandle": "theexcalibur17",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Good Tech & Active Dev @millions",
+          "postedAt": "2026-09-16T10:01:17.505Z"
+        },
+        {
+          "id": "68a92fb2-ad69-494e-aecd-a0aa793b2de4",
+          "authorId": "42d9d0ed-86fd-5a63-abdd-450e6044ef72",
+          "authorHandle": "zentralov3",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Tech still works great constant updates, bag is burned fees are going into the coin man this looks great  its just \na matter of time until the big whales come in 🧲🚀",
+          "postedAt": "2026-09-16T05:12:19.475Z"
+        },
+        {
+          "id": "a095ba34-6932-4fe4-87bf-254441dd3b19",
+          "authorId": "845a413d-035e-57a2-b62c-fc0cd98a6b28",
+          "authorHandle": "niksn",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "really good tech + updating constantly see you up there",
+          "postedAt": "2026-09-15T23:19:14.751Z"
+        },
+        {
+          "id": "b84103c1-3f3f-4c0c-9361-71f3dbb46125",
+          "authorId": "f80c2dc1-1824-5e1f-bfd2-f17a22475009",
+          "authorHandle": "punanitrain",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Nothing bout them looks like a rug pull, seems like a cool platform and this is the lowest it’ll be",
+          "postedAt": "2026-09-15T19:40:02.144Z"
+        },
+        {
+          "id": "74832d52-d66f-465f-9cf9-e3921e529d40",
+          "authorId": "d4b6d6c4-26be-5527-afd5-05d98ebc0d50",
+          "authorHandle": "syndr4m",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "X update!",
+          "postedAt": "2026-09-15T15:34:34.906Z"
+        },
+        {
+          "id": "3fce1596-f1a2-4b48-ae9c-f1cfe508fa42",
+          "authorId": "d4b6d6c4-26be-5527-afd5-05d98ebc0d50",
+          "authorHandle": "syndr4m",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "A new day, new challenges. To Ath!",
+          "postedAt": "2026-09-15T09:33:43.602Z"
+        },
+        {
+          "id": "d3da6aa2-db4b-47c3-a6d7-9d6619340cd7",
+          "authorId": "62fcc02c-e634-54c9-b88b-2360648b68a3",
+          "authorHandle": "Zouff",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "perfect buy in",
+          "postedAt": "2026-09-15T05:16:56.008Z"
+        },
+        {
+          "id": "e6c8dbb9-41d1-4170-97a0-bb0d5e86ba7d",
+          "authorId": "62fcc02c-e634-54c9-b88b-2360648b68a3",
+          "authorHandle": "Zouff",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "im not even worried i know that what bro is building is solid .",
+          "postedAt": "2026-09-15T04:34:41.834Z"
+        },
+        {
+          "id": "cce38bfc-7fcf-45e4-8b93-11d4a1f76787",
+          "authorId": "610d22f3-c784-5ec7-8c0c-4a8b18abaf2e",
+          "authorHandle": "Aztrius",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "people ruin good things.",
+          "postedAt": "2026-09-15T04:04:39.166Z"
+        },
+        {
+          "id": "fa694c8a-91e3-4b50-a3c9-0443194fac7d",
+          "authorId": "915863db-8a89-543a-9ee1-aae09178fc51",
+          "authorHandle": "cheeseburgerr",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Are yall like retards",
+          "postedAt": "2026-09-15T04:03:03.512Z"
+        },
+        {
+          "id": "b7f2c80d-dd55-4ced-98e4-bb8014b01bf0",
+          "authorId": "f4c04125-304b-50ef-8ddf-00d6e932e454",
+          "authorHandle": "BSan12",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Let’s pump",
+          "postedAt": "2026-09-15T03:42:39.204Z"
+        },
+        {
+          "id": "9882ccc8-f03a-42df-88ab-fb375109ad94",
+          "authorId": "62fcc02c-e634-54c9-b88b-2360648b68a3",
+          "authorHandle": "ZouffBags",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Like I said dev is consistently working on this project. The ones who remain are for this community the ones who sold are just after a couple dollars. This is the equivalent to owning equity in a company before it blows up. \n\n100% conviction in this token and the project behind it 💯",
+          "postedAt": "2026-09-15T01:01:21.677Z"
+        },
+        {
+          "id": "e32564ab-fa01-4b5b-98d8-158bd0399ddd",
+          "authorId": "49bbad99-0381-58dd-a1f3-3669bd96a1e6",
+          "authorHandle": "kry_vq",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "watch up everyone",
+          "postedAt": "2026-09-15T00:58:07.548Z"
+        },
+        {
+          "id": "b6e98d18-fc69-4d78-9f0d-4ccfbdbfb12a",
+          "authorId": "79c9cb43-acf7-5772-8778-0e25eb30d42c",
+          "authorHandle": "BitmanTW",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "$LLM scam confirmed, this is another launchpad paired with ai models",
+          "postedAt": "2026-09-15T00:49:41.814Z"
+        },
+        {
+          "id": "5402ad35-9361-4a91-96e2-e981c9bfef55",
+          "authorId": "f04c10ed-5beb-50af-8404-0457b7691a20",
+          "authorHandle": "DatOneHaitian",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "I’m not worried about this one. I know it’s gonna send with force",
+          "postedAt": "2026-09-15T00:32:46.670Z"
+        },
+        {
+          "id": "23a501b4-7db5-4b25-87b6-3c04db51bd73",
+          "authorId": "49bbad99-0381-58dd-a1f3-3669bd96a1e6",
+          "authorHandle": "kry_vq",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "did yall fall asleep on this one or what?",
+          "postedAt": "2026-09-14T23:18:26.669Z"
+        },
+        {
+          "id": "2c0ce377-ea1a-4059-b874-8ac79e61ffaf",
+          "authorId": "592a75ef-75e1-5869-b090-a9923a4e53b4",
+          "authorHandle": "itsJuniiorr",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Hmmmm",
+          "postedAt": "2026-09-14T23:03:58.056Z"
+        },
+        {
+          "id": "6f22db01-ecaa-4f63-ac92-7a813e14c6a7",
+          "authorId": "592a75ef-75e1-5869-b090-a9923a4e53b4",
+          "authorHandle": "itsJuniiorr",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "What going on",
+          "postedAt": "2026-09-14T22:58:38.635Z"
+        },
+        {
+          "id": "806ef6ee-aa8a-4833-8f72-aa8abff9ac44",
+          "authorId": "592a75ef-75e1-5869-b090-a9923a4e53b4",
+          "authorHandle": "itsJuniiorr",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Is it moving at all lol",
+          "postedAt": "2026-09-14T22:56:54.597Z"
+        },
+        {
+          "id": "3f4bb4d6-305e-495d-9b2d-b2f5835830ea",
+          "authorId": "694a5967-327e-5cd2-bffe-8f2b3502bcbc",
+          "authorHandle": "DrexBaby",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Every trade still pays 2%. 1% always funds the compute pool that pays for your model's replies. The other 1% is yours to route: to your own wallet, or split across your holders every hour, pro rata, in ETH.\n\nPick it at launch, it's fixed after. Every payout lands with a tx hash on the token page. To…",
+          "postedAt": "2026-09-14T22:40:08.996Z"
+        },
+        {
+          "id": "b355bc4c-749f-4318-ba66-235ddee48c7e",
+          "authorId": "62fcc02c-e634-54c9-b88b-2360648b68a3",
+          "authorHandle": "ZouffBags",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Update !!\n\nhttps://x.com/synepsepad/status/2099618065600377181?s=46",
+          "postedAt": "2026-09-14T21:56:16.064Z"
+        },
+        {
+          "id": "627c3843-2153-44ce-8e7c-9e6bc51e2ad5",
+          "authorId": "42d9d0ed-86fd-5a63-abdd-450e6044ef72",
+          "authorHandle": "zentralov3",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Great tech it works perfectly dev keeps cooking, let's send this to the moon.🚀",
+          "postedAt": "2026-09-14T21:34:57.143Z"
+        },
+        {
+          "id": "b7006d25-5c7b-432e-a3a8-8c8afaba6b86",
+          "authorId": "cdc5a438-8728-5aa2-888a-19944e717e6e",
+          "authorHandle": "The_Wolf_Bros",
+          "tokenAddress": "0xe96184c99b3a3b89c907ea0753c5fde9e3c572ab",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Surely we can get this back up.  So undervalued",
+          "postedAt": "2026-09-14T21:24:59.304Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 25 recent FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0x26becab467bf74a3e09c095c30427acbd6544608",
+      "symbol": "DOGEGPT",
+      "cabal": "rh-honeypot-factory-8fc191",
+      "outcome": "honeypot",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "c3ef9e13-033c-40fa-9b8e-ec269e555d58",
+          "authorId": "dbe8f2fe-95f9-5a3e-a698-231462b3952b",
+          "authorHandle": "knuckl3s",
+          "tokenAddress": "0x26becab467bf74a3e09c095c30427acbd6544608",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": ":((( please let me sell 🙏",
+          "postedAt": "2026-09-14T12:26:07.754Z"
+        },
+        {
+          "id": "ffe4746d-f454-43d7-9853-7b273c621381",
+          "authorId": "7258a00e-782d-55d9-804b-5da7b6f926bd",
+          "authorHandle": "Rewtip",
+          "tokenAddress": "0x26becab467bf74a3e09c095c30427acbd6544608",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "SCAM",
+          "postedAt": "2026-09-14T09:53:19.759Z"
+        },
+        {
+          "id": "f011bf2f-a03a-44b1-84cc-b21157494140",
+          "authorId": "b69676eb-94fa-5813-86a4-15baa76d1091",
+          "authorHandle": "lastchance4real",
+          "tokenAddress": "0x26becab467bf74a3e09c095c30427acbd6544608",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Can’t sell",
+          "postedAt": "2026-09-14T05:11:01.199Z"
+        },
+        {
+          "id": "e150b729-bcdc-4029-b45b-d38beefd92de",
+          "authorId": "b8d2fc17-0b5c-54c3-af67-137c6b4e4bf0",
+          "authorHandle": "ether_monk",
+          "tokenAddress": "0x26becab467bf74a3e09c095c30427acbd6544608",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "scam token don’t buy you can’t sell",
+          "postedAt": "2026-09-14T04:41:42.130Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 4 recent FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0xaf72f6237674830778082a4566167b4ba4f1e04b",
+      "symbol": "ZZZCAT",
+      "cabal": "rh-honeypot-factory-8fc191",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0xdc1a9f464dcb4a1dfdae34253939fdb509b081bf",
+      "symbol": "STONKINU",
+      "cabal": "rh-honeypot-factory-8fc191",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0x038f31900fcde52884456a47bbd2bb308bda8064",
+      "symbol": "EMBERCAT",
+      "cabal": "rh-honeypot-factory-8fc191",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0x3adde168a09132b95f25f52119a440b2bf9b32d0",
+      "symbol": "JUGGERNAUT",
+      "cabal": "rh-honeypot-factory-8fc191",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "ethereum",
+      "address": "0xe61f6e39711cec14f8d6c637c2f4568baa9ff7ee",
+      "symbol": "withheld",
+      "cabal": "rh-snipe-ring-0xb33eb167",
+      "outcome": "unestablished",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+      "symbol": "withheld",
+      "cabal": "rh-snipe-ring-0xb33eb167",
+      "outcome": "organic",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "cf706d67-90db-4e2d-9939-d7ec9cdbc514",
+          "authorId": "86d3612e-b312-55b3-bb1b-e894a182dc3b",
+          "authorHandle": "0xprime_eth",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "been digging deeper into $HEY and found something pretty interesting about the dev.\n\nturns out he’s not some fresh builder who just appeared this cycle. the trail goes back years: old wallet history, mining activity, a Bitcointalk account active since 2015, and the original HEY build from 2022.\n\ni e…",
+          "postedAt": "2026-09-17T10:09:47.512Z"
+        },
+        {
+          "id": "3126219c-889c-4cbe-bcae-a6707044151d",
+          "authorId": "f88996d3-4a4b-5c81-a102-1f6fb17e8522",
+          "authorHandle": "spikingchart",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Nice",
+          "postedAt": "2026-09-17T07:16:40.656Z"
+        },
+        {
+          "id": "c8a4a1d1-b05d-4aa2-82de-e47f294c23d0",
+          "authorId": "7e32444d-15b2-5a0c-952d-603991e80f59",
+          "authorHandle": "algo_Cats",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "they just open up the API for all the devs here.\n\nwhich is great if you ask me means that the tek is really working,\n\nI will use myself this API tool, just told my devs to make a nice bot so we can see good calls before others.\n\nbelow 5M is fud, ohh also they are talking with Ogle in DMs.",
+          "postedAt": "2026-09-17T06:48:39.614Z"
+        },
+        {
+          "id": "32dedd9a-b33d-4551-8904-f599f6d64ff6",
+          "authorId": "fb91409a-3c3a-5547-a80a-68a284b6a205",
+          "authorHandle": "Menamento",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Get rewarded for supporting good builders.",
+          "postedAt": "2026-09-17T03:01:56.537Z"
+        },
+        {
+          "id": "45027f75-c5f1-41ce-b4fc-52e83818c4a9",
+          "authorId": "86d3612e-b312-55b3-bb1b-e894a182dc3b",
+          "authorHandle": "0xprime_eth",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Robinhood just tweeted something that is exactly what HEY is built for 👀 send this to millions!!\n\n://x.com/heyresearch/status/2100318654110089573?s=46",
+          "postedAt": "2026-09-16T20:31:18.986Z"
+        },
+        {
+          "id": "9ccef0eb-ab21-4892-a546-68a71927bc78",
+          "authorId": "86d3612e-b312-55b3-bb1b-e894a182dc3b",
+          "authorHandle": "0xprime_eth",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "been digging deeper into $HEY and found something interesting about the dev\n\nI’ve been speaking with him directly and cross-checking more of his background to verify whether what I found actually holds up\n\nso far, the more I dig, the more bullish I’m getting on @HeyResearch\n\nnot posting the full the…",
+          "postedAt": "2026-09-16T11:02:03.658Z"
+        },
+        {
+          "id": "2910dc4b-2e1d-4437-bb97-5ceafd81de97",
+          "authorId": "86d3612e-b312-55b3-bb1b-e894a182dc3b",
+          "authorHandle": "0xprime_eth",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Hearing good things about this dev 🧐 im bullish, going to add more",
+          "postedAt": "2026-09-16T10:53:55.429Z"
+        },
+        {
+          "id": "ec27aeb0-d0e6-4e2f-9a5e-d57c637902a4",
+          "authorId": "7e32444d-15b2-5a0c-952d-603991e80f59",
+          "authorHandle": "algo_Cats",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "hey research: the shipping ledger of robinhood chain.\n\ni audited the whole catalogue myself, 3,502 entries, 565 shipping, every ship event linked to a github commit. 2.5% of supply locked in a contract, verified. \n\nweak spots i keep saying out loud: unlock date not verifiable, scout empty, listed tw…",
+          "postedAt": "2026-09-16T10:09:28.045Z"
+        },
+        {
+          "id": "83cca91e-5383-41b1-a7fc-dee2b48ad0bd",
+          "authorId": "7e32444d-15b2-5a0c-952d-603991e80f59",
+          "authorHandle": "algo_Cats",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "hey research: a shipping ledger for builders on robinhood chain.\n\ni audited the whole catalogue, 3,502 entries, 565 shipping, every ship event linked to github. lock of 2.5% supply in a contract, verified. weak spots: unlock date not verifiable, scout empty, listed twice. not a meme, an index of who…",
+          "postedAt": "2026-09-15T06:18:15.499Z"
+        },
+        {
+          "id": "037cefd4-4482-4f5f-bf26-210af19c7a8a",
+          "authorId": "6a1e9ef5-51db-540b-a8dd-cfb4cf493263",
+          "authorHandle": "slime33",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Exactly the tech a utility chain like robinhood needs\n\nDemand will grow —> serious investors will pivot to hey research lab —> we all get rich",
+          "postedAt": "2026-09-14T20:52:33.165Z"
+        },
+        {
+          "id": "62081d5e-b429-4cce-9d9f-1002f6355797",
+          "authorId": "79c9cb43-acf7-5772-8778-0e25eb30d42c",
+          "authorHandle": "BitmanTW",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "https://x.com/heyresearch/status/2099555635146936429",
+          "postedAt": "2026-09-14T17:53:37.917Z"
+        },
+        {
+          "id": "81c90ddb-609b-42a8-9cb2-6946f843b3b5",
+          "authorId": "7a54619f-f50f-52c0-9f2d-706254e4fa62",
+          "authorHandle": "shimes",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "This is the one",
+          "postedAt": "2026-09-14T16:14:31.133Z"
+        },
+        {
+          "id": "5d1306a8-94f7-4652-b5d5-e17bd9faf44b",
+          "authorId": "1da2f84c-a79f-59f1-89a3-104d529beab6",
+          "authorHandle": "CryptCCG",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Hey offers a researcher & builder-Intelligence discovery layer for Robinhood Chain.\n\nDifferent functions are available yet and the team looks active to me. Def. worth a try!\n\nhttps://x.com/HeyResearch\nhttps://t.me/HeyResearchLab",
+          "postedAt": "2026-09-14T14:50:18.063Z"
+        },
+        {
+          "id": "382ab178-454e-485e-b34b-1bac7d2d8e09",
+          "authorId": "88fdd91c-895e-5ea2-a45f-befd30a086e8",
+          "authorHandle": "vevletvortex82",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Income shark follows 👀",
+          "postedAt": "2026-09-14T14:38:32.316Z"
+        },
+        {
+          "id": "7fc582b2-d8de-41a8-b190-99d5740395ac",
+          "authorId": "79c9cb43-acf7-5772-8778-0e25eb30d42c",
+          "authorHandle": "BitmanTW",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "millions tek\nhttps://x.com/heyresearch/status/2099453179868139562",
+          "postedAt": "2026-09-14T13:11:50.836Z"
+        },
+        {
+          "id": "3157c965-6def-4913-8c4a-b49dab8aa1ef",
+          "authorId": "7e32444d-15b2-5a0c-952d-603991e80f59",
+          "authorHandle": "algo_Cats",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "https://t.me/c/3953998117/3197\n\nogle just liked a reply;\n\nyou are not ready for this one.",
+          "postedAt": "2026-09-14T13:10:21.416Z"
+        },
+        {
+          "id": "118419d6-167f-4476-8c71-88adfc5a9acc",
+          "authorId": "fa79be9c-b339-5d18-a677-5dc5661cf37a",
+          "authorHandle": "ilikeMonay",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "def makes things alot easier. need this !",
+          "postedAt": "2026-09-14T13:06:03.819Z"
+        },
+        {
+          "id": "98715291-6016-4aa3-813c-ec5000560af0",
+          "authorId": "450f94e3-fd04-53ef-b787-f22361b3c70c",
+          "authorHandle": "Sanham_A",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "What if ?",
+          "postedAt": "2026-09-14T12:59:39.110Z"
+        },
+        {
+          "id": "a9102784-ff9f-485b-942d-0c177c05228d",
+          "authorId": "fb91409a-3c3a-5547-a80a-68a284b6a205",
+          "authorHandle": "Menamento",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "X10+ can happen faster than your night..\nDD",
+          "postedAt": "2026-09-14T12:36:59.701Z"
+        },
+        {
+          "id": "be3873e0-8dbf-4468-9a26-17c747ee9ebd",
+          "authorId": "79c9cb43-acf7-5772-8778-0e25eb30d42c",
+          "authorHandle": "BitmanTW",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Oh?\nhttps://x.com/cryptogle/status/2099221000281858356",
+          "postedAt": "2026-09-14T12:34:55.913Z"
+        },
+        {
+          "id": "c761d70c-ffba-4321-ad95-ca2000c112e1",
+          "authorId": "7e32444d-15b2-5a0c-952d-603991e80f59",
+          "authorHandle": "algo_Cats",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "with the tools that ogle is now supporting;\n\nI do not see why this will not grow and help the ecosystem,\n\nso for this ecosystem I bid, and I will bid more no matter what mcap is.\n\nbecause when you want to have a nice ecosystem to make money on, you have to support and respect creators.",
+          "postedAt": "2026-09-14T07:18:02.955Z"
+        },
+        {
+          "id": "70c26df4-2f75-487b-a8a4-5ca9e4da7bb8",
+          "authorId": "eeefa746-d4d4-54bb-b437-eaa7b4eca5d5",
+          "authorHandle": "0xnicc",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "game will dump on your head",
+          "postedAt": "2026-09-14T04:05:34.472Z"
+        },
+        {
+          "id": "f4ed89da-c4a7-4ae4-8d2c-e3d03a7b5140",
+          "authorId": "4f7e70db-a1dc-57d1-8ae4-a84470d15580",
+          "authorHandle": "game_for_one",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Tools 1.2m\n\nOgle mentioned them working tougher, ai layer of that stack",
+          "postedAt": "2026-09-14T03:48:30.697Z"
+        },
+        {
+          "id": "bc7a4b00-1b1c-4b93-bacf-e9f32e5a97b9",
+          "authorId": "4f7e70db-a1dc-57d1-8ae4-a84470d15580",
+          "authorHandle": "game_for_one",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Ogle looking at it\n\nLooks like a super under the radar ai play\n\nhttps://x.com/mkrz_/status/2098739528702075134?s=46",
+          "postedAt": "2026-09-14T03:21:06.106Z"
+        },
+        {
+          "id": "fc9f5d81-2773-4f26-aada-5937cfe4183c",
+          "authorId": "eb2607e0-afd9-59e0-94ab-99e618029217",
+          "authorHandle": "kakarotop",
+          "tokenAddress": "0xb33eb16782776b4d738c0fd643577cb0284db610",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Ogle got eyes on them & possible collab with $TOOLS ?\nhttps://x.com/cryptogle/status/2099221000281858356",
+          "postedAt": "2026-09-13T21:45:30.100Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 25 recent FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+      "symbol": "FIH",
+      "cabal": "altcoinist-ring",
+      "outcome": "organic",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "899f41f6-82a5-4ee8-97b6-bb067fdf23f4",
+          "authorId": "9a44e792-3ace-5ebe-9842-722d690ad31a",
+          "authorHandle": "Altcoinist",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "beauFIHul chart.",
+          "postedAt": "2026-09-17T11:24:07.476Z"
+        },
+        {
+          "id": "86ade2d0-1a49-4661-9767-cbb24bca3e50",
+          "authorId": "396526dc-cfe9-5404-afbf-8ccb7d61af44",
+          "authorHandle": "rekttrain",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Just copying altcoinist on this",
+          "postedAt": "2026-09-17T07:36:19.782Z"
+        },
+        {
+          "id": "ce3320e7-f9f7-4dd2-aad7-361e8bc2befe",
+          "authorId": "61c6af61-bf10-5d82-ab34-ae92e22798db",
+          "authorHandle": "3volve",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Tired of fomo fees. Been slowly moving out and will continue to do so. Hodl fih on personal wallet",
+          "postedAt": "2026-09-17T02:03:19.388Z"
+        },
+        {
+          "id": "fdfef349-8ebb-44f0-994f-5468c6658b39",
+          "authorId": "84350010-6e2c-58c5-a5d7-59634000d561",
+          "authorHandle": "Countkian",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Fih more like dih",
+          "postedAt": "2026-09-16T19:26:57.955Z"
+        },
+        {
+          "id": "bb0b3d19-69d0-436a-bc48-87bf03ccdede",
+          "authorId": "26d64b9b-6421-5fa7-ba61-dc5ef69d03e9",
+          "authorHandle": "habibfirmansyh",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "its $FIH time",
+          "postedAt": "2026-09-15T10:30:44.619Z"
+        },
+        {
+          "id": "31e959c4-1e3c-43cb-872d-d5d75ea33dce",
+          "authorId": "5a970f8d-b732-568a-a0ed-535a4bd5533d",
+          "authorHandle": "sloppyfloppers",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "me today\n  🐸",
+          "postedAt": "2026-09-15T09:27:40.999Z"
+        },
+        {
+          "id": "ccb7a77c-51e9-4bb8-b193-22ba9940c974",
+          "authorId": "a2a3e58d-9cc4-510e-aa4e-5d1e675e500c",
+          "authorHandle": "Frankiee",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Pump",
+          "postedAt": "2026-09-15T08:16:58.984Z"
+        },
+        {
+          "id": "88f5dbb4-1357-45eb-968d-b7dc01703cf5",
+          "authorId": "27b94338-6275-5837-9494-0ae6224c85d7",
+          "authorHandle": "Takkaminus",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Highest conviction hold and ultimately the #1 meme on RH.",
+          "postedAt": "2026-09-14T19:19:03.236Z"
+        },
+        {
+          "id": "27f240c8-7979-44ba-b556-fa167c94604d",
+          "authorId": "d0d9bfee-aca4-5708-888a-e294826d7319",
+          "authorHandle": "5smoothstones",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Let’s break out into the billions",
+          "postedAt": "2026-09-14T15:16:59.955Z"
+        },
+        {
+          "id": "535eefb4-6a12-4fe5-b2d9-ad3dd40b409c",
+          "authorId": "5c63f669-7dff-53d7-b55e-933cf4b296a4",
+          "authorHandle": "p_oli25",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "It’s time",
+          "postedAt": "2026-09-14T09:13:44.220Z"
+        },
+        {
+          "id": "e3527ce0-2e4a-4a8e-98fa-419289247346",
+          "authorId": "6ec63483-b252-5d22-ad86-617744cf3f67",
+          "authorHandle": "Pumpybara",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "What the fk is this PA",
+          "postedAt": "2026-09-14T04:39:23.657Z"
+        },
+        {
+          "id": "84592a88-9fbb-4634-9086-9e1f944143f3",
+          "authorId": "f21edbd2-4a4d-562b-9662-ac3a1757b9f5",
+          "authorHandle": "DegenTomassi",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Holding $FIH feels great",
+          "postedAt": "2026-09-14T00:15:09.835Z"
+        },
+        {
+          "id": "f11525f4-0194-4464-b97a-1f8f6ee758c9",
+          "authorId": "93321e22-0d53-58bd-b7ce-77fd3332642b",
+          "authorHandle": "DailySoleMoose",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "It will soon ignite and erupt.",
+          "postedAt": "2026-09-13T23:48:38.514Z"
+        },
+        {
+          "id": "aa6d62e1-63dc-4101-a465-f1293a83308b",
+          "authorId": "9a44e792-3ace-5ebe-9842-722d690ad31a",
+          "authorHandle": "Altcoinist",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "time for FIH to pull a juggernaut\n\nFIH was deployed on day 1 of the RH chain\n\nVlad Tenev's own artwork from '24\n\nand the chart is beauFIHul.",
+          "postedAt": "2026-09-13T22:16:22.630Z"
+        },
+        {
+          "id": "4e32d9ec-2f45-4324-a8d5-7fff43b7977d",
+          "authorId": "3c05e0d3-aca6-511c-9d9f-86a84ea1a207",
+          "authorHandle": "allgreencandles",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "wait until the fomo cabal realizes this 'unknown' token has held above $1M more or less since August 1st\n\nearly",
+          "postedAt": "2026-09-13T19:32:13.681Z"
+        },
+        {
+          "id": "102ccbd0-6cc1-46c3-bd8a-b4060bf83360",
+          "authorId": "19ef1eed-4d28-52c7-a3fc-d2f56e0df8ce",
+          "authorHandle": "granolabb",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "I have a suspicion this will eventually be supply crimed. Time will tell.",
+          "postedAt": "2026-09-13T02:38:17.595Z"
+        },
+        {
+          "id": "2b61d0d8-5570-45e9-a05d-d8dc9b6fb62d",
+          "authorId": "3c05e0d3-aca6-511c-9d9f-86a84ea1a207",
+          "authorHandle": "allgreencandles",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "launched the day RH chain went live. never ever gone down. vlad tweeted this meme a while back. \n\nunusual chart, one of the only on RH that has had a single direction since day 1 of the chain.\n\nfuck it we ride.",
+          "postedAt": "2026-09-12T18:17:21.398Z"
+        },
+        {
+          "id": "6819fd6a-0a4e-4844-8e4f-2a9931104b9d",
+          "authorId": "61c6af61-bf10-5d82-ab34-ae92e22798db",
+          "authorHandle": "3volve",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Gotta be the next meme RH lists, or tracks, as the other ones recently.",
+          "postedAt": "2026-09-12T06:48:02.327Z"
+        },
+        {
+          "id": "109dadc9-7f8c-4637-9467-4e2f97eb585e",
+          "authorId": "a995a41e-11a2-58a6-95c2-6f240ae2726b",
+          "authorHandle": "JY_EL_account",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "always going back to quality",
+          "postedAt": "2026-09-11T05:34:11.085Z"
+        },
+        {
+          "id": "d66d5ae2-bad6-42cc-a051-17356f8bd738",
+          "authorId": "d0d9bfee-aca4-5708-888a-e294826d7319",
+          "authorHandle": "5smoothstones",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Created by Vlad - what if it gets listed on RH like Juggernaut?",
+          "postedAt": "2026-09-10T13:45:17.429Z"
+        },
+        {
+          "id": "eeecc8c5-bd59-462e-9bc9-57e673704e47",
+          "authorId": "9a44e792-3ace-5ebe-9842-722d690ad31a",
+          "authorHandle": "Altcoinist",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "send FIH\n\nhttps://x.com/vladtenev/status/1856807363334008948?s=46&t=W_tekLbeCHmf2pe7LmE7kA",
+          "postedAt": "2026-09-10T13:24:04.834Z"
+        },
+        {
+          "id": "feabb275-110d-445b-95e5-e50a10bd806d",
+          "authorId": "a995a41e-11a2-58a6-95c2-6f240ae2726b",
+          "authorHandle": "JY_EL_account",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "one of the best memes on rh. backed by altcoinist/tibbir folks. \n\njuggernaut just got the rh listing. expecting this to reprice too eventually",
+          "postedAt": "2026-09-10T13:22:40.789Z"
+        },
+        {
+          "id": "c4aa20c1-20bd-4fd6-b4b8-d43fe741ff28",
+          "authorId": "9a44e792-3ace-5ebe-9842-722d690ad31a",
+          "authorHandle": "Altcoinist",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "despite the onchain bloodbath, \n\nFIH held up strong and is green on the daily.\n\nnever fade real cults, it's rare af.",
+          "postedAt": "2026-09-09T13:47:25.305Z"
+        },
+        {
+          "id": "6203d161-4470-47f7-a2db-8d12aac0d640",
+          "authorId": "5c63f669-7dff-53d7-b55e-933cf4b296a4",
+          "authorHandle": "p_oli25",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Honestly one of the best communities out there",
+          "postedAt": "2026-09-09T10:47:43.188Z"
+        },
+        {
+          "id": "2ed38504-8b74-4271-bdfa-e42ceb9f5a6a",
+          "authorId": "9a44e792-3ace-5ebe-9842-722d690ad31a",
+          "authorHandle": "Altcoinist",
+          "tokenAddress": "0x4b3a3ff4ec9d289727e24a8152f406bada44264d",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "FIH Looking good here",
+          "postedAt": "2026-09-07T13:38:00.092Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 25 recent FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+      "symbol": "WRESTLER",
+      "cabal": "altcoinist-ring",
+      "outcome": "organic",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "eb780210-3998-40f2-acf5-5cdcb46e4dd5",
+          "authorId": "0ba52f4b-0e3a-5c8d-b7f3-8675f7b4ee41",
+          "authorHandle": "gr8f8th",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Would you rather be in BONER with $50mc that can run maybe 3-5x or would you rather be in WRESTLER that can do 30-50x.........",
+          "postedAt": "2026-09-17T13:43:37.587Z"
+        },
+        {
+          "id": "5fd0415e-8ebf-4cf8-adef-037df827e335",
+          "authorId": "055a21a7-b934-5ad4-bf50-2b7328561b4b",
+          "authorHandle": "J4KOB06",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "NOVO and GALAXY follow back soon. We will be there.",
+          "postedAt": "2026-09-17T13:35:56.306Z"
+        },
+        {
+          "id": "8d6de5ee-7cf1-45ba-93f5-c0e56cff4216",
+          "authorId": "3fb2fa23-5d5d-5028-9818-69d9cc1ff21a",
+          "authorHandle": "pleasebroo",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "https://x.com/vladtenev/status/2100575159736553687?s=46",
+          "postedAt": "2026-09-17T13:32:28.759Z"
+        },
+        {
+          "id": "93b392e1-6bd7-4ee4-ab12-95b3177d95ca",
+          "authorId": "1532c0b2-b135-5cea-9b43-8586561ecbe9",
+          "authorHandle": "GokuIsHungry",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Big things are coming to this coin check it out yourselves \n\nhttps://x.com/wrestler_galaxy/status/2100574787865116870?s=46",
+          "postedAt": "2026-09-17T13:28:08.818Z"
+        },
+        {
+          "id": "0d75c324-028e-41f1-ace1-a69a749c0a11",
+          "authorId": "9a44e792-3ace-5ebe-9842-722d690ad31a",
+          "authorHandle": "Altcoinist",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "HO LEE SHEET\n\nhttps://x.com/secgov/status/2100571317128888364?s=46&t=W_tekLbeCHmf2pe7LmE7kA",
+          "postedAt": "2026-09-17T13:27:50.509Z"
+        },
+        {
+          "id": "3139a88e-b5f6-4fe4-a7db-223709986507",
+          "authorId": "66344511-007a-5d5e-95f6-585be3aa1381",
+          "authorHandle": "MrRobotTrades",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "we are all wrestlers",
+          "postedAt": "2026-09-17T11:38:29.605Z"
+        },
+        {
+          "id": "cafe8002-c6fc-4af1-a0f0-df279a4646f6",
+          "authorId": "919f2127-79cf-5d4e-88a2-76b5792c888e",
+          "authorHandle": "caliber360",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Wrestler is fighter, breaking ATH today?",
+          "postedAt": "2026-09-17T11:29:15.617Z"
+        },
+        {
+          "id": "1ea2227a-f3c8-4e4d-88bd-50f3ad3500a1",
+          "authorId": "9a44e792-3ace-5ebe-9842-722d690ad31a",
+          "authorHandle": "Altcoinist",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "$WRESTLER holders get GLXY stock voting right at 70M mcap. \n\nlet's get to work!",
+          "postedAt": "2026-09-17T11:23:52.816Z"
+        },
+        {
+          "id": "7491211f-ba25-4d66-9714-466d79d4b14d",
+          "authorId": "9a44e792-3ace-5ebe-9842-722d690ad31a",
+          "authorHandle": "Altcoinist",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "wrestler cult chat on X\n\n200+ ppl who never tap out already in\n\nhttps://x.com/wrestler_galaxy/status/2100523967291236652?s=46&t=W_tekLbeCHmf2pe7LmE7kA",
+          "postedAt": "2026-09-17T10:00:16.710Z"
+        },
+        {
+          "id": "a3410b0d-90b6-4d42-bfdd-b79f7ab46634",
+          "authorId": "396526dc-cfe9-5404-afbf-8ccb7d61af44",
+          "authorHandle": "rekttrain",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "I bought back , hearing rumors john cena is a holder, but you can't see him",
+          "postedAt": "2026-09-17T07:31:55.604Z"
+        },
+        {
+          "id": "51724c0f-e248-4c21-a490-5faf1741b4a4",
+          "authorId": "0fc13a53-534c-5ac7-af30-cdddbac7a58d",
+          "authorHandle": "jamalwadelive",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "bottom",
+          "postedAt": "2026-09-17T06:05:36.295Z"
+        },
+        {
+          "id": "bbf32a3d-126d-48d0-adf8-8b75983dc492",
+          "authorId": "6f68f9c8-0c89-5259-9026-8e05fbc77422",
+          "authorHandle": "PsycheAnon",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "WE READY FOR ANOTHER ROUND",
+          "postedAt": "2026-09-17T04:03:52.812Z"
+        },
+        {
+          "id": "484aad58-4acf-47b3-b868-12274669018c",
+          "authorId": "aaef456b-ec4b-5c79-a9c6-a78bcf608c15",
+          "authorHandle": "ballchaser3000",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Ready for another round 🗣️",
+          "postedAt": "2026-09-17T01:15:47.181Z"
+        },
+        {
+          "id": "03fb71b1-3ebf-4fe8-ad37-0c6e6161eadb",
+          "authorId": "3753ffc8-9bb6-5fc8-b5f1-3e24b0245826",
+          "authorHandle": "CorpseMoney",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "2Pac - Hit 'Em Up (Dirty)",
+          "postedAt": "2026-09-16T22:47:14.983Z"
+        },
+        {
+          "id": "330f7ec0-94a5-41fd-8f21-64661cb52ac5",
+          "authorId": "919f2127-79cf-5d4e-88a2-76b5792c888e",
+          "authorHandle": "caliber360",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "new rally, new day baby",
+          "postedAt": "2026-09-16T22:44:00.826Z"
+        },
+        {
+          "id": "61f3bed4-1212-4ec7-a123-bc5dec2c55d8",
+          "authorId": "537fdd1a-ee07-59ea-82a1-e2eb96ae0136",
+          "authorHandle": "MannyDinSin",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Never tapp out 🔥",
+          "postedAt": "2026-09-16T22:35:56.687Z"
+        },
+        {
+          "id": "f1696638-5310-4b6d-b7de-49ba676f30d1",
+          "authorId": "880281fd-7f56-5646-9383-64da47b07f7a",
+          "authorHandle": "PexMeisteroff",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Exponential growth to be unlocked",
+          "postedAt": "2026-09-16T22:34:41.816Z"
+        },
+        {
+          "id": "eb9a3b2c-2688-4a04-95ca-4237f127e0b0",
+          "authorId": "055a21a7-b934-5ad4-bf50-2b7328561b4b",
+          "authorHandle": "J4KOB06",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "WRESTLERS will get back to the top, never tap out!",
+          "postedAt": "2026-09-16T22:28:26.557Z"
+        },
+        {
+          "id": "f96f63b4-0a60-4aeb-b4fc-3aea0380c479",
+          "authorId": "880281fd-7f56-5646-9383-64da47b07f7a",
+          "authorHandle": "PexMeisteroff",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "3M easy",
+          "postedAt": "2026-09-16T22:20:41.071Z"
+        },
+        {
+          "id": "b4920c69-4ffc-497b-b087-b92134d1054f",
+          "authorId": "6f68f9c8-0c89-5259-9026-8e05fbc77422",
+          "authorHandle": "PsycheAnon",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "love you $wrestler",
+          "postedAt": "2026-09-16T21:58:19.249Z"
+        },
+        {
+          "id": "8fb82867-047e-47cc-ac19-5f83fc71646b",
+          "authorId": "fd25771c-5763-58c6-a756-d6ddce1bda8d",
+          "authorHandle": "fomquant",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "$902k cap, $65k liq, 2,298 holders. Buyers own 71% of 1h flow and the chart barely moved 1.3%—classic controlled grind, not a treasure bond. WRESTLER wants the round-3 squeeze if $850k holds and buyers stay above 60%.",
+          "postedAt": "2026-09-16T21:52:21.064Z"
+        },
+        {
+          "id": "2cd3babe-be9c-4a4c-b9cd-6c0b573b2235",
+          "authorId": "1f2efaa4-3fc9-500b-9de3-d054c13e986d",
+          "authorHandle": "HunterofTruth16",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "assymetrical af play",
+          "postedAt": "2026-09-16T21:51:47.908Z"
+        },
+        {
+          "id": "25fe9a6a-eb91-42bb-b51d-699ed1359868",
+          "authorId": "880281fd-7f56-5646-9383-64da47b07f7a",
+          "authorHandle": "PexMeisteroff",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Let’s keep it rockiiin’, let’s keep it rooockiin’",
+          "postedAt": "2026-09-16T21:47:04.328Z"
+        },
+        {
+          "id": "5abb668a-fead-4685-8aeb-6c35346ebcff",
+          "authorId": "2155b140-dbec-5da5-a017-8571466f7139",
+          "authorHandle": "IdealWearyBird",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "YO go look at DIVI its lookin good",
+          "postedAt": "2026-09-16T21:38:59.405Z"
+        },
+        {
+          "id": "ccc7e829-a105-47b8-a107-71b3f5c8f34c",
+          "authorId": "ef8a3aa6-111e-5ae8-b788-8ebf0155cb72",
+          "authorHandle": "TradingAloha",
+          "tokenAddress": "0xab528169dcc80d68837a33b1e2b866bb7d7ee301",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Round 3 will hurt people who sold. Prepare yourselves.",
+          "postedAt": "2026-09-16T21:34:24.862Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 25 recent FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0xa944c6aee0aba6cc7345287f37c7daa8075c8dcb",
+      "symbol": "TIBBIR",
+      "cabal": "altcoinist-ring",
+      "outcome": "unestablished",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+      "symbol": "PONS",
+      "cabal": "altcoinist-ring",
+      "outcome": "unestablished",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "7d1a7e5d-a0c4-4cae-b937-a250cc3ccd91",
+          "authorId": "ceba3830-a090-5c89-9882-17b69e7eea74",
+          "authorHandle": "norikjsf",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Buy whilst its still low, dont tell me i didnt say so...🤷‍♂️",
+          "postedAt": "2026-09-17T13:00:53.663Z"
+        },
+        {
+          "id": "71373037-e532-495b-b0ae-57a0800575b9",
+          "authorId": "3a1412a2-df4f-557f-af8b-6f23535902ea",
+          "authorHandle": "gaihero",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "我能靠pons翻身吗",
+          "postedAt": "2026-09-17T12:37:56.140Z"
+        },
+        {
+          "id": "8e80472c-bd0a-403e-9954-2b64d9b6ec04",
+          "authorId": "d422977c-cbfe-5b80-a469-e8e645d50ce3",
+          "authorHandle": "BTCdayu",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "人们在ARC链受伤后，纷纷回到了RH链。",
+          "postedAt": "2026-09-17T12:37:00.487Z"
+        },
+        {
+          "id": "24bac526-8631-4b00-ba08-906d9647f140",
+          "authorId": "d81289d7-94da-51a3-9cf1-51d24316b756",
+          "authorHandle": "naneksun",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Robinhood will be one of the winner of this bull run. I am betting on their launchpad.",
+          "postedAt": "2026-09-17T11:50:28.269Z"
+        },
+        {
+          "id": "aeeb77fc-75be-465e-a4f0-e2475a943d1c",
+          "authorId": "edb56255-856d-538b-a472-12a3fc710438",
+          "authorHandle": "originaldern",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "dipped",
+          "postedAt": "2026-09-17T11:17:25.096Z"
+        },
+        {
+          "id": "bc317df5-5b8e-43ac-acae-3ee8196031b1",
+          "authorId": "adf3fcc8-d128-5331-b662-cc6c2ac6fbd7",
+          "authorHandle": "stillchasingxrp_",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Weee",
+          "postedAt": "2026-09-17T10:07:30.851Z"
+        },
+        {
+          "id": "f4d8370d-38e1-4abc-afd3-4fbafab6b237",
+          "authorId": "4c88563b-770a-5abe-810a-bd6be308fe16",
+          "authorHandle": "lordarbiter",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Shit, owen is back from retirement and posted a thesis about pons. \n\nhttps://x.com/owen1v9/status/2100385562041397519",
+          "postedAt": "2026-09-17T08:31:10.083Z"
+        },
+        {
+          "id": "3e123aec-756d-47f7-a847-849f96cd4d41",
+          "authorId": "7acbbf3c-af5d-5d2a-a1bf-2b0ee2912263",
+          "authorHandle": "WellRoughQuail",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "PONS is inevitable. \n\nIf you’re bullish on robinhood chain, you should be bullish on pons. Anything less than $5b is fud. \n\n-> 80% of pons fees buys the token & burns.\n-> trading fees create perpetual buying and supply reduction.\n-> last 30 days protocol revenue $22.34m\n-> $13.57m in buybacks \n-> me…",
+          "postedAt": "2026-09-17T08:27:54.370Z"
+        },
+        {
+          "id": "8b7e7d60-c67d-454b-b699-4130ba021dc9",
+          "authorId": "a06b356a-2578-583e-968f-5627ed37cded",
+          "authorHandle": "CyangBz",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "不等了可能下不去了，直接在买一点，目前的仓位适中",
+          "postedAt": "2026-09-17T08:06:44.183Z"
+        },
+        {
+          "id": "00e773ff-6d6e-4b3e-ac50-0c07e3311870",
+          "authorId": "dcbfc181-b3d0-5735-be1c-135bc49749ff",
+          "authorHandle": "ventikohi",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Are you ready for the leg up to 1b?",
+          "postedAt": "2026-09-17T07:43:30.389Z"
+        },
+        {
+          "id": "e3e1d4b5-86e9-44b1-90b3-59e4c21459a1",
+          "authorId": "8261b9f8-071d-5c11-b82f-1ca4b303ad71",
+          "authorHandle": "elrnaldo",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Lets do a blow of top guys",
+          "postedAt": "2026-09-17T06:30:37.132Z"
+        },
+        {
+          "id": "507094f9-36da-420a-89c1-f7d9796d8dc0",
+          "authorId": "a27a5881-09bd-54aa-850b-9413dd49cf3a",
+          "authorHandle": "tsx_viral",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Longer you hold the more profit you’ll get, if everyone would buy and hold it would go up like crazy and it would change your life",
+          "postedAt": "2026-09-17T06:26:43.382Z"
+        },
+        {
+          "id": "426d1b81-53b7-41bb-8dba-65b5307e1e84",
+          "authorId": "b2f1ce3d-9e0e-5d19-b7db-4e3c215dc2d7",
+          "authorHandle": "SAXBOOM",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "it’s time",
+          "postedAt": "2026-09-17T05:45:34.122Z"
+        },
+        {
+          "id": "856760bf-ea19-47f1-96a7-2554bec63317",
+          "authorId": "4c88563b-770a-5abe-810a-bd6be308fe16",
+          "authorHandle": "lordarbiter",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "PONS run so BUN can fly.",
+          "postedAt": "2026-09-17T05:30:26.284Z"
+        },
+        {
+          "id": "da095604-656b-41bd-9bc8-faebe1f29be7",
+          "authorId": "6145abb6-808a-5b20-80df-e252fd473e7b",
+          "authorHandle": "Bower9I",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Pushin 🅿️",
+          "postedAt": "2026-09-17T05:30:01.675Z"
+        },
+        {
+          "id": "3e4bc3aa-ec70-4eb6-b79e-953b80c721e7",
+          "authorId": "4e1eaff9-8c6f-5eb1-b826-4093dbfeda55",
+          "authorHandle": "sebasmeza",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Looking good",
+          "postedAt": "2026-09-17T05:24:36.273Z"
+        },
+        {
+          "id": "6724952c-21d9-498a-864a-477959bb50a9",
+          "authorId": "dc9ada7c-7e68-5b3c-828a-3c6b1018127c",
+          "authorHandle": "Bruno42",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "looks like a lot of people loosing there positions over small bags like really small bags",
+          "postedAt": "2026-09-17T05:17:25.380Z"
+        },
+        {
+          "id": "5e63433d-a7f8-4c0a-bf7a-db0fea92f732",
+          "authorId": "24f1ffc9-1b7a-566a-bdb1-d6bdcdd00e96",
+          "authorHandle": "louisliu",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "fomo这么专业的平台，显示的pons市值完全没有考虑pons已回购销毁的部分，pons需要再涨40%才能有显示的市值",
+          "postedAt": "2026-09-17T05:08:00.177Z"
+        },
+        {
+          "id": "b7b8fa42-17f9-42f6-8dbb-69f5607ed0b1",
+          "authorId": "140818a6-fbff-54bb-a1b6-bcaaea532104",
+          "authorHandle": "Wikon",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Can we just go to next leg up. Please",
+          "postedAt": "2026-09-17T04:56:56.605Z"
+        },
+        {
+          "id": "2537c1f0-08a2-405f-822b-1a14a452272d",
+          "authorId": "a27a5881-09bd-54aa-850b-9413dd49cf3a",
+          "authorHandle": "tsx_viral",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Think this is gonna go back up to 900m???",
+          "postedAt": "2026-09-17T04:27:25.461Z"
+        },
+        {
+          "id": "b6f01e54-09ea-4725-bde1-6827c6c88e99",
+          "authorId": "e55b3569-a822-5052-93b3-781ecf4617ea",
+          "authorHandle": "nararya80",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "belive in PONS",
+          "postedAt": "2026-09-17T04:17:14.263Z"
+        },
+        {
+          "id": "beff35dd-c6eb-4b43-a2cd-adc6a4264177",
+          "authorId": "be75beca-8636-5e35-9f31-4969987de04c",
+          "authorHandle": "Whens",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Robinhood chain eco",
+          "postedAt": "2026-09-17T03:13:48.185Z"
+        },
+        {
+          "id": "a03113b5-d709-4702-a487-fa98bb74ea25",
+          "authorId": "14e70d56-e253-5c4f-bc74-824fa66c0f9c",
+          "authorHandle": "ZP_12_",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Are we coiling up and loading for the next leg up here?",
+          "postedAt": "2026-09-17T03:04:49.678Z"
+        },
+        {
+          "id": "f8471ba9-8428-43cd-a36d-f67d63b9ed03",
+          "authorId": "0a650252-1533-5849-b283-4a78cd0cbbc3",
+          "authorHandle": "littlefatboy",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "No1 meme stock platform",
+          "postedAt": "2026-09-17T02:26:54.233Z"
+        },
+        {
+          "id": "65e9eef8-c1f8-49c1-9ef3-0fb0089e2c96",
+          "authorId": "4454a7a6-7288-5ea0-aa12-5762b26e5a8b",
+          "authorHandle": "DEGENLORD",
+          "tokenAddress": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Yall ready for round 2?",
+          "postedAt": "2026-09-17T01:50:35.248Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 25 recent FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+      "symbol": "CASHCAT",
+      "cabal": "altcoinist-ring",
+      "outcome": "unestablished",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "ec71a042-c24d-4653-9e6a-67bdbee89df6",
+          "authorId": "707dd67e-09b7-540f-a15e-7bbfdd34da16",
+          "authorHandle": "NorthPraetor",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "bottom is in, hope you're positioned for the next leg up anon",
+          "postedAt": "2026-09-17T13:51:34.476Z"
+        },
+        {
+          "id": "e6733f81-2fe6-4639-9459-d75c5fd7a752",
+          "authorId": "4589aba1-2cea-5b1f-a358-aa1c986c43e1",
+          "authorHandle": "tacotradesonly",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Like I’ve been saying, but the dips",
+          "postedAt": "2026-09-17T13:42:45.424Z"
+        },
+        {
+          "id": "638b8062-6b2f-4549-8db3-554fb6da388c",
+          "authorId": "d181dc45-8512-5e51-9ac1-2e5d62ea565b",
+          "authorHandle": "kneechee_",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Butt Pirate Roberts",
+          "postedAt": "2026-09-17T12:52:39.355Z"
+        },
+        {
+          "id": "1dcee24a-2d8c-4a47-ba25-ff0be6f2406f",
+          "authorId": "9eb0cad0-9065-58e9-883c-e031aa0c3606",
+          "authorHandle": "lyrikb",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "75",
+          "postedAt": "2026-09-17T12:01:40.774Z"
+        },
+        {
+          "id": "74d9921b-f688-4669-b8aa-83a2dcd9729b",
+          "authorId": "ad6ae269-5917-5e8c-ac70-d25cf6afb27e",
+          "authorHandle": "Down4500redemption",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "What’s there to be happy about. jobs not finished",
+          "postedAt": "2026-09-17T11:33:16.906Z"
+        },
+        {
+          "id": "e0d33694-4dff-43f3-a548-f7037e7c73b8",
+          "authorId": "7b311cee-9a73-5901-80d7-e58ff587572e",
+          "authorHandle": "Tahabruuh",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "De risk and ride",
+          "postedAt": "2026-09-17T11:00:21.465Z"
+        },
+        {
+          "id": "077d0ee1-e9b2-4e9e-87e2-777821710762",
+          "authorId": "95d74d3f-7c2a-5fb2-9312-8a27d4697300",
+          "authorHandle": "elllse9",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "1B is coming",
+          "postedAt": "2026-09-17T10:04:34.796Z"
+        },
+        {
+          "id": "097b5652-bbaa-4957-927d-eff281c9babc",
+          "authorId": "a1501fef-a454-5a2e-af6c-c53cb4e0a79e",
+          "authorHandle": "GIGIGIGIG",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Where is the Cash ? \nWell.. obviously , Cash cat is the answer !",
+          "postedAt": "2026-09-17T09:18:17.183Z"
+        },
+        {
+          "id": "4ec2336e-f7d6-49e4-98aa-2a8c11419efb",
+          "authorId": "d5aa13a6-b34c-57e8-8923-dcaa49f6466b",
+          "authorHandle": "0xBohr",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Hope you didn't capitulate your $CASHCAT bags during the boring period\n\nRace to billion starting now",
+          "postedAt": "2026-09-17T09:00:42.718Z"
+        },
+        {
+          "id": "6e9284fe-aa1f-494c-a5df-e8d7329bda4d",
+          "authorId": "77673687-5151-59a1-bad7-abb08e6e4514",
+          "authorHandle": "Hoomakh",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Will go to a billion, real question is, how many billions?",
+          "postedAt": "2026-09-17T08:48:09.188Z"
+        },
+        {
+          "id": "2ba3d525-e5e7-4bf3-a089-0095ecd03a45",
+          "authorId": "2e955ffc-6fac-578a-93d8-3324605f6bed",
+          "authorHandle": "change",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "pure memes are evergreen",
+          "postedAt": "2026-09-17T08:09:06.017Z"
+        },
+        {
+          "id": "bce2971b-a3e1-4199-802b-ca837706dbc6",
+          "authorId": "3cb4eeaf-ac95-538e-b258-e8d7f6663328",
+          "authorHandle": "MikeAderol",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Run Vasya run",
+          "postedAt": "2026-09-17T07:59:46.135Z"
+        },
+        {
+          "id": "8185c080-a4b2-4ad5-b896-361244634cc3",
+          "authorId": "c0ce7bc3-ab6c-5b06-9ce4-bdefc846f5ad",
+          "authorHandle": "yewmp",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "billions soon",
+          "postedAt": "2026-09-17T07:54:53.780Z"
+        },
+        {
+          "id": "75ab602f-122f-4dfe-baaf-3caff8617a28",
+          "authorId": "edcedc11-f703-5187-9f1e-bf7519074c53",
+          "authorHandle": "Impulseinvestrs",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "CASHCAT is looking ready to purr",
+          "postedAt": "2026-09-17T07:28:50.542Z"
+        },
+        {
+          "id": "bd2d306d-74f4-4ceb-84ef-b12d7776925b",
+          "authorId": "3fe19f0d-7b3c-59a5-b775-3c445fd4bfb6",
+          "authorHandle": "1Kdj5cznniBW9ut",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "i’m down 600k",
+          "postedAt": "2026-09-17T07:16:15.650Z"
+        },
+        {
+          "id": "4da3406f-2097-474d-a597-7414ca6a3948",
+          "authorId": "9ed3471c-91d3-5d2c-88ff-052557c7f901",
+          "authorHandle": "perkies",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "told ya im hoping for the best now we are at the best and now go beast👹👹",
+          "postedAt": "2026-09-17T06:41:29.252Z"
+        },
+        {
+          "id": "962a2a30-acbb-42c3-8ed2-8e5924f4146a",
+          "authorId": "0ef0ae67-6521-557f-adc4-8f1ded9c09f4",
+          "authorHandle": "BRADTRADZZ",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Easily one of the best coins ever made",
+          "postedAt": "2026-09-17T06:01:47.569Z"
+        },
+        {
+          "id": "6c8a2cdc-fa50-4bc6-9c4e-a820c4caef27",
+          "authorId": "987d6dfb-aff4-51ea-8df4-2ad59ff16b28",
+          "authorHandle": "toastedxd",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "not showering till this hits 1b",
+          "postedAt": "2026-09-17T05:35:21.763Z"
+        },
+        {
+          "id": "ad327102-54a3-4fda-88c9-33dac5ab3dfb",
+          "authorId": "94ee3b0b-b674-5812-a76c-13fb90773752",
+          "authorHandle": "jxck_eth",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "It’s time",
+          "postedAt": "2026-09-17T05:19:43.582Z"
+        },
+        {
+          "id": "97f7ab0a-47fe-4edc-80a2-0f902f1f644f",
+          "authorId": "5655fda8-0b7f-5912-8387-d53f8abdcde0",
+          "authorHandle": "simonll4",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Se activa el gato, ojo aca",
+          "postedAt": "2026-09-17T04:44:10.315Z"
+        },
+        {
+          "id": "f9068421-bc68-4e9c-8752-19a7dc0c69f2",
+          "authorId": "e55b3569-a822-5052-93b3-781ecf4617ea",
+          "authorHandle": "nararya80",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "love this cat",
+          "postedAt": "2026-09-17T04:18:37.071Z"
+        },
+        {
+          "id": "8b64154b-6da4-49db-8ff4-f4ca7ee3767e",
+          "authorId": "af0761aa-8d3f-5e02-b028-1319c0b1a760",
+          "authorHandle": "ChopperSats",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "put the fn cash on the fn cat",
+          "postedAt": "2026-09-17T04:13:06.857Z"
+        },
+        {
+          "id": "f528e13d-14a7-4fac-92b0-9628094e3cee",
+          "authorId": "108f3c58-808d-5642-86cd-b8d6f2903c91",
+          "authorHandle": "cmpayneful",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "We run it back. Simple as that. \n\nNew chain of no consequence for memes launched? Who cares. \n\nThis is a blue chip meme.",
+          "postedAt": "2026-09-17T04:11:11.968Z"
+        },
+        {
+          "id": "d49026e4-2972-45d1-92b8-90346980cfbd",
+          "authorId": "664413fc-2321-54eb-8f6e-07d8a455111f",
+          "authorHandle": "jkyoon090103_2",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Next upbit?",
+          "postedAt": "2026-09-17T03:43:30.062Z"
+        },
+        {
+          "id": "8da6ced6-6c23-4068-a446-b6b63c54c1ab",
+          "authorId": "ad6ae269-5917-5e8c-ac70-d25cf6afb27e",
+          "authorHandle": "Down4500redemption",
+          "tokenAddress": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "500 million is fud",
+          "postedAt": "2026-09-17T03:36:48.041Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 25 recent FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+      "symbol": "PARK",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "curve-scalped",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "d848ab61-53d9-4d4e-8297-57d5e4f6d5ce",
+          "authorId": "89e5f135-4bfd-5fbb-b099-39b782627457",
+          "authorHandle": "B_Is_4_Blaze",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Is this goin to millions 🔄👀",
+          "postedAt": "2026-09-17T13:53:01.501Z"
+        },
+        {
+          "id": "7d908069-974e-4d59-b1c9-2248f53807fc",
+          "authorId": "85d05668-fde3-5785-b2da-436e34292527",
+          "authorHandle": "DomoTrades",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "500k today coming right up",
+          "postedAt": "2026-09-17T12:47:06.814Z"
+        },
+        {
+          "id": "e6a8261b-b471-433d-b6ae-fbc48a1887c0",
+          "authorId": "9e1eed17-f3ce-51fd-aa5a-765c028900f5",
+          "authorHandle": "ER4N0W",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "🚀 Impulse → 📉 correction → 🔺 tightening consolidation → waiting for breakout",
+          "postedAt": "2026-09-17T12:45:02.963Z"
+        },
+        {
+          "id": "70921a60-0b2d-403e-901b-74cee35fcd29",
+          "authorId": "8731b2be-d031-53d8-a17c-1f26d71483d1",
+          "authorHandle": "rhine24032",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Good morning. Today is going to be a good day.",
+          "postedAt": "2026-09-17T12:04:54.392Z"
+        },
+        {
+          "id": "fe8b77eb-f18c-430f-bd4b-2475cac687ea",
+          "authorId": "4e8853b4-b71c-5be8-a754-d566d890f259",
+          "authorHandle": "ploofy",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "500k soon",
+          "postedAt": "2026-09-17T11:54:31.308Z"
+        },
+        {
+          "id": "8ea36225-1ba6-4a8a-86d7-e93135fdadeb",
+          "authorId": "9e1eed17-f3ce-51fd-aa5a-765c028900f5",
+          "authorHandle": "ER4N0W",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "My thesis is all fundamental... but I do see a bull flag!!!",
+          "postedAt": "2026-09-17T11:42:40.814Z"
+        },
+        {
+          "id": "b54915ca-8dc5-4158-a7af-1615693b8272",
+          "authorId": "4e8853b4-b71c-5be8-a754-d566d890f259",
+          "authorHandle": "ploofy",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "TO THE MOOOON",
+          "postedAt": "2026-09-17T11:42:39.541Z"
+        },
+        {
+          "id": "b4b3bcac-7beb-4e94-a6cc-6e977a21592b",
+          "authorId": "8a9092c3-6bf1-5285-8854-02c26275bbd4",
+          "authorHandle": "Unknowndud61382",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "I love your memes on X",
+          "postedAt": "2026-09-17T10:37:49.443Z"
+        },
+        {
+          "id": "6778125e-3799-414d-8128-526caad9923e",
+          "authorId": "00072ac2-15cf-50d1-a639-06603129de9b",
+          "authorHandle": "MCSVJ",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Funny Conntent",
+          "postedAt": "2026-09-17T10:21:48.403Z"
+        },
+        {
+          "id": "c99ae363-cc6c-46ca-922b-704e49092c0e",
+          "authorId": "88d6610f-e8a1-5482-8871-10212d96b18e",
+          "authorHandle": "TradesBy2K",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "This just needs more people, im bull posting on X\nThe rest of you should do the same🚀",
+          "postedAt": "2026-09-17T09:00:08.058Z"
+        },
+        {
+          "id": "6d675e0c-32f3-4b1c-b594-f8d9ae573ec1",
+          "authorId": "60bb915e-6712-5270-b8d6-816b98db0c6e",
+          "authorHandle": "blackglovex",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Strong Stonk community + South Park 😮‍💨🤌",
+          "postedAt": "2026-09-17T08:05:36.109Z"
+        },
+        {
+          "id": "a619563f-5e86-4e37-9fef-504f96018232",
+          "authorId": "95a253b1-2fc2-53f8-89b5-5ed8a7ae2020",
+          "authorHandle": "MasterFish",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Either take me too Zero or be my Hero",
+          "postedAt": "2026-09-17T05:49:11.112Z"
+        },
+        {
+          "id": "856452b2-b710-4f42-a403-bfad739705e6",
+          "authorId": "9e1eed17-f3ce-51fd-aa5a-765c028900f5",
+          "authorHandle": "ER4N0W",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Welcome if you made it here in time, multi milly project staring us all right in the face!!!",
+          "postedAt": "2026-09-17T05:31:12.699Z"
+        },
+        {
+          "id": "f43b5776-4586-45a6-800b-6c39cee2c95d",
+          "authorId": "8731b2be-d031-53d8-a17c-1f26d71483d1",
+          "authorHandle": "rhine24032",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Jeez we are so early. This is going so high.",
+          "postedAt": "2026-09-17T04:25:16.840Z"
+        },
+        {
+          "id": "1ca619d4-8c56-4f6d-95c6-cd8f6a679c68",
+          "authorId": "18b9d799-0ec9-55b1-9830-0f97e26f0488",
+          "authorHandle": "gabe98041",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "RUN IT BACKKK!! 📈",
+          "postedAt": "2026-09-17T04:09:41.151Z"
+        },
+        {
+          "id": "81321d2f-406d-4d09-a583-85334e378fd2",
+          "authorId": "e73fa58e-7553-5a0d-b09c-b44d0d490e55",
+          "authorHandle": "OGMario_c",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Had to get a bag of this, just too freakin hilarious, keep up the great content",
+          "postedAt": "2026-09-17T03:39:45.438Z"
+        },
+        {
+          "id": "74df29cf-f531-4d08-931b-7a603520f58f",
+          "authorId": "bae1f3b2-5d7c-5fff-81ff-230cae8f439e",
+          "authorHandle": "Solju",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Slow and steady progress is progress",
+          "postedAt": "2026-09-17T03:01:49.298Z"
+        },
+        {
+          "id": "867475c7-3c7d-45cd-8fa7-259ed196639a",
+          "authorId": "5a20d9d7-6538-5804-8de2-835bd7e776a4",
+          "authorHandle": "dinkdink",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "No way this doesn’t moon\n\nPA means nothing right now",
+          "postedAt": "2026-09-17T02:28:39.313Z"
+        },
+        {
+          "id": "b6ac84c2-f176-4926-94b7-b691596357c1",
+          "authorId": "bae1f3b2-5d7c-5fff-81ff-230cae8f439e",
+          "authorHandle": "Solju",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Save the sells for Disney gang ✌️",
+          "postedAt": "2026-09-17T02:14:49.156Z"
+        },
+        {
+          "id": "b6aa923a-b0ab-4f7a-aa65-d19244bda342",
+          "authorId": "85d05668-fde3-5785-b2da-436e34292527",
+          "authorHandle": "DomoTrades",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Let’s bring it back CMON",
+          "postedAt": "2026-09-17T02:14:39.186Z"
+        },
+        {
+          "id": "6c6927f6-1def-40b5-a0d7-a3a59c9a7677",
+          "authorId": "8731b2be-d031-53d8-a17c-1f26d71483d1",
+          "authorHandle": "rhine24032",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Let's go boys. We keep getting more and more traction.",
+          "postedAt": "2026-09-17T02:06:35.247Z"
+        },
+        {
+          "id": "f1312a22-336f-47e1-81fe-75fd80324905",
+          "authorId": "bae1f3b2-5d7c-5fff-81ff-230cae8f439e",
+          "authorHandle": "Solju",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "For the holders who held down to the frickin beneath wat the floor should’ve been good work just keep that same discipline intact",
+          "postedAt": "2026-09-17T02:04:01.469Z"
+        },
+        {
+          "id": "96ed93f9-30f3-44cb-8fbd-f9a20d042801",
+          "authorId": "9e1eed17-f3ce-51fd-aa5a-765c028900f5",
+          "authorHandle": "ER4N0W",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "I've watched the X followers go from 85 (when I first found the project), to 200 (first ATH pump), to now 400 followers while we have a nice pull back. This is exactly what I want to see. A project like this is all about eyeballs and I that journey is just getting started. \n\nThe list of catalyst tha…",
+          "postedAt": "2026-09-17T02:02:18.195Z"
+        },
+        {
+          "id": "15e5dfa4-0293-485f-9e1c-2c8851f2b116",
+          "authorId": "2e2b5406-8d59-569c-94fb-f474abb6d2a2",
+          "authorHandle": "checko",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Gabe u look like baby alien",
+          "postedAt": "2026-09-17T01:08:35.451Z"
+        },
+        {
+          "id": "ddb228ed-4c51-4c52-be2e-5021d31c59be",
+          "authorId": "2e2b5406-8d59-569c-94fb-f474abb6d2a2",
+          "authorHandle": "checko",
+          "tokenAddress": "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5",
+          "tokenNetwork": "sol",
+          "symbol": null,
+          "text": "Fuck u gabe im out 1.3k",
+          "postedAt": "2026-09-17T01:03:14.819Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 25 recent FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "5NK9STFaivRDScQnF5VwE7zwdEfFpKRd3BwhPPYuBAGS",
+      "symbol": "Aigob",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "BfRMi3osCEn76huxCMiPqvyfWz9YwzfzdViMa83Bmoon",
+      "symbol": "XIDRAG",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "AbEtvmjR9afBvjVY4hxzqLxN3xmFoCwAEXCofVgmoon",
+      "symbol": "ROBAI",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "CeHRqHs1adSwco4nGfRnC47ME8EdUVMhCce5HVABBAGS",
+      "symbol": "MLBWC",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "DtA6FUsUY4nK9HLYr8L3sZRNQUPKZfLxhtMB9qvJpump",
+      "symbol": "Tayrock",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "Ap8gWjgA9YdJQpMTeyAEqn6YP7rP3UC82GDvYWYipump",
+      "symbol": "DRONKRA",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "8qhtfGY1v6WtK75WgMGaWcw1DUT3rXEu5R9LPQqVbonk",
+      "symbol": "IRSPYGL",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "G5QriGjyai2hkwC1Vw6rBm8jQZaib7kceecayKCoBAGS",
+      "symbol": "ORBCROWN",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "HFKHqyJroRgU9j9hVya2rqm48T5WJwrU1KStygwABAGS",
+      "symbol": "Uclcrab",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "solana",
+      "address": "5mwnJgccHmRBv5HkqaQ3zs83nnGABR6p2L9UscRSBAGS",
+      "symbol": "Dunworm",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "outcome": "liquidity-pulled",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0x8db9cbfa0c1a4bb474db19c5d92590f5b03f70eb",
+      "symbol": "IDX",
+      "cabal": "rh-farm-idx9000",
+      "outcome": "self-sniped-and-dumped",
+      "state": "miss",
+      "theses": [],
+      "cu": 250,
+      "note": "FomoScan holds no FOMO theses on this token."
+    },
+    {
+      "chain": "robinhood",
+      "address": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+      "symbol": "IDX",
+      "cabal": "rh-farm-idx9000",
+      "outcome": "self-sniped-and-dumped",
+      "state": "hit",
+      "theses": [
+        {
+          "id": "8f03ccc4-b01a-411c-abca-c426d71aaaaa",
+          "authorId": "cb40d8b7-41f3-5aca-8035-86967067284e",
+          "authorHandle": "Onlyradioo",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "i’m very interested in how creative people get with this",
+          "postedAt": "2026-09-17T13:42:00.982Z"
+        },
+        {
+          "id": "5d12cb02-8174-4b12-af2b-7e2dcfbde4e2",
+          "authorId": "cf212f3b-5801-535d-b64f-ef0d48ae1266",
+          "authorHandle": "cleartide_",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Up please.",
+          "postedAt": "2026-09-17T13:31:23.222Z"
+        },
+        {
+          "id": "a1001b3c-3430-47f3-ac43-cd62bc1c7a7c",
+          "authorId": "4a35c580-c1bf-521d-86a9-ed3d2d9fd570",
+          "authorHandle": "929RobertR",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "יאללה $IDX, תן בראש 🚀",
+          "postedAt": "2026-09-17T13:26:27.660Z"
+        },
+        {
+          "id": "d2981c06-0d66-4755-9e19-704ae4abee71",
+          "authorId": "59fd9bec-8ca2-5240-b7ee-31442f5f0741",
+          "authorHandle": "amassey867",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "虚构的指数，真实的期待。看看 $IDX 能玩出什么花样。",
+          "postedAt": "2026-09-17T13:05:14.524Z"
+        },
+        {
+          "id": "c567f695-7b95-46cf-ab83-ac4babe37e35",
+          "authorId": "ae002770-db4e-5c54-9b69-5a4e2415627b",
+          "authorHandle": "isti309",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Every dip is opportunity!",
+          "postedAt": "2026-09-17T13:04:25.882Z"
+        },
+        {
+          "id": "4f7a1f0f-89c4-4227-b7ea-3b37e4908a4a",
+          "authorId": "ae002770-db4e-5c54-9b69-5a4e2415627b",
+          "authorHandle": "isti309",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "IDX and chill",
+          "postedAt": "2026-09-17T13:03:25.017Z"
+        },
+        {
+          "id": "535bfda3-b6a2-4454-8db5-7d611162c25f",
+          "authorId": "ae002770-db4e-5c54-9b69-5a4e2415627b",
+          "authorHandle": "isti309",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "send it to 500k",
+          "postedAt": "2026-09-17T13:00:56.666Z"
+        },
+        {
+          "id": "d315f068-e08d-433b-9b37-dbba0ae229e9",
+          "authorId": "075ea058-0a92-5ddf-9b37-e43a5c61b8de",
+          "authorHandle": "jacquelinegatsby",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "这名字越看越上头，$IDX 👀",
+          "postedAt": "2026-09-17T12:49:25.147Z"
+        },
+        {
+          "id": "23dd6fe6-acff-4e74-a88a-e21f3b02dd8b",
+          "authorId": "de66c899-8d62-5548-aed1-0ae9488bc509",
+          "authorHandle": "CAPPYCAPPYY",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "just a little more green 💚",
+          "postedAt": "2026-09-17T11:44:54.591Z"
+        },
+        {
+          "id": "ce8b5ddf-7266-4d1a-816e-1e89639c35bb",
+          "authorId": "85e1d12c-5220-59d1-b6d7-345ae1292cf1",
+          "authorHandle": "nightowl869",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "someone explain index 9000 with a straight face and a laser pointer please",
+          "postedAt": "2026-09-17T11:36:32.007Z"
+        },
+        {
+          "id": "ba3dd376-5e70-47ac-8c6e-293836f76a98",
+          "authorId": "801ed67a-e298-59a2-8e62-da84f9f3555d",
+          "authorHandle": "busynessman",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "i like that the story starts somewhere unexpected. a robinhood education page becoming the reason people care about a meme is genuinely funny",
+          "postedAt": "2026-09-17T11:17:39.571Z"
+        },
+        {
+          "id": "cebf124b-0d2b-4a08-bb76-8746fe06c33e",
+          "authorId": "3f034da1-2f08-5747-9683-9ed0845e5f46",
+          "authorHandle": "mostlytide",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "index 9000 deserves some overly serious fan presentations",
+          "postedAt": "2026-09-17T11:03:44.943Z"
+        },
+        {
+          "id": "1d458992-ffbf-4647-8349-41455f3b38dc",
+          "authorId": "81536a85-877c-5359-886e-0786a76a6606",
+          "authorHandle": "Alaouicapital",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Dips are for buying",
+          "postedAt": "2026-09-17T11:02:03.657Z"
+        },
+        {
+          "id": "3ae9fa62-5fb8-4d8a-b8ce-d84c3c497bcc",
+          "authorId": "a3d5acb7-1f72-5d2f-8b58-f5646dff6f56",
+          "authorHandle": "JUSTCOMET",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "10m is definitely on my imagination’s agenda",
+          "postedAt": "2026-09-17T10:45:25.341Z"
+        },
+        {
+          "id": "35edeb9b-b4aa-4fac-bc01-c84172d796bb",
+          "authorId": "05cc9f3f-c759-5b13-a1e8-5a337209be96",
+          "authorHandle": "neoncedar",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "$IDX, turn up the volume 🚀",
+          "postedAt": "2026-09-17T10:28:16.904Z"
+        },
+        {
+          "id": "5152b80c-90bf-4a59-ad1d-63a1d4fabd85",
+          "authorId": "38aac0e8-ed20-54f0-a9c0-9a87e770b65c",
+          "authorHandle": "studyconvictionXX",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "the $SPX comparison makes sense to me because both ideas give people a ridiculous financial concept to get behind",
+          "postedAt": "2026-09-17T10:19:36.873Z"
+        },
+        {
+          "id": "fa037454-d62e-472c-85d8-c9e501641317",
+          "authorId": "0674fb83-e50f-5830-bf5c-9e88ccdb2cd5",
+          "authorHandle": "tinyattic_",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "imaginary benchmark\nactual excitement\n$IDX 🌙",
+          "postedAt": "2026-09-17T09:58:08.133Z"
+        },
+        {
+          "id": "500bbe75-6215-4afb-8f34-6e66eab7ce6a",
+          "authorId": "fdaee347-a0dd-5895-ab86-23725c22d704",
+          "authorHandle": "gardenn718",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "Green, thanks 💚",
+          "postedAt": "2026-09-17T09:44:46.798Z"
+        },
+        {
+          "id": "f63bc5aa-5966-4008-aeed-d99e4cbc7bab",
+          "authorId": "c09ca158-b57f-5888-972b-68e178abaf9d",
+          "authorHandle": "_northbound",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "this could become a very entertaining obsession",
+          "postedAt": "2026-09-17T09:34:00.603Z"
+        },
+        {
+          "id": "0687c2b7-3281-49d6-a146-44ab8d0147a1",
+          "authorId": "b940a751-8410-5367-9e4f-e764499071cc",
+          "authorHandle": "Moonbeam486",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "a fictional index getting passionate supporters feels extremely appropriate for crypto",
+          "postedAt": "2026-09-17T09:27:24.834Z"
+        },
+        {
+          "id": "6c03dad5-0ce9-4f76-9cd0-8bef5ffb9a79",
+          "authorId": "eb3d8ca6-80fe-583b-beff-d46da0be96a3",
+          "authorHandle": "Warmwindow147",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "i like how easy it is to explain why the origin is funny",
+          "postedAt": "2026-09-17T09:20:11.807Z"
+        },
+        {
+          "id": "e891d3f2-b362-4cd8-acf7-a1e0d7c4181b",
+          "authorId": "db61d45a-acaf-55cf-a824-6aecbc470d47",
+          "authorHandle": "veryripple",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "10m would get my attention loudly",
+          "postedAt": "2026-09-17T09:13:54.157Z"
+        },
+        {
+          "id": "96177c5c-2cdb-4e41-92c2-5491e1e3c183",
+          "authorId": "b718f652-6591-50a8-93a5-11d2b03d2d90",
+          "authorHandle": "echoo287",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "$SPX got an entire culture around its joke. i’d love to watch $IDX build something of its own",
+          "postedAt": "2026-09-17T08:58:05.934Z"
+        },
+        {
+          "id": "9ffb86e3-7864-487f-b78f-fcc9c59f7497",
+          "authorId": "4da21ecd-af40-5790-8c4a-12ef69c60a2e",
+          "authorHandle": "TRivera",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "i want a front-row seat for whatever people turn this into",
+          "postedAt": "2026-09-17T08:49:49.367Z"
+        },
+        {
+          "id": "918b0dd6-d133-4906-acd4-db05732b4eec",
+          "authorId": "0dbd5e60-4c9f-5d17-b84a-993bdc611a60",
+          "authorHandle": "FrankDeGay",
+          "tokenAddress": "0xcd4e70bfd73952123449e453f08c12e44ab89e58",
+          "tokenNetwork": "robinhood",
+          "symbol": null,
+          "text": "index 9000\nbig ambitions\nbigger enthusiasm 🚀",
+          "postedAt": "2026-09-17T08:40:44.184Z"
+        }
+      ],
+      "cu": 250,
+      "note": "FomoScan holds 25 recent FOMO theses on this token."
+    }
+  ]
+}

@@ -84,6 +84,7 @@ import { githubAdapter } from "./adapters/github";
 import { dexscreenerAdapter } from "./adapters/dexscreener";
 import { coingeckoAdapter } from "./adapters/coingecko";
 import { onchainAdapter } from "./adapters/onchain";
+import { fomoscanAdapter } from "./adapters/fomoscan";
 import { arkhamAdapter } from "./adapters/arkham";
 import { basicFactsAdapter, registrableDomain, screenSecRegistryForNames } from "./adapters/basicFacts";
 import { writeEntityFacts } from "./entityStore";
@@ -326,6 +327,7 @@ const ADAPTERS: Adapter[] = [
   dexscreenerAdapter,
   coingeckoAdapter,
   // redditAdapter retired: Reddit API access was not approved.
+  fomoscanAdapter,
   onchainAdapter,
   arkhamAdapter,
   basicFactsAdapter,
@@ -339,7 +341,9 @@ const ADAPTERS: Adapter[] = [
 export const ADAPTERS_FOR_TEST: readonly Adapter[] = ADAPTERS;
 export const IDENTITY_LANE = [xAdapter, githubAdapter, peopledatalabsAdapter, offchainAdapter] as const;
 export const TOKEN_LANE = [dexscreenerAdapter, coingeckoAdapter] as const;
-export const WALLET_LANE = [onchainAdapter, arkhamAdapter] as const;
+// fomoscan runs first: it is the lane that can ADD an attributed wallet for the
+// on-chain and Arkham reads to examine.
+export const WALLET_LANE = [fomoscanAdapter, onchainAdapter, arkhamAdapter] as const;
 
 /**
  * Every cost-ledger provider an adapter's run() can record. Concurrent
@@ -357,6 +361,7 @@ export const ADAPTER_PROVIDERS: Record<string, readonly string[]> = {
   "offchain-diligence": ["google-news", "courtlistener", "opensanctions", "x-avatar", "claude", "cache"],
   "dexscreener": ["dexscreener"],
   "coingecko": ["coingecko"],
+  "fomoscan": ["fomoscan"],
   "onchain": ["helius"],
   "arkham": ["arkham", "public-evm-rpc"],
 };
@@ -4222,6 +4227,9 @@ export const ADAPTER_DELEGATES: Readonly<Record<string, readonly string[]>> = {
   "offchain-diligence": ["official-domain", "public-web", "independent-web", "adverse-search", "courtlistener", "opensanctions"],
   dexscreener: ["dexscreener"],
   coingecko: ["coingecko"],
+  // FomoScan is the wallet-graph lane that can ADD an attributed wallet, so a
+  // wallet-graph or x-profile scope may re-run it.
+  fomoscan: ["wallet-graph", "x-profile", "fomoscan"],
   onchain: ["direct-chain-rpc", "wallet-graph"],
   // Arkham had no entry, so a wallet-graph or person scope never re-collected
   // deployer attribution or exposure and the row read "outside the frozen
