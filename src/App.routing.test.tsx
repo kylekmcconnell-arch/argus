@@ -218,6 +218,9 @@ vi.mock("./lib/live", () => ({
 
 vi.mock("./lib/runner", () => ({
   getRun: harness.getRun,
+  // The scan tray subscribes to the registries; routing tests keep it empty.
+  activeRuns: () => [],
+  subscribeRuns: () => () => {},
   setOnComplete: vi.fn((callback: (dossier: Record<string, unknown>, priv?: boolean) => void) => {
     harness.personOnComplete = callback;
   }),
@@ -228,6 +231,8 @@ vi.mock("./lib/runner", () => ({
 
 vi.mock("./lib/scanrunner", () => ({
   getScanRun: harness.getScanRun,
+  activeScanRuns: () => [],
+  subscribeScanRuns: () => () => {},
   setScanOnComplete: vi.fn((callback: (run: Record<string, unknown>) => void) => {
     harness.scanOnComplete = callback;
   }),

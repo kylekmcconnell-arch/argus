@@ -73,6 +73,7 @@ const ReferralsPage = lazy(() => import("./components/ReferralsPage").then((modu
 const PolymarketTraderRun = lazy(() => import("./components/PolymarketTraderRun").then((module) => ({ default: module.PolymarketTraderRun })));
 const ReconPage = lazy(() => import("./components/ReconPage").then((module) => ({ default: module.ReconPage })));
 const Report = lazy(() => import("./components/Report").then((module) => ({ default: module.Report })));
+import { ScanTray } from "./components/ScanTray";
 const TokenReport = lazy(() => import("./components/TokenReport").then((module) => ({ default: module.TokenReport })));
 const TokenRun = lazy(() => import("./components/TokenRun").then((module) => ({ default: module.TokenRun })));
 const TrendingPage = lazy(() => import("./components/TrendingPage").then((module) => ({ default: module.TrendingPage })));
@@ -543,15 +544,22 @@ export default function App() {
     priv = false,
     force = false,
     intent: ResearchIntent = "investment_due_diligence",
+    // A deep dive launched FROM a report runs in the background tray instead
+    // of replacing the report the reader is on. Only the happy launch path is
+    // silent; every outcome that needs the reader (ambiguity, not-found)
+    // still navigates so it is never swallowed.
+    background = false,
   ) => {
-    if (!closeCaseBriefForNavigation()) return;
-    leaveEvidenceReview();
+    if (!background && !closeCaseBriefForNavigation()) return;
+    if (!background) leaveEvidenceReview();
     const requestId = ++safeAuditRequestRef.current;
-    setPersonBriefTarget(null);
-    setTokenBriefTarget(null);
-    setCaseNotice(null);
-    privRef.current = priv;
-    setPrivateMode(priv);
+    if (!background) {
+      setPersonBriefTarget(null);
+      setTokenBriefTarget(null);
+      setCaseNotice(null);
+      privRef.current = priv;
+      setPrivateMode(priv);
+    }
     const resolved = resolveInput(raw);
     if (resolved.kind === "token") {
       if (!isRunnableTokenInput(resolved)) {
@@ -561,11 +569,13 @@ export default function App() {
         setPhase("notfound");
         return;
       }
-      setQuery(raw);
-      setTokenInput(resolved);
+      if (!background) {
+        setQuery(raw);
+        setTokenInput(resolved);
+      }
       const run = startTokenScan(resolved, priv, { force }); // background: survives navigation
       if (run.priv !== priv) { showPrivacyConflict(raw); return; }
-      setPhase("token-run");
+      if (!background) setPhase("token-run");
       return;
     }
     // A Polymarket profile link. Checked before "site" because the fallback
@@ -590,8 +600,10 @@ export default function App() {
     }
     // handle: use the RESOLVED username (e.g. extracted from an x.com URL), not raw.
     const handle = resolved.ref;
-    setQuery(handle);
-    setLiveError(null);
+    if (!background) {
+      setQuery(handle);
+      setLiveError(null);
+    }
     const providers = await probeBackend();
     if (requestId !== safeAuditRequestRef.current) return;
     if (providers) {
@@ -603,7 +615,7 @@ export default function App() {
       // immediate navigation away — the runner owns the stream, not the view.
       const run = startPersonAudit(handle, priv, intent);
       if (!!run.priv !== priv) { showPrivacyConflict(handle); return; }
-      setPhase("live");
+      if (!background) setPhase("live");
     } else {
       setPhase("notfound");
     }
@@ -1388,12 +1400,15 @@ export default function App() {
     allowLaunch = true,
     reuseStored = true,
     intent: ResearchIntent = "investment_due_diligence",
+    background = false,
   ) => {
     const activeRequestId = requestId ?? ++safeAuditRequestRef.current;
     try {
-      privRef.current = priv;
-      setPrivateMode(priv);
-      setPhase("resolving");
+      if (!background) {
+        privRef.current = priv;
+        setPrivateMode(priv);
+        setPhase("resolving");
+      }
       if (!priv && reuseStored) {
         const storedLookup = await resolveStoredCases(candidate.canonicalRef);
         if (activeRequestId !== safeAuditRequestRef.current) return;
@@ -1426,25 +1441,27 @@ export default function App() {
         }
       }
 
-      setTokenChoices([]);
-      setCaseNotice(null);
-      setQuery(candidate.input.ref);
-      privRef.current = priv;
-      setPrivateMode(priv);
+      if (!background) {
+        setTokenChoices([]);
+        setCaseNotice(null);
+        setQuery(candidate.input.ref);
+        privRef.current = priv;
+        setPrivateMode(priv);
+      }
       if (mode === "token") {
-        setTokenInput(candidate.input);
+        if (!background) setTokenInput(candidate.input);
         const run = reuseStored
           ? startTokenScan(candidate.input, priv)
           : startTokenScan(candidate.input, priv, { force: true });
         if (run.priv !== priv) { showPrivacyConflict(candidate.canonicalRef); return; }
-        setPhase("token-run");
+        if (!background) setPhase("token-run");
       } else {
-        setInvestigationInput(candidate.input);
+        if (!background) setInvestigationInput(candidate.input);
         const run = reuseStored
           ? startInvestigationScan(candidate.input, priv, { intent })
           : startInvestigationScan(candidate.input, priv, { force: true, intent });
         if (run.priv !== priv) { showPrivacyConflict(candidate.canonicalRef); return; }
-        setPhase("investigation");
+        if (!background) setPhase("investigation");
       }
     } catch (error) {
       if (activeRequestId !== safeAuditRequestRef.current) return;
@@ -1462,19 +1479,22 @@ export default function App() {
     allowLaunch = true,
     reuseStored = true,
     intent: ResearchIntent = "investment_due_diligence",
+    background = false,
   ) => {
-    if (!closeCaseBriefForNavigation()) return;
-    leaveEvidenceReview();
+    if (!background && !closeCaseBriefForNavigation()) return;
+    if (!background) leaveEvidenceReview();
     const requestId = ++safeAuditRequestRef.current;
     try {
-      setCaseNotice(null);
-      setTokenChoices([]);
-      privRef.current = priv;
-      setPrivateMode(priv);
-      setQuery(raw);
-      setLiveError(null);
-      setResolutionUsesStoredCases(reuseStored);
-      setPhase("resolving");
+      if (!background) {
+        setCaseNotice(null);
+        setTokenChoices([]);
+        privRef.current = priv;
+        setPrivateMode(priv);
+        setQuery(raw);
+        setLiveError(null);
+        setResolutionUsesStoredCases(reuseStored);
+        setPhase("resolving");
+      }
 
       const parsed = resolveInput(raw);
       const lookupInput = parsed.kind === "handle"
@@ -1514,7 +1534,7 @@ export default function App() {
           setPhase("notfound");
           return;
         }
-        await onAudit(raw, priv, false, intent);
+        await onAudit(raw, priv, false, intent, background);
         return;
       }
 
@@ -1604,7 +1624,7 @@ export default function App() {
         setPhase("token-choice");
         return;
       }
-      await openOrLaunchTokenCandidate(resolution.candidate, priv, mode, requestId, allowLaunch, reuseStored, intent);
+      await openOrLaunchTokenCandidate(resolution.candidate, priv, mode, requestId, allowLaunch, reuseStored, intent, background);
     } catch (error) {
       if (requestId !== safeAuditRequestRef.current) return;
       showAuditLaunchFailure(raw, mode, reuseStored, error);
@@ -1634,9 +1654,11 @@ export default function App() {
       label: dossier.display_name || dossier.handle,
       kind: "person",
     });
-    // A paid rabbit-hole action is always a fresh investigation. Stored cases
-    // remain available through the free "Open saved report" path in the sheet.
-    void onSafeAuditMode(raw, priv, "investigation", true, false);
+    // A paid rabbit-hole action is always a fresh investigation, and it runs
+    // in the background tray: the reader stays on the report they are reading
+    // instead of being yanked to the scan view (#455). Stored cases remain
+    // available through the free "Open saved report" path in the sheet.
+    void onSafeAuditMode(raw, priv, "investigation", true, false, "investment_due_diligence", true);
   }, [dossier, onSafeAuditMode]);
 
   const returnToResearchSource = useCallback(async () => {
@@ -1907,6 +1929,22 @@ export default function App() {
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 
+      {/* Background-scan tray (#455): deep dives launched from a report run
+          down here instead of replacing the report. Sticky, collapsible, with
+          per-task progress; a finished task flips green with an Open button,
+          and expanding a task fills the window under a "Go back" bar. */}
+      {(phase === "report" || phase === "token-report" || phase === "investigation-report" || phase === "project") && (
+        <ScanTray
+          parentLabel={
+            phase === "report" ? (dossier?.display_name || dossier?.handle || "current") :
+            phase === "token-report" ? (tokenDossier?.symbol ? `$${tokenDossier.symbol}` : "current") :
+            phase === "investigation-report" ? (investigation?.token?.symbol ? `$${investigation.token.symbol}` : "current") :
+            "current"
+          }
+          excludeRef={phase === "report" ? dossier?.handle : undefined}
+          onOpen={(ref, kind) => { void onOpenRecent(ref, kind === "person" ? "person" : kind); }}
+        />
+      )}
       {phase === "report" && dossier && <Report key={`person:${dossier.versionContext?.reportVersionId ?? dossier.viewVersionContext?.reportVersionId ?? dossier.persistence?.scanId ?? dossier.viewPersistence?.scanId ?? dossier.report.audit_id}`} dossier={dossier} onReset={reset} onAudit={personReportPrivate ? onPrivateAudit : onSafeAudit} onResearchAudit={(raw, priv) => onReportResearch(raw, personReportPrivate || priv)} onOpenSavedResearch={(raw, kind) => void onOpenRecent(raw, kind)} onOpenTokenReport={onOpenIncludedToken} onRescan={() => onAudit(dossier.handle, personReportPrivate)} onOpenProject={personReportPrivate ? onOpenPrivateProject : (name, domain, panelCostToken) => onOpenProject(name, domain, false, panelCostToken)} onOpenBrief={!evidenceReviewVersionId && !privateMode && personBriefTarget ? () => setCaseBriefTarget(personBriefTarget) : undefined} />}
       {phase === "project" && viewedProject && <ProjectView project={viewedProject} onAudit={viewedProject.privateMode ? onPrivateAudit : onSafeAudit} onReset={reset} record={!viewedProject.privateMode} panelCostToken={viewedProject.panelCostToken} />}
 
