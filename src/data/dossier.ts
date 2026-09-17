@@ -263,6 +263,8 @@ export interface Dossier {
   stockHealth?: CollectedEvidence["stockHealth"];
   /** Frozen stock exposure behind the verified token (score-neutral). */
   tokenizedStockPairing?: CollectedEvidence["tokenizedStockPairing"];
+  /** Frozen Web3 / non-Web3 market categorization for a company subject. */
+  subjectCategory?: CollectedEvidence["subjectCategory"];
   /**
    * Deterministic, score-neutral decision intelligence built from this exact
    * evidence capture. Older reports omit it and must not reconstruct it from
@@ -680,6 +682,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {}),
     ...(ev.stockHealth ? { stockHealth: structuredClone(ev.stockHealth) } : {}),
     ...(ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {}),
+    ...(ev.subjectCategory ? { subjectCategory: structuredClone(ev.subjectCategory) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),

@@ -36,6 +36,7 @@ import type { SourceArtifact } from "../data/evidence";
 import type { TokenDossier } from "../token/audit";
 import { getProfile, SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
+import { subjectCategoryLabel } from "../lib/subjectCategory";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import { CopyTldrButton, OutcomeDeltaStrip, ProviderFailureNotice, ScoreContextStrip } from "./ScoreContext";
 import { UsageVisuals } from "./UsageVisuals";
@@ -348,6 +349,11 @@ function SubjectProfileContext({
             <RoleIcon role={role} size={13} /> {ROLE_META[role].label}
           </span>
         ))}
+        {dossier.subjectCategory && (
+          <span className="chip" title={dossier.subjectCategory.basis.join(" ")}>
+            {subjectCategoryLabel(dossier.subjectCategory)}
+          </span>
+        )}
         {hasTerminalXState ? (
           <span className="text-[12.5px] font-medium text-avoid">X profile metrics unavailable</span>
         ) : (

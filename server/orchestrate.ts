@@ -44,6 +44,7 @@ import { teamCandidateSourceMatchesIdentity } from "../src/lib/teamCandidateIden
 import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 import { deriveTokenApplicability } from "./tokenApplicability";
+import { deriveSubjectCategory } from "./subjectCategory";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, reverseBioClaimIsStanding, followsSubject, resetFollowScanMemo, resetReverseBioMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
@@ -5571,6 +5572,11 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     organizationSubject: isOrganizationAccount(evidence),
   });
   evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
+  // Market categorization rides on the applicability decision: every company
+  // report states Web3 vs non-Web3 so the reader knows which metric families
+  // applied. Deterministic, identity-bound inputs only; fails to
+  // "undetermined" rather than guessing when the token search never completed.
+  evidence.subjectCategory = deriveSubjectCategory(evidence);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
     ventures: evidence.ventures,

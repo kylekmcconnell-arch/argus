@@ -498,3 +498,112 @@ Curated in `src/data/cabals.ts` (`sol-park-pumpswap-pool-factory`).
 Public Solana RPCs reject `getTokenLargestAccounts` for Token-2022 mints and
 cap `getSignaturesForAddress` pagination in practice; use the bonding-curve
 account for the launch window and Solscan's holder page for the snapshot.
+
+## Pons V2 self-launch with a dividend pivot ($IDX9000, Robinhood Chain, read 2026-09-16)
+
+$IDX / IDX9000 (`0xcd4e70bfd73952123449e453f08c12e44ab89e58`) is the LEBRON shape
+with two new moves. Curated in `src/data/cabals.ts` (`rh-farm-idx9000`).
+
+- **Rehearsal launch.** The deployer (`0x5cfdc3ee…`, an EIP-7702 account funded
+  0.5 ETH from a 5,845 ETH hot wallet 73 minutes earlier) launched an
+  identical IDX (`0x8db9cbfa…`) at 04:52 UTC with a 36.4% dev buy, sold it
+  all by 04:57, claimed the tax and bridged, then launched the live token at
+  05:02:50 with a 30.11% dev buy paid in tokenized SPY. A dead twin with the
+  same name and symbol a few minutes before the live token is a deployer
+  fingerprint worth checking on every Pons scan: read the deployer's token
+  transfers for a second PonsV2LauncherToken.
+- **Dump into the curve, not the pool.** 20.1% went back into the curve inside
+  three minutes of launch (blocks +767 to +1706) and 7.5% more before
+  graduation; the last 2.5% hit the graduated pool. Each dev sell was met
+  within four blocks by a cluster of buys from wallets funded hours earlier
+  from Robinhood-scale hot wallets, so the curve absorbed the dump. Recipe:
+  align deployer sells with buy clusters in the following four blocks.
+- **Creator-fee redirect.** At 16:37 UTC, three minutes before the last bridge
+  exit, the deployer called `PonsV2LaunchFactory.transferCreatorFeeRecipient`
+  and pointed the fee stream at an escrow created through Pons's own
+  `EscrowProxy` (`0x70e95cc5…`, deployed by the same address as
+  PonsV2LaunchLocker, 68k txs). That escrow pays the 5% sell tax to holders
+  in SPY every 90 minutes. A "fees go to holders" claim on a Pons token is
+  therefore checkable: look for that call and for `Claimed` events on the
+  recipient escrow. Here the claim became true only after the operator had
+  taken its 2.59 ETH.
+- **Brand after exit.** index9000.xyz was registered 66 minutes after the
+  deployer's last transaction, the X account posts lore every two hours and
+  follows only the Pons team and Robinhood, and a paid caller (@YusufGemz)
+  pushed the token from a $227k to a $435k cap the next day. The BNB Chain
+  address that received the bridged proceeds also exists on Robinhood Chain,
+  is a serial Pons sniper since July, and bought back 0.39% nine minutes
+  before the domain was registered. Same key on two chains is the one hard
+  link between the exit and the marketing phase.
+- **Who buys now.** 18.5% of supply in 24 hours through RobinHoodSettler, the
+  Robinhood app's swap router, into fresh 7702 app wallets; sells come from
+  aggregator and MEV contracts and the July sniper farm. When the settler is
+  the only buyer, the bid is retail from a call channel.
+
+## KOL call backtest: @YusufGemz (read 2026-09-17)
+
+Method: 57 posts scraped from the profile (2026-08-31 to 2026-09-16), every
+post naming a ticker with a bullish claim counted as a call at its post
+time, ticker resolved to the deepest DexScreener pool, price taken from
+GeckoTerminal hourly candles (close of the candle containing the post),
+returns measured at +24 h close, the +24 h high, +72 h close and the last
+candle on 2026-09-17. Repeat calls on the same token count separately
+because each one asks followers to buy again. 28 of 31 calls priced;
+$PAPERGIRL had no pool and two posts were commentary without a ticker.
+
+| Call (UTC) | Token | +24h | +24h high | +72h | Now |
+| --- | --- | --- | --- | --- | --- |
+| 2026-08-31 09:40 | SIRIUS | -75% | +17% | -38% | -80% |
+| 2026-08-31 16:12 | CASHCAT | -2% | +19% | +36% | -1% |
+| 2026-09-01 15:30 | UPTOBER | -5% | +26% | -2% | -32% |
+| 2026-09-02 14:53 | UBIK | -18% | +27% | +16% | +151% |
+| 2026-09-02 18:14 | OPTIMUS | +30% | +87% | +58% | -22% |
+| 2026-09-03 13:08 | DOGE-1 | -37% | +22% | -21% | -97% |
+| 2026-09-03 16:20 | PONS | +24% | +34% | +36% | +11% |
+| 2026-09-04 10:51 | OPTIMUS | -27% | +52% | -55% | -62% |
+| 2026-09-05 12:50 | PONS | +3% | +8% | -17% | -27% |
+| 2026-09-05 18:55 | UBIK | +15% | +30% | +46% | +28% |
+| 2026-09-05 20:14 | PONSAN | -92% | +4% | -90% | -99% |
+| 2026-09-06 14:57 | ZOLANA | -18% | +728% | -20% | -48% |
+| 2026-09-07 12:50 | UBIK | -10% | +7% | -23% | -2% |
+| 2026-09-08 08:24 | 4AI | -75% | +3% | -85% | -90% |
+| 2026-09-08 21:07 | UBIK | -13% | +24% | +2% | -16% |
+| 2026-09-11 10:37 | UBIK | +25% | +34% | -12% | -19% |
+| 2026-09-11 15:23 | OPTIMUS | -6% | +32% | -8% | +96% |
+| 2026-09-12 11:05 | UBIK | -17% | +25% | -38% | -34% |
+| 2026-09-12 11:52 | DOGE-1 | -18% | +40% | -83% | -91% |
+| 2026-09-12 12:09 | CASHCAT | -9% | +3% | -7% | +17% |
+| 2026-09-13 14:32 | INDEX | +0% | +15% | -10% | +1% |
+| 2026-09-13 16:28 | UBIK | -24% | +0% | -37% | -29% |
+| 2026-09-14 14:56 | BEM | -23% | +6% | -30% | -30% |
+| 2026-09-14 20:12 | IDX | +201% | +346% | +429% | +429% |
+| 2026-09-16 01:34 | LONG | -66% | +56% | -65% | -65% |
+| 2026-09-16 11:11 | IDX | +16% | +75% | +16% | +16% |
+| 2026-09-16 12:50 | LIFT | -69% | +60% | -69% | -69% |
+| 2026-09-16 17:09 | IDX | -21% | +9% | -21% | -21% |
+
+Medians: +24 h -15%, +72 h -18%, now -25%. 20 of 28 calls were under water
+at +72 h and still are. Seven calls printed a +50% high inside 24 h, which is
+the window a caller's own exit needs; the only call that held was the first
+$IDX mention on 2026-09-14 20:12 UTC, posted when the token was a $80k cap
+four hours after its domain was registered, and his source for it was "my
+$SPX friend" and "Quant told me". Tokens he says he "called early in the YG
+cabal" (his private Telegram) read worst in public: $PONSAN -99%, $4AI -90%,
+$DOGE-1 -97%, $SIRIUS -80%. The "no paid deal" disclaimer appears once, on
+$4AI, the day after its launch.
+
+Reading for ARGUS: a call from this account is a distribution event, not a
+discovery. Score it as K2 exit-liquidity behaviour with the private-group
+front-run pattern (public post after the private call, "already up Nx"),
+and treat any token he touches in its first day as one being sold to his
+audience.
+
+Wallet search: for seven of his Robinhood calls (UBIK, OPTIMUS, PONSAN, 4AI,
+IDX, CASHCAT, INDEX) every wallet that received the token in the eight hours
+before the public post was collected and intersected. After removing
+contracts, routers and bots with more than 5,000 transactions, no wallet
+bought a meaningful size (0.05% of supply or more) ahead of three or more of
+his calls, and only two drained EIP-7702 wallets did so ahead of two
+(0x52a5e2e0… on OPTIMUS and PONSAN, 0x40efc800… on UBIK and PONSAN). Either
+he does not buy what he posts, or he buys through the Robinhood app from a
+fresh wallet each time; the on-chain trail does not yet give him a wallet.
