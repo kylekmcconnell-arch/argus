@@ -11,7 +11,7 @@ export type RetrievalStatus = "rendered" | "recovered" | "gap";
 export type StageOutcome = "ok" | "spa-stub" | "blocked" | "unreachable";
 
 export interface RetrievalStage {
-  method: "direct fetch" | "rendering crawler";
+  method: "direct fetch" | "server fetch" | "rendering crawler";
   outcome: StageOutcome;
   chars: number;
   note: string;
@@ -62,8 +62,12 @@ const SKIP_HREF = /^(?:#|javascript:|mailto:|tel:|data:)/i;
  * Every anchor href in the raw HTML, deterministically. This is the same fix the
  * LinkedIn extraction miss got: read the markup, do not ask a model what the page
  * links to. Extraction only. Nothing here is ever fetched.
+ *
+ * Hrefs resolve against the page URL: footers routinely write "/team" or
+ * "//linkedin.com/company/x", and a relative destination never matches the
+ * social regex downstream, so a verbatim href was a silently dropped link.
  */
-export function extractLinks(html: string): string[] {
+export function extractLinks(html: string, baseUrl?: string): string[] {
   const markup = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ");
@@ -73,7 +77,15 @@ export function extractLinks(html: string): string[] {
   for (const m of markup.matchAll(/<a\b[^>]*?\shref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+))/gi)) {
     const href = (m[1] ?? m[2] ?? m[3] ?? "").trim().replace(/&amp;/gi, "&");
     if (!href || SKIP_HREF.test(href)) continue;
-    out.add(href);
+    let resolved = href;
+    if (baseUrl) {
+      try {
+        const abs = new URL(href, baseUrl);
+        if (abs.protocol !== "http:" && abs.protocol !== "https:") continue;
+        resolved = abs.toString();
+      } catch { /* an unparsable href stays verbatim */ }
+    }
+    out.add(resolved);
     if (out.size >= MAX_LINKS) break;
   }
   return [...out];
@@ -181,8 +193,8 @@ export async function retrieveSite(
 
   // Whatever raw HTML we hold, we hold its hrefs too. Pull them before the tag
   // strip, or they are gone for the rest of the pipeline.
-  const rawLinks = directHtml ? extractLinks(directHtml) : undefined;
-  const rawDescription = directHtml ? metaDescription(directHtml) : undefined;
+  let rawLinks = directHtml ? extractLinks(directHtml, u) : undefined;
+  let rawDescription = directHtml ? metaDescription(directHtml) : undefined;
 
   if (directOutcome === "ok" && directHtml) {
     const text = visibleText(directHtml);
@@ -190,6 +202,50 @@ export async function retrieveSite(
       url: u, status: "rendered", content: text, links: rawLinks, description: rawDescription, title: titleOf(directHtml), stages,
       coverageNote: "Retrieved directly; full page content available.",
     };
+  }
+
+  // ---- Stage 1.5: server-side raw HTML fetch ----
+  // The direct fetch runs in the browser, where nearly every third-party origin
+  // is CORS-blocked — which starved the whole lane of anchor hrefs, and a
+  // footer of icon-only social anchors reported as "no social links". The ARGUS
+  // server has no CORS constraint; its bounded fetch returns the same raw
+  // markup a curl would, hrefs included.
+  if (directOutcome !== "ok") {
+    let serverHtml: string | null = null;
+    let serverOutcome: StageOutcome = "unreachable";
+    try {
+      const r = await fetch(`/api/recon-site?url=${encodeURIComponent(u)}`, { headers: { Accept: "application/json" } });
+      if (r.ok) {
+        const body = await r.json() as { status?: string; html?: string };
+        if (body.status === "ok" && typeof body.html === "string" && body.html.trim()) {
+          serverHtml = body.html;
+          serverOutcome = classifyHtml(serverHtml);
+        }
+      }
+    } catch { /* a failed server read escalates to the rendering crawler */ }
+    push({
+      method: "server fetch",
+      outcome: serverOutcome,
+      chars: serverHtml ? visibleText(serverHtml).length : 0,
+      note:
+        serverOutcome === "ok" ? "The ARGUS server retrieved the raw page markup, links included." :
+        serverOutcome === "spa-stub" ? "The server saw only the JavaScript app shell; its static links were kept. Escalating." :
+        "The server could not retrieve the page either. Escalating to the rendering crawler.",
+    });
+    if (serverHtml) {
+      // Even an app shell carries its static footer anchors: keep whichever
+      // read produced links at all, preferring the fuller one.
+      const serverLinks = extractLinks(serverHtml, u);
+      if (serverLinks.length > (rawLinks?.length ?? 0)) rawLinks = serverLinks;
+      rawDescription = rawDescription ?? metaDescription(serverHtml) ?? undefined;
+      if (serverOutcome === "ok") {
+        const text = visibleText(serverHtml);
+        return {
+          url: u, status: "rendered", content: text, links: rawLinks, description: rawDescription, title: titleOf(serverHtml), stages,
+          coverageNote: "Retrieved through the ARGUS server; full page content and links available.",
+        };
+      }
+    }
   }
 
   // ---- Stage 2: rendering crawler (keyless JS render) ----

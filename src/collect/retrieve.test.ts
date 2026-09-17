@@ -76,4 +76,42 @@ describe("retrieveSite link preservation", () => {
     expect(retrieval.status).toBe("gap");
     expect(retrieval.links).toBeUndefined();
   });
+
+  it("recovers the raw markup through the server when the browser fetch is CORS-blocked", async () => {
+    // The Dynex shape: every cross-origin direct fetch throws in a browser, so
+    // without the server stage the lane never held raw HTML and the footer's
+    // icon-only socials read as "no social links on the page".
+    const body = `<html><head><title>Dynex</title></head><body><p>${"Dynex builds neuromorphic compute. ".repeat(20)}</p>${ICON_FOOTER}</body></html>`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("/api/recon-site?")) {
+        return new Response(JSON.stringify({ status: "ok", url: "https://dynex.example/", html: body }), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error("cors");
+    }));
+
+    const retrieval = await retrieveSite("dynex.example");
+
+    expect(retrieval.status).toBe("rendered");
+    expect(retrieval.links).toContain("https://x.com/enigmafund");
+    expect(retrieval.links).toContain("https://www.linkedin.com/company/enigmafund");
+    expect(retrieval.stages.map((stage) => stage.method)).toEqual(["direct fetch", "server fetch"]);
+  });
+});
+
+describe("href resolution", () => {
+  it("absolutizes relative and protocol-relative hrefs against the page URL", () => {
+    const html = `
+      <a href="/team">Team</a>
+      <a href="//www.linkedin.com/company/dynexcoin">Find us on LinkedIn</a>
+      <a href="https://x.com/dynexcoin">Find us on X</a>
+      <a href="ipfs://bag123">whitepaper</a>`;
+    expect(extractLinks(html, "https://dynex.example/about")).toEqual([
+      "https://dynex.example/team",
+      "https://www.linkedin.com/company/dynexcoin",
+      "https://x.com/dynexcoin",
+    ]);
+  });
 });
