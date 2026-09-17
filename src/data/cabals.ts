@@ -130,6 +130,27 @@ export const CABALS: Cabal[] = [
     ],
   },
   {
+    id: "rh-machi-taiwan",
+    name: "Machi Big Brother's $TAIWAN launch",
+    kind: "launch-farm",
+    intent: "unestablished",
+    summary:
+      "Jeffrey Huang, @machibigbrother, deployed $TAIWAN on Robinhood Chain from his public wallet machibigbrother.eth on 2026-08-31 and announced it on X the next day as 'Taiwan Coin paired with Taiwan Semiconductor Manufacturing', then on 2026-09-03 as 'my Mona Lisa'. He took no creator allocation: the full billion went to the launch hook and he bought his position on the open market like everyone else. He then promoted the token on FOMO while buying, and began selling nine days after launch. Both of his wallets sold, 6.9M tokens for about 3,900 USD, while he still holds 1.7 percent of supply. Every sale from the FomoScan-verified wallet bridged to Solana as USDC, and two of the four Solana tokens he posted theses about on 09-13 and 09-14 were first acquired by his Solana wallet after those proceeds landed. Intent is recorded as unestablished, not nefarious: the promote-then-sell sequence is documented, but he is roughly 15,000 USD underwater on the token, sold under one percent of supply, and nothing shows holders being sold into at scale. The selling that took the token down 92 percent from its peak was dispersed across 5,373 wallets, with the top ten accounting for 6.6 percent of sell flow and his own wallet ranked 238th.",
+    firstSeen: "2026-08-31",
+    lastSeen: "2026-09-17",
+    wallets: [
+      { chain: RH, address: "0x020ca66c30bec2c4fe3861a94e4db4a498a35872", role: "deployer", label: "machibigbrother.eth, the public wallet that launched $TAIWAN", evidence: "sent the launch tx 0xccbfd848a241472a46ae0a640eb0e59946e7580ac22393521a678ab79db7fd1d to factory 0x22e99278 at 2026-08-31 17:46 UTC, which minted 1,000,000,000 to hook 0xeb7c0347; ENS forward resolution of machibigbrother.eth returns this address; bought 10,435,660 tokens through the swap hub on 09-03 and 09-04, sold 435,660 on 09-07 08:40 and moved 1,000,000 to the fresh EOA 0x5fc7030f875851fd6fe4c8f199b009b1908b9ef4 (nonce 0, still holds them); holds 9,000,000 and 2.30 ETH, read 2026-09-17" },
+      { chain: RH, address: "0x3205c07eb8d4f59fa709d64ca68c51d427094be4", role: "kol-wallet", label: "FomoScan-verified trading wallet of FOMO account machibigbrother", evidence: "FomoScan record for FOMO account machibigbrother, display name Machi Big Brother (read 2026-09-17; FOMO stores no X link, so the binding rests on the account name, and no direct transfer links this address to machibigbrother.eth). EIP-7702 account, Simple7702Account delegate 0xe6cae83b. Bought 14,479,681 $TAIWAN in 20 buys 09-01 to 09-07 for about 12,825 USD and sold 6,479,680 in six sales 09-09 13:51 to 09-17 11:18 for about 3,563 USD, each sale routed $TAIWAN into TSM and bridged to Solana as USDC (Relay requests, 1,206.42 USDC total); holds 8,000,001" },
+      { chain: SOL, address: "CvmrvyKfkJQtGNVKzaJ6H337CN9F2vxrLsZZnmjP2omq", role: "kol-wallet", label: "FomoScan-verified Solana wallet, destination of the $TAIWAN sale proceeds", evidence: "FomoScan record for FOMO account machibigbrother (read 2026-09-17); holds all four Solana tokens he posted theses about on 09-13 and 09-14, of which HneTUS79 was first acquired 09-10 17:22 and AmPojoiS 09-12 22:04, both after the 09-09 and 09-10 $TAIWAN sales bridged in" },
+    ],
+    accounts: [
+      { handle: "machibigbrother", role: "kol", label: "Jeffrey Huang, 223.4k followers on X, creator and promoter of $TAIWAN", evidence: "X posts 2026-09-01 'Taiwan Coin paired with Taiwan Semiconductor Manufacturing' and 2026-09-03 'I am addicted to creating coins but I have now created my Mona Lisa. $TAIWAN'; FOMO theses on the token 09-06 16:57 'We are building the world's largest $TSM reserve. Long your longs.' and 09-07 04:03 'There is no ai without Taiwan', posted while buying and two days before he began selling; neither of his wallets holds any TSM, so the reserve being built sits in the pool, not with him; read 2026-09-17" },
+    ],
+    launches: [
+      { chain: RH, address: "0xaa0b48defde440b8445ba45db88cb076cf261e18", symbol: "TAIWAN", name: "Taiwan Coin", launchedAt: "2026-08-31", venue: "unknown factory 0x22e99278308b393ea1260859b181ad7e78f5eeed", outcome: "organic", note: "Paired against tokenized TSM rather than ETH. Peaked 20 hours after launch and is down 92 percent from that high, at about 105,000 USD of liquidity. No creator allocation and no self-snipe; the decline came from dispersed selling across 5,373 attributed wallets, top ten at 6.6 percent of flow. The creator's own selling began 2026-09-09, nine days after launch and two days after his last bullish post on it.", evidence: "156,948 transfers merged from Robinhood RPC logs over blocks 51,053,350 to 65,718,843, read 2026-09-17; sales attributed by walking router hops inside each tx; GeckoTerminal hourly candles for the price path" },
+    ],
+  },
+  {
     id: "rh-snipe-infra",
     name: "Robinhood Chain snipe infrastructure",
     kind: "infra",

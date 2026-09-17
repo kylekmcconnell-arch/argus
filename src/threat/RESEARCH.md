@@ -723,3 +723,56 @@ with no pool and no transfers, two launchpad launches that never traded, the
 apple token down 97.6 percent from a high set five hours after launch, and
 BASECAT alive a month later at about 615,000 USD of liquidity and 487,000 USD
 of daily volume.
+
+## Machi Big Brother and $TAIWAN: promote, sell, rotate (read 2026-09-17)
+
+Indexed as `rh-machi-taiwan`. The question was who sold $TAIWAN on Robinhood
+Chain and whether @machibigbrother was among them. He was, and he also created
+the token.
+
+**Identity.** The launch transaction came from machibigbrother.eth, resolved
+independently through ENS, so the deployer identification does not depend on
+FomoScan at all. He confirmed it on X on 2026-09-01 and again on 09-03. The
+second wallet, the one that did most of the selling, comes from FomoScan: the
+FOMO account `machibigbrother` carries a verified EVM wallet and a Solana
+wallet. FOMO stores no X link for that account, so the binding rests on the
+account name, and no direct transfer connects that address to
+machibigbrother.eth. The circumstantial case is strong: the FOMO account with
+his name speaks for a token his public wallet deployed.
+
+**The sequence.** He bought 24.9M tokens for about 19,500 USD across both
+wallets between 09-01 and 09-07, posting bullish theses while buying, including
+"We are building the world's largest $TSM reserve. Long your longs." on 09-06.
+Neither wallet holds any TSM; the reserve accumulates in the pool. His last
+bullish post on the token was 09-07 04:03 and his first sale was 09-09 13:51.
+He sold 6.9M tokens for about 3,900 USD and still holds 1.7 percent of supply,
+leaving him roughly 15,000 USD down.
+
+**The rotation.** Every sale from the FomoScan wallet bridged out: Relay
+requests show all six going from chain 4663 to Solana, arriving as USDC,
+1,206.42 USDC in total. His Solana wallet holds all four Solana tokens he
+posted theses about on 09-13 and 09-14, and two of them were first acquired
+after the proceeds landed: HneTUS79 on 09-10 17:22 and AmPojoiS on 09-12 22:04.
+So the money moved from the token he created and promoted into tokens he then
+promoted.
+
+**What the broader seller set does not show.** The decline was not one exit.
+Attributing every sale by walking router hops gives 5,373 selling wallets, the
+top ten holding 6.6 percent of sell flow, and his own wallet ranked 238th. For
+the token he promoted next on Robinhood Chain, 362 of 7,446 buyers had
+previously sold $TAIWAN, 16.5 percent of that token's buy volume. That is not
+evidence of coordination: the token launched on 09-14, after most $TAIWAN
+selling, so the ordering is forced, and there is no control showing what
+overlap two unrelated tokens on this chain would produce. Treat it as a base
+rate to beat, not a finding.
+
+**Method note for Robinhood Chain.** Uniswap v4 nets its settlements, so
+transfers into the PoolManager are only the residual delta and attributing
+sells to that address misses almost everything. The real sink is the swap hub
+0x8366a39c, and router layers nest several deep: the largest apparent seller
+was a forwarder that received from 596 sources and passed 100 percent onward.
+Classify every candidate by `eth_getCode` first, treat contracts as
+infrastructure to walk through, and remember that EIP-7702 accounts carry code
+but are user wallets. Log queries also need care: the launch window exceeds the
+10,000-log cap and needs recursive splitting, and address-less queries time
+out.
