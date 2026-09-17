@@ -119,6 +119,14 @@ import {
 import { collectCryptoRankFunding, cryptoRankConfigured } from "./adapters/cryptoRank";
 import { collectHolderProfile } from "./adapters/tokenHolders";
 import { collectStockHealth, resolveTokenizedStockUnderlying, tokenizedStockPairingSnapshot } from "./adapters/stockHealth";
+import {
+  collectCompaniesHouseRecord,
+  collectOpenCorporatesRecord,
+  collectSecRegistrant,
+  collectSiteDeclaredRegistrations,
+  companiesHouseConfigured,
+  openCorporatesConfigured,
+} from "./adapters/companyRegistries";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { buildMaterialReportDelta } from "../src/lib/reportDelta";
 import { collectSecurityAudits } from "./adapters/securityAudits";
@@ -3370,6 +3378,114 @@ async function collectTokenizedStockExposure(ctx: CollectContext): Promise<void>
   }
 }
 
+/**
+ * Company-registry pass: real registries answer the legal-entity questions for
+ * every company subject, crypto or not. The SEC EDGAR record joins by the CIK
+ * the verified public_security fact already carries; Companies House and
+ * OpenCorporates join by registration numbers the subject's OWN bound official
+ * site declares. Names never join a registry record. Never throws; keyed
+ * registries without keys stay silent here and visible on /api/health.
+ */
+async function collectCompanyRegistryEvidence(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.companyRegistry) return;
+  if (!evidence.roles.includes(SubjectClass.PROJECT) && !isOrganizationAccount(evidence)) return;
+
+  const snapshot: NonNullable<CollectedEvidence["companyRegistry"]> = {
+    siteDeclaredRegistrations: [],
+    capturedAt: new Date().toISOString(),
+  };
+
+  const listingFact = (evidence.basicFacts ?? []).find((fact) =>
+    fact.predicate === "public_security" && fact.status === "verified" && fact.security);
+  if (listingFact?.security) {
+    const outcome = await collectSecRegistrant(listingFact.security.cik);
+    if (outcome.available) {
+      const officialDomain = canonicalOfficialWebsite(evidence.profile.website)?.domain ?? null;
+      const registrantDomain = outcome.value.registrantWebsite
+        ? canonicalOfficialWebsite(outcome.value.registrantWebsite)?.domain ?? null
+        : null;
+      snapshot.sec = {
+        ...outcome.value,
+        websiteAgreesWithOfficialDomain: officialDomain && registrantDomain
+          ? officialDomain === registrantDomain
+          : null,
+      };
+      ctx.emit({
+        phase: "Research",
+        label: `SEC registrant record joined · CIK ${outcome.value.cik}`,
+        detail: `${outcome.value.entityName}${outcome.value.stateOfIncorporation ? ` · incorporated in ${outcome.value.stateOfIncorporation}` : ""}${outcome.value.lastAnnualReportAt ? ` · latest annual report ${outcome.value.lastAnnualReportAt}` : ""}${snapshot.sec.websiteAgreesWithOfficialDomain === false ? " · NOTE: the registrant's declared website is a different domain than the subject's official site" : ""}.`,
+        source: "sec-edgar",
+        tone: snapshot.sec.websiteAgreesWithOfficialDomain === false ? "warn" : "neutral",
+      });
+    } else if (outcome.reason === "unavailable") {
+      ctx.emit({
+        phase: "Research",
+        label: "SEC registrant record unavailable",
+        detail: `${outcome.note} The verified listing itself stands.`,
+        source: "sec-edgar",
+        tone: "warn",
+      });
+    }
+  }
+
+  const officialWebsite = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+  if (officialWebsite) {
+    snapshot.siteDeclaredRegistrations = await collectSiteDeclaredRegistrations(officialWebsite);
+    for (const declared of snapshot.siteDeclaredRegistrations.slice(0, 2)) {
+      if (declared.jurisdiction === "gb" && companiesHouseConfigured() && !snapshot.companiesHouse) {
+        const record = await collectCompaniesHouseRecord(declared.number);
+        if (record.available) {
+          snapshot.companiesHouse = { ...record.value, declaredOn: declared.sourceUrl };
+          ctx.emit({
+            phase: "Research",
+            label: `Companies House record joined · No. ${record.value.companyNumber}`,
+            detail: `${record.value.companyName}${record.value.status ? ` · ${record.value.status}` : ""}${record.value.incorporatedOn ? ` · incorporated ${record.value.incorporatedOn}` : ""} · joined by the number the official site itself declares.`,
+            source: "companies-house",
+            tone: record.value.status && record.value.status !== "active" ? "warn" : "neutral",
+          });
+        } else if (record.reason !== "not_configured") {
+          ctx.emit({
+            phase: "Research",
+            label: record.reason === "no_data"
+              ? `Companies House has no record for site-declared No. ${declared.number}`
+              : "Companies House unavailable",
+            detail: `${record.note} The site's own declaration is frozen either way.`,
+            source: "companies-house",
+            tone: record.reason === "no_data" ? "warn" : "neutral",
+          });
+        }
+      } else if (declared.jurisdiction && openCorporatesConfigured() && !snapshot.companiesHouse && !snapshot.openCorporates) {
+        const record = await collectOpenCorporatesRecord(declared.jurisdiction, declared.number);
+        if (record.available) {
+          snapshot.openCorporates = { ...record.value, declaredOn: declared.sourceUrl };
+          ctx.emit({
+            phase: "Research",
+            label: `OpenCorporates record joined · ${record.value.jurisdiction.toUpperCase()} ${record.value.companyNumber}`,
+            detail: `${record.value.companyName}${record.value.status ? ` · ${record.value.status}` : ""} · joined by the number the official site itself declares.`,
+            source: "opencorporates",
+            tone: "neutral",
+          });
+        }
+      }
+    }
+    if (snapshot.siteDeclaredRegistrations.length && !snapshot.companiesHouse && !snapshot.openCorporates
+      && !companiesHouseConfigured() && !openCorporatesConfigured()) {
+      ctx.emit({
+        phase: "Research",
+        label: "Registration number found · no registry key configured",
+        detail: `The official site declares registration number${snapshot.siteDeclaredRegistrations.length === 1 ? "" : "s"} ${snapshot.siteDeclaredRegistrations.map((entry) => entry.number).join(", ")}, but neither Companies House nor OpenCorporates keys are configured, so the registry record was not read.`,
+        source: "site fetch",
+        tone: "neutral",
+      });
+    }
+  }
+
+  if (snapshot.sec || snapshot.companiesHouse || snapshot.openCorporates || snapshot.siteDeclaredRegistrations.length) {
+    evidence.companyRegistry = snapshot;
+  }
+}
+
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
@@ -4855,6 +4971,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
   // paired against a tokenized stock gets the underlying stock's health too.
   await collectListedSecurityHealth(ctx);
   await collectTokenizedStockExposure(ctx);
+  await collectCompanyRegistryEvidence(ctx);
   let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
   if (rolesAfterBasicFacts.includes(SubjectClass.PROJECT)) {
