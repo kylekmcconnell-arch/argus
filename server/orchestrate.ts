@@ -88,6 +88,7 @@ import { fomoscanAdapter } from "./adapters/fomoscan";
 import { arkhamAdapter } from "./adapters/arkham";
 import { basicFactsAdapter, registrableDomain, screenSecRegistryForNames } from "./adapters/basicFacts";
 import { writeEntityFacts } from "./entityStore";
+import { investorObservationsFromEvidence, writeInvestorObservations } from "./investorStore";
 import {
   hasResolvedRealName,
   offchainAdapter,
@@ -6257,6 +6258,18 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
   // intentionally EXCLUDED: BasicFact legal_regulatory_event, adverse findings,
   // and sanctions/legal source artifacts must all be re-screened live every run.
   writeVerifiedEntityFacts(evidence, options);
+  // Cross-scan investor store: the frozen funding rounds' backers, one row per
+  // (investor x subject x round), feeding the derived VC ranking surface. Same
+  // best-effort, org-scoped, never-private rules as the entity KB.
+  if (options?.organizationId && !options.privateRun) {
+    const investorRows = investorObservationsFromEvidence(
+      options.organizationId,
+      evidence.profile.handle.replace(/^@/, "").toLowerCase(),
+      evidence.roles[0] ? String(evidence.roles[0]).toLowerCase() : "person",
+      { ...evidence, website: evidence.profile.website },
+    );
+    if (investorRows.length) void writeInvestorObservations(investorRows);
+  }
   finishRuntimeStage("pipeline", runtimeStartedAt);
   return dossier;
 }
