@@ -36,6 +36,7 @@ import type { SourceArtifact } from "../data/evidence";
 import type { TokenDossier } from "../token/audit";
 import { getProfile, SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
+import { subjectCategoryLabel } from "../lib/subjectCategory";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import { CopyTldrButton, OutcomeDeltaStrip, ProviderFailureNotice, ScoreContextStrip } from "./ScoreContext";
 import { UsageVisuals } from "./UsageVisuals";
@@ -115,6 +116,8 @@ import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { LaunchVenuePanel } from "./LaunchVenuePanel";
+import { StockHealthPanel } from "./StockHealthPanel";
+import { TokenizedStockPairingPanel } from "./TokenizedStockPairingPanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion, isProductDescriptionQuestion } from "../lib/intelligenceBrief";
 import { hasBoundProjectDescription, hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
@@ -347,6 +350,11 @@ function SubjectProfileContext({
             <RoleIcon role={role} size={13} /> {ROLE_META[role].label}
           </span>
         ))}
+        {dossier.subjectCategory && (
+          <span className="chip" title={dossier.subjectCategory.basis.join(" ")}>
+            {subjectCategoryLabel(dossier.subjectCategory)}
+          </span>
+        )}
         {hasTerminalXState ? (
           <span className="text-[12.5px] font-medium text-avoid">X profile metrics unavailable</span>
         ) : (
@@ -4152,6 +4160,14 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
 
         {f.evmControlReality && (
           <EvmControlSurfacePanel snapshot={f.evmControlReality} />
+        )}
+
+        {f.stockHealth && (
+          <StockHealthPanel snapshot={f.stockHealth} />
+        )}
+
+        {f.tokenizedStockPairing && (
+          <TokenizedStockPairingPanel snapshot={f.tokenizedStockPairing} />
         )}
 
         {f.launchVenueSubject && (

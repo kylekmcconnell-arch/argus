@@ -45,6 +45,7 @@ import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 import { deriveTokenApplicability } from "./tokenApplicability";
 import { launchVenueForOfficialDomain } from "../src/threat/launch";
+import { deriveSubjectCategory } from "./subjectCategory";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, reverseBioClaimIsStanding, followsSubject, resetFollowScanMemo, resetReverseBioMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
@@ -118,6 +119,7 @@ import {
 } from "./adapters/defiLlama";
 import { collectCryptoRankFunding, cryptoRankConfigured } from "./adapters/cryptoRank";
 import { collectHolderProfile } from "./adapters/tokenHolders";
+import { collectStockHealth, resolveTokenizedStockUnderlying, tokenizedStockPairingSnapshot } from "./adapters/stockHealth";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { buildMaterialReportDelta } from "../src/lib/reportDelta";
 import { collectSecurityAudits } from "./adapters/securityAudits";
@@ -3300,6 +3302,110 @@ function detectLaunchVenueSubject(ctx: CollectContext): void {
   });
 }
 
+/**
+ * Listed-security health: when a scan verified that the subject has a publicly
+ * traded security (the SEC-registry public_security fact), read the stock's
+ * own point-in-time health. This is the doctrine's stock leg — a company whose
+ * applicable instrument is a stock is assessed on the stock, penny stocks
+ * through mega-caps — frozen as score-neutral context exactly like the EVM
+ * control surface. Never throws; a feed outage is a visible coverage note.
+ */
+async function collectListedSecurityHealth(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.stockHealth) return;
+  const listingFact = (evidence.basicFacts ?? []).find((fact) =>
+    fact.predicate === "public_security"
+    && fact.status === "verified"
+    && fact.security);
+  if (!listingFact?.security) return;
+  const outcome = await collectStockHealth({
+    ticker: listingFact.security.ticker,
+    issuer: listingFact.security.issuer,
+    exchange: listingFact.security.exchange,
+    registryFactId: listingFact.factId,
+    registrySourceUrl: listingFact.sources[0]?.url ?? "",
+  });
+  if (!outcome.available) {
+    ctx.emit({
+      phase: "Research",
+      label: outcome.reason === "identity_mismatch"
+        ? "Listed-security health withheld · feed identity disagreed"
+        : outcome.reason === "unavailable"
+          ? "Listed-security health unavailable"
+          : "Listed-security health · no market-feed record",
+      detail: `${outcome.note} The verified listing itself stands; only the market-health read is affected.`,
+      source: "market-feed",
+      tone: outcome.reason === "no_data" ? "neutral" : "warn",
+    });
+    return;
+  }
+  evidence.stockHealth = { ...outcome.value };
+  const value = outcome.value;
+  const position = value.fiftyTwoWeekPositionPct !== null ? `${value.fiftyTwoWeekPositionPct}% of its 52-week range` : "an unbounded 52-week range";
+  const yearMove = value.change1yPct !== null ? `${value.change1yPct > 0 ? "up" : "down"} ${Math.abs(value.change1yPct)}% over the year` : "with under a year of history";
+  ctx.emit({
+    phase: "Research",
+    label: `Listed-security health captured · ${value.ticker}${value.pennyStock ? " · penny-stock range" : ""}`,
+    detail: `${value.issuer} trades at ${value.price} ${value.currency ?? ""} on ${value.exchange ?? "an unconfirmed venue"}, at ${position}, ${yearMove}. Frozen as score-neutral context.`,
+    source: "market-feed",
+    tone: "neutral",
+  });
+}
+
+/**
+ * Tokenized-stock pairing: a verified token can carry stock exposure two ways.
+ * It can BE a tokenized stock (xStocks, Dinari, Backed, native stock-token
+ * chains), or its price-corroborated pool can QUOTE in one (StonkBroker-class
+ * venues pair tokens against stocks, penny stocks included). Either way the
+ * doctrine wants the underlying stock's health in the assessment, so this
+ * resolves the underlying through the fail-closed tokenized-stock binding and
+ * freezes it score-neutral. Never throws.
+ */
+async function collectTokenizedStockExposure(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  const token = evidence.projectToken;
+  if (!token?.verified || evidence.tokenizedStockPairing) return;
+  const sides: Array<{ exposure: "token_is_tokenized_stock" | "quote_is_tokenized_stock"; side: { symbol: string; name: string | null; chain: string | null } }> = [
+    { exposure: "token_is_tokenized_stock", side: { symbol: token.symbol, name: token.name, chain: token.chain } },
+    ...(token.pairQuoteSymbol
+      ? [{
+          exposure: "quote_is_tokenized_stock" as const,
+          side: { symbol: token.pairQuoteSymbol, name: token.pairQuoteName ?? null, chain: token.chain },
+        }]
+      : []),
+  ];
+  for (const { exposure, side } of sides) {
+    const resolution = await resolveTokenizedStockUnderlying(side);
+    if (!resolution.resolved) {
+      if (resolution.reason === "not_tokenized_stock") continue;
+      ctx.emit({
+        phase: "Token",
+        label: resolution.reason === "identity_mismatch"
+          ? "Tokenized-stock exposure withheld · underlying identity disagreed"
+          : resolution.reason === "unavailable"
+            ? "Tokenized-stock exposure check unavailable"
+            : "Tokenized-stock exposure · no listed underlying",
+        detail: resolution.note,
+        source: "market-feed",
+        tone: resolution.reason === "unavailable" || resolution.reason === "identity_mismatch" ? "warn" : "neutral",
+      });
+      continue;
+    }
+    evidence.tokenizedStockPairing = tokenizedStockPairingSnapshot(exposure, side, resolution);
+    const underlying = evidence.tokenizedStockPairing.underlying;
+    ctx.emit({
+      phase: "Token",
+      label: exposure === "token_is_tokenized_stock"
+        ? `Token is a tokenized stock · underlying ${underlying.ticker}${underlying.pennyStock ? " (penny-stock range)" : ""}`
+        : `Pool quotes in a tokenized stock · underlying ${underlying.ticker}${underlying.pennyStock ? " (penny-stock range)" : ""}`,
+      detail: `${resolution.basis[0] ?? ""} The stock's health is frozen with the report as score-neutral context.`,
+      source: "market-feed",
+      tone: "neutral",
+    });
+    return;
+  }
+}
+
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
@@ -4779,6 +4885,12 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
       tone: "warn",
     });
   }
+  // The stock leg of the assessment doctrine: a verified public listing gets
+  // its own point-in-time health read (score-neutral), whether the subject is
+  // a non-Web3 company or a listed Web3 one; a verified token that is or is
+  // paired against a tokenized stock gets the underlying stock's health too.
+  await collectListedSecurityHealth(ctx);
+  await collectTokenizedStockExposure(ctx);
   // Venue-as-subject recognition rides on the finalized official domain.
   detectLaunchVenueSubject(ctx);
   let rolesAfterBasicFacts = providerBackedRoles(evidence);
@@ -5498,6 +5610,11 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     organizationSubject: isOrganizationAccount(evidence),
   });
   evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
+  // Market categorization rides on the applicability decision: every company
+  // report states Web3 vs non-Web3 so the reader knows which metric families
+  // applied. Deterministic, identity-bound inputs only; fails to
+  // "undetermined" rather than guessing when the token search never completed.
+  evidence.subjectCategory = deriveSubjectCategory(evidence);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
     ventures: evidence.ventures,
