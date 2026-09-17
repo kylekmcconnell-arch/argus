@@ -156,6 +156,38 @@ describe("private person report evidence boundary", () => {
     expect(relationships!.compareDocumentPosition(scoreEvidence!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("renders the frozen market category as a subject chip, with its basis as the tooltip", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: { ...base.report, roles: [SubjectClass.PROJECT] },
+      subjectCategory: {
+        market: "web3",
+        tokenStanding: "no_token",
+        basis: ["A completed identity-bound token search found no token."],
+        determinedAt: "2026-09-17T00:00:00.000Z",
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const chip = [...container.querySelectorAll("span.chip")].find((node) =>
+      node.textContent?.includes("Web3 startup · no token"));
+    expect(chip).not.toBeUndefined();
+    expect(chip!.getAttribute("title")).toContain("found no token");
+  });
+
+  it("renders no category chip for a report frozen before categorization existed", () => {
+    const base = buildReport(SUBJECTS[1]);
+    act(() => {
+      root.render(<Report dossier={base} onReset={() => {}} onAudit={() => {}} />);
+    });
+    expect(container.textContent).not.toContain("Category undetermined");
+    expect(container.textContent).not.toContain("Non-Web3");
+  });
+
   it("uses the linked token scan as Style 2's separate second score", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
