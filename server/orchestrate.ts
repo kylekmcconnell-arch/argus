@@ -117,7 +117,7 @@ import {
 } from "./adapters/defiLlama";
 import { collectCryptoRankFunding, cryptoRankConfigured } from "./adapters/cryptoRank";
 import { collectHolderProfile } from "./adapters/tokenHolders";
-import { collectStockHealth } from "./adapters/stockHealth";
+import { collectStockHealth, resolveTokenizedStockUnderlying, tokenizedStockPairingSnapshot } from "./adapters/stockHealth";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { buildMaterialReportDelta } from "../src/lib/reportDelta";
 import { collectSecurityAudits } from "./adapters/securityAudits";
@@ -3315,6 +3315,60 @@ async function collectListedSecurityHealth(ctx: CollectContext): Promise<void> {
   });
 }
 
+/**
+ * Tokenized-stock pairing: a verified token can carry stock exposure two ways.
+ * It can BE a tokenized stock (xStocks, Dinari, Backed, native stock-token
+ * chains), or its price-corroborated pool can QUOTE in one (StonkBroker-class
+ * venues pair tokens against stocks, penny stocks included). Either way the
+ * doctrine wants the underlying stock's health in the assessment, so this
+ * resolves the underlying through the fail-closed tokenized-stock binding and
+ * freezes it score-neutral. Never throws.
+ */
+async function collectTokenizedStockExposure(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  const token = evidence.projectToken;
+  if (!token?.verified || evidence.tokenizedStockPairing) return;
+  const sides: Array<{ exposure: "token_is_tokenized_stock" | "quote_is_tokenized_stock"; side: { symbol: string; name: string | null; chain: string | null } }> = [
+    { exposure: "token_is_tokenized_stock", side: { symbol: token.symbol, name: token.name, chain: token.chain } },
+    ...(token.pairQuoteSymbol
+      ? [{
+          exposure: "quote_is_tokenized_stock" as const,
+          side: { symbol: token.pairQuoteSymbol, name: token.pairQuoteName ?? null, chain: token.chain },
+        }]
+      : []),
+  ];
+  for (const { exposure, side } of sides) {
+    const resolution = await resolveTokenizedStockUnderlying(side);
+    if (!resolution.resolved) {
+      if (resolution.reason === "not_tokenized_stock") continue;
+      ctx.emit({
+        phase: "Token",
+        label: resolution.reason === "identity_mismatch"
+          ? "Tokenized-stock exposure withheld · underlying identity disagreed"
+          : resolution.reason === "unavailable"
+            ? "Tokenized-stock exposure check unavailable"
+            : "Tokenized-stock exposure · no listed underlying",
+        detail: resolution.note,
+        source: "market-feed",
+        tone: resolution.reason === "unavailable" || resolution.reason === "identity_mismatch" ? "warn" : "neutral",
+      });
+      continue;
+    }
+    evidence.tokenizedStockPairing = tokenizedStockPairingSnapshot(exposure, side, resolution);
+    const underlying = evidence.tokenizedStockPairing.underlying;
+    ctx.emit({
+      phase: "Token",
+      label: exposure === "token_is_tokenized_stock"
+        ? `Token is a tokenized stock · underlying ${underlying.ticker}${underlying.pennyStock ? " (penny-stock range)" : ""}`
+        : `Pool quotes in a tokenized stock · underlying ${underlying.ticker}${underlying.pennyStock ? " (penny-stock range)" : ""}`,
+      detail: `${resolution.basis[0] ?? ""} The stock's health is frozen with the report as score-neutral context.`,
+      source: "market-feed",
+      tone: "neutral",
+    });
+    return;
+  }
+}
+
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
@@ -4796,8 +4850,10 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
   }
   // The stock leg of the assessment doctrine: a verified public listing gets
   // its own point-in-time health read (score-neutral), whether the subject is
-  // a non-Web3 company or a listed Web3 one.
+  // a non-Web3 company or a listed Web3 one; a verified token that is or is
+  // paired against a tokenized stock gets the underlying stock's health too.
   await collectListedSecurityHealth(ctx);
+  await collectTokenizedStockExposure(ctx);
   let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
   if (rolesAfterBasicFacts.includes(SubjectClass.PROJECT)) {

@@ -323,6 +323,13 @@ export interface ProjectTokenSnapshot {
   maxSupply?: number;
   liquidityUsd?: number;
   pairAddress?: string;
+  /**
+   * What the price-corroborated pool quotes in. Tokenized-stock venues
+   * (StonkBroker-class) pair tokens against stocks, so the quote side carries
+   * real exposure information; the pairing lane resolves its underlying.
+   */
+  pairQuoteSymbol?: string;
+  pairQuoteName?: string;
   /** Provider-reported creation time for the canonical DEX pair, in Unix milliseconds. */
   pairCreatedAt?: number;
   /** CoinGecko lifetime high, captured with the canonical-token snapshot. */
@@ -1155,6 +1162,41 @@ export interface StockHealthSnapshot {
   capturedAt: string;
 }
 
+/**
+ * Frozen stock exposure carried by a token: either the token IS a tokenized
+ * stock (xStocks, Dinari dShares, Backed, native stock-token chains) or its
+ * price-corroborated pool QUOTES in one (StonkBroker-class venues pair tokens
+ * against stocks, including penny stocks). The underlying listed equity's
+ * health is read through the same market feed as StockHealthSnapshot and
+ * frozen score-neutral; the basis records exactly which surfaces bound the
+ * token to the stock.
+ */
+export interface TokenizedStockPairingSnapshot {
+  mode: "point_in_time";
+  scoringImpact: "none";
+  exposure: "token_is_tokenized_stock" | "quote_is_tokenized_stock";
+  /** The token-side surface that carried the stock exposure. */
+  tokenizedSymbol: string;
+  tokenizedName: string | null;
+  underlying: {
+    ticker: string;
+    feedLongName: string | null;
+    exchange: string | null;
+    currency: string | null;
+    price: number;
+    fiftyTwoWeekPositionPct: number | null;
+    change30dPct: number | null;
+    change90dPct: number | null;
+    change1yPct: number | null;
+    maxDrawdown1yPct: number | null;
+    annualizedVolatilityPct: number | null;
+    pennyStock: boolean | null;
+  };
+  basis: string[];
+  sourceUrl: string;
+  capturedAt: string;
+}
+
 /** Grok first-pass read of the bound X profile + official site. Display name is never a bind key. */
 /** Product/token the COMPANY launched. Separate unique-id from the subject. */
 export interface LaunchedProductLead {
@@ -1229,6 +1271,8 @@ export interface CollectedEvidence {
   evmControlReality?: EvmControlRealitySnapshot;
   /** Frozen point-in-time health of the verified listed security. Score-neutral context; never enters the scorer packet. */
   stockHealth?: StockHealthSnapshot;
+  /** Frozen stock exposure behind the verified token (tokenized stock or stock-quoted pool). Score-neutral context. */
+  tokenizedStockPairing?: TokenizedStockPairingSnapshot;
   /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */
   protocolFunding?: ProtocolFundingSnapshot;
   /** Frozen CryptoRank funding record; the second raises index, used when the DeFiLlama record is absent. Feeds P4 at reported tier. */

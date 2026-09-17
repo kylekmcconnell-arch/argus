@@ -261,6 +261,8 @@ export interface Dossier {
   tokenApplicability?: CollectedEvidence["tokenApplicability"];
   /** Frozen point-in-time health of the verified listed security (score-neutral). */
   stockHealth?: CollectedEvidence["stockHealth"];
+  /** Frozen stock exposure behind the verified token (score-neutral). */
+  tokenizedStockPairing?: CollectedEvidence["tokenizedStockPairing"];
   /**
    * Deterministic, score-neutral decision intelligence built from this exact
    * evidence capture. Older reports omit it and must not reconstruct it from
@@ -677,6 +679,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {}),
     ...(ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {}),
     ...(ev.stockHealth ? { stockHealth: structuredClone(ev.stockHealth) } : {}),
+    ...(ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),
