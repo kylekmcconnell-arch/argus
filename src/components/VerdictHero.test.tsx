@@ -41,7 +41,7 @@ describe("VerdictHero", () => {
     expect(host.textContent).toContain("Contract safety scored 26 of 26 points.");
     expect(host.textContent).toContain("The source code is verified, and ownership has been renounced.");
     expect(host.textContent).toContain("The main concern is liquidity setup, which scored 18 of 24 points.");
-    expect(host.textContent).toContain("The liquidity pool holds $3,071,603, but most liquidity-provider tokens are held in one wallet.");
+    expect(host.textContent).toContain("The selected pool holds $3,071,603, but most liquidity-provider tokens are held in one wallet. That is this pool only, not all of the token's liquidity.");
     expect(host.textContent).toContain("Open the evidence below for every source and calculation.");
 
     expect(host.textContent).not.toMatch(/record holds|carries the file|the drag is|full basis sits/i);
