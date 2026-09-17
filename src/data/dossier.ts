@@ -349,7 +349,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     .map((member) => ({
       ...member,
       ...(member.identity_link_evidence_origin === "model_lead"
-        ? { handle: undefined, linkedin: undefined, github: undefined, developerProfiles: undefined }
+        ? { handle: undefined, linkedin: undefined, telegram: undefined, email: undefined, github: undefined, developerProfiles: undefined }
         : {}),
       ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
     }));

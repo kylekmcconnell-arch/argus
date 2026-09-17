@@ -1441,6 +1441,8 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         existing.linkedin = t.linkedin;
         existing.identity_link_evidence_origin = t.identity_link_evidence_origin;
       }
+      if (!existing.telegram && t.telegram) existing.telegram = t.telegram;
+      if (!existing.email && t.email) existing.email = t.email;
       if ((!existing.projects || !existing.projects.length) && t.projects?.length) {
         existing.projects = t.projects;
         existing.projects_evidence_origin = t.projects_evidence_origin;
@@ -1496,6 +1498,8 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       biography: t.biography,
       kind: "kind" in t && (t.kind === "org" || t.kind === "person") ? t.kind : "person" as const,
       linkedin: t.linkedin,
+      telegram: t.telegram,
+      email: t.email,
       evidence: t.evidence,
       source: t.source ?? "X content",
       sourceUrl: t.sourceUrl,
