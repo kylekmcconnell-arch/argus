@@ -1286,7 +1286,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // later duplicates, so a page-roster name still gets its identity links.
   const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
   const namedCorpus = [...posts, ...corpus.teamSignalPosts];
-  const officialOrgs = officialXNamedOrgs(namedCorpus).filter((org) => norm(org.handle) && norm(org.handle) !== norm(ctx.handle));
+  const officialOrgs = officialXNamedOrgs(namedCorpus, ctx.evidence.profile.display_name).filter((org) => norm(org.handle) && norm(org.handle) !== norm(ctx.handle));
   const orgKeys = new Set(officialOrgs.map((org) => norm(org.handle)));
   // Official twitterapi corpus naming @handles as founder/co-founder/team.
   // Unique-id is the handle. Independent of Serper.

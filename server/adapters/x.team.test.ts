@@ -120,14 +120,44 @@ describe("official corpus names handles as team or linked orgs", () => {
 
   it("binds an incubator/team-behind/backed-by handle as an org, not a person", () => {
     const posts = [
-      "Incubated by @SomeOrg.",
-      "The team behind this is @SomeOrg.",
-      "Backed by @SomeOrg.",
+      "We are incubated by @SomeOrg.",
+      "The team behind us is @SomeOrg.",
+      "We are proud to be backed by @SomeOrg.",
     ];
     const orgs = officialXNamedOrgs(posts);
     expect(orgs.some((o) => o.handle === "@SomeOrg" && o.role === "incubator")).toBe(true);
     const team = officialXNamedTeam(posts, "ExampleProject");
     expect(team.some((m) => (m.handle ?? "").toLowerCase() === "someorg")).toBe(false);
+  });
+
+  it("binds a backed-by claim framed with the project's own name", () => {
+    const orgs = officialXNamedOrgs(["ExampleProject is backed by @RealFund."], "ExampleProject");
+    expect(orgs).toEqual([
+      expect.objectContaining({ handle: "@RealFund", role: "backed-by" }),
+    ]);
+  });
+
+  it("never mints a backer from amplification of someone else's backing (the CZ shape)", () => {
+    // The corpus is keyword-fished for "backed by" and keeps quote-posts and
+    // replies, so a project congratulating another project used to hand the
+    // audited subject a first-party-verified celebrity backer (#459: CZ shown
+    // as a Definitive backer he never was).
+    const posts = [
+      "Congrats @otherproject on the raise, backed by @cz_binance!",
+      "Huge: @someproject is backed by @cz_binance and shipping fast.",
+      "Backed by @cz_binance \ud83d\ude80",
+      "The team behind @otherproject is @SomeStudio.",
+      "Incubated by @SomeLab.",
+    ];
+    expect(officialXNamedOrgs(posts, "ExampleProject")).toEqual([]);
+  });
+
+  it("keeps the ownership window inside one clause", () => {
+    // An ownership token in a different sentence of the same post must not
+    // leak into a claim about someone else.
+    expect(officialXNamedOrgs([
+      "We are hiring across the stack. Congrats @otherproject, backed by @cz_binance!",
+    ], "ExampleProject")).toEqual([]);
   });
 
   it("does not bind an unrelated @mention as team", () => {
