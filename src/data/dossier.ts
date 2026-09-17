@@ -259,6 +259,8 @@ export interface Dossier {
   entityContinuity?: CollectedEvidence["entityContinuity"];
   /** Frozen pre-scoring token applicability decision. */
   tokenApplicability?: CollectedEvidence["tokenApplicability"];
+  /** The audited subject recognized as a launch venue, with its registered launch mechanics. */
+  launchVenueSubject?: CollectedEvidence["launchVenueSubject"];
   /**
    * Deterministic, score-neutral decision intelligence built from this exact
    * evidence capture. Older reports omit it and must not reconstruct it from
@@ -674,6 +676,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {}),
     ...(ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {}),
     ...(ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {}),
+    ...(ev.launchVenueSubject ? { launchVenueSubject: structuredClone(ev.launchVenueSubject) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),

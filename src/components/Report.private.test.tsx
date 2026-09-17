@@ -156,6 +156,39 @@ describe("private person report evidence boundary", () => {
     expect(relationships!.compareDocumentPosition(scoreEvidence!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("renders the launchpad-ecosystem panel for a venue subject, and nothing for others", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: { ...base.report, roles: [SubjectClass.PROJECT] },
+      launchVenueSubject: {
+        venue: "o1",
+        matchedDomain: "o1.exchange",
+        chains: ["base", "robinhood"],
+        lpDisposition: "locked",
+        lpNote: "no curve phase: the full supply is pooled and documented as permanent.",
+        platformPaysCreator: true,
+        feeNote: "1% per swap split between creator, platform, and referrer.",
+        capturedAt: "2026-09-17T00:00:00.000Z",
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const panel = container.querySelector('[data-testid="launch-venue"]');
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toContain("What this venue does to every token it launches");
+    expect(panel!.textContent).toContain("Liquidity: Locked");
+    expect(panel!.textContent).toContain("Creators earn ongoing fees");
+
+    act(() => {
+      root.render(<Report dossier={base} onReset={() => {}} onAudit={() => {}} />);
+    });
+    expect(container.querySelector('[data-testid="launch-venue"]')).toBeNull();
+  });
+
   it("uses the linked token scan as Style 2's separate second score", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {

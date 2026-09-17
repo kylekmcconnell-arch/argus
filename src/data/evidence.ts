@@ -1175,6 +1175,22 @@ export interface CollectedEvidence {
    * This lane is point-in-time context only and has no v1 scoring impact.
    */
   evmControlReality?: EvmControlRealitySnapshot;
+  /**
+   * The audited subject IS a launch venue (its verified official domain
+   * matches a documented venue domain). A launchpad without a native token is
+   * never judged on token metrics; it is judged on the launch mechanics it
+   * imposes on every token it releases, frozen here from the venue registry.
+   */
+  launchVenueSubject?: {
+    venue: string;
+    matchedDomain: string;
+    chains: string[];
+    lpDisposition: string;
+    lpNote: string;
+    platformPaysCreator: boolean;
+    feeNote: string;
+    capturedAt: string;
+  };
   /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */
   protocolFunding?: ProtocolFundingSnapshot;
   /** Frozen CryptoRank funding record; the second raises index, used when the DeFiLlama record is absent. Feeds P4 at reported tier. */
