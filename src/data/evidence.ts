@@ -1258,6 +1258,26 @@ export interface TokenizedStockPairingSnapshot {
   capturedAt: string;
 }
 
+/**
+ * Frozen market categorization for a company subject. ARGUS assesses all
+ * startups and businesses, not only crypto: every PROJECT report says whether
+ * the subject is a Web3 startup or a non-Web3 company, and where its token
+ * stands. Derived deterministically from the frozen token-applicability
+ * decision, identity-bound protocol records, and bound first-party text;
+ * `undetermined` is the fail-closed answer when the token identity search did
+ * not complete and no other signal speaks.
+ */
+export interface SubjectCategorySnapshot {
+  market: "web3" | "non_web3" | "undetermined";
+  /** Mirrors the token-applicability decision in reader-facing terms. */
+  tokenStanding: "live_token" | "token_planned" | "no_token" | "token_unverified";
+  /** Verified public-security fact (SEC registry class), when one exists. Orthogonal to market: a Web3 company can be listed too. */
+  publicListing?: { value: string; sourceUrl: string };
+  /** Which signals decided the category, in plain language. */
+  basis: string[];
+  determinedAt: string;
+}
+
 /** Grok first-pass read of the bound X profile + official site. Display name is never a bind key. */
 /** Product/token the COMPANY launched. Separate unique-id from the subject. */
 export interface LaunchedProductLead {
@@ -1389,6 +1409,8 @@ export interface CollectedEvidence {
   entityContinuity?: EntityContinuitySnapshot;
   /** Pre-scoring determination of whether P3 token conduct applies. */
   tokenApplicability?: TokenApplicabilitySnapshot;
+  /** Frozen Web3 / non-Web3 market categorization for a company subject. */
+  subjectCategory?: SubjectCategorySnapshot;
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to

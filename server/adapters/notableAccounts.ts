@@ -426,4 +426,6 @@ export const NOTABLE_ACCOUNTS: NotableAccount[] = [
   { handle: "synepsepad", label: "RH launchpad · Synapse (self-sniped launch)" },
   { handle: "Quantrhood", label: "RH project · QUANT" },
   { handle: "earnonhood", label: "RH project · earnonhood (scam accusation lead)" },
+  { handle: "IDX_RH", label: "RH memecoin · $IDX9000 (post-exit brand of a self-dumped Pons launch)" },
+  { handle: "YusufGemz", label: "paid caller · Yusuf / YG FAM (Telegram channel; called $IDX after the dev exit)" },
 ];
