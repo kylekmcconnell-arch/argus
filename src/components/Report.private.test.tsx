@@ -156,6 +156,57 @@ describe("private person report evidence boundary", () => {
     expect(relationships!.compareDocumentPosition(scoreEvidence!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("renders the listed-security health panel from the saved snapshot, score-neutral", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: { ...base.report, roles: [SubjectClass.PROJECT] },
+      stockHealth: {
+        mode: "point_in_time",
+        scoringImpact: "none",
+        ticker: "EXMP",
+        issuer: "Example Corp",
+        exchange: "NasdaqGS",
+        currency: "USD",
+        binding: {
+          registryFactId: "fact-listing",
+          registrySourceUrl: "https://www.sec.gov/files/company_tickers_exchange.json",
+          feedLongName: "Example Corp",
+          instrumentType: "EQUITY",
+        },
+        price: 3.15,
+        fiftyTwoWeekHigh: 8,
+        fiftyTwoWeekLow: 2,
+        fiftyTwoWeekPositionPct: 19,
+        change30dPct: -12.4,
+        change90dPct: -35.1,
+        change1yPct: -58,
+        maxDrawdown1yPct: -61.2,
+        annualizedVolatilityPct: 92.3,
+        pennyStock: true,
+        trend: [{ date: "2026-09-10", close: 3.15 }],
+        sourceUrl: "https://query1.finance.yahoo.com/v8/finance/chart/EXMP?range=1y&interval=1d",
+        capturedAt: "2026-09-17T00:00:00.000Z",
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const panel = container.querySelector('[data-testid="stock-health"]');
+    expect(panel).not.toBeNull();
+    expect(panel!.textContent).toContain("How the stock itself is trading");
+    expect(panel!.textContent).toContain("Penny-stock range");
+    expect(panel!.textContent).toContain("Score-neutral");
+    expect(panel!.textContent).toContain("Example Corp");
+    // A report frozen before the lane existed renders no panel.
+    act(() => {
+      root.render(<Report dossier={base} onReset={() => {}} onAudit={() => {}} />);
+    });
+    expect(container.querySelector('[data-testid="stock-health"]')).toBeNull();
+  });
+
   it("uses the linked token scan as Style 2's separate second score", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {

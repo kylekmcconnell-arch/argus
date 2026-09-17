@@ -101,6 +101,49 @@ describe("the technical posture route", () => {
     expect(body.note).toContain("misattribution");
   });
 
+  it("kind=equity binds by exact base ticker and rejects on-chain namesakes", async () => {
+    vi.stubEnv("CHART_SIGNALS_URL", "http://signals.local");
+    vi.stubEnv("CHART_SIGNALS_TOKEN", "t");
+    stubOk(upstream([
+      // a crypto token that shares the stock's ticker: carries an on-chain
+      // identity, so the equity path must drop it
+      row({ ticker: "AAPL-USD", signals: ["red_bars"] }),
+      // the actual equity row: no chain, no address
+      row({ chain: "", address: "", ticker: "AAPL", signals: ["green_bars"], market_cap_usd: "" }),
+      // a different stock entirely
+      row({ chain: "", address: "", ticker: "MSFT", signals: ["red_bars"], market_cap_usd: "" }),
+    ]));
+    const { api, sent } = res();
+    await handler({ method: "GET", query: { symbol: "AAPL", kind: "equity" } } as never, api as never);
+    const body = sent.body as { covered: boolean; readings: Array<{ observations: string[] }> };
+    expect(body.covered).toBe(true);
+    expect(body.readings).toHaveLength(1);
+    expect(body.readings[0].observations.join(" ")).toContain("uptrend");
+  });
+
+  it("kind=equity reports an unbound ticker instead of borrowing crypto rows", async () => {
+    vi.stubEnv("CHART_SIGNALS_URL", "http://signals.local");
+    vi.stubEnv("CHART_SIGNALS_TOKEN", "t");
+    stubOk(upstream([row({ ticker: "AAPL-USD" })]));
+    const { api, sent } = res();
+    await handler({ method: "GET", query: { symbol: "AAPL", kind: "equity" } } as never, api as never);
+    const body = sent.body as { covered: boolean; binding?: string; note: string };
+    expect(body.covered).toBe(false);
+    expect(body.binding).toBe("unresolved");
+    expect(body.note).toContain("equity ticker");
+  });
+
+  it("the crypto path is unchanged by the kind parameter's absence", async () => {
+    vi.stubEnv("CHART_SIGNALS_URL", "http://signals.local");
+    vi.stubEnv("CHART_SIGNALS_TOKEN", "t");
+    stubOk(upstream([row({ chain: "", address: "", ticker: "BTC" })]));
+    const { api, sent } = res();
+    await handler({ method: "GET", query: { chain: "ethereum", address: "0x1111111111111111111111111111111111111111", symbol: "BTC" } } as never, api as never);
+    const body = sent.body as { covered: boolean; binding?: string };
+    expect(body.covered).toBe(false);
+    expect(body.binding).toBe("unresolved");
+  });
+
   it("does not let an upstream failure be served as a clean reading", async () => {
     vi.stubEnv("CHART_SIGNALS_URL", "http://signals.local");
     vi.stubEnv("CHART_SIGNALS_TOKEN", "t");

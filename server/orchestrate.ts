@@ -117,6 +117,7 @@ import {
 } from "./adapters/defiLlama";
 import { collectCryptoRankFunding, cryptoRankConfigured } from "./adapters/cryptoRank";
 import { collectHolderProfile } from "./adapters/tokenHolders";
+import { collectStockHealth } from "./adapters/stockHealth";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { buildMaterialReportDelta } from "../src/lib/reportDelta";
 import { collectSecurityAudits } from "./adapters/securityAudits";
@@ -3264,6 +3265,56 @@ async function collectCryptoRankFundingEvidence(ctx: CollectContext): Promise<vo
   }
 }
 
+/**
+ * Listed-security health: when a scan verified that the subject has a publicly
+ * traded security (the SEC-registry public_security fact), read the stock's
+ * own point-in-time health. This is the doctrine's stock leg — a company whose
+ * applicable instrument is a stock is assessed on the stock, penny stocks
+ * through mega-caps — frozen as score-neutral context exactly like the EVM
+ * control surface. Never throws; a feed outage is a visible coverage note.
+ */
+async function collectListedSecurityHealth(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.stockHealth) return;
+  const listingFact = (evidence.basicFacts ?? []).find((fact) =>
+    fact.predicate === "public_security"
+    && fact.status === "verified"
+    && fact.security);
+  if (!listingFact?.security) return;
+  const outcome = await collectStockHealth({
+    ticker: listingFact.security.ticker,
+    issuer: listingFact.security.issuer,
+    exchange: listingFact.security.exchange,
+    registryFactId: listingFact.factId,
+    registrySourceUrl: listingFact.sources[0]?.url ?? "",
+  });
+  if (!outcome.available) {
+    ctx.emit({
+      phase: "Research",
+      label: outcome.reason === "identity_mismatch"
+        ? "Listed-security health withheld · feed identity disagreed"
+        : outcome.reason === "unavailable"
+          ? "Listed-security health unavailable"
+          : "Listed-security health · no market-feed record",
+      detail: `${outcome.note} The verified listing itself stands; only the market-health read is affected.`,
+      source: "market-feed",
+      tone: outcome.reason === "no_data" ? "neutral" : "warn",
+    });
+    return;
+  }
+  evidence.stockHealth = { ...outcome.value };
+  const value = outcome.value;
+  const position = value.fiftyTwoWeekPositionPct !== null ? `${value.fiftyTwoWeekPositionPct}% of its 52-week range` : "an unbounded 52-week range";
+  const yearMove = value.change1yPct !== null ? `${value.change1yPct > 0 ? "up" : "down"} ${Math.abs(value.change1yPct)}% over the year` : "with under a year of history";
+  ctx.emit({
+    phase: "Research",
+    label: `Listed-security health captured · ${value.ticker}${value.pennyStock ? " · penny-stock range" : ""}`,
+    detail: `${value.issuer} trades at ${value.price} ${value.currency ?? ""} on ${value.exchange ?? "an unconfirmed venue"}, at ${position}, ${yearMove}. Frozen as score-neutral context.`,
+    source: "market-feed",
+    tone: "neutral",
+  });
+}
+
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
@@ -4743,6 +4794,10 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
       tone: "warn",
     });
   }
+  // The stock leg of the assessment doctrine: a verified public listing gets
+  // its own point-in-time health read (score-neutral), whether the subject is
+  // a non-Web3 company or a listed Web3 one.
+  await collectListedSecurityHealth(ctx);
   let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
   if (rolesAfterBasicFacts.includes(SubjectClass.PROJECT)) {

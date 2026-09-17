@@ -114,6 +114,7 @@ import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
 import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
+import { StockHealthPanel } from "./StockHealthPanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion, isProductDescriptionQuestion } from "../lib/intelligenceBrief";
 import { hasBoundProjectDescription, hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
@@ -4151,6 +4152,10 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
 
         {f.evmControlReality && (
           <EvmControlSurfacePanel snapshot={f.evmControlReality} />
+        )}
+
+        {f.stockHealth && (
+          <StockHealthPanel snapshot={f.stockHealth} />
         )}
 
         <div id="decision-basis" className="legacy-reading-duplicate scroll-mt-28">
