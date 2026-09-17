@@ -15,6 +15,8 @@ const {
 }));
 
 vi.mock("./_auth.js", () => ({ requireArgusAuth }));
+const { fetchTeamPage } = vi.hoisted(() => ({ fetchTeamPage: vi.fn(async () => []) }));
+vi.mock("../server/adapters/teampage.js", () => ({ fetchTeamPage }));
 vi.mock("./_cache.js", () => ({
   attachPanelCost,
   cacheGetJson,
@@ -146,7 +148,10 @@ describe("Recon paid supplemental context", () => {
       completed: true,
       partial: false,
       providerFailed: false,
-      providers: [{ provider: "grok", status: "succeeded" }],
+      providers: [
+        { provider: "grok", status: "succeeded" },
+        { provider: "team-page", status: "succeeded" },
+      ],
       people: [{
         name: "Ada Candidate",
         handle: "@ada_candidate",
@@ -174,10 +179,50 @@ describe("Recon paid supplemental context", () => {
     expect(captured.body).toMatchObject({
       attempted: true,
       completed: false,
-      partial: false,
+      // The first-party team-page angle still completed, so coverage is
+      // partial, never a negative about the people themselves.
+      partial: true,
       providerFailed: true,
       people: [],
-      providers: [{ provider: "grok", status: "failed" }],
+      providers: [
+        { provider: "grok", status: "failed" },
+        { provider: "team-page", status: "succeeded" },
+      ],
+    });
+  });
+
+  it("returns the site's own team page roster as first-party team attribution", async () => {
+    resolvePanelCostVersion.mockReturnValue(VERSION_ID);
+    fetchTeamPage.mockResolvedValueOnce([{
+      name: "Daniela Herrmann",
+      role: "Co-Founder & Mission Control",
+      handle: "@dynexcoin",
+      linkedin: "www.linkedin.com/in/daniela-herrmann",
+      kind: "team",
+      evidence: "direct role statement on https://dynexcoin.org/team",
+      source: "https://dynexcoin.org/team",
+      sourceUrl: "https://dynexcoin.org/team",
+    }] as never);
+    const { res, captured } = response();
+
+    await reconTeamHandler({
+      headers: { "x-argus-panel-context": "required", "x-argus-panel-token": "signed-site-token" },
+      query: { domain: "dynexcoin.org" },
+    } as never, res as never);
+
+    expect(captured.status).toBe(200);
+    expect(fetchTeamPage).toHaveBeenCalledWith("dynexcoin.org", undefined);
+    expect(captured.body).toMatchObject({
+      attempted: true,
+      people: [{
+        name: "Daniela Herrmann",
+        role: "Co-Founder & Mission Control",
+        handle: "@dynexcoin",
+        provider: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        evidenceKind: "team_attribution",
+      }],
     });
   });
 });

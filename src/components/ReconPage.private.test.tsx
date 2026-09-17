@@ -115,6 +115,42 @@ describe("private site recon evidence boundary", () => {
     expect(presentation.discoveryCopy).toContain("not verified employment");
   });
 
+  it("promotes first-party team-page roster rows into the site section, out of the quarantine", () => {
+    const presentation = reconTeamPresentation(["Ada Site"], {
+      available: true,
+      attempted: true,
+      completed: true,
+      partial: false,
+      providerFailed: false,
+      people: [
+        {
+          name: "Ada Site",
+          role: "Co-Founder & CEO",
+          handle: "@adasite",
+          provider: "team-page",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          evidenceKind: "team_attribution",
+          evidence: "direct role statement on https://dynex.example/team",
+        },
+        {
+          name: "Mira Model",
+          role: "Founder",
+          provider: "grok",
+          evidence_origin: "model_lead",
+          artifact_verified: false,
+          evidenceKind: "team_attribution",
+        },
+      ],
+    });
+
+    // The roster row absorbs the plain site-name chip for the same person, and
+    // a model lead never rides along even under the same evidence kind.
+    expect(presentation.siteRoster.map((person) => person.name)).toEqual(["Ada Site"]);
+    expect(presentation.sitePeople).toEqual([]);
+    expect(presentation.supplementalLeads.map((person) => person.name)).toEqual(["Mira Model"]);
+  });
+
   it("renders failed supplemental discovery as unknown instead of a negative", () => {
     const presentation = reconTeamPresentation([], {
       available: true,

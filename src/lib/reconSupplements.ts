@@ -6,7 +6,7 @@ import type {
   WebTeamDiscoveryResult,
 } from "./investigation";
 
-const PROVIDERS = new Set<WebPersonProvider>(["grok", "twitterapi", "github"]);
+const PROVIDERS = new Set<WebPersonProvider>(["grok", "twitterapi", "github", "team-page"]);
 const EVIDENCE_KINDS = new Set<WebPersonEvidenceKind>([
   "team_attribution",
   "project_association",
