@@ -141,6 +141,19 @@ function apiKey(): string | null {
 
 const normalizeHandle = (handle: string): string => handle.trim().replace(/^@/, "").toLowerCase();
 
+/**
+ * FOMO stores the X link either as a bare username or as a profile URL
+ * ("https://x.com/lowcap_hunter"). Reduce both to the username.
+ */
+export function xUsernameFromFomo(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let v = raw.trim();
+  const m = /^(?:https?:\/\/)?(?:www\.|mobile\.)?(?:x|twitter)\.com\/(?:#!\/)?@?([A-Za-z0-9_]{1,15})(?:[/?#].*)?$/i.exec(v);
+  if (m) v = m[1];
+  v = v.replace(/^@/, "");
+  return /^[A-Za-z0-9_]{1,15}$/.test(v) ? v : null;
+}
+
 interface RawResponse {
   status: number;
   json: unknown;
@@ -207,7 +220,7 @@ function parseUser(json: unknown): FomoUser | null {
     handle,
     name: str(o.name),
     bio: str(o.bio),
-    twitter: str(o.twitter)?.replace(/^@/, "") ?? null,
+    twitter: xUsernameFromFomo(str(o.twitter)),
     solanaAddress: str(o.solanaAddress),
     evmAddress: str(o.evmAddress)?.toLowerCase() ?? null,
   };
@@ -238,7 +251,7 @@ function parsePnl(json: unknown): FomoPnl | null {
   }
   return {
     handle,
-    twitter: str(o.twitter)?.replace(/^@/, "") ?? null,
+    twitter: xUsernameFromFomo(str(o.twitter)),
     wallet: str(o.wallet),
     evmWallet: str(o.evmWallet)?.toLowerCase() ?? null,
     updatedAt: str(o.updatedAt) ?? (num(o.updatedAt) != null ? new Date(num(o.updatedAt)!).toISOString() : null),

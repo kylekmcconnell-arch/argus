@@ -10,6 +10,7 @@ import {
   fetchFomoUserByHandle,
   fetchFomoUserByWallet,
   fomoRecordBindsToSubject,
+  xUsernameFromFomo,
   fomoscanAdapter,
 } from "./fomoscan";
 import type { CollectContext } from "./types";
@@ -142,6 +143,16 @@ describe("FomoScan numbers are FomoScan's and say what they are", () => {
 });
 
 describe("a FOMO record is only bound to the subject when FOMO's own X link agrees", () => {
+  it("reads FOMO's X link whether it is a username or a profile url", () => {
+    expect(xUsernameFromFomo("https://x.com/lowcap_hunter")).toBe("lowcap_hunter");
+    expect(xUsernameFromFomo("http://twitter.com/@YusufGemz/")).toBe("YusufGemz");
+    expect(xUsernameFromFomo("x.com/altcoinist?s=21")).toBe("altcoinist");
+    expect(xUsernameFromFomo("@YusufGemz")).toBe("YusufGemz");
+    expect(xUsernameFromFomo("not a handle!")).toBeNull();
+    expect(xUsernameFromFomo(null)).toBeNull();
+    expect(fomoRecordBindsToSubject(user({ twitter: "https://x.com/YusufGemz" }) as never, "yusufgemz")).toBe("x-confirmed");
+  });
+
   it("confirms on a matching X username, rejects a different one, and downgrades a name-only match", () => {
     expect(fomoRecordBindsToSubject(user() as never, "@yusufgemz")).toBe("x-confirmed");
     expect(fomoRecordBindsToSubject(user({ twitter: "someoneelse" }) as never, "yusufgemz")).toBe("other-person");
