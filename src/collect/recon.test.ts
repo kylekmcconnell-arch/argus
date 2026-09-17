@@ -41,6 +41,20 @@ describe("social links on a server-rendered page", () => {
     expect(recon.findings.map((f) => f.claim)).not.toContain("No social or community links found in the rendered content.");
   });
 
+  it("promotes bare linkedin.com and github.com mentions in recovered text", () => {
+    // Reader-recovered text carries no anchors: a footer that survives only as
+    // "www.linkedin.com/company/dynexcoin" plain text must still count.
+    const recon = analyzeContent(fromHtml("", {
+      content: "Dynex builds neuromorphic compute. Find us at www.linkedin.com/company/dynexcoin and github.com/dynexcoin",
+      links: undefined,
+    }));
+
+    expect(recon.socials.map((s) => s.url)).toEqual([
+      "https://linkedin.com/company/dynexcoin",
+      "https://github.com/dynexcoin",
+    ]);
+  });
+
   it("still reads socials written out in the text, with no anchors at all", () => {
     const recon = analyzeContent(fromHtml("", {
       content: "Follow us at https://x.com/enigmafund or join https://t.me/enigma. Handle: @enigmafund",

@@ -67,7 +67,7 @@ export interface DeployerTrail {
   note: string;
 }
 
-export type WebPersonProvider = "grok" | "twitterapi" | "github";
+export type WebPersonProvider = "grok" | "twitterapi" | "github" | "team-page";
 export type WebPersonEvidenceKind =
   | "team_attribution"
   | "project_association"
