@@ -64,7 +64,7 @@ describe("AskReport", () => {
     expect(container.querySelector('a[href="https://example.com/source"]')).not.toBeNull();
   });
 
-  it("opens with the disputed context on a challenge event and tags the question", async () => {
+  it("opens with the disputed context on a challenge-ask event and tags the question", async () => {
     const providerFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ answer: "ok" }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -80,7 +80,9 @@ describe("AskReport", () => {
     });
 
     act(() => {
-      window.dispatchEvent(new CustomEvent("argus:challenge", {
+      // The structured challenge dialog now owns "argus:challenge"; the Eye
+      // answers the ask-about-this routing event instead.
+      window.dispatchEvent(new CustomEvent("argus:challenge-ask", {
         detail: { context: "Team & identity · scored 14/25" },
       }));
     });

@@ -94,6 +94,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     retiredService("crunchbase", "Crunchbase (company funding)", "DeFiLlama and Monid/Akta cover funding and backing"),
     retiredService("reddit", "Reddit (community signal)", "Reddit API access was not approved"),
     configuredService("gmgn", "GMGN (holder cost basis + wallet tags)", process.env.GMGN_API_KEY, "configure GMGN_API_KEY (apply at https://gmgn.ai/ai)"),
+    optionalService("resend", "Resend (challenge verification + edit notices)", process.env.RESEND_API_KEY, "configure RESEND_API_KEY (and RESEND_FROM on a verified sending domain)"),
     optionalService("companies-house", "Companies House (UK legal-entity registry)", process.env.COMPANIES_HOUSE_API_KEY, "configure COMPANIES_HOUSE_API_KEY (free key at developer.company-information.service.gov.uk)"),
     optionalService("opencorporates", "OpenCorporates (global legal-entity registry)", process.env.OPENCORPORATES_API_TOKEN, "configure OPENCORPORATES_API_TOKEN"),
     optionalService("safebrowsing", "Google Safe Browsing (site-safety recall)", process.env.GOOGLE_SAFE_BROWSING_KEY, "configure GOOGLE_SAFE_BROWSING_KEY"),
