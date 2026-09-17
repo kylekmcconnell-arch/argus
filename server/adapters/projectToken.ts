@@ -91,6 +91,8 @@ interface DexPair {
   pairAddress: string;
   chain: string;
   quoteSymbol: string;
+  /** Quote token's display name; the tokenized-stock pairing lane reads it. */
+  quoteName: string;
   priceUsd: number;
   liquidityUsd: number;
   sourceUrl: string;
@@ -1497,6 +1499,7 @@ function selectPriceCorroboratedPair(
       pairAddress,
       chain,
       quoteSymbol: cleanText(quoteToken.symbol),
+      quoteName: cleanText(quoteToken.name),
       priceUsd,
       liquidityUsd: liquidity,
       sourceUrl: cleanText(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`,
@@ -2331,6 +2334,10 @@ export async function collectProjectTokenIdentity(
     ...pair ? {
       liquidityUsd: pair.liquidityUsd,
       pairAddress: pair.pairAddress,
+      // What the pool quotes in. StonkBroker-class venues pair tokens against
+      // tokenized stocks, so the quote side is identity data, not trivia.
+      ...(pair.quoteSymbol ? { pairQuoteSymbol: pair.quoteSymbol } : {}),
+      ...(pair.quoteName ? { pairQuoteName: pair.quoteName } : {}),
       ...(pair.pairCreatedAt !== undefined ? { pairCreatedAt: pair.pairCreatedAt } : {}),
     } : {},
     ...ath ? { ath } : {},

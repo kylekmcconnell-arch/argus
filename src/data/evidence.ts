@@ -323,6 +323,13 @@ export interface ProjectTokenSnapshot {
   maxSupply?: number;
   liquidityUsd?: number;
   pairAddress?: string;
+  /**
+   * What the price-corroborated pool quotes in. Tokenized-stock venues
+   * (StonkBroker-class) pair tokens against stocks, so the quote side carries
+   * real exposure information; the pairing lane resolves its underlying.
+   */
+  pairQuoteSymbol?: string;
+  pairQuoteName?: string;
   /** Provider-reported creation time for the canonical DEX pair, in Unix milliseconds. */
   pairCreatedAt?: number;
   /** CoinGecko lifetime high, captured with the canonical-token snapshot. */
@@ -875,6 +882,13 @@ export interface BasicFact {
   evidence_origin: "deterministic";
   artifact_verified: true;
   provider: "public-web";
+  /**
+   * Structured listing identity for a registry-verified public_security fact.
+   * The SEC registry row's CIK, ticker, exchange and issuer used to live only
+   * inside the frozen excerpt bytes; downstream lanes (stock health, EDGAR
+   * filings) join on these fields instead of re-parsing prose.
+   */
+  security?: { cik: number; ticker: string; exchange: string; issuer: string };
   discoveryProvider?: "claude-web-search" | "grok" | "grounded" | "argus-identity-bootstrap" | "security-audits";
   /**
    * Omitted/true: a strict single-passage fact, eligible to set enforced score
@@ -1104,6 +1118,86 @@ export interface TokenApplicabilitySnapshot {
 }
 
 /**
+ * Frozen point-in-time health read of a verified listed security. The doctrine
+ * behind it: when a company's applicable market instrument is a stock, ARGUS
+ * assesses the stock's own health instead of pretending token metrics apply.
+ * Score-neutral in v1 (mode/scoringImpact mirror EvmControlRealitySnapshot):
+ * the panel renders, the scorer never sees it. Identity is double-anchored:
+ * the ticker comes from the verified SEC-registry public_security fact, and
+ * the market feed's own issuer name and instrument type must agree before the
+ * snapshot is frozen.
+ */
+export interface StockHealthSnapshot {
+  mode: "point_in_time";
+  scoringImpact: "none";
+  ticker: string;
+  issuer: string;
+  exchange: string | null;
+  currency: string | null;
+  binding: {
+    /** The verified SEC-registry fact this read is anchored to. */
+    registryFactId: string;
+    registrySourceUrl: string;
+    /** The market feed's own issuer name and instrument type, frozen as the agreement receipt. */
+    feedLongName: string | null;
+    instrumentType: string | null;
+  };
+  price: number;
+  fiftyTwoWeekHigh: number | null;
+  fiftyTwoWeekLow: number | null;
+  /** 0 = at the 52-week low, 100 = at the 52-week high. */
+  fiftyTwoWeekPositionPct: number | null;
+  change30dPct: number | null;
+  change90dPct: number | null;
+  change1yPct: number | null;
+  /** Deepest peak-to-trough decline across the captured year, as a negative percent. */
+  maxDrawdown1yPct: number | null;
+  /** Annualized close-to-close volatility over the captured year. */
+  annualizedVolatilityPct: number | null;
+  /** US convention: priced under $5. Null when the currency is not USD. */
+  pennyStock: boolean | null;
+  /** Weekly downsampled closes (about a year, ending at the latest close). */
+  trend: Array<{ date: string; close: number }>;
+  sourceUrl: string;
+  capturedAt: string;
+}
+
+/**
+ * Frozen stock exposure carried by a token: either the token IS a tokenized
+ * stock (xStocks, Dinari dShares, Backed, native stock-token chains) or its
+ * price-corroborated pool QUOTES in one (StonkBroker-class venues pair tokens
+ * against stocks, including penny stocks). The underlying listed equity's
+ * health is read through the same market feed as StockHealthSnapshot and
+ * frozen score-neutral; the basis records exactly which surfaces bound the
+ * token to the stock.
+ */
+export interface TokenizedStockPairingSnapshot {
+  mode: "point_in_time";
+  scoringImpact: "none";
+  exposure: "token_is_tokenized_stock" | "quote_is_tokenized_stock";
+  /** The token-side surface that carried the stock exposure. */
+  tokenizedSymbol: string;
+  tokenizedName: string | null;
+  underlying: {
+    ticker: string;
+    feedLongName: string | null;
+    exchange: string | null;
+    currency: string | null;
+    price: number;
+    fiftyTwoWeekPositionPct: number | null;
+    change30dPct: number | null;
+    change90dPct: number | null;
+    change1yPct: number | null;
+    maxDrawdown1yPct: number | null;
+    annualizedVolatilityPct: number | null;
+    pennyStock: boolean | null;
+  };
+  basis: string[];
+  sourceUrl: string;
+  capturedAt: string;
+}
+
+/**
  * Frozen market categorization for a company subject. ARGUS assesses all
  * startups and businesses, not only crypto: every PROJECT report says whether
  * the subject is a Web3 startup or a non-Web3 company, and where its token
@@ -1195,6 +1289,10 @@ export interface CollectedEvidence {
    * This lane is point-in-time context only and has no v1 scoring impact.
    */
   evmControlReality?: EvmControlRealitySnapshot;
+  /** Frozen point-in-time health of the verified listed security. Score-neutral context; never enters the scorer packet. */
+  stockHealth?: StockHealthSnapshot;
+  /** Frozen stock exposure behind the verified token (tokenized stock or stock-quoted pool). Score-neutral context. */
+  tokenizedStockPairing?: TokenizedStockPairingSnapshot;
   /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */
   protocolFunding?: ProtocolFundingSnapshot;
   /** Frozen CryptoRank funding record; the second raises index, used when the DeFiLlama record is absent. Feeds P4 at reported tier. */

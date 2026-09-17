@@ -259,6 +259,10 @@ export interface Dossier {
   entityContinuity?: CollectedEvidence["entityContinuity"];
   /** Frozen pre-scoring token applicability decision. */
   tokenApplicability?: CollectedEvidence["tokenApplicability"];
+  /** Frozen point-in-time health of the verified listed security (score-neutral). */
+  stockHealth?: CollectedEvidence["stockHealth"];
+  /** Frozen stock exposure behind the verified token (score-neutral). */
+  tokenizedStockPairing?: CollectedEvidence["tokenizedStockPairing"];
   /** Frozen Web3 / non-Web3 market categorization for a company subject. */
   subjectCategory?: CollectedEvidence["subjectCategory"];
   /**
@@ -676,6 +680,8 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {}),
     ...(ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {}),
     ...(ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {}),
+    ...(ev.stockHealth ? { stockHealth: structuredClone(ev.stockHealth) } : {}),
+    ...(ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {}),
     ...(ev.subjectCategory ? { subjectCategory: structuredClone(ev.subjectCategory) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }

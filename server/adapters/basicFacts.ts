@@ -4257,6 +4257,10 @@ function secRegistryPublicSecurityFacts(
         evidence_origin: "deterministic",
         artifact_verified: true,
         provider: "public-web",
+        // Structured listing identity: downstream lanes (stock health, EDGAR
+        // filings) join on the CIK and ticker instead of re-parsing the value
+        // string or the frozen excerpt bytes.
+        security: { cik: row.cik, ticker: row.ticker, exchange: venue, issuer: relationship.name },
       }];
     });
   });
