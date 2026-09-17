@@ -116,6 +116,7 @@ import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
 import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
+import { FundraisingPanel } from "./FundraisingPanel";
 import { LaunchVenuePanel } from "./LaunchVenuePanel";
 import { StockHealthPanel } from "./StockHealthPanel";
 import { TokenizedStockPairingPanel } from "./TokenizedStockPairingPanel";
@@ -4178,6 +4179,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         {f.evmControlReality && (
           <EvmControlSurfacePanel snapshot={f.evmControlReality} />
         )}
+
+        <FundraisingPanel dossier={f} />
 
         {f.stockHealth && (
           <StockHealthPanel snapshot={f.stockHealth} />

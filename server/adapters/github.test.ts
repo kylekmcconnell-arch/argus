@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
-import { githubAdapter, githubOrgFromOfficialSite, searchQueryVariants } from "./github";
+import { githubAdapter, githubOrgFromOfficialSite, searchQueryVariants, sitemapCandidateUrls } from "./github";
 
 const json = (body: unknown) => new Response(JSON.stringify(body), {
   status: 200,
@@ -388,5 +388,58 @@ describe("GitHub org from the project's own web surfaces", () => {
   it("returns null without an official website", async () => {
     await expect(githubOrgFromOfficialSite(undefined)).resolves.toBeNull();
     await expect(githubOrgFromOfficialSite("")).resolves.toBeNull();
+  });
+
+  it("walks the site's own sitemap when the primary surfaces carry no link (the Definitive shape)", async () => {
+    // definitive.fi live (2026-09-17): the home page is client-rendered with
+    // no GitHub link in its raw HTML, docs.* does not exist, but the sitemap
+    // lists /flash-api whose prerendered footer links github.com/DefinitiveCo.
+    const sitemap = `<?xml version="1.0"?><urlset>
+      <loc>https://www.definitive.fi</loc>
+      <loc>https://www.definitive.fi/about</loc>
+      <loc>https://www.definitive.fi/blog/some-post</loc>
+      <loc>https://www.definitive.fi/flash-api</loc>
+    </urlset>`;
+    const fetched: string[] = [];
+    const fetcher = (async (input: string | URL | Request) => {
+      const url = String(input);
+      fetched.push(url);
+      if (url === "https://definitive.fi/") return html("<html><body>app shell, no links</body></html>");
+      if (url === "https://definitive.fi/sitemap.xml") return html(sitemap);
+      if (url.startsWith("https://docs.definitive.fi")) return html("no such host", 404);
+      if (url === "https://www.definitive.fi/flash-api") {
+        return html('<footer><a href="https://github.com/DefinitiveCo">GitHub</a></footer>');
+      }
+      if (url === "https://www.definitive.fi/about") return html("<html><body>about us</body></html>");
+      return html("not found", 404);
+    }) as typeof fetch;
+
+    await expect(githubOrgFromOfficialSite("https://www.definitive.fi/", fetcher)).resolves.toEqual({
+      org: "DefinitiveCo",
+      sourceUrl: "https://www.definitive.fi/flash-api",
+    });
+    // The api-shaped page ranks first, so the walk resolves there and never
+    // spends fetches on the about or blog pages.
+    expect(fetched).toContain("https://www.definitive.fi/flash-api");
+    expect(fetched).not.toContain("https://www.definitive.fi/about");
+    expect(fetched).not.toContain("https://www.definitive.fi/blog/some-post");
+  });
+
+  it("ranks sitemap pages developer-first, drops off-apex and root entries, and caps the walk", () => {
+    const xml = `<urlset>
+      <loc>https://apex.example/</loc>
+      <loc>https://apex.example/blog/one</loc>
+      <loc>https://apex.example/blog/two</loc>
+      <loc>https://apex.example/about</loc>
+      <loc>https://apex.example/developers</loc>
+      <loc>https://elsewhere.example/developers</loc>
+      <loc>https://apex.example/pricing</loc>
+    </urlset>`;
+    const ranked = sitemapCandidateUrls(xml, "apex.example", 3);
+    expect(ranked[0]).toBe("https://apex.example/developers");
+    expect(ranked[1]).toBe("https://apex.example/about");
+    expect(ranked).toHaveLength(3);
+    expect(ranked).not.toContain("https://elsewhere.example/developers");
+    expect(ranked).not.toContain("https://apex.example/");
   });
 });

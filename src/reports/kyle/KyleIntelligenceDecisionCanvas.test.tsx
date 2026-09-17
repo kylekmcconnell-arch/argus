@@ -125,12 +125,12 @@ describe("Kyle intelligence report opening", () => {
     />));
 
     expect(container.textContent).toContain(
-      "Team and leadership has the most recorded supporting evidence. Next to check: Establish a complete independent security history.",
+      "Team and leadership is documented, with 3 saved supporting sources. Next to check: Establish a complete independent security history.",
     );
     expect(container.textContent).not.toContain("Independent evidence remains incomplete.");
   });
 
-  it("uses verified support depth before score saturation when naming the strongest evidence", async () => {
+  it("leads with the deepest-sourced area, stated in absolute terms with no ranking language", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas
       {...props}
       favorable
@@ -141,8 +141,11 @@ describe("Kyle intelligence report opening", () => {
       ]}
     />));
 
-    expect(container.textContent).toContain("Team and leadership has the most recorded supporting evidence.");
-    expect(container.textContent).not.toContain("Product and execution has the most recorded supporting evidence.");
+    expect(container.textContent).toContain("Team and leadership is well documented, with 8 saved supporting sources.");
+    expect(container.textContent).not.toContain("Product and execution is");
+    // An investor reads this one report on its own merits: no comparative or
+    // leaderboard framing survives in the lead sentence.
+    expect(container.textContent).not.toContain("most recorded supporting evidence");
   });
 
   it("names the actual unresolved evidence area instead of hard-coding security and governance", async () => {

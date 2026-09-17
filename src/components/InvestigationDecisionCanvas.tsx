@@ -445,16 +445,19 @@ export function InvestigationDecisionCanvas(props: InvestigationDecisionCanvasPr
         )}
       </header>
 
+      {/* Meta-information about reading the report, not report content: it
+          renders a quarter smaller than findings so the eye seeking actionable
+          information never competes with methodology notes. */}
       <section className="panel mt-4 px-5 py-4" aria-label="How to read this score">
-        <h3 className="font-semibold text-ink">How to read this score</h3>
-        <p className="mt-2 text-[13.5px] leading-relaxed text-ink-dim">Higher scores mean a stronger result under ARGUS checks. A score is not a percentage chance of success or a prediction of returns. Read the warning alongside the number: a serious finding can control the result.</p>
-        {presentationStyle !== 2 && whyCopy && <p className="mt-2 text-[13.5px] leading-relaxed"><strong>Why this result:</strong> {whyCopy}</p>}
-        <p className="mt-2 text-[13.5px] leading-relaxed text-ink-dim">{scoreIsProvisional
+        <h3 className="text-[11px] font-semibold text-ink">How to read this score</h3>
+        <p className="mt-2 text-[10px] leading-relaxed text-ink-dim">Higher scores mean a stronger result under ARGUS checks. A score is not a percentage chance of success or a prediction of returns. Read the warning alongside the number: a serious finding can control the result.</p>
+        {presentationStyle !== 2 && whyCopy && <p className="mt-2 text-[10px] leading-relaxed"><strong>Why this result:</strong> {whyCopy}</p>}
+        <p className="mt-2 text-[10px] leading-relaxed text-ink-dim">{scoreIsProvisional
           ? "This score uses the areas assessed so far. Some checks remain open, so new evidence may change it."
           : "The score and the number of finished checks answer different questions. A finished check can still find a risk."} Missing information is a limit on the assessment, not proof of wrongdoing.</p>
-        <p className="mt-2 text-[13.5px] leading-relaxed text-ink-dim"><strong>Where the data comes from:</strong> <a href={evidenceHref} className="text-signal-lift underline">Open this report’s saved evidence</a> for the sources behind its findings. A statement by the subject, a provider’s measurement and an independently confirmed fact are different kinds of evidence. Where a source was not saved, treat the claim as unverified.</p>
+        <p className="mt-2 text-[10px] leading-relaxed text-ink-dim"><strong>Where the data comes from:</strong> <a href={evidenceHref} className="text-signal-lift underline">Open this report’s saved evidence</a> for the sources behind its findings. A statement by the subject, a provider’s measurement and an independently confirmed fact are different kinds of evidence. Where a source was not saved, treat the claim as unverified.</p>
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          {applicable > 0 && <a href={methodologyHref} className="text-[13px] text-signal-lift underline">See checks and data gaps</a>}
+          {applicable > 0 && <a href={methodologyHref} className="text-[10px] text-signal-lift underline">See checks and data gaps</a>}
           <ReportChallengeButton context={`${scoreLabel} · ${score == null ? "not measured" : `${score}/100`}`} anchorId={challengeAnchorId} label="Challenge this score" />
           {showDualScores && <ReportChallengeButton context={`${secondaryScore!.label} · ${secondaryScore!.score == null ? "not measured" : `${secondaryScore!.score}/100`}`} anchorId={challengeAnchorId} label={`Challenge ${secondaryScore!.label.toLowerCase()}`} />}
         </div>
