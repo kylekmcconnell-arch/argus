@@ -389,12 +389,25 @@ export function bindProfileAnchor(
 
   // Nearest anchor after the name appears in the markup, bounded so an
   // unrelated link further down the page is never adopted.
+  //
+  // A roster page puts every colleague's card within a few hundred characters
+  // of every other, so proximity alone adopted a DIFFERENT person's profile
+  // ("Konstantin Sebeo" bound to linkedin.com/in/katharina-eddins-translator),
+  // and that URL then became the identity key for the licensed employment
+  // lookup, importing a stranger's job history as this person's role
+  // continuity (ARGUS-05). Proximity may only LOCATE a profile whose own
+  // identifier already echoes the person's name; it can never supply the
+  // identity by itself. A handle that shares no name token with the person is
+  // left unbound rather than guessed.
   const namePosition = html.toLowerCase().indexOf(tokens.join(" "));
   if (namePosition < 0) return undefined;
   const near = candidates
     .filter((anchor) => Math.abs(anchor.index - namePosition) <= 1200)
     .sort((a, b) => Math.abs(a.index - namePosition) - Math.abs(b.index - namePosition))[0];
-  return near?.value;
+  if (!near) return undefined;
+  const identifier = near.value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const echoesName = tokens.some((token) => token.length >= 3 && identifier.includes(token));
+  return echoesName ? near.value : undefined;
 }
 
 export function htmlToText(html: string): string {

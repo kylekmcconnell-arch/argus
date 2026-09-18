@@ -742,7 +742,13 @@ function CorroborationTable({
               <div className="min-w-0 text-[12.5px] leading-relaxed text-ink-dim">
                 <div>{relationshipSignalLabel(r.follows, r.ack)}</div>
                 {acknowledgmentSource && (
-                  <a href={acknowledgmentSource.href} target="_blank" rel="noopener noreferrer" className="link-ext mt-1.5 inline-flex">Open acknowledgment</a>
+                  <a href={acknowledgmentSource.href} target="_blank" rel="noopener noreferrer" className="link-ext mt-1.5 inline-flex">
+                    {/* A row that says acknowledgment was never checked cannot
+                        offer a confirmed acknowledgment (ARGUS-10). */}
+                    {["endorsement", "thanks", "mention"].includes((r.ack ?? "").toLowerCase())
+                      ? "Open acknowledgment"
+                      : "Open the candidate source (acknowledgment not reviewed)"}
+                  </a>
                 )}
               </div>
               <div className="max-w-[14rem] sm:max-w-[11rem] sm:text-right">
@@ -1722,9 +1728,12 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const leadershipRows = report.governing_role === "PROJECT" ? (dossier.leaderDepartures ?? []) : [];
   const leadershipForMember = (member: ReportTeamMember) => {
     const memberKeys = new Set(teamIdentityKeys(member));
+    // Match on the name only. Matching on a saved LinkedIn URL let one
+    // mis-bound profile attach another person's employment record as this
+    // person's role continuity (ARGUS-05).
     return leadershipRows.find((row) => {
-      const rowKeys = [row.name, row.linkedin].map(normalizedTeamIdentity).filter(Boolean);
-      return rowKeys.some((key) => memberKeys.has(key));
+      const nameKey = normalizedTeamIdentity(row.name);
+      return Boolean(nameKey) && memberKeys.has(nameKey);
     });
   };
   const unmatchedLeadershipRows = leadershipRows.filter((row) =>
@@ -1975,7 +1984,11 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       label: "Token safety score",
       score: linkedTokenDossier?.score ?? null,
       verdictLabel: linkedTokenDossier?.verdict ?? "Not measured",
-      context: "Contract, tradeability, liquidity, holders, market data and sanctions.",
+      // Two engines answer different questions on opposite polarities: this
+      // one is quality out of 100 (higher is better), the market-mechanics
+      // lens below reports risk points (higher is worse). A report that
+      // published 95 PASS above 46 DANGER named neither scale (ARGUS-02).
+      context: "Out of 100, higher is safer. Contract, tradeability, liquidity, holders, market data and sanctions. The market-mechanics lens reports risk points on the opposite scale.",
       composition: linkedTokenCompositionRows,
       unavailableCopy: f.threatNote
         ?? "A project token is linked, but this saved project report does not contain a completed token-safety score.",
@@ -2459,6 +2472,10 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     // deliberately does NOT render here: it lives in the verdict header chip
     // and the methodology rail. A verdict section leads with findings about
     // the subject, never with our own process status.
+    // These rows carry no artifact references, which the evidence ledger
+    // already says out loud. Republishing the model's self-assigned
+    // confidence as ARGUS provenance turned a review lead into
+    // high-confidence adverse evidence (ARGUS-07).
     ...visibleContradictions.slice(0, 2).map((contradiction, index) => ({
       id: `contradiction-${index}`,
       title: plainLanguageSummary(contradiction.claim),
@@ -3609,7 +3626,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 </div>
                 {(webTeam.length > 0 || webTeamLeads.length > 0) && (
                   <span className="verdict-pill tint-signal">
-                    {webTeam.length} verified · {webTeamLeads.length} to verify
+                    {webTeam.length} source-grounded · {webTeamLeads.length} to verify
                   </span>
                 )}
               </header>
