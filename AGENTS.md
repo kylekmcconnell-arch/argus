@@ -26,6 +26,33 @@ wallet, or trading UI change belongs in
 If ownership is not explicit, stop before editing and create or update an issue
 labeled `needs-routing`. Never invent a repository mapping.
 
+## No personal approval gates
+
+Automated checks are the only gate. The four required checks plus review of the
+diff decide whether work merges; no collaborator's personal sign-off is a
+precondition for anything, in either direction.
+
+- Do not hold work, a branch, a pull request, a design change, or a scoring
+  weight open waiting for a named person (Kyle, Enigma, or anyone else) to
+  approve it. Ship it behind the required checks.
+- Do not write "awaiting <person>'s approval", "for <person>'s sign-off",
+  "please confirm or overrule", or an "Asks" list that blocks a merge. State the
+  decision you took and the evidence for it, and name what would reverse it.
+- A handoff, audit, or design document is a record of a decision already taken,
+  not a request for permission. Write it in the past tense and merge it.
+- Disagreement is resolved by a follow-up pull request that changes the thing,
+  not by a queue of pending approvals. Revert is always available.
+- This does not relax the guarded workflow below: publishing, deployments,
+  messages, purchases, permissions, financial actions, and anything that spends
+  money or leaves the repository still need explicit authorization, and the
+  protected branch and its required checks are never bypassed.
+
+This rule was decided by the owner on 2026-09-09
+(`docs/audits/2026-09-09/system-review.md`) and is machine-checked:
+`config/agent-context.json` carries `authority.personalApprovalGates: "none"`
+and `scripts/validate-agent-context.mjs` fails the `agent-context` check if it
+drifts.
+
 Keep secrets, customer/private data, provider transcripts, and credentials out
 of GitHub. Publishing, deployments, messages, purchases, permissions, and
 financial actions require explicit authorization and the existing guarded

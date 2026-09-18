@@ -1,6 +1,7 @@
 # ARGUS development read, 2026-09-16
 
-Prepared for Kyle to absorb and approve. Author: Enigma with Claude.
+A record of decisions already taken and shipped. Author: Enigma with Claude.
+Nothing here waits on a sign-off; reverse any of it with a pull request.
 
 ## What this repository is
 
@@ -68,7 +69,7 @@ with its sector and with tokens at the same stage.
   against three leading repos in the detected sector and against tokens at
   the same stage from this workspace's saved reports; "What this read saw".
 
-## Decisions taken (please confirm or overrule)
+## Decisions taken
 
 1. **The reviewed product is not named in the repository.** Docs, comments,
    fixtures, PR bodies and the cabal registry refer to it generically or by
@@ -145,8 +146,11 @@ with its sector and with tokens at the same stage.
 - A paid GeckoTerminal tier would lift the pricing bound if the backtest is
   worth it.
 
-## Asks
+## What would reverse these
 
-- Approve the four decisions above, or say which to change.
-- Confirm the penalty weights are acceptable as a starting point.
-- Decide whether the scan-time lane should stay unmetered.
+- A different call on any of the four decisions above: open a pull request that
+  changes it. None of them is waiting on an approval.
+- Penalty weights: they are live as a starting point and are meant to be reset
+  once the backtest has priced stalled and thin rows in the dozens.
+- The scan-time lane stays unmetered until its GitHub call cost shows up as a
+  problem in the cost ledger.
