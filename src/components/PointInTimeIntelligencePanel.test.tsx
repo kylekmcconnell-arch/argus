@@ -308,7 +308,7 @@ describe("PointInTimeIntelligencePanel", () => {
     render(value);
 
     expect(container.querySelector('[role="tablist"]')).toBeNull();
-    expect(container.textContent).toContain("canonical full-diligence view");
+    expect(container.textContent).toContain("readiness lens");
     expect(container.textContent).toContain("Full diligence");
     expect([...signalIds(container)].sort()).toEqual([...value.signals.map((signal) => signal.id)].sort());
   });
