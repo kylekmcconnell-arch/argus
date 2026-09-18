@@ -2,6 +2,21 @@ import type { Dossier } from "../data/dossier";
 import { isExactDomainBoundCompanyEnrichment } from "./diligenceEvidenceBinding";
 import { launchVenueNames } from "../threat/launch";
 
+/** Same registrable site, ignoring scheme, www and path. */
+function sameRegistrableHost(a: string | null | undefined, b: string | null | undefined): boolean {
+  const host = (value: string | null | undefined): string => {
+    if (!value) return "";
+    try {
+      return new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`)
+        .hostname.replace(/^www\./i, "").toLowerCase();
+    } catch {
+      return "";
+    }
+  };
+  const left = host(a);
+  return left !== "" && left === host(b);
+}
+
 // Fundraising & backers: one merged, chronological read of every identity-bound
 // funding record frozen with the report (DeFiLlama, CryptoRank, Monid/Akta),
 // with each round carrying its own source. Aggregator indexes are discovery
@@ -120,7 +135,17 @@ export function mergeFundraisingRounds(dossier: Pick<Dossier, "protocolFunding" 
         leadInvestors: [...(round.leadInvestors ?? [])],
         otherInvestors: [...(round.otherInvestors ?? [])],
         instrument: "unstated",
-        sources: [{ provider: "monid", title: "Monid/Akta funding record", url: enrichment.sourceUrl }],
+        // The enrichment's sourceUrl is frequently the company's own website
+        // (that is how the record was bound to the company). Saying "funding
+        // record" over a link to the subject's homepage presents first-party
+        // evidence as a provider receipt (ARGUS-18).
+        sources: [{
+          provider: "monid",
+          title: sameRegistrableHost(enrichment.sourceUrl, dossier.website ?? null)
+            ? "Monid/Akta record · opens the company's own site, not a provider receipt"
+            : "Monid/Akta funding record",
+          url: enrichment.sourceUrl,
+        }],
       });
     }
   }

@@ -58,10 +58,8 @@ function subjectBlock(d: Dossier): string {
   const last =
     typeof d.days_since_post === "number"
       ? d.days_since_post === 0
-        ? "posted today"
-        : d.days_since_post === 1
-        ? "posted yesterday"
-        : `last posted ${d.days_since_post}d ago`
+        ? "posted on the day of capture"
+        : `last posted ${d.days_since_post}d before capture`
       : "";
   const meta = [
     d.followers ? `${esc(d.followers)} followers` : "",
