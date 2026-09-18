@@ -142,6 +142,10 @@ function HolderBar({ holders }: { holders: HolderProfileSnapshot }) {
   ) {
     return null;
   }
+  // A lower bound that rounds UP stops being a lower bound: 1.5319% shown as
+  // "at least 2%" asserts more supply than was measured (ARGUS-13). Floor
+  // lower bounds to two decimals instead.
+  const floorTwo = (value: number): string => (Math.floor(value * 100) / 100).toFixed(2).replace(/\.?0+$/, "");
   const remainingAssessed = Math.max(0, top10 - top1);
   const rest = Math.max(0, 100 - top10);
   const segments = [
@@ -154,10 +158,19 @@ function HolderBar({ holders }: { holders: HolderProfileSnapshot }) {
     },
     { label: aggregateIsFloor ? "outside assessed rows" : "everyone else", pct: rest },
   ].filter((segment) => segment.pct > 0);
+  // Three independent roundings of parts that must total 100 displayed
+  // 1% + 0% + 98% = 99%. Round every row but the last, and give the last the
+  // residual so the shown parts always sum to 100.
+  const shown = segments.map((segment, index, all) => ({
+    ...segment,
+    display: index === all.length - 1
+      ? Math.max(0, 100 - all.slice(0, -1).reduce((sum, other) => sum + Math.round(other.pct), 0))
+      : Math.round(segment.pct),
+  }));
   return (
     <div>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="text-[15.5px] font-semibold tracking-tight text-ink tabular-nums">{aggregateIsFloor ? "at least " : ""}{Math.round(top10)}%</span>
+        <span className="text-[15.5px] font-semibold tracking-tight text-ink tabular-nums">{aggregateIsFloor ? `at least ${floorTwo(top10)}` : Math.round(top10)}%</span>
         <span className="text-[10px] uppercase tracking-[0.09em] text-ink-faint">
           {aggregateIsFloor
             ? `of supply across ${assessedWalletCount} assessed wallet${assessedWalletCount === 1 ? "" : "s"}`
@@ -167,17 +180,17 @@ function HolderBar({ holders }: { holders: HolderProfileSnapshot }) {
           <span className="mono text-[11px] text-ink-faint">{holders.holderCount.toLocaleString()} holders</span>
         )}
       </div>
-      <div className="mt-2 flex h-2.5 w-full overflow-hidden rounded-full" role="img" aria-label={`Supply split: ${segments.map((segment) => `${segment.label} ${Math.round(segment.pct)}%`).join(", ")}`}>
+      <div className="mt-2 flex h-2.5 w-full overflow-hidden rounded-full" role="img" aria-label={`Supply split: ${shown.map((segment) => `${segment.label} ${segment.display}%`).join(", ")}`}>
         {segments.map((segment, index) => (
           <div key={segment.label} className="h-full bg-signal-lift" style={{ width: `${Math.max(1.5, segment.pct)}%`, opacity: SEGMENT_OPACITY[index] ?? 0.2 }} />
         ))}
       </div>
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-        {segments.map((segment, index) => (
+        {shown.map((segment, index) => (
           <span key={segment.label} className="flex items-center gap-1.5 text-[11px] text-ink-dim">
             <span className="h-2 w-2 shrink-0 rounded-sm bg-signal-lift" style={{ opacity: SEGMENT_OPACITY[index] ?? 0.2 }} aria-hidden="true" />
             {segment.label}
-            <span className="mono text-ink-faint tabular-nums">{Math.round(segment.pct)}%</span>
+            <span className="mono text-ink-faint tabular-nums">{segment.display}%</span>
           </span>
         ))}
         {holders.lpLockedOrBurnedPct != null && holders.lpLockedOrBurnedPct > 0 && (

@@ -369,13 +369,13 @@ function SubjectProfileContext({
         )}
         {typeof dossier.days_since_post === "number" && (
           <span className={`text-[12.5px] ${dossier.days_since_post >= 21 ? "font-medium text-avoid" : "text-ink-faint"}`}>
+            {/* Relative wording reads as "now" forever in a frozen report, so
+                anchor every figure to the capture instead (ARGUS-19). */}
             {hasTerminalXState
-              ? `last observed post ${dossier.days_since_post}d ago`
+              ? `last observed post ${dossier.days_since_post}d before capture`
               : dossier.days_since_post === 0
-                ? "posted today"
-                : dossier.days_since_post === 1
-                  ? "posted yesterday"
-                  : `last posted ${dossier.days_since_post}d ago`}
+                ? "posted on the day of capture"
+                : `last posted ${dossier.days_since_post}d before capture`}
           </span>
         )}
       </div>
@@ -1253,7 +1253,10 @@ function FrozenTrustGraphPanel({
       : "NO CONCERNING CONNECTION FOUND";
 
   return (
-    <Section title="Known connections" kicker="checked against every case your team has audited">
+    <Section
+      title="Known connections"
+      kicker={`${screen.qualifiedContributionCount} qualified record${screen.qualifiedContributionCount === 1 ? "" : "s"} screened of ${screen.contributionCount} case${screen.contributionCount === 1 ? "" : "s"} on record`}
+    >
       <Card className="overflow-hidden">
         <div className="p-4">
           <div className="flex flex-wrap items-center gap-2">
