@@ -85,7 +85,7 @@ import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
 import { VerdictHero } from "./VerdictHero";
 import { ReportActionsRow } from "./ReportActionsRow";
-import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
+import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, projectAxisScores, tokenDimensionChapters } from "../lib/dimensionChapters";
 import {
   BasicFactsPanel,
   type BasicFactLeadView,
@@ -1884,7 +1884,7 @@ export function InvestigationReport({
                 <div className="af-doc">
                 {projectAccount?.projectStrengthBands && (
                   <DimensionChapters
-                    chapters={personDimensionChapters(projectAccount.projectStrengthBands)}
+                    chapters={personDimensionChapters(projectAccount.projectStrengthBands, projectAxisScores(projectAccount.report))}
                     checksHref="#investigation-methodology"
                   />
                 )}

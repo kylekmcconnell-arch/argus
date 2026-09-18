@@ -337,7 +337,7 @@ describe("founder decision question outcomes", () => {
     expect(observations[0]?.note).toContain("Each observed asset claim must be verified in its own category");
     expect(founderReadiness(observations[0])).toMatchObject({
       status: "provisional",
-      coveragePercent: 88,
+      coveragePercent: 88.8,
       successful: 8,
       applicable: 9,
       unresolved: 1,

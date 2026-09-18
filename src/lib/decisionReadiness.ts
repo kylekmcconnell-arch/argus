@@ -1,4 +1,4 @@
-import { clearanceCoverage, decisionCriticalChecks, summarizeChecks, type ScanCheck } from "./scanChecklist.js";
+import { clearanceCoverage, coveragePercentOf, decisionCriticalChecks, summarizeChecks, type ScanCheck } from "./scanChecklist.js";
 
 /**
  * Coverage below this floor is too thin to describe an assessment as
@@ -89,11 +89,11 @@ export function deriveDecisionReadiness(
 
   // Floor rather than round so an unresolved check can never display as 100%.
   const checkCoveragePercent = applicable > 0
-    ? Math.floor((successful / applicable) * 100)
+    ? coveragePercentOf(successful, applicable)
     : 0;
   const axisCoveragePercent = decisionAxisTotal !== null && evidenceBackedAxes !== null
     ? decisionAxisTotal > 0
-      ? Math.floor((Math.min(evidenceBackedAxes, decisionAxisTotal) / decisionAxisTotal) * 100)
+      ? coveragePercentOf(Math.min(evidenceBackedAxes, decisionAxisTotal), decisionAxisTotal)
       : 0
     : 100;
   const coveragePercent = decisionFrameworkUnavailable

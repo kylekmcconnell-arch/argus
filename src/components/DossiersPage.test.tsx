@@ -29,7 +29,7 @@ vi.mock("../lib/scanstats", () => ({ scanStats: () => [], totalScans: () => 0 })
 vi.mock("../lib/analyst", () => ({ getAnalyst: () => "Kyle" }));
 vi.mock("../graph/network", () => ({ buildAliasResolver: () => (key: string) => key }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
-vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
+vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }), useOptionalArgusAuth: () => ({ role: "owner" }) }));
 
 import { DossiersPage } from "./DossiersPage";
 
