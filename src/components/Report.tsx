@@ -3054,7 +3054,10 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     { href: "#identity-evidence", label: "People", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
     ...(f.projectToken ? [{ href: "#project-token" as const, label: "Market", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
     ...(f.socialActivity && roles.includes(SubjectClass.PROJECT) ? [{ href: "#social-activity" as const, label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> }] : []),
-    { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
+    // The badge counted only the local contribution store, which is empty in a
+    // shared or frozen view, so navigation said 0 while the surface below
+    // listed relationships (ARGUS-17).
+    { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: visibleGraphEdges.length + connections.length },
     { href: "#evidence-ledger", label: "Evidence & method", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount },
   ];
 

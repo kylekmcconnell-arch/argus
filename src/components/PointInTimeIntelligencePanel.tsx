@@ -314,7 +314,9 @@ function primaryArchetype(snapshot: IntelligenceSpineSnapshot): string {
   const assessment = snapshot.subject.archetypes;
   if (assessment.primary) return words(assessment.primary);
   if (assessment.state === "generic") return "Generic protocol";
-  return "Archetype unresolved";
+  // "Archetype unresolved" reads as a finding against the subject; it only
+  // ever meant ARGUS did not classify the protocol type (ARGUS-06).
+  return "Protocol type not classified";
 }
 
 function thesisText(
@@ -503,7 +505,7 @@ export function PointInTimeIntelligencePanel({
             What the evidence says
           </h2>
           <p className="story-chapter-description mt-2 max-w-3xl leading-relaxed text-ink-dim">
-            A plain-language reading of the complete evidence saved with this report for <span className="font-medium text-ink">{snapshot.subject.label}</span>. This is the canonical full-diligence view.
+            A plain-language reading of the complete evidence saved with this report for <span className="font-medium text-ink">{snapshot.subject.label}</span>. This is the readiness lens: it explains the saved result and never revises the saved score or verdict, so it can withhold a conclusion while the report still carries one.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
@@ -546,7 +548,7 @@ export function PointInTimeIntelligencePanel({
                       : criticalDecisionGaps.length > 0
                         ? `${criticalDecisionGaps.length} critical question${criticalDecisionGaps.length === 1 ? " is" : "s are"} still open. ARGUS will not fill that gap with an assumption.`
                         : "The saved evidence does not yet support a clear conclusion in this view."
-                    : "The investigation has not completed enough decision-critical work to publish a conclusion."}
+                    : "The investigation has not completed enough decision-critical work for THIS lens to publish a conclusion. The saved score and verdict above remain the report's result."}
                 </p>
               )}
             </section>
