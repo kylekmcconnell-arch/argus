@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "contractVersion": "2026-08-21.1",
+  "contractVersion": "2026-09-18.1",
   "project": {
     "id": "argus",
     "name": "ARGUS",
@@ -18,6 +18,7 @@
     "engineeringHandoff": "github",
     "runtimeContext": "oenbot",
     "approvals": "oenbot-or-existing-guarded-workflow",
+    "personalApprovalGates": "none",
     "deploymentInput": "immutable-reviewed-sha"
   },
   "routing": {

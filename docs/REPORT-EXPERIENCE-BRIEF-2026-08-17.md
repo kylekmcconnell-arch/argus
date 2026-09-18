@@ -183,12 +183,12 @@ So:
   assembly, FLIP-morphing shared values, the provenance drill-down, the citation-count
   sources table, reduced-motion discipline.
 - **Do not take:** the palette, the serif, the paper texture, the section copy.
-- **Needs Kyle's explicit sign-off before starting:** the provenance colour ramp. It adds
-  a new semantic colour family, and `DESIGN.md` freezes token names. It is the best idea
-  here and it is also a contract amendment — propose the token names and get them approved
-  rather than shipping them into `src/index.css` and asking later.
+- **Amends the contract, so ship it as one:** the provenance colour ramp. It adds a new
+  semantic colour family, and `DESIGN.md` freezes token names. Land the token names in
+  `DESIGN.md` in the same pull request that introduces them in `src/index.css`, so the
+  canon and the code move together. No separate sign-off.
 
-If any of this brief conflicts with `DESIGN.md`, `DESIGN.md` wins until Kyle amends it.
+If any of this brief conflicts with `DESIGN.md`, `DESIGN.md` wins until a pull request amends it.
 
 ## 8. Suggested build sequence
 

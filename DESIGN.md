@@ -10,8 +10,7 @@ implementations, 25+ font sizes, three parallel status→color maps, and a broke
 The identity: **a forensic instrument, not a SaaS dashboard.** Density over decoration
 (REPORT-UX-AUDIT.md P2); critical metadata legible at arm's length (P1).
 
-> **AMENDMENT — `design-and-ui` branch, 2026-08-18 (Enigma; awaiting Kyle's
-> sign-off before this merges to main).** The default light theme is retuned
+> **AMENDMENT — 2026-08-18 (Enigma), in force on `main`.** The default light theme is retuned
 > to a warm-paper palette after precurion.com — paper surfaces, `#141414`
 > ink, and one deep-green signal (`#047756`) replacing royal blue; caution
 > moves from dusty rose to amber. The display voice moves from wide Archivo

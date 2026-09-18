@@ -3,3 +3,7 @@
 Read `AGENTS.md` and `config/agent-context.json`, then run
 `node scripts/validate-agent-context.mjs` before editing. Continue GitHub's
 durable issue/branch/PR handoff; Grok Bot memory is context, not source authority.
+
+No personal approval gates: automated checks are the only gate. Never hold work,
+a pull request, or a document waiting for a named collaborator to approve it
+(see "No personal approval gates" in `AGENTS.md`).
