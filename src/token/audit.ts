@@ -1267,7 +1267,7 @@ async function runTokenAudit(
     ? "Holder data not verifiable keyless."
     : !holdersReliable
       ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.`
-      : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
+      : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct < 10 ? topPct.toFixed(2) : topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
 
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;

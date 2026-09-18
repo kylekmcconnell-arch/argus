@@ -696,7 +696,7 @@ function MarketRiskSummary({ scan }: { scan: ThreatScan }) {
           <span className="text-[13px] font-medium text-ink">{scan.call.action}</span>
         </div>
         <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
-          This is the concise market-and-mechanics interpretation of the saved token evidence. It does not treat price decline alone as a safety failure.
+          {scan.call.risk} of 100 risk points, where higher is worse. This is the opposite scale to the token safety score, which is a quality score where higher is safer, so the two can disagree without either being wrong. This is the concise market-and-mechanics interpretation of the saved token evidence. It does not treat price decline alone as a safety failure.
         </p>
         {items.length > 0 && (
           <ul className="mt-3 grid gap-2 lg:grid-cols-2">
