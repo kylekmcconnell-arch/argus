@@ -12,7 +12,7 @@ import type { ThreatScan } from "../threat/types";
 
 const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn(), trustGraph: vi.fn(), marketIntelligence: vi.fn() }));
 
-vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
+vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }), useOptionalArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
 // The promoted production lane renders the connection workspace, which needs
 // the real entity-key canonicalizer; only the connection lookup is stubbed.
@@ -2524,7 +2524,7 @@ describe("decision-safe person report presentation", () => {
     expect([...container.querySelectorAll(".display")].some((node) => node.textContent?.trim() === "PROVISIONAL")).toBe(true);
     expect(container.textContent).toContain("provisional score");
     expect(container.textContent).toContain("PASS SIGNAL");
-    expect(container.textContent).toContain("76% checked");
+    expect(container.textContent).toContain("76.9% checked");
     expect(container.textContent).toContain("10/13");
     expect(container.textContent).toContain("6 of 6 areas have sources");
     expect(container.textContent).toContain("3 follow-up questions");

@@ -10,7 +10,7 @@ import { publicCaseLabel } from "../lib/caseLabel";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
+vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }), useOptionalArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
 // The promoted production lane renders the connection workspace, which needs
 // the real entity-key canonicalizer; only the connection lookup is stubbed.

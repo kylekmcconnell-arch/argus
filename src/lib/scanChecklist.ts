@@ -192,6 +192,17 @@ export const NEVER_WAIVE_CHECK_IDS: ReadonlySet<string> = new Set([
 /** Every explicitly required check must record an outcome for full clearance. */
 export const CLEARANCE_COVERAGE_FLOOR_PERCENT = 100;
 
+/**
+ * Coverage as a percentage that neither overstates nor silently truncates:
+ * floored at one decimal, so 7/8 reads 87.5 (not a truncated 87, not a
+ * rounded-up 88) and 249/250 reads 99.6, never a false 100 against a
+ * clearance floor. Consumers compare this number against the floors above.
+ */
+export function coveragePercentOf(recorded: number, applicable: number): number {
+  if (!(applicable > 0)) return 0;
+  return Math.floor((recorded / applicable) * 1000) / 10;
+}
+
 export interface ClearanceCoverage {
   applicable: number;
   recorded: number;
@@ -218,7 +229,7 @@ export function clearanceCoverage(checks: readonly ScanCheck[]): ClearanceCovera
     : [];
   const applicable = applicableRows.length;
   const recorded = recordedRows.length;
-  const recordedPercent = applicable > 0 ? Math.floor((recorded / applicable) * 100) : 0;
+  const recordedPercent = coveragePercentOf(recorded, applicable);
   const sufficient = applicable > 0 && (hasStableIds
     ? openNeverWaive.length === 0 && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT
     : recorded === applicable);

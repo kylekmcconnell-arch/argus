@@ -12,7 +12,7 @@ import { SubjectClass } from "../engine";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
+vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }), useOptionalArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../lib/useArkhamLabels", () => ({ useArkhamLabels: () => ({ labels: {}, state: "idle" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [], investigationContribution: () => null }));
 // The promoted production lane renders the connection workspace, which needs

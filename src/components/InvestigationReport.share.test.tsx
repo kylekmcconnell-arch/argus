@@ -307,7 +307,7 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("REVIEW WITH GAPS");
     expect(container.textContent).toContain("Before you use this report");
     expect(container.textContent).toContain("Known connections must finish before this report is ready");
-    expect(container.querySelector<HTMLElement>('[role="progressbar"][aria-label="Checks finished"]')?.getAttribute("aria-valuenow")).toBe("85");
+    expect(container.querySelector<HTMLElement>('[role="progressbar"][aria-label="Checks finished"]')?.getAttribute("aria-valuenow")).toBe("85.7");
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).not.toContain("INCOMPLETE");
     expect(container.textContent).not.toContain("Investigation incomplete");

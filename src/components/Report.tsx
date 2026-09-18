@@ -62,7 +62,7 @@ import { reportIdentity } from "../lib/caseLabel";
 import { AddInfo } from "./AddInfo";
 import { ScoreComposition } from "./ScoreComposition";
 import { DimensionChapters } from "./DimensionChapters";
-import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel } from "../lib/dimensionChapters";
+import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, projectAxisScores } from "../lib/dimensionChapters";
 import { DossierReport } from "./DossierReport";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
@@ -80,7 +80,7 @@ import { changeReportLifecycle } from "../lib/reports";
 import { LegalScreen } from "./LegalScreen";
 import { SanctionsNameScreen } from "./SanctionsNameScreen";
 import { RingAlert } from "./RingAlert";
-import { useArgusAuth } from "../auth-context";
+import { useOptionalArgusAuth } from "../auth-context";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
 import { DecisionBasis } from "./DecisionBasis";
 import { isStrictFundScaleArtifact } from "../lib/fundScaleEvidence";
@@ -1684,7 +1684,9 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const reportLane = useReportLane();
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("general_diligence");
   const reportStyle = reportLane.definition.presentationStyle;
-  const { role } = useArgusAuth();
+  // Null on the public share route (no AuthGate); every workspace action is
+  // already absent there, so an anonymous reader is simply a viewer.
+  const role = useOptionalArgusAuth()?.role ?? "viewer";
   const f = dossier;
   const hasTerminalXState = f.x_account_status === "suspended" || f.x_account_status === "unavailable";
   const { report, graph, founderSummary, evidence } = dossier;
@@ -3836,13 +3838,13 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 <span className="mono">{Object.keys(f.projectStrengthBands).length} chapters</span>
               </summary>
               <DimensionChapters
-                chapters={personDimensionChapters(f.projectStrengthBands)}
+                chapters={personDimensionChapters(f.projectStrengthBands, projectAxisScores(report))}
                 checksHref="#scan-methodology"
               />
             </details>
           ) : (
             <DimensionChapters
-              chapters={personDimensionChapters(f.projectStrengthBands)}
+              chapters={personDimensionChapters(f.projectStrengthBands, projectAxisScores(report))}
               checksHref="#scan-methodology"
             />
           )

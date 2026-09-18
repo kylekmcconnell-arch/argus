@@ -36,8 +36,8 @@ export function DimensionChapters({ chapters, checksHref, compositionHref = "#co
               <h2 className="af-h2 mt-2.5">{chapter.headline}</h2>
             </div>
             <div className="af-sec-score">
-              <span className="af-n" style={{ color: TONE_COLOR[chapter.tone] }}>{chapter.score}</span>
-              <span>/ {chapter.weight} pts</span>
+              <span className="af-n" style={{ color: TONE_COLOR[chapter.tone] }}>{chapter.score ?? "n/a"}</span>
+              <span>/ {chapter.weight} pts{chapter.score === null ? " · not scored in this report" : ""}</span>
             </div>
           </div>
           {chapter.lead && <p className="af-prose">{chapter.lead}</p>}
