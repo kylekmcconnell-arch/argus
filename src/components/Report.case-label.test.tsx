@@ -85,23 +85,18 @@ describe("saved report case identity", () => {
     act(() => {
       root.render(<Report dossier={v8} onReset={() => {}} onAudit={() => {}} />);
     });
-    const header8 = container.querySelector('[aria-label^="Case "]')?.textContent ?? "";
-    const details8 = container.querySelector('[aria-label="Saved report details"]')?.textContent ?? "";
-    expect(header8).toContain(`/ ${CASE_LABEL}`);
-    expect(header8).not.toContain("PA-A74E3B463FCB43C89558");
-    expect(details8).toContain(`Case${CASE_LABEL}`);
-    expect(details8).toContain("Report IDPA-AAF133F87A134DF0AE17");
-    expect(details8).not.toContain("PA-A74E3B463FCB43C89558");
+    // The footer names the stable case and this version's own report ID.
+    const identity8 = container.querySelector("[data-report-identity]")?.textContent ?? "";
+    expect(identity8).toContain(`Case ${CASE_LABEL}`);
+    expect(identity8).toContain("Report PA-AAF133F87A134DF0AE17");
+    expect(identity8).not.toContain("Report PA-A74E3B463FCB43C89558");
 
     act(() => {
       root.render(<Report dossier={v9} onReset={() => {}} onAudit={() => {}} />);
     });
-    const header9 = container.querySelector('[aria-label^="Case "]')?.textContent ?? "";
-    const details9 = container.querySelector('[aria-label="Saved report details"]')?.textContent ?? "";
-    expect(header9).toContain(`/ ${CASE_LABEL}`);
-    expect(header9).toBe(header8);
-    expect(details9).toContain(`Case${CASE_LABEL}`);
-    expect(details9).toContain("Report IDPA-A74E3B463FCB43C89558");
-    expect(details9).not.toContain("Report IDPA-AAF133F87A134DF0AE17");
+    const identity9 = container.querySelector("[data-report-identity]")?.textContent ?? "";
+    expect(identity9).toContain(`Case ${CASE_LABEL}`);
+    expect(identity9).toContain("Report PA-A74E3B463FCB43C89558");
+    expect(identity9).not.toContain("Report PA-AAF133F87A134DF0AE17");
   });
 });
