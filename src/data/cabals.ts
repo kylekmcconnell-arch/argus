@@ -99,6 +99,31 @@ const BASE = "base";
 
 export const CABALS: Cabal[] = [
   {
+    id: "rh-lemonfun-fee-farm",
+    name: "$LEMON (Lemon.fun) creator fee farm",
+    kind: "launch-farm",
+    intent: "nefarious",
+    summary:
+      "The same in-token fee model as rh-wirebot-fee-farm, on the same launchpad family, one week earlier. The launch was clean on its mechanics: no bonding curve, the full billion straight to the pair, and the deployer bought 2.0 percent in the launch transaction for 0.028 ETH. The extraction is the fee stream the launchpad pays in the token: 46,881,851 tokens, 4.69 percent of supply, arrived at the deployer across roughly 396 payments. The deployer holds none of it. It burned 10,000,000 and pushed the remaining 57M out to five wallets, four of which forwarded everything to the swap router 0xbdbae060 and one of which sold 22.8M straight into the pair. All five are empty or near empty now. Tagged nefarious on the same basis as the wire bot record: continuous extraction paid in the token, sold into the token's own market through intermediaries, with the deployer's own sell record left clean. The 1 percent burn is the one point in the operator's favour.",
+    firstSeen: "2026-07-25",
+    lastSeen: "2026-09-20",
+    wallets: [
+      { chain: RH, address: "0x2f75a321b571006ac11674aa7bbda890e16d6c25", role: "deployer", label: "creator wallet: claims the fee stream, distributes, never sells directly", evidence: "sent launch tx 0x48a82224ef11e3b49902c03f962bb64a74fd828b843774a18883c31e0759104d to factory 0x2ba793fd at 2026-07-25 12:46:57 UTC paying 0.028 ETH and receiving 20,037,911 tokens (2.0%) from the pair; received 46,881,851 more from fee contract 0xc10309cf03bc81c121a8270e3a28e159a9296903 across 398 inbound transfers; sent all 66,932,210 back out in 10 transfers; nonce 1,913, holds 0 tokens, read 2026-09-20" },
+      { chain: RH, address: "0xd120c6eeb3024721908dfe641689350323c90301", role: "off-ramp", label: "largest fee recipient", evidence: "received 20,000,000 from the deployer and forwarded 10,000,000 to router 0xbdbae060 and 9,922,223 onward; holds 0, read 2026-09-20" },
+      { chain: RH, address: "0x5655e9bfdbce8d4a73ead52a6afb9df5002888f7", role: "off-ramp", label: "fee recipient, routed out in full", evidence: "received 12,433,831 from the deployer and sent 14,257,514 to router 0xbdbae060; holds 0, read 2026-09-20" },
+      { chain: RH, address: "0x880efd2803ad382963fef923cb714226e2840555", role: "off-ramp", label: "fee recipient, routed out in full", evidence: "received 10,000,000 from the deployer and sent 10,000,000 to router 0xbdbae060; holds 0, read 2026-09-20" },
+      { chain: RH, address: "0x851dc4d0a2c03b08c0c748bc16a1a52dbc1316ca", role: "off-ramp", label: "fee recipient, routed out in full", evidence: "received 10,000,000 from the deployer and sent 10,874,779 to router 0xbdbae060; holds 0, read 2026-09-20" },
+      { chain: RH, address: "0xef2c099803fff879443009722aa2b9c46e020ab6", role: "off-ramp", label: "fee recipient that sold straight into the pair", evidence: "received 4,420,676 from the deployer and sent 39,510,017 out in total, of which 22,819,498 went directly into the pair 0x01fe057d; EIP-7702 account, holds 262,594, read 2026-09-20" },
+    ],
+    accounts: [
+      { handle: "lemondotfun", role: "project", label: "Lemon.fun project account", evidence: "the token's listed X account, with a Telegram at t.me/lemondotfun, carried on the DexScreener pair for 0xf0e17e54 (read 2026-09-20)" },
+    ],
+    launches: [
+      { chain: RH, address: "0xf0e17e54239cd945cd7bea471a3a2ca6a8c7f7a3", symbol: "LEMON", name: "Lemon.fun", launchedAt: "2026-07-25", venue: "unknown factory 0x2ba793fd69bf251fd1af90b576be8b9fa6be46db", outcome: "fee-farmed", note: "No bonding curve: the full 1,000,000,000 went to the pair inside the launch transaction, and the deployer's only allocation was the 2.0 percent it bought there. About 255,000 USD fully diluted against 61,200 USD of liquidity, down 20 percent on the day of the read. The fee stream is 4.69 percent of supply and has been sold through five intermediary wallets; 1 percent was burned.", evidence: "launch transaction and Transfer logs read from Robinhood RPC on 2026-09-20; launch block 19,020,802 located by timestamp binary search; deployer, fee contract and recipient flows traced by topic-filtered getLogs across blocks 19,020,802 to 67,950,000; DexScreener for market state" },
+    ],
+    related: ["rh-wirebot-fee-farm"],
+  },
+  {
     id: "base-b20-serial-launcher-58d0fdcb",
     name: "Base B20 and o1 serial launcher",
     kind: "launch-farm",
