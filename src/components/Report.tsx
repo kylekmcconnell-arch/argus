@@ -3281,7 +3281,22 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       )}
       {!f.projectToken && (f.threat || f.threatNote) && (
         <div id="project-token-threat" className="scroll-mt-28">
-          <Section title="Project token · threat scan" kicker={f.threatNote ?? "the token threat leg of this audit"}>
+          {/* A promoted contract is somebody else's token the subject talked
+              about, and a bio address is an unverified self-claim. Only a
+              canonical binding is the subject's own asset, so only it may be
+              titled "Project token" (#371). */}
+          <Section
+            title={f.threatBinding === "promotion"
+              ? "Promoted token · threat scan"
+              : f.threatBinding === "bio"
+                ? "Contract named in the bio · threat scan"
+                : "Project token · threat scan"}
+            kicker={f.threatBinding === "promotion"
+              ? "a contract this account promoted; ARGUS has not established it as the subject's own token"
+              : f.threatBinding === "bio"
+                ? "a contract this account names in its own bio, self-claimed and not independently bound"
+                : f.threatNote ?? "the token threat leg of this audit"}
+          >
             {f.threat ? (
               <Card className="p-2"><ThreatReport scan={f.threat} /></Card>
             ) : (
