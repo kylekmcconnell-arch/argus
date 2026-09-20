@@ -12,6 +12,14 @@ export interface TokenCandidate {
   address: string;
   via: "evm" | "solana";
   source: string; // one line of provenance, rendered with the report
+  /**
+   * How this contract was tied to the subject. Only "canonical" means ARGUS
+   * joined it to the subject's own verified X account or domain: a bio address
+   * is an unverified self-claim, and a promotion is somebody else's token the
+   * subject talked about. A KOL's promotions are not the KOL's own asset, so
+   * nothing may present them as one (#371).
+   */
+  binding: "canonical" | "bio" | "promotion";
 }
 
 type VerifiedProjectTokenCandidate = {
@@ -63,6 +71,7 @@ export function tokenFromVerifiedProjectToken(
   return {
     address,
     via,
+    binding: "canonical",
     source: `the canonical${symbol ? ` $${symbol}` : ""} project token verified through ${identitySource}`,
   };
 }
@@ -81,10 +90,10 @@ export function declaredTokenFromBio(bio: string): TokenCandidate | null {
   const candidates = [...(bio ?? "").matchAll(DECLARED_CA)].flatMap((match): TokenCandidate[] => {
     const address = match[1] ?? "";
     if (/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      return [{ address, via: "evm", source: "the contract explicitly declared in the subject's own bio" }];
+      return [{ address, via: "evm", binding: "bio", source: "the contract explicitly declared in the subject's own bio" }];
     }
     if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
-      return [{ address, via: "solana", source: "the contract explicitly declared in the subject's own bio" }];
+      return [{ address, via: "solana", binding: "bio", source: "the contract explicitly declared in the subject's own bio" }];
     }
     return [];
   });
@@ -98,9 +107,9 @@ export function declaredTokenFromBio(bio: string): TokenCandidate | null {
 export function tokenFromBio(bio: string): TokenCandidate | null {
   const b = bio ?? "";
   const evm = b.match(EVM_CA)?.[0];
-  if (evm) return { address: evm, via: "evm", source: "the contract in the subject's own bio" };
+  if (evm) return { address: evm, via: "evm", binding: "bio", source: "the contract in the subject's own bio" };
   const sol = b.match(SOL_WORD)?.[1];
-  if (sol) return { address: sol, via: "solana", source: "the contract in the subject's own bio" };
+  if (sol) return { address: sol, via: "solana", binding: "bio", source: "the contract in the subject's own bio" };
   return null;
 }
 
@@ -117,7 +126,7 @@ export function tokenFromPromotions(
     if (via === "evm" && !/^0x[a-fA-F0-9]{40}$/.test(a)) continue;
     if (via === "solana" && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) continue;
     const tick = (p.ticker ?? "").replace(/^\$+/, "");
-    return { address: a, via, source: `a claimed promotion${tick ? ` ($${tick})` : ""}` };
+    return { address: a, via, binding: "promotion", source: `a claimed promotion${tick ? ` ($${tick})` : ""}` };
   }
   return null;
 }

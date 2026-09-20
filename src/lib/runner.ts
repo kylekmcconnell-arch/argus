@@ -122,7 +122,9 @@ export function startPersonAudit(
   // finalized only once both legs land, so a full-scan report always carries its
   // token verdict. The standalone Threat tab remains the cheap, token-only tier.
   let threatLeg: Promise<ThreatScan | null> | null = null;
-  let threatCandidate: TokenCandidate | null = null;
+  /** Provenance is absent only when a stale server announced without it. */
+  type AnnouncedCandidate = Omit<TokenCandidate, "binding"> & { binding?: TokenCandidate["binding"] };
+  let threatCandidate: AnnouncedCandidate | null = null;
   let threatSettled = false;
   let threatNote = "";
   let threatFailure = "";
@@ -136,7 +138,10 @@ export function startPersonAudit(
     run.pct = Math.min(92, Math.max(run.pct, run.steps.length * 11));
     emit();
   };
-  const startThreatLeg = (cand: TokenCandidate) => {
+  // A stale server build can announce a token without the provenance field.
+  // Leaving it undefined renders the neutral legacy title; inferring
+  // "canonical" would relabel somebody else's token as the subject's (#371).
+  const startThreatLeg = (cand: AnnouncedCandidate) => {
     if (threatLeg) return;
     threatCandidate = cand;
     threatNote = `Token attributed via ${cand.source}.`;
@@ -216,6 +221,8 @@ export function startPersonAudit(
         }
       }
       d.threat = scan;
+      // The scan is worthless to a reader without knowing whose token it is.
+      if (threatCandidate?.binding) d.threatBinding = threatCandidate.binding;
       threatNote = scan
         ? `${threatNote} $${scan.symbol}: ${scan.call.verdict} · ${scan.call.risk}/100 risk.`
         : `${threatNote} The token scan did not complete${threatFailure ? `: ${threatFailure}` : " (no DEX pair or no completed scanner result)"} - it can be rerun from the Threat tab.`;
