@@ -863,3 +863,38 @@ against tokenized Meta stock, no creator allocation, 1,000,000,000 straight to
 the pool, the deployer absent from its transfer ledger, top holder 3.0 percent,
 and its only listed link is a news article about a Facebook privacy mascot.
 The token is a shell; the wallet behind it is the record worth keeping.
+
+## The in-token fee model has a second instance ($LEMON, read 2026-09-20)
+
+Indexed as `rh-lemonfun-fee-farm`, related to `rh-wirebot-fee-farm`. Two
+Robinhood Chain tokens, launched eight days apart through the same launchpad
+family (factories 0x2ba793fd and 0x0c37a24f, both taking selector 0x686399cb),
+run the identical extraction. This is a model, not a one-off, and it is worth
+treating as a named pattern when scanning that chain.
+
+**The shared shape.** No bonding curve; the whole supply goes to the pair in
+the launch transaction; the deployer's only allocation is a slice it buys there
+(2.0 percent on LEMON, 1.44 percent on wire). Nothing a contract scanner
+flags. The launchpad then pays creator fees **in the token**, and that stream
+is the business: 4.69 percent of supply on LEMON across about 396 payments,
+8.43 percent on wire across 210.
+
+**The routing is what makes it findable and what makes it deliberate.** On both
+tokens the deployer's own sales into the pool are zero. LEMON's deployer pushed
+57M tokens to five wallets; four forwarded everything to the swap router
+0xbdbae060 and the fifth sold 22.8M straight into the pair. Every one of them
+is empty now. Checking the creator address for sell pressure returns a clean
+record on both tokens, which is the point of the arrangement.
+
+**Detection recipe.** On a Robinhood Chain token, take the deployer, sum
+inbound transfers from any single contract that is not the pair, and express it
+as a share of supply. A recurring in-token credit from one contract is a fee
+stream. Then follow the deployer's outbound transfers one hop: if the
+recipients' balances are zero and their outflows land on a router or the pair,
+the stream is being sold and the creator's own record will look clean. Do not
+stop at the deployer.
+
+**One difference worth recording.** LEMON's operator burned 10,000,000 tokens,
+1 percent of supply, out of the stream. The wire bot operator burned nothing.
+It does not change the read, but it is the only point either operator has in
+its favour.
