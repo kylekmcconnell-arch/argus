@@ -439,5 +439,14 @@
     "address": "0xe6a537a407488807f0bbeb0038b79004f19dddfb",
     "asOf": "2026-06-15",
     "note": "small cap $25.9M; CoinGecko #714"
+  },
+  {
+    "label": "MERRYMEN",
+    "target": "millw14/merrymen",
+    "kind": "repo",
+    "chain": "robinhood",
+    "address": "0xa15cd06dd305269a0f48bebeb30aa3588fba7b32",
+    "asOf": "2026-09-20",
+    "note": "agent trading platform on Robinhood Chain; token is a perk/discount tier, no revenue share"
   }
 ]
