@@ -40,6 +40,83 @@ const VIEWER_GET_PATHS = new Set([
 ]);
 const OWNER_PATHS = new Set(["/api/reclassify", "/api/members", "/api/waitlist", "/api/threat-recheck"]);
 // Admission budget for bounded paid panels/chat; scan credits remain separate.
+// Paid panels: routes that spend provider money on an open report or a running
+// scan. Each one also attributes its cost through the same capability, so this
+// list must match the routes that resolve a panel token; a contract test
+// asserts that.
+const PAID_PANEL_PATHS = new Set([
+  "arkham", "arkham-counterparties", "arkham-holdings", "arkham-money-flow",
+  "arkham-risk-paths", "arkham-token-holders", "call-performance",
+  "challenge-verdict", "cluster", "deployer", "evm-cluster", "evm-deployer",
+  "evm-funder", "funder", "github-forensics", "github-shipping",
+  "identity-sweep", "kol-signals", "namesake", "pfp-check", "project-docs",
+  "recon-team", "resolve-github", "token-identity", "vc-portfolio", "x-find",
+  "x-posts",
+].map((route) => `/api/${route}`));
+
+/** A standalone ArrayBuffer copy: Web Crypto refuses a SharedArrayBuffer view. */
+const toBuffer = (bytes: Uint8Array): ArrayBuffer => {
+  const copy = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(copy).set(bytes);
+  return copy;
+};
+
+const base64UrlToBytes = (value: string): Uint8Array | null => {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/")
+    + "=".repeat((4 - (value.length % 4)) % 4);
+  try {
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Verify a panel capability here, at the one place every paid panel passes.
+ *
+ * The signing helper in api/_cache.js uses node:crypto, which the Edge runtime
+ * does not have, so this re-verifies the same HMAC with Web Crypto. It only
+ * decides ADMISSION: the handlers still resolve the token themselves to decide
+ * whether it also names a report version for cost attribution (#356).
+ */
+async function panelCapabilityValid(organizationId: string, token: string | null): Promise<boolean> {
+  const secret = process.env.PANEL_COST_TOKEN_SECRET;
+  if (!secret || !token || token.length > 2048) return false;
+  const parts = token.split(".");
+  if (parts.length !== 2 || !parts[0] || !/^[A-Za-z0-9_-]{43}$/.test(parts[1])) return false;
+  const signature = base64UrlToBytes(parts[1]);
+  const payloadBytes = base64UrlToBytes(parts[0]);
+  if (!signature || !payloadBytes) return false;
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const signed = await crypto.subtle.verify("HMAC", key, toBuffer(signature), toBuffer(new TextEncoder().encode(parts[0])));
+    if (!signed) return false;
+    const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as {
+      v?: number; org?: string; report?: string; scan?: string; exp?: number;
+    };
+    if (!payload
+      || typeof payload.org !== "string"
+      || payload.org.toLowerCase() !== organizationId.toLowerCase()
+      || !Number.isSafeInteger(payload.exp)
+      || (payload.exp ?? 0) <= Math.floor(Date.now() / 1000)) return false;
+    // A version capability names a report; a scan capability names a run.
+    return (payload.v === 1 && typeof payload.report === "string" && !!payload.report)
+      || (payload.v === 2 && typeof payload.scan === "string" && !!payload.scan);
+  } catch {
+    return false;
+  }
+}
+
 const SUPPLEMENTAL_PATHS = new Set([
   "social-activity", "find-wallet", "x-authenticity",
   "ask", "arkham", "arkham-money-flow", "arkham-counterparties", "arkham-holdings", "arkham-token-holders", "arkham-risk-paths",
@@ -245,6 +322,18 @@ export default async function middleware(request: Request): Promise<Response> {
     requestHeaders.set("x-argus-organization-id", organizationId);
     return next({ request: { headers: requestHeaders } });
   };
+
+  // A paid panel must present a capability: one issued for the open report's
+  // version, or for the scan that is still running. Without this the whole
+  // paid surface ran on the analyst role alone (#356). Checked before any
+  // budget is reserved, so a refused panel costs nothing.
+  if (PAID_PANEL_PATHS.has(pathname)
+    && !(await panelCapabilityValid(organizationId, request.headers.get("x-argus-panel-token")))) {
+    return Response.json({
+      error: "panel_capability_required",
+      message: "Open this panel from a saved report or a running scan. Its capability is missing or has expired.",
+    }, { status: 409, headers: { "cache-control": "no-store" } });
+  }
 
   const scanKey = request.headers.get("x-argus-scan-key");
   if (scanKey && (pathname === "/api/social-activity" || pathname === "/api/x-authenticity")) {

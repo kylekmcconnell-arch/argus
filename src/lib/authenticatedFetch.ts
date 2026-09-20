@@ -1,3 +1,5 @@
+import { currentPanelToken } from "./panelToken";
+
 export type FetchLike = (
   input: string | URL | Request,
   init?: RequestInit,
@@ -46,6 +48,13 @@ export function createAuthenticatedFetch(
     new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
     const callerSuppliedAuth = headers.has("authorization");
     if (!callerSuppliedAuth) headers.set("authorization", `Bearer ${token}`);
+    // Paid panels require a capability. A component that passes its own
+    // version-bound token still wins, because only that one names a report
+    // version for cost attribution.
+    if (!headers.has("x-argus-panel-token")) {
+      const panelToken = currentPanelToken();
+      if (panelToken) headers.set("x-argus-panel-token", panelToken);
+    }
 
     const res = await nativeFetch(input, { ...init, headers });
 
@@ -58,6 +67,10 @@ export function createAuthenticatedFetch(
         const retryHeaders = new Headers(init?.headers);
         new Headers(input instanceof Request ? input.headers : undefined).forEach((v, k) => { if (!retryHeaders.has(k)) retryHeaders.set(k, v); });
         retryHeaders.set("authorization", `Bearer ${fresh}`);
+        if (!retryHeaders.has("x-argus-panel-token")) {
+          const panelToken = currentPanelToken();
+          if (panelToken) retryHeaders.set("x-argus-panel-token", panelToken);
+        }
         return nativeFetch(input, { ...init, headers: retryHeaders });
       }
     }
