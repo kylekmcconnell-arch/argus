@@ -1004,10 +1004,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const versionContext = reportVersionId
         ? await loadVersionContext(credentials, auth.organizationId, reportVersionId)
         : null;
+      // Reopening a saved report must also carry a panel capability, or every
+      // paid panel on it is refused (#356). Bound to the version being
+      // returned, so it attributes cost to the report the analyst is reading.
+      const panelCostToken = reportVersionId
+        ? issuePanelCostToken(auth.organizationId, reportVersionId)
+        : undefined;
       res.status(200).json({
         available: true,
         caseStatus: "open",
         report: report && versionContext ? { ...report, versionContext } : report,
+        ...(panelCostToken ? { panelCostToken } : {}),
       });
       return;
     }

@@ -11,7 +11,7 @@ import {
   type AuthContext,
 } from "./_auth.js";
 import { activateReportVersion, persistReportVersionBundle } from "./_provenance.js";
-import { issuePanelCostToken, recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
+import { issuePanelCostToken, issueScanPanelToken, recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
 import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
@@ -329,7 +329,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
   const emit = (step: TraceStep) => send("step", step);
   if (typeof quota.creditRemaining === "number") {
-    send("credits", { remaining: quota.creditRemaining });
+    send("credits", {
+      remaining: quota.creditRemaining,
+      // A capability for the panels this scan opens before it is saved. Sent
+      // on the transient credits event, never on a step: steps are persisted
+      // with the report and a capability must not be (#356).
+      ...(() => {
+        const panelToken = issueScanPanelToken(auth.organizationId, receiptRunKey);
+        return panelToken ? { panelToken } : {};
+      })(),
+    });
   }
   const heartbeat = setInterval(() => {
     try {

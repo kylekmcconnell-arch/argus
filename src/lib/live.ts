@@ -4,6 +4,7 @@
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
 import { AUDIT_STREAM_INACTIVITY_TIMEOUT_MS } from "./investigationRuntime";
+import { setPanelToken } from "./panelToken";
 import type { ResearchIntent } from "./researchDirector";
 
 export interface ProviderStatus {
@@ -129,7 +130,8 @@ export function streamAudit(
           const dataLine = /data: ([\s\S]+)/.exec(chunk)?.[1];
           if (!ev || !dataLine) continue;
           const data = JSON.parse(dataLine);
-          if (ev === "step") h.onStep(data as TraceStep);
+          if (ev === "credits") setPanelToken((data as { panelToken?: string })?.panelToken);
+          else if (ev === "step") h.onStep(data as TraceStep);
           else if (ev === "done") settle(() => h.onDone(data as Dossier));
           else if (ev === "error") settle(() => h.onError(data?.error ?? "error", { kind: "rejected" }));
         }

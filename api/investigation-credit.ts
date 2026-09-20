@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { consumeInvestigationQuota, refundInvestigationCredit, requireArgusAuth } from "./_auth.js";
 import { claimScanReceipt, readScanReceipt, scanReceiptClaimInputValid } from "./_scanReceipts.js";
+import { issueScanPanelToken } from "./_cache.js";
 
 const KEY = /^[A-Za-z0-9:_-]{8,180}$/;
 const KINDS = new Set(["token", "investigation"]);
@@ -77,6 +78,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       chargedCredits: quota.used,
       remainingCredits: quota.remaining,
       receiptRecorded: true,
+      // The panels this scan is about to open have no report version yet, so
+      // the capability is bound to the run instead (#356).
+      ...(() => {
+        const panelToken = issueScanPanelToken(auth.organizationId, idempotencyKey);
+        return panelToken ? { panelToken } : {};
+      })(),
     });
     return;
   }
