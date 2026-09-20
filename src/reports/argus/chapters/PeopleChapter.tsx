@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { DisclosureButton, InlinePanel } from "../disclosure";
 import { useArgusReport } from "../context";
 import { Badge, ChallengeButton, ChallengePanel, ChapterHead, ExtLink, Panel, ReviewBanner, type ChallengeTarget } from "../primitives";
@@ -35,6 +35,20 @@ export function ContactList({ name, contacts }: { name: string; contacts: Person
   );
 }
 
+/* The portrait walks the preferred sources in order: the project's own site,
+   then LinkedIn, then X. A source that fails to load (LinkedIn blocks most
+   automated image requests) falls through to the next, and initials are the
+   last resort, so a person never renders as a broken image. */
+function PersonPortrait({ person }: { person: PersonCardView }) {
+  const candidates = person.avatarCandidates?.length
+    ? person.avatarCandidates
+    : person.avatarUrl ? [person.avatarUrl] : [];
+  const [index, setIndex] = useState(0);
+  const src = candidates[index];
+  if (!src) return <>{initials(person.name)}</>;
+  return <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setIndex((current) => current + 1)} />;
+}
+
 function PersonCard({ person, onAudit }: { person: PersonCardView; onAudit?: (handle: string) => void }) {
   const panelId = `person:${person.key}`;
   const challenge: ChallengeTarget = {
@@ -47,7 +61,7 @@ function PersonCard({ person, onAudit }: { person: PersonCardView; onAudit?: (ha
       <article className="panel person">
         <div className="person-top">
           <span className="avatar" aria-hidden="true">
-            {person.avatarUrl ? <img src={person.avatarUrl} alt="" referrerPolicy="no-referrer" /> : initials(person.name)}
+            <PersonPortrait person={person} />
           </span>
           <div>
             <h3>{person.name}</h3>

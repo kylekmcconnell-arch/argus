@@ -159,7 +159,9 @@ describe("investigation exact sharing", () => {
     render(investigation());
 
     expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
-    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    // One canonical frame: the interactive chapter shell.
+    expect(container.querySelector(".argus-rd")).not.toBeNull();
+    expect(container.querySelector('nav[aria-label="Report sections"]')).not.toBeNull();
     expect(container.textContent).toContain("what the evidence tells us");
   });
 
@@ -167,7 +169,7 @@ describe("investigation exact sharing", () => {
     window.history.replaceState(null, "", "/?s=%24ARG&kind=token&reportStyle=1");
     render(investigation());
     expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
-    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    expect(container.querySelector(".argus-rd")).not.toBeNull();
     expect(container.textContent).toContain("what the evidence tells us");
   });
 
@@ -185,23 +187,24 @@ describe("investigation exact sharing", () => {
     });
 
     render(investigation({ versionContext: context(8) }));
-    expect(container.querySelector('[aria-label="Case PA-AAF133F87A134DF0AE17"]')?.textContent).toContain(
-      "/ PA-AAF133F87A134DF0AE17",
+    expect(container.querySelector("[data-report-identity]")?.textContent).toContain(
+      "Case PA-AAF133F87A134DF0AE17",
     );
 
     render(investigation({ versionContext: context(9) }));
-    expect(container.querySelector('[aria-label="Case PA-AAF133F87A134DF0AE17"]')?.textContent).toContain(
-      "/ PA-AAF133F87A134DF0AE17",
+    expect(container.querySelector("[data-report-identity]")?.textContent).toContain(
+      "Case PA-AAF133F87A134DF0AE17",
     );
-    expect(container.textContent).toContain("saved report v9");
+    expect(container.textContent).toContain("v9");
   });
 
   it("uses fluid report frames instead of a centered fixed-width shell", () => {
     render(investigation());
 
-    const frames = [...container.querySelectorAll<HTMLElement>(".report-frame")];
-    expect(frames).toHaveLength(2);
-    expect(frames.every((frame) => !frame.className.includes("max-w-"))).toBe(true);
+    const main = container.querySelector<HTMLElement>(".argus-rd .rd-main");
+    expect(main).not.toBeNull();
+    expect([...container.querySelectorAll<HTMLElement>(".report-frame")]
+      .every((frame) => !frame.className.includes("max-w-"))).toBe(true);
   });
 
   it("uses social activity saved on the embedded project account when the token copy is absent", () => {
@@ -253,7 +256,7 @@ describe("investigation exact sharing", () => {
       } as unknown as NonNullable<Investigation["projectAccount"]>,
     }));
 
-    expect(container.querySelector('nav[aria-label="Report table of contents"] a[href="#social-activity"]')).not.toBeNull();
+    expect(container.querySelector('[data-chapter="social"] [id="social-activity"], [id="social-activity"]')).not.toBeNull();
     expect(container.querySelector("#social-activity")?.textContent).toContain("Social activity");
     expect(container.querySelector("#social-activity")?.textContent).toContain("$PROLOGUE");
   });
@@ -302,7 +305,7 @@ describe("investigation exact sharing", () => {
     }), () => undefined, () => undefined);
 
     expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
-    expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('nav[aria-label="Report sections"]')).toHaveLength(1);
     expect(container.textContent).not.toContain("Score while checks are open");
     expect(container.textContent).toContain("REVIEW WITH GAPS");
     expect(container.textContent).toContain("Before you use this report");
@@ -320,15 +323,14 @@ describe("investigation exact sharing", () => {
     expect(scoreCard).toBeNull();
     expect(marketCard).toBeNull();
 
-    const toolbar = container.querySelector<HTMLElement>(".report-toolbar");
-    const caseBrief = [...(toolbar?.querySelectorAll("button") ?? [])]
-      .find((button) => button.textContent?.includes("Case brief"));
-    expect(caseBrief?.className).toContain("btn-primary");
-    expect(caseBrief?.className).toContain("btn-brand");
-    expect(caseBrief?.className).not.toContain("hidden");
-    const mobileActions = toolbar?.querySelector("details");
-    expect(mobileActions?.textContent).toContain("Challenge report");
-    expect(mobileActions?.textContent).toContain("Rescan current evidence");
+    // The toolbar keeps Watch, Export brief and Share; the case brief and the
+    // rescan live one click away in the overflow menu.
+    const more = container.querySelector<HTMLButtonElement>('button[aria-label="More report actions"]');
+    expect(more).not.toBeNull();
+    act(() => more?.click());
+    const menu = container.querySelector('[role="menu"]');
+    expect(menu?.textContent).toContain("Case brief");
+    expect(menu?.textContent).toContain("Rescan");
 
     const decisionBrief = container.querySelector('[data-canonical-decision-brief="true"]');
     expect(decisionBrief?.textContent).toContain("Known connections");
@@ -805,11 +807,13 @@ describe("investigation exact sharing", () => {
 
     const chapterLabels = [...container.querySelectorAll<HTMLElement>(".story-chapter .report-section-heading > div > .eyebrow")]
       .map((label) => label.textContent);
+    // Chapters are read one at a time, in the canonical order: the numbered
+    // legacy headings keep their own labels inside their chapter.
     expect(chapterLabels).toEqual([
       "01 · Report summary",
       "02 · Why",
-      "03 · Market",
       "04 · People",
+      "03 · Market",
       "05 · Connections",
       "06 · Challenge",
       "07 · Method",
@@ -845,11 +849,21 @@ describe("investigation exact sharing", () => {
       reportVersionId,
     }));
 
-    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report table of contents"]');
+    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report sections"]');
     expect(nav).not.toBeNull();
-    const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
-      .map((link) => link.getAttribute("href"));
-    expect(hrefs).toEqual([
+    expect([...(nav?.querySelectorAll("button") ?? [])].map((tab) => tab.textContent?.trim())).toEqual([
+      "Decision",
+      "Scores",
+      "What the product is",
+      "Code",
+      "People",
+      "Market",
+      "Social",
+      "Connections",
+      "Evidence & method",
+    ]);
+    // Every chapter stays mounted, so the report's own anchors keep resolving.
+    const hrefs = [
       "#report-summary",
       "#report-risks",
       "#investigation-visuals",
@@ -857,7 +871,7 @@ describe("investigation exact sharing", () => {
       "#investigation-relationships",
       "#investigation-methodology",
       "#investigation-challenge",
-    ]);
+    ];
     for (const href of hrefs) {
       expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();
     }
@@ -926,9 +940,12 @@ describe("investigation exact sharing", () => {
       },
     }), onReAudit);
 
-    const toolbar = container.querySelector("header.report-toolbar");
-    expect(toolbar?.querySelector('a[href="#investigation-challenge"]')?.textContent).toContain("Challenge");
-    const rescan = [...(toolbar?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+    // Every claim carries its own inline challenge, and the rescan is in the
+    // toolbar's overflow menu.
+    expect(container.querySelector(".challenge-link")).not.toBeNull();
+    const more = container.querySelector<HTMLButtonElement>('button[aria-label="More report actions"]');
+    act(() => more?.click());
+    const rescan = [...container.querySelectorAll<HTMLButtonElement>('[role="menu"] button')]
       .find((button) => button.textContent?.includes("Rescan"));
     expect(rescan).toBeDefined();
     act(() => rescan?.click());
@@ -1003,6 +1020,13 @@ describe("investigation exact sharing", () => {
       .find((button) => button.textContent?.trim() === "Share");
     expect(share).toBeDefined();
     await act(async () => share?.click());
+    const create = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Create share link");
+    expect(create).toBeDefined();
+    await act(async () => create?.click());
+    const copy = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Copy link");
+    await act(async () => copy?.click());
 
     // The embedded threat scan fires its own cache-check fetch on mount, so find
     // the share call rather than assuming it is first.
@@ -1046,8 +1070,8 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).not.toContain("Ask about this report");
     expect(harness.askReport).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain("What could change the result");
-    // The reading surfaces stay: the report body and the PDF export.
-    expect(buttonLabels.some((label) => label === "Export PDF")).toBe(true);
+    // The reading surfaces stay: the report body and the export.
+    expect(buttonLabels.some((label) => label.includes("Export brief"))).toBe(true);
     // The embedded threat scan is absent, so no live fetch fires from it.
     expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("threat"))).toBe(true);
   });

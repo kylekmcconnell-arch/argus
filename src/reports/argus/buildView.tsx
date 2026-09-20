@@ -17,7 +17,7 @@ import { deriveIntelligenceBrief, type IntelligenceBriefItem } from "../../lib/i
 import type { DecisionDiscovery } from "../../lib/reportInsights";
 import { judgmentLine } from "../../lib/verdictNarrative";
 import { plainDecisionText } from "../../lib/plainDecisionText";
-import { personAvatar, trustedOfficialTeamPortraitUrl, trustedOfficialXAvatarUrl } from "../../lib/avatars";
+import { linkedinAvatar, trustedOfficialTeamPortraitUrl, trustedOfficialXAvatarUrl, xAvatar } from "../../lib/avatars";
 import { plainLanguageSummary } from "../../lib/plainLanguage";
 import { auditStoredReportQuality } from "../../lib/reportQualityAudit";
 import { canonicalBasicFactPredicate } from "../../lib/basicFactQuestions";
@@ -931,6 +931,12 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
     else if (!departure) parts.push("Independent current-role verification is unresolved.");
     if (!record?.priorCompanies?.length && member.evidence && !/^prior:/i.test(member.evidence)) parts.push(sentence(plainLanguageSummary(member.evidence)));
     if (!record?.priorCompanies?.length && member.evidence && /^prior:/i.test(member.evidence)) parts.push(`Prior affiliation recorded: ${member.evidence.replace(/^prior:\s*/i, "")}.`);
+    const avatarCandidates = [
+      trustedOfficialTeamPortraitUrl(member.officialPortraitUrl, member.officialPortraitSourceUrl),
+      contacts.mismatchedLinkedinSlug ? null : linkedinAvatar(contacts.linkedin?.url ?? member.linkedin),
+      trustedOfficialXAvatarUrl(member.avatarUrl),
+      member.handle ? xAvatar(member.handle) : null,
+    ].filter((url): url is string => Boolean(url));
     const records = personRecords({
       name: member.name,
       handle: member.handle ?? null,
@@ -946,10 +952,11 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
       key: `${member.name}-${index}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-"),
       name: member.name,
       role: member.role,
-      avatarUrl: trustedOfficialTeamPortraitUrl(member.officialPortraitUrl, member.officialPortraitSourceUrl)
-        ?? trustedOfficialXAvatarUrl(member.avatarUrl)
-        ?? personAvatar(member.handle, member.linkedin)
-        ?? null,
+      // Portrait preference: the project's own website, then LinkedIn, then X.
+      // A LinkedIn URL that names someone else is an identity mismatch, so its
+      // photo is never shown as this person's face.
+      avatarUrl: avatarCandidates[0] ?? null,
+      avatarCandidates,
       developerProfiles: (member.developerProfiles ?? [])
         .map((profile) => ({
           label: profile.provider === "github" ? "GitHub" : "Hugging Face",

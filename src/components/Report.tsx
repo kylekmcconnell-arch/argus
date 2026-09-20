@@ -3857,7 +3857,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           decision: () => <DecisionChapter view={reportView} before={decisionBefore} after={decisionAfter} onRescan={shareView ? undefined : onRescan} />,
           scores: () => <ScoresChapter view={reportView} legacy={scoresLegacy} />,
           product: () => <ProductChapter view={reportView} legacy={productLegacy} />,
-          code: () => <CodeChapter view={reportView} code={codeView} legacy={codeLegacy} />,
+          code: () => <CodeChapter subjectKind={reportView.subjectKind} code={codeView} legacy={codeLegacy} />,
           people: () => <PeopleChapter view={reportView} legacy={peopleLegacy} onAudit={shareView ? undefined : onAudit} />,
           market: ({ active }) => <MarketChapter view={reportView} active={active} reconciliation={holderReconciliation} legacy={marketLegacy} />,
           social: () => <SocialChapter view={reportView} legacy={socialLegacy} />,

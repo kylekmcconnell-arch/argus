@@ -74,10 +74,10 @@ function CommitterRow({ person }: { person: CodeCommitterView }) {
   );
 }
 
-export function CodeChapter({ view, code, legacy }: { view: ReportView; code: CodeView; legacy?: ReactNode }) {
+export function CodeChapter({ subjectKind, code, legacy }: { subjectKind: ReportView["subjectKind"]; code: CodeView; legacy?: ReactNode }) {
   const read = code.read;
   const committerArea = code.areas.find((area) => area.id === "committers");
-  const subject = view.subjectKind === "person" ? "This person" : "This project";
+  const subject = subjectKind === "person" ? "This person" : "This project";
   return (
     <>
       <ChapterHead

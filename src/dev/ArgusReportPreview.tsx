@@ -1,4 +1,6 @@
 import { Report } from "../components/Report";
+import { TokenReport } from "../components/TokenReport";
+import type { TokenDossier } from "../token/audit";
 import { storedPersonDossier, type StoredReport } from "../lib/reports";
 import type { ShippingSummary } from "../threat/shipping";
 import fixture from "../reports/argus/__fixtures__/altcoinist-v4.json";
@@ -7,6 +9,7 @@ import fixture from "../reports/argus/__fixtures__/altcoinist-v4.json";
    ?design-preview=argus-report            owner view of the saved Altcoinist v4 report
    ?design-preview=argus-report&mode=share recipient (read-only) view
    ?design-preview=argus-report&code=demo  the Code chapter with a made-up development read
+   ?design-preview=argus-report&kind=token the token scan of the same saved case
    The scroll container mirrors the workspace's main pane so sticky chrome
    behaves exactly as it does inside the app shell. */
 
@@ -109,6 +112,24 @@ export function ArgusReportPreview() {
   const params = new URLSearchParams(window.location.search);
   const share = params.get("mode") === "share";
   const dossier = storedPersonDossier(fixture as unknown as StoredReport);
+  // The token leg of the same saved case, rendered as a token scan.
+  if (params.get("kind") === "token") {
+    const token = { ...(dossier.threat?.dossier as TokenDossier) };
+    if (params.get("code") === "demo") token.shipping = DEMO_SHIPPING;
+    return (
+      <div className="flex h-screen overflow-hidden bg-void">
+        <main className="thin-scroll flex-1 overflow-x-hidden overflow-y-auto">
+          <TokenReport
+            dossier={token}
+            onReset={() => undefined}
+            onAudit={() => undefined}
+            onRescan={() => undefined}
+            shareView={share}
+          />
+        </main>
+      </div>
+    );
+  }
   if (params.get("code") === "demo" && dossier.threat?.dossier) {
     dossier.threat.dossier.shipping = DEMO_SHIPPING;
   }

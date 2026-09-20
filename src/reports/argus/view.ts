@@ -85,6 +85,8 @@ export interface PersonCardView {
   name: string;
   role: string;
   avatarUrl?: string | null;
+  /** Portrait sources in order of preference: the project's own site, then LinkedIn, then X. */
+  avatarCandidates?: string[];
   badge: { label: string; tone: Tone };
   text: string;
   contacts: PersonContacts;

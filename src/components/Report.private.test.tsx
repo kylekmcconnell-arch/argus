@@ -1219,7 +1219,10 @@ describe("private person report evidence boundary", () => {
     expect(card.querySelector('a[href="https://t.me/ada_example"]')?.textContent).toContain("@ada_example");
     expect(card.querySelector('a[href="mailto:ada@fixture.example"]')?.textContent).toContain("ada@fixture.example");
     expect(card.querySelector('a[href="https://linkedin.com/in/ada-example"]')).not.toBeNull();
-    expect(card.querySelector('img[src="https://pbs.twimg.com/profile_images/1/ada.jpg"]')).not.toBeNull();
+    // Portrait preference: the project's own site, then LinkedIn, then X. This
+    // fixture has no site portrait, so LinkedIn is shown and the X photo is
+    // the fallback if it fails to load.
+    expect(card.querySelector('img[src^="https://unavatar.io/linkedin/ada-example"]')).not.toBeNull();
     expect(card.textContent).toContain("The employment record lists this role as current.");
     // The person's evidence opens inline: role source and developer profiles.
     const review = [...card.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("Review evidence"))!;
