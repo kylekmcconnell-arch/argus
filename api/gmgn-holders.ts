@@ -17,6 +17,8 @@
 // analyst budget is the abuse guard.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { describeGmgnHolders, fetchGmgnTokenIntel, riskTagsOf } from "../server/adapters/gmgn.js";
+import { recordProviderUsageEvent } from "./_cache.js";
+import { panelIdentity } from "./_panelIdentity.js";
 
 export const config = { maxDuration: 20 };
 
@@ -41,6 +43,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (address.length > 128) return res.status(400).json({ error: "address is not a token address" });
 
   const intel = await fetchGmgnTokenIntel(chain, address, { limit: 20 });
+  // GMGN is a keyed provider and was spending silently (#356).
+  const identity = panelIdentity(req);
+  if (identity && process.env.GMGN_API_KEY) {
+    await recordProviderUsageEvent(identity.organizationId, undefined, {
+      provider: "gmgn",
+      op: "panel:gmgn-holders",
+      calls: 1,
+      usd: 0,
+      meta: "keyed provider, per-plan pricing not per-call",
+      ...(identity.userId ? { initiatedBy: identity.userId } : {}),
+      status: intel.available ? "succeeded" : "failed",
+    });
+  }
   const payload = {
     available: intel.available,
     note: intel.note,

@@ -122,7 +122,42 @@ describe("reserveSupplementalBudget", () => {
       p_user_id: auth.userId,
       p_route: "/api/ask",
       p_daily_limit: 100,
+      // No per-user cap configured: the workspace limit alone applies, which
+      // is the behaviour that predates the cap (#356).
+      p_user_daily_limit: null,
     });
+  });
+
+  it("sends the configured per-user cap and reports when it is what stopped the request", async () => {
+    vi.stubEnv("ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT", "25");
+    const fetchMock = vi.fn(async () => jsonResponse([{ allowed: false, used: 40, remaining: 60, reason: "user_daily_limit" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const reservation = await reserveSupplementalBudget(auth, "/api/ask");
+
+    expect(reservation).toMatchObject({ allowed: false, perUser: true, userLimit: 25 });
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)))
+      .toMatchObject({ p_user_daily_limit: 25 });
+  });
+
+  it("does not claim a per-user stop when the workspace is what ran out", async () => {
+    vi.stubEnv("ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT", "25");
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([{ allowed: false, used: 100, remaining: 0, reason: "workspace_daily_limit" }])));
+
+    const reservation = await reserveSupplementalBudget(auth, "/api/ask");
+
+    expect(reservation.allowed).toBe(false);
+    expect(reservation.perUser).toBeUndefined();
+  });
+
+  it("refuses to run rather than ignore a malformed per-user cap", async () => {
+    vi.stubEnv("ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT", "not-a-number");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reserveSupplementalBudget(auth, "/api/ask"))
+      .resolves.toMatchObject({ allowed: false, error: "supplemental_budget_not_configured" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("fails closed with stable codes when the limit is unset or the store does not answer", async () => {

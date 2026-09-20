@@ -233,6 +233,19 @@ export default async function middleware(request: Request): Promise<Response> {
     return Response.json({ error: "insufficient_role", requiredRole }, { status: 403 });
   }
 
+  // Identity the handlers may trust: set after authentication, always
+  // overwriting whatever arrived, so a client-supplied value never reaches a
+  // handler. Panels gated here rather than calling requireArgusAuth need the
+  // workspace to attribute their provider spend (#356).
+  const authenticatedUserId: string = user.id;
+  const forwardAuthenticated = () => {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-argus-user-id", authenticatedUserId);
+    requestHeaders.set("x-argus-role", role);
+    requestHeaders.set("x-argus-organization-id", organizationId);
+    return next({ request: { headers: requestHeaders } });
+  };
+
   const scanKey = request.headers.get("x-argus-scan-key");
   if (scanKey && (pathname === "/api/social-activity" || pathname === "/api/x-authenticity")) {
     const body = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
@@ -243,7 +256,7 @@ export default async function middleware(request: Request): Promise<Response> {
       signal: AbortSignal.timeout(8000),
     }).catch(() => null);
     if (!claim?.ok) return Response.json({ error: "scan_supplement_unavailable" }, { status: 503 });
-    if (await claim.json() === true) return next();
+    if (await claim.json() === true) return forwardAuthenticated();
     // Invalid/used scope cannot bypass the ordinary daily allowance.
   }
 
@@ -254,9 +267,18 @@ export default async function middleware(request: Request): Promise<Response> {
     if (!Number.isInteger(configuredLimit) || configuredLimit < 1 || configuredLimit > 100000) {
       return Response.json({ error: "supplemental_budget_not_configured" }, { status: 503 });
     }
+    // The workspace allowance is shared, so without a per-analyst share one
+    // session can lock every colleague out for the rest of the UTC day (#356).
+    // Unset means no per-user cap, which is the previous behaviour.
+    const rawUserLimit = process.env.ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT;
+    const configuredUserLimit = rawUserLimit == null || rawUserLimit === "" ? null : Number(rawUserLimit);
+    if (configuredUserLimit !== null
+      && (!Number.isInteger(configuredUserLimit) || configuredUserLimit < 1 || configuredUserLimit > 100000)) {
+      return Response.json({ error: "supplemental_budget_not_configured" }, { status: 503 });
+    }
     const reservation = await fetch(`${supabaseUrl}/rest/v1/rpc/reserve_supplemental_budget`, {
       method: "POST", headers: { ...serviceHeaders, "content-type": "application/json" },
-      body: JSON.stringify({ p_organization_id: organizationId, p_user_id: user.id, p_route: pathname, p_daily_limit: configuredLimit }),
+      body: JSON.stringify({ p_organization_id: organizationId, p_user_id: user.id, p_route: pathname, p_daily_limit: configuredLimit, p_user_daily_limit: configuredUserLimit }),
       signal: AbortSignal.timeout(8_000),
     }).catch(() => null);
     const rows: unknown = reservation?.ok ? await reservation.json().catch(() => null) : null;
@@ -265,14 +287,21 @@ export default async function middleware(request: Request): Promise<Response> {
       return Response.json({ error: "supplemental_budget_unavailable" }, { status: 503, headers: { "cache-control": "no-store" } });
     }
     if (!row.allowed) {
-      return Response.json({ error: "supplemental_daily_limit_reached", limit: configuredLimit,
-        message: "This workspace has reached its daily limit for supplemental checks and report chat." },
+      const perUser = row.reason === "user_daily_limit";
+      return Response.json(perUser
+        ? {
+          error: "supplemental_user_daily_limit_reached",
+          limit: configuredUserLimit,
+          message: "You have reached your own daily limit for supplemental checks and report chat. The workspace still has budget; it resets at 00:00 UTC.",
+        }
+        : {
+          error: "supplemental_daily_limit_reached",
+          limit: configuredLimit,
+          message: "This workspace has reached its daily limit for supplemental checks and report chat.",
+        },
         { status: 429, headers: { "cache-control": "no-store" } });
     }
   }
 
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-argus-user-id", user.id);
-  requestHeaders.set("x-argus-role", role);
-  return next({ request: { headers: requestHeaders } });
+  return forwardAuthenticated();
 }
