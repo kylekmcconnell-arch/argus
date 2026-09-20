@@ -898,3 +898,48 @@ stop at the deployer.
 1 percent of supply, out of the stream. The wire bot operator burned nothing.
 It does not change the read, but it is the only point either operator has in
 its favour.
+
+## A build that checks out ($MERRYMEN, Robinhood Chain, read 2026-09-20)
+
+Worth recording because it is the counter-example to everything else indexed on
+this chain, and because the failure mode is different from a scam.
+
+**The code is real.** `millw14/merrymen`, TypeScript, created 2026-07-10, four
+days before the token. 989 commits, 961 from the lead and six other
+contributors, 66 stars, 20 forks, 15 open issues, 17 MB. Weekly commits over
+the last month ran 114, 239, 210, 201 and it was pushed on the day of the read.
+It ships artifacts rather than promises: an npm package with 42 versions and 92
+downloads in the week, a Windows installer at 111 downloads, an Android demo at
+143, Linux AppImages, plus live hosted app and docs. Added to
+`eval/shipping-backtest.json` as the first robinhood-chain subject.
+
+**On-chain it is clean.** The full billion went factory to launch contract to
+pool. The deployer never received a single token, holds none, and has no fee
+stream; the token contract holds 6,784 tokens, so there is no clog or tax
+reserve. None of the extraction patterns recorded elsewhere on this chain.
+
+**The disclosures are better than most audits.** The token page states the
+product is free without the token, that the token buys perks only, and that
+there is no buyback, no burn, no revenue share and no promised return. The
+governance page says in its own words that voting is a signalling process, not
+binding on-chain execution, and that holding confers no share of revenue,
+profit or ownership. Tier thresholds (10k, 100k, 1M for 10, 25 and 50 percent
+off the performance fee) are in the repo, not only in the copy.
+
+**Four discrepancies, all minor, none of them extraction.** No LICENSE file in
+the repo despite MIT claimed on the site and in package.json. The npm package
+was last published 2026-08-02 while the repo commits daily, so the installable
+artifact trails the source by weeks. The token page and the token's on-chain
+name claim it was "launched via Virtuals", which could not be verified: the
+launch factory 0xd4ccbfa3 has a nonce of 2 and is not a busy launchpad. The
+team is pseudonymous.
+
+**The lesson for scoring.** A clean operator and a token worth holding are
+separate questions, and this record exists to keep them separate. The token's
+only function is a discount on a performance fee from a platform whose
+measurable usage is about 90 installs a week and roughly 1,150 followers.
+There is no mechanism that converts product success into token value, so a 72
+percent drawdown from the 09-10 peak on 4,950 USD of daily volume is consistent
+with nothing being wrong with the project. Do not let shipping evidence carry a
+token thesis it cannot support, and do not read a falling chart on a real build
+as evidence of a farm.
