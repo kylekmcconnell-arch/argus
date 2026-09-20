@@ -145,7 +145,97 @@ export interface ShippingSummary {
   reposRead: number;
   commitsRead: number;
   releasesInWindow: number;
+  /* Detail frozen for the report's Code chapter. Every field is optional: a
+     report saved before this lane existed carries none of them, and the
+     engine never reads them. */
+  /** The people who committed in the window, largest share first. */
+  committers?: ShippingSummaryCommitter[];
+  /** Human committers who were active in the prior 60 days and stopped. */
+  goneQuiet?: string[];
+  churnDetail?: string;
+  /** Licence of the flagship repository: how open the source actually is. */
+  license?: LicenseClass;
+  licenseId?: string;
+  ci?: "success" | "failure" | "pending" | "unknown";
+  auditInTree?: boolean;
+  lockfileAgeDays?: number;
+  /** Substance and machine-authorship measures behind the authorship verdict. */
+  medianLinesChanged?: number;
+  medianFiles?: number;
+  trivialSharePct?: number;
+  bulkDropCount?: number;
+  aiTrailerCount?: number;
+  genericMessageSharePct?: number;
+  mirrorSharePct?: number;
+  /** Star timing, for the bought-stars read. */
+  starsTotal?: number;
+  starBurstSharePct?: number;
+  starBurstWindowStart?: string;
+  starLaunchBurst?: boolean;
+  starHistoryDays?: number;
+  /** Outside use, not attention. */
+  externalPrs?: number;
+  externalIssues?: number;
+  activeForks?: number;
+  packageDownloadsLastMonth?: number;
+  packages?: string[];
+  /** Code reaching production. */
+  deploysInWindow?: number;
+  publishesInWindow?: number;
+  codeToChain?: number;
+  /** Where the subject sits against sector leaders and same-stage projects. */
+  peerSector?: string;
+  peerPositionCommits?: PeerPosition;
+  peerPositionAuthors?: PeerPosition;
+  peerPositionStars?: PeerPosition;
+  cohortLabel?: string;
+  cohortSize?: number;
+  cohortPercentileCommits?: number;
+  cohortShippingSharePct?: number;
+  /** Dated promises found in the project's own documents. */
+  roadmapMet?: number;
+  roadmapMissed?: number;
+  roadmapPending?: number;
+  /** What the read could and could not see; shown verbatim. */
+  coverageNotes?: string[];
+  reposTotal?: number;
+  commitsCounted?: number;
+  hygiene?: HygieneVerdict;
+  /** Weekly development activity for the chart: up to 52 weeks, oldest first. */
+  trendWeeks?: ShippingSummaryWeek[];
+  trendSource?: "provider-weekly" | "window-commits" | "none";
+  /** Share of commits by the largest committer, for the concentration bar. */
+  top1SharePct?: number;
+  botSharePct?: number;
 }
+
+/** One week of the frozen activity chart. */
+export interface ShippingSummaryWeek {
+  weekStart: string;
+  commits: number;
+  releases: number;
+  deploys: number;
+  /** The week's median close, when a price series was joined. */
+  price?: number;
+}
+
+/** One committer as frozen into a saved report. */
+export interface ShippingSummaryCommitter {
+  name: string;
+  login?: string;
+  commits: number;
+  sharePct: number;
+  kind: "human" | "bot" | "mirror";
+  /** The account was created inside the window: a fresh identity, not a fresh person. */
+  freshAccount: boolean;
+  accountCreatedAt?: string;
+  last30: number;
+  prior60: number;
+  twitter?: string;
+  company?: string;
+  orgs?: string[];
+}
+
 
 export interface ShippingStargazer {
   starredAt: string;
@@ -1174,6 +1264,80 @@ export function summarizeShipping(a: ShippingAssessment, capturedAt: string): Sh
     reposRead: a.coverage.reposRead,
     commitsRead: a.coverage.commitsRead,
     releasesInWindow: a.cadence.releasesInWindow,
+    committers: a.committers.roster.slice(0, 12).map((c) => ({
+      name: c.name,
+      ...(c.login ? { login: c.login } : {}),
+      commits: c.commits,
+      sharePct: c.sharePct,
+      kind: c.kind,
+      freshAccount: c.freshAccount,
+      ...(c.accountCreatedAt ? { accountCreatedAt: c.accountCreatedAt } : {}),
+      last30: c.last30,
+      prior60: c.prior60,
+      ...(c.twitter ? { twitter: c.twitter } : {}),
+      ...(c.company ? { company: c.company } : {}),
+      ...(c.orgs && c.orgs.length ? { orgs: c.orgs } : {}),
+    })),
+    goneQuiet: a.committers.churn.goneQuiet,
+    churnDetail: a.committers.churn.detail,
+    license: a.health.license,
+    ...(a.health.licenseId ? { licenseId: a.health.licenseId } : {}),
+    ci: a.health.ci,
+    auditInTree: a.health.auditInTree,
+    ...(a.health.lockfileAgeDays != null ? { lockfileAgeDays: a.health.lockfileAgeDays } : {}),
+    ...(a.substance.medianLinesChanged != null ? { medianLinesChanged: a.substance.medianLinesChanged } : {}),
+    ...(a.substance.medianFiles != null ? { medianFiles: a.substance.medianFiles } : {}),
+    ...(a.substance.trivialSharePct != null ? { trivialSharePct: a.substance.trivialSharePct } : {}),
+    bulkDropCount: a.substance.bulkDropCount,
+    aiTrailerCount: a.authorship.aiTrailerCount,
+    ...(a.authorship.genericMessageSharePct != null ? { genericMessageSharePct: a.authorship.genericMessageSharePct } : {}),
+    mirrorSharePct: a.committers.mirrorSharePct,
+    starsTotal: a.stars.total,
+    ...(a.stars.burstSharePct != null ? { starBurstSharePct: a.stars.burstSharePct } : {}),
+    ...(a.stars.burstWindowStart ? { starBurstWindowStart: a.stars.burstWindowStart } : {}),
+    ...(a.stars.launchBurst != null ? { starLaunchBurst: a.stars.launchBurst } : {}),
+    starHistoryDays: a.coverage.starHistoryDays,
+    externalPrs: a.adoption.externalPrs,
+    externalIssues: a.adoption.externalIssues,
+    activeForks: a.adoption.activeForks,
+    ...(a.adoption.packageDownloadsLastMonth != null ? { packageDownloadsLastMonth: a.adoption.packageDownloadsLastMonth } : {}),
+    ...(a.adoption.packages.length ? { packages: a.adoption.packages } : {}),
+    deploysInWindow: a.live.deploysInWindow,
+    publishesInWindow: a.live.publishesInWindow,
+    codeToChain: a.live.codeToChain,
+    ...(a.peers
+      ? {
+          peerSector: a.peers.label,
+          peerPositionCommits: a.peers.position.commits,
+          peerPositionAuthors: a.peers.position.authors,
+          peerPositionStars: a.peers.position.stars,
+        }
+      : {}),
+    ...(a.cohort
+      ? {
+          cohortLabel: a.cohort.label,
+          cohortSize: a.cohort.size,
+          ...(a.cohort.percentileCommits != null ? { cohortPercentileCommits: a.cohort.percentileCommits } : {}),
+          ...(a.cohort.shippingSharePct != null ? { cohortShippingSharePct: a.cohort.shippingSharePct } : {}),
+        }
+      : {}),
+    roadmapMet: a.roadmap.met,
+    roadmapMissed: a.roadmap.missed,
+    roadmapPending: a.roadmap.pending,
+    coverageNotes: a.coverage.notes,
+    ...(a.coverage.reposTotal != null ? { reposTotal: a.coverage.reposTotal } : {}),
+    commitsCounted: a.coverage.commitsCounted,
+    hygiene: a.hygiene.verdict,
+    trendWeeks: a.trend.weeks.slice(-52).map((week) => ({
+      weekStart: week.weekStart,
+      commits: week.commits,
+      releases: week.releases,
+      deploys: week.deploys,
+      ...(week.price != null ? { price: week.price } : {}),
+    })),
+    trendSource: a.trend.source,
+    top1SharePct: a.committers.top1SharePct,
+    botSharePct: a.committers.botSharePct,
   };
 }
 

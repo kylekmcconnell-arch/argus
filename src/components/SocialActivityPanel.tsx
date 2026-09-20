@@ -250,7 +250,7 @@ export function SocialActivityPanel({
             {hasConcentration && (
               <div className="py-3 sm:pl-4">
                 <span className="mono text-[15px] font-semibold text-ink">{snapshot.top10AccountSharePct}%</span>
-                <span className="ml-1 text-[12.5px] text-ink-dim">from the 10 most active accounts</span>
+                <span className="ml-1 text-[12.5px] text-ink-dim">from the 10 most active accounts{snapshot.windows.last7Days.authorCoverageComplete ? "" : " in the captured sample"} · share of posts, not a coordination finding</span>
               </div>
             )}
           </div>

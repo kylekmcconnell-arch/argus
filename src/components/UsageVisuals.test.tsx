@@ -167,6 +167,37 @@ describe("UsageVisuals", () => {
       .toContain("outside assessed rows");
   });
 
+  it("never rounds a lower bound upward, and shows parts that total 100 (ARGUS-13)", () => {
+    act(() => {
+      root.render(
+        <UsageVisuals
+          holders={{
+            topHolderPct: 1.3,
+            top10Pct: 1.5319402445,
+            assessedWalletCount: 2,
+            top10PctIsFloor: true,
+            holderCount: 4_000,
+            lpLockedOrBurnedPct: null,
+            holdersAssessed: true,
+            distributionSource: "goplus",
+            distributionNote: "Two usable wallet rows after eight exclusions.",
+            sourceUrl: "https://gopluslabs.io/",
+            capturedAt: "2026-09-03T05:08:00.000Z",
+          }}
+        />,
+      );
+    });
+
+    // 1.5319...% rounded up to "at least 2%" asserted more supply than measured.
+    expect(container.textContent).toContain("at least 1.53%");
+    expect(container.textContent).not.toContain("at least 2%");
+
+    const label = container.querySelector('[aria-label^="Supply split"]')?.getAttribute("aria-label") ?? "";
+    const parts = [...label.matchAll(/(\d+)%/g)].map((match) => Number(match[1]));
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.reduce((sum, part) => sum + part, 0)).toBe(100);
+  });
+
   it("omits a suppressed distribution instead of publishing collection telemetry as a metric", () => {
     act(() => {
       root.render(

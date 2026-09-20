@@ -43,6 +43,7 @@ import { teamIdentityKeys } from "../src/lib/teamIdentity";
 import { teamCandidateSourceMatchesIdentity } from "../src/lib/teamCandidateIdentity";
 import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
+import { captureTimestamp } from "./captureTime";
 import { deriveTokenApplicability } from "./tokenApplicability";
 import { launchVenueForOfficialDomain } from "../src/threat/launch";
 import { deriveSubjectCategory } from "./subjectCategory";
@@ -147,6 +148,7 @@ import {
 } from "./adapters/monid";
 import { collectOperatorLaunches, describeLaunchHistory } from "./adapters/operatorLaunches";
 import { collectSocialActivity } from "./socialActivity";
+import { isRetainedSourceFact, isStrictlyVerifiedFact } from "../src/lib/evidenceTier.js";
 import {
   hydrateOfficialProjectIdentityFromFacts,
   verifiedOfficialProjectIdentity,
@@ -2098,7 +2100,8 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   const canonicalTokenProjectBound = evidence.projectToken?.verified === true
     && Boolean(evidence.projectToken.officialX)
     && handlesMatch(evidence.projectToken.officialX ?? "", evidence.profile.handle)
-    && !evidence.profile.resolved_name?.trim();
+    && !evidence.profile.resolved_name?.trim()
+    && subjectAdoptsCanonicalToken(evidence);
   // The bio is the first-party self-description, but an empty bio is not an
   // absent subject: the account's own posts are the same kind of evidence from
   // the same provider, so they classify when the bio says nothing.
@@ -2281,6 +2284,49 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   return [...roles];
 }
 
+/**
+ * Does the SUBJECT claim this token, rather than merely being claimed by it?
+ *
+ * A registry row is written by whoever listed the coin. Letting it alone
+ * delete FOUNDER and install PROJECT meant a person who appeared in a namesake
+ * coin's registry links became that coin's project account (#359). The
+ * DexScreener fallback already refuses a candidate on exactly this ground, so
+ * this applies the same reciprocity test to the registry path.
+ *
+ * Two surfaces satisfy it, both first-party:
+ *  - "official_domain": the registry homepage sat on a domain the subject's
+ *    own provider-frozen profile declares, so the subject published the link.
+ *  - the exact contract appears in the subject's own bio or own posts.
+ *
+ * An official-X match is deliberately NOT enough on its own: that is the token
+ * naming the account, which is the direction of the attack.
+ */
+function subjectAdoptsCanonicalToken(evidence: CollectedEvidence): boolean {
+  const token = evidence.projectToken;
+  if (!token?.verified) return false;
+  if (token.verification === "official_domain") return true;
+  const ownText = `${evidence.profile.bio ?? ""}\n${evidence.profile.self_post_sample ?? ""}`;
+  const address = (token.address ?? "").trim();
+  if (address) {
+    const adoptsAddress = address.startsWith("0x")
+      ? ownText.toLowerCase().includes(address.toLowerCase())
+      : ownText.includes(address);
+    if (adoptsAddress) return true;
+  }
+  // The account's own text claiming the ticker is the other direction of the
+  // same bind: the registry names this account as the token's, and the account
+  // names the token as its own ("official account for $SUPERGEMMA"). Require
+  // the conventional $TICKER form, or a distinctive bare symbol, so a common
+  // word in a bio cannot adopt a token by coincidence.
+  const symbol = (token.symbol ?? "").trim();
+  if (symbol && /^[A-Za-z0-9]{2,15}$/.test(symbol)) {
+    const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\$${escaped}\\b`, "i").test(ownText)) return true;
+    if (symbol.length >= 4 && new RegExp(`\\b${escaped}\\b`, "i").test(ownText)) return true;
+  }
+  return false;
+}
+
 const LEGAL_ENTITY_LANGUAGE = /\b(?:incorporated|corporation|company|limited|llc|l\.l\.c\.?|ltd\.?|inc\.?|plc|llp|l\.p\.?|gmbh|s\.a\.?|foundation|association|registered)\b/i;
 
 /**
@@ -2333,17 +2379,9 @@ export function strictOrganizationLegalEntity(
  * roster. The search model only suggests candidates; every row admitted here
  * already passed an independent page fetch plus exact excerpt verification.
  */
-const isRetainedSourceFact = (fact: BasicFact): boolean =>
-  fact.artifact_verified === true
-  && (fact.status === "verified" || fact.status === "corroborated");
-
-// A provider projection or ceiling-only record is useful investigator context,
-// but it is deliberately ineligible to become ARGUS verification. Keep this
-// predicate shared by every project check that publishes the word "verified".
-const isStrictlyVerifiedFact = (fact: BasicFact): boolean =>
-  isRetainedSourceFact(fact)
-  && fact.providerProjection !== true
-  && fact.floorEligible !== false;
+// isRetainedSourceFact / isStrictlyVerifiedFact now live in
+// src/lib/evidenceTier.ts so the scoring bands, this check writer, the person
+// roster and the key-facts panel cannot drift apart again (#472, ARGUS-04/09).
 
 const sameOfficialDomain = (candidateUrl: string | undefined, officialWebsite: string | undefined): boolean => {
   const expected = canonicalOfficialWebsite(officialWebsite)?.domain;
@@ -6149,8 +6187,23 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
       analystState,
       analystDetail,
     );
+    // Freeze the same sentence with the report. The provider snapshot lives
+    // only in memory, so without this the reason a score was withheld is gone
+    // by the time anyone opens the saved version.
+    evidence.scoringOutcome = {
+      state: analystState === "executed" || analystState === "partial" || analystState === "failed"
+        ? analystState
+        : "skipped",
+      detail: analystDetail,
+      capturedAt: captureTimestamp(),
+    };
   } else {
     checkTracker.provider("ai-analyst", "AI analyst", "unavailable", "analyst provider is not configured");
+    evidence.scoringOutcome = {
+      state: "skipped",
+      detail: "the analyst provider is not configured, so no scorer call was made",
+      capturedAt: captureTimestamp(),
+    };
   }
   finishRuntimeStage("analyst", analystStartedAt);
 

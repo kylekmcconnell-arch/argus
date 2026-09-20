@@ -229,6 +229,12 @@ export interface Dossier {
   // Why the threat leg ran on that token (or why it was skipped) - one line,
   // rendered with the section so the attribution is auditable.
   threatNote?: string;
+  /**
+   * How the scanned contract was tied to this subject. A card, share or export
+   * that reads `threat` must read this too: only "canonical" is the subject's
+   * own token (#371).
+   */
+  threatBinding?: "canonical" | "bio" | "promotion";
   /** Second-hop discovery stays inspectable even when excluded from the graph. */
   ventureTeams?: CollectedEvidence["ventureTeams"];
   /** Cited model discoveries that did not govern the frozen result. */
@@ -290,6 +296,7 @@ export interface Dossier {
   evidenceAttempts?: import("../lib/evidenceRetry").EvidenceAttempt[];
   /** What the investigation director asked, delegated, and could not finish. */
   researchPlan?: ResearchPlan;
+  scoringOutcome?: CollectedEvidence["scoringOutcome"];
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
@@ -702,6 +709,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),
     ...(intelligence ? { intelligence } : {}),
+    ...(ev.scoringOutcome ? { scoringOutcome: { ...ev.scoringOutcome } } : {}),
     ...(ev.researchPlan ? {
       researchPlan: {
         ...ev.researchPlan,

@@ -9,6 +9,7 @@ import {
   tokenChecks,
   type CheckStatus,
   type ScanCheck,
+  coveragePercentOf,
 } from "./scanChecklist";
 
 afterEach(() => {
@@ -321,6 +322,26 @@ describe("clearanceCoverage (full-clearance coverage policy)", () => {
     expect(coverage.recordedPercent).toBe(75);
     expect(coverage.openNeverWaive).toEqual([]);
     expect(coverage.sufficient).toBe(false);
+  });
+
+  it("reports 7 of 8 as 87.5 percent, neither truncated to 87 nor rounded to 88 (ARGUS-08)", () => {
+    const checks = [
+      row("identity-resolution", "confirmed"),
+      ...Array.from({ length: 6 }, (_, index) => row(`enrichment-${index}`, "confirmed" as CheckStatus)),
+      row("news-press", "unavailable"),
+    ];
+    const coverage = clearanceCoverage(checks);
+    expect(coverage.recorded).toBe(7);
+    expect(coverage.applicable).toBe(8);
+    expect(coverage.recordedPercent).toBe(87.5);
+    expect(coverage.sufficient).toBe(false);
+  });
+
+  it("never lets one-decimal rounding manufacture a clean 100 percent", () => {
+    expect(coveragePercentOf(249, 250)).toBe(99.6);
+    expect(coveragePercentOf(2, 3)).toBe(66.6);
+    expect(coveragePercentOf(8, 8)).toBe(100);
+    expect(coveragePercentOf(0, 0)).toBe(0);
   });
 
   it("never waives an open sanctions screen regardless of coverage", () => {

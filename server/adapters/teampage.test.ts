@@ -365,3 +365,24 @@ describe("profile anchors on a team page", () => {
     expect(bindProfileAnchor("Niklas", roster, anchors, "linkedin")).toBeUndefined();
   });
 });
+
+describe("proximity binding cannot adopt a stranger's profile (ARGUS-05)", () => {
+  const twoPeople = `
+    <div class="card"><h3>Konstantin Sebeo</h3><p>Founder</p>
+      <a href="https://www.linkedin.com/in/katharina-eddins-translator">LinkedIn</a></div>
+    <div class="card"><h3>Katharina Eddins</h3><p>Translator</p></div>
+  `;
+
+  it("leaves a nearby profile unbound when its identifier names someone else", () => {
+    const anchors = profileAnchors(twoPeople);
+    expect(anchors.length).toBeGreaterThan(0);
+    expect(bindProfileAnchor("Konstantin Sebeo", twoPeople, anchors, "linkedin")).toBeUndefined();
+  });
+
+  it("still binds a nearby profile whose identifier echoes the person's own name", () => {
+    const own = `<div class="card"><h3>Konstantin Sebeo</h3>
+      <a href="https://www.linkedin.com/in/ksebeo">LinkedIn</a></div>`;
+    const anchors = profileAnchors(own);
+    expect(bindProfileAnchor("Konstantin Sebeo", own, anchors, "linkedin")).toBe("linkedin.com/in/ksebeo");
+  });
+});

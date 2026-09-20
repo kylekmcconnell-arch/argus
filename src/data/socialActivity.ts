@@ -261,6 +261,20 @@ const ADVERSE_PATTERNS: Array<{ signal: string; pattern: RegExp }> = [
   { signal: "dump warning", pattern: /\b(?:dump(?:ed|ing)?|crash(?:ed|ing)?)\b/i },
 ];
 
+/**
+ * Words that flip a warning into its denial within the same clause. A post
+ * saying "no bundle" was being counted as a bundling allegation and a post
+ * saying a DIFFERENT token rugged became a rug warning about this subject
+ * (ARGUS-16). The window is deliberately short: it scopes the negation to the
+ * clause, so "no bundle, but the deployer sold" keeps the deployer claim.
+ */
+const NEGATION_BEFORE = /\b(?:no|not|never|zero|isn'?t|aren'?t|wasn'?t|without|nothing)\b[^.?!;,]{0,28}$/i;
+
+export function adverseSignalIsNegated(text: string, pattern: RegExp): boolean {
+  const match = new RegExp(pattern.source, pattern.flags.replace("g", "")).exec(text);
+  return match ? NEGATION_BEFORE.test(text.slice(0, match.index)) : false;
+}
+
 function adverseCategory(text: string): SocialActivityAdverseCategory {
   if (/\b(?:bundl(?:e|ed|ing)|fresh wallets?|fund(?:er|ing|ing source)|deployer|holders?|liquidity|pool)\b/i.test(text)) {
     return "wallet_cluster";
@@ -289,7 +303,9 @@ export function selectSocialAdverseMentions(
     if (!handle || handle === subject) continue;
     const text = post.text?.replace(/\s+/g, " ").trim() ?? "";
     if (!text) continue;
-    const signals = ADVERSE_PATTERNS.filter(({ pattern }) => pattern.test(text)).map(({ signal }) => signal);
+    const signals = ADVERSE_PATTERNS
+      .filter(({ pattern }) => pattern.test(text) && !adverseSignalIsNegated(text, pattern))
+      .map(({ signal }) => signal);
     if (!signals.length) continue;
     const tweetUrl = tweetPermalink(handle, post.id, post.tweetUrl);
     if (!tweetUrl) continue;

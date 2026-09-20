@@ -17,6 +17,7 @@ describe("tokenFromVerifiedProjectToken", () => {
     })).toEqual({
       address: "0x1234567890abcdef1234567890abcdef12345678",
       via: "evm",
+      binding: "canonical",
       source: "the canonical $ANYONE project token verified through the official project domain",
     });
   });
@@ -107,5 +108,30 @@ describe("tokenFromPromotions", () => {
     expect(tokenFromPromotions([{ contract_address: "not-an-address", chain: "solana" }])).toBeNull();
     expect(tokenFromPromotions([])).toBeNull();
     expect(tokenFromPromotions(undefined)).toBeNull();
+  });
+});
+
+describe("token provenance is machine-readable, not just prose (#371)", () => {
+  it("marks a promoted contract as a promotion, never as the subject's own token", () => {
+    const candidate = tokenFromPromotions([
+      { contract_address: "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", chain: "ethereum", ticker: "OTHER" },
+    ]);
+    expect(candidate).toMatchObject({ binding: "promotion" });
+    expect(candidate?.source).toContain("claimed promotion");
+  });
+
+  it("marks a bare bio address as a self-claim, not a verified binding", () => {
+    expect(tokenFromBio("building things. CA 0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"))
+      .toMatchObject({ binding: "bio" });
+  });
+
+  it("reserves canonical for a token bound through the subject's own account or domain", () => {
+    expect(tokenFromVerifiedProjectToken({
+      verified: true,
+      address: "0x1234567890abcdef1234567890abcdef12345678",
+      chain: "ethereum",
+      symbol: "ANYONE",
+      verification: "official_x",
+    })).toMatchObject({ binding: "canonical" });
   });
 });

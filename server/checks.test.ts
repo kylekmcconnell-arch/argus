@@ -408,7 +408,7 @@ describe("PersonCheckTracker", () => {
     // decision gate), but the six founder questions, the adverse sweep, and the
     // trust-graph reconciliation remain open: far from decision-ready.
     const readiness = deriveDecisionReadiness(tracker.snapshot(["FOUNDER"], { resolvedRealName: true }));
-    expect(readiness).toMatchObject({ status: "incomplete", successful: 1, applicable: 9, coveragePercent: 11 });
+    expect(readiness).toMatchObject({ status: "incomplete", successful: 1, applicable: 9, coveragePercent: 11.1 });
   });
 
   it("reaches decision-ready founder coverage from investor questions plus the legal-grade screens, not optional provider bookkeeping", () => {

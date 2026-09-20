@@ -102,6 +102,8 @@ export interface ConnectionWorkspaceProps {
  */
 export interface ReportLaneRenderers {
   decisionCanvas?: (props: InvestigationDecisionCanvasProps) => ReactNode;
+  /** Verification tools shown in the Evidence chapter for owner views that opt in. */
+  developerTools?: (props: InvestigationDecisionCanvasProps) => ReactNode;
   connectionWorkspace?: (props: ConnectionWorkspaceProps) => ReactNode;
   socialSynthesis?: (snapshot: SocialActivitySnapshot) => ReactNode;
   githubSynthesis?: (assessment: GithubAssessment) => ReactNode;

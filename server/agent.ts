@@ -19,6 +19,7 @@ import { isOrganizationAccount } from "../src/lib/investorSubject";
 import { portfolioRelationshipBinding } from "../src/lib/portfolioRelationshipBinding";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
 import { repeatBackingSignal } from "../src/engine/taxonomy";
+import { isSourceGroundedTeamMember, isStrictlyVerifiedFact } from "../src/lib/evidenceTier.js";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
@@ -580,7 +581,7 @@ export const PROJECT_SCORING_POLICY = [
   "P3 token conduct is governed by the frozen tokenApplicability state established before scoring. verified_live_token and historical_token_lineage are assessed; lineage means the analyst must consider predecessor names, contracts, migrations, and current status together. confirmed_tokenless removes P3 as not applicable and normalizes the project score over the remaining 80 weighted points. prelaunch_token_deferred also removes P3 without penalty until a token is live. unresolved_token_identity keeps P3 unresolved and the overall project verdict provisional. Never infer applicability from biography wording, never award clean-conduct points for lacking a token, and never penalize a tokenless business for having no token history.",
   "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
   "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end because no positive backing signal was verified on that axis only, never as counter-evidence against any other axis.",
-  "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
+  "P5 traction and liveness: current product activity plus concrete operating metrics - users, revenue, fees, TVL, transactions, retention - justify a strong score. Token market capitalization, trading volume, liquidity and posting cadence are audience attention, not product traction: they may support a reading but can never stand in for a usage metric. When no dated operating metric was collected, say the operating metrics are unknown; do not score that absence as adverse, and do not treat token turnover as evidence that the product is used. Verified live usage must not be reduced to moderate merely because another metric was not collected.",
   "A severe canonical-token market drawdown is material counter-evidence for P5 and must be cited, but price performance alone only caps otherwise exceptional traction and liveness at the solid band. It cannot erase verified current protocol usage or imply token misconduct.",
   "P6 transparency and integrity: a named legal operator, terms, public docs or repositories, governance materials, and consistent current disclosures justify a solid score. Published independent audits, treasury reporting, and fuller financial disclosures may justify the exceptional band. An unavailable disclosure path is a confidence gap unless a direct verified search establishes a material nondisclosure.",
   "Only cite substantive counterEvidenceRefs for distinct verified facts that pull a score below its evidence-strength band. A verified adverse fact may be primary support for an adverse band, but positive support and score-limiting counter-evidence must otherwise remain separate citations. An emerging score reflects limited demonstrated maturity or scale and does not require adverse evidence. Never use absence wording or operational coverage telemetry as a reason to lower a band.",
@@ -1889,10 +1890,7 @@ export function deriveProjectStrengthBands(
   // the single scoring gate that isolates recall facts from floors.
   const verifiedFacts = (...predicates: string[]): Record<string, unknown>[] => basicFacts.filter((fact) =>
     predicates.includes(String(fact.predicate ?? "").toLowerCase())
-    && fact.artifact_verified === true
-    && (fact.status === "verified" || fact.status === "corroborated")
-    && fact.floorEligible !== false
-    && fact.providerProjection !== true);
+    && isStrictlyVerifiedFact(fact));
   // Ceiling-only sibling: verified facts whose floorEligible flag was cleared
   // (a self-description, ARGUS's own live-site fetch, recall corroboration).
   // Press headlines already open band ceilings, and these are strictly
@@ -1906,7 +1904,7 @@ export function deriveProjectStrengthBands(
     .map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`)
     .join(" ");
   const team = records(packet.team).filter((member) =>
-    member.artifact_verified === true && member.evidence_origin !== "model_lead");
+    isSourceGroundedTeamMember(member));
   const leaders = team.filter((member) => PROJECT_LEADER_TEAM_ROLE.test(String(member.role ?? "")));
   const leaderNames = new Set(leaders.map((member) => String(member.name ?? "").trim().toLowerCase()).filter(Boolean));
   const profile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile)
@@ -2249,8 +2247,15 @@ export function deriveProjectStrengthBands(
   // still an unfetched headline. Compute the enforceable floor from verified
   // activity only so coverage cannot manufacture traction points.
   const verifiedCurrentActivity = currentSocialActivity;
-  let p5FloorTier: ProjectStrengthTier = verifiedCurrentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
-  if (verifiedCurrentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5FloorTier = "solid";
+  // Token market cap, volume and liquidity measure ATTENTION, not that anyone
+  // uses the product: a company with no dated users, revenue, fees or
+  // retention was earning half the traction axis from posting cadence and
+  // token turnover alone (ARGUS-15). Market scale stays a ceiling widener
+  // below, exactly as unverified press does, but the enforced minimum now
+  // requires either verified current activity or an actual protocol usage
+  // metric.
+  let p5FloorTier: ProjectStrengthTier = verifiedCurrentActivity || protocolTractionFacts.length > 0 ? "emerging" : "none";
+  if (verifiedCurrentActivity && protocolTractionFacts.length > 0) p5FloorTier = "solid";
   if (verifiedCurrentActivity && currentProtocolTractionFacts.length > 0 && scaleSignals >= 2 && tokenProviders >= 2) p5FloorTier = "exceptional";
   let p5Tier: ProjectStrengthTier = currentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
   if (currentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5Tier = "solid";
@@ -2281,7 +2286,7 @@ export function deriveProjectStrengthBands(
     ...(protocolTractionFacts.length ? ["verified protocol usage metric"] : []),
     ...(currentProtocolTractionFacts.length ? ["dated current protocol metric"] : []),
     ...(tvlLongevity ? ["multi-year billion-scale TVL history"] : []),
-    ...(moderateMarket ? ["measured token-market corroboration"] : []),
+    ...(moderateMarket ? ["measured token-market activity widens the ceiling only, never the floor"] : []),
     ...(severeProjectTokenDrawdown ? ["severe canonical-token drawdown caps exceptional traction"] : []),
   ], artifactIds([
     ...(currentSocialActivity && daysSincePost !== null && profile ? [profile] : []),

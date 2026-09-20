@@ -6,6 +6,7 @@
 import { env } from "./config";
 import { assessShipping, summarizeShipping, type ShippingDeploy, type ShippingPricePoint, type ShippingSummary } from "../src/threat/shipping";
 import { collectShipping } from "../src/threat/shippingCollect";
+import { detectPeerSector } from "../src/threat/shippingPeers";
 import { deployTrailReadable, readDeployTrail } from "../src/threat/deployTrail";
 import { fetchOhlcv } from "../src/lib/priceHistory";
 import type { CollectTokenShippingFn } from "../src/token/audit";
@@ -18,7 +19,7 @@ export const collectShippingSummary: CollectTokenShippingFn = async (githubOrg, 
   const token = options?.token;
   const etherscanKey = env("ETHERSCAN_API_KEY") || undefined;
   const [input, series, trail] = await Promise.all([
-    collectShipping({ target: githubOrg, kind: "org", key, usage, ...(fetchImpl ? { fetchImpl } : {}) }),
+    collectShipping({ target: githubOrg, kind: "org", key, usage, sector: detectPeerSector(options?.sectorText ?? null), ...(fetchImpl ? { fetchImpl } : {}) }),
     token?.address && token.chain ? fetchOhlcv(token.address, token.chain, undefined, "day").catch(() => null) : Promise.resolve(null),
     token?.deployer && token.chain && deployTrailReadable(token.chain, etherscanKey) ? readDeployTrail({ chain: token.chain, wallet: token.deployer, etherscanKey, ...(fetchImpl ? { fetchImpl } : {}) }) : Promise.resolve(null),
   ]);

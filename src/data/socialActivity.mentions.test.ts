@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectSocialMentioners, type SocialActivityMentionCandidate } from "./socialActivity";
+import { selectSocialAdverseMentions, selectSocialMentioners, type SocialActivityMentionCandidate } from "./socialActivity";
 
 const post = (row: Partial<SocialActivityMentionCandidate> & Pick<SocialActivityMentionCandidate, "id" | "authorId" | "createdAt" | "handle" | "text">): SocialActivityMentionCandidate => row;
 
@@ -74,5 +74,31 @@ describe("selectSocialMentioners", () => {
       post({ id: "no-handle", authorId: "123", createdAt: "2026-08-22T20:00:00.000Z", handle: "", text: "hello" }),
       post({ id: "blank", authorId: "b", createdAt: "2026-08-22T20:00:00.000Z", handle: "bob", text: "   " }),
     ], "@clutch")).toEqual([]);
+  });
+});
+
+describe("selectSocialAdverseMentions negation scoping (ARGUS-16)", () => {
+  const candidate = (id: string, text: string): SocialActivityMentionCandidate =>
+    ({ id, authorId: `a${id}`, createdAt: "2026-09-03T05:00:00.000Z", handle: `watcher${id}`, text, tweetUrl: `https://x.com/watcher${id}/status/${id}` });
+
+  it("does not convert a denial into the allegation it denies", () => {
+    const mentions = selectSocialAdverseMentions(
+      [candidate("1", "Checked the chart: no bundle here, supply looks clean.")],
+      "@subject",
+    );
+    expect(mentions).toEqual([]);
+  });
+
+  it("keeps a real allegation, and keeps the unnegated half of a mixed post", () => {
+    const mentions = selectSocialAdverseMentions(
+      [
+        candidate("2", "This looks like a bundle, same deployer as the last one."),
+        candidate("3", "No bundle, but the deployer sold into the launch."),
+      ],
+      "@subject",
+    );
+    expect(mentions.map((mention) => mention.postId).sort()).toEqual(["2", "3"]);
+    expect(mentions.find((mention) => mention.postId === "3")?.signals).toContain("deployer claim");
+    expect(mentions.find((mention) => mention.postId === "3")?.signals).not.toContain("wallet bundling claim");
   });
 });

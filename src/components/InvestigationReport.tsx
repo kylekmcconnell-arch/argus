@@ -3,6 +3,7 @@ import { tokenCompositionRow, tokenMarketPresentation } from "../lib/tokenPresen
 import { investigationFacets } from "../lib/investigationFacets";
 import { useRef, useState } from "react";
 import { verdictMeta, axisLabel } from "../lib/verdict";
+import { withheldScoreReason } from "../lib/withheldScore";
 import { printReportPdf } from "../lib/printPdf";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import {
@@ -54,38 +55,23 @@ import { PanelRequestNotice } from "./PanelRequestNotice";
 import { investigationContribution, getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
-import {
-  ArrowClockwise,
-  ArrowLeft,
-  Briefcase,
-  CaretDown,
-  ChartLineUp,
-  ChatsCircle,
-  ClipboardText,
-  Database,
-  DotsThree,
-  Graph,
-  IdentificationBadge,
-  ShareNetwork,
-  ShieldWarning,
-  Star,
-  UserFocus,
-  UsersThree,
-  WarningCircle,
-} from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowLeft, CaretDown, UserFocus, UsersThree, WarningCircle } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { SecondOpinion } from "./SecondOpinion";
 import { ExpandableText } from "./ExpandableText";
 import { ReportDisclaimer } from "./ReportDisclaimer";
 import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
-import { ReportExperienceLayout, ReportStickyTableOfContents, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
+import { ArgusReportShell, type MoreAction } from "../reports/argus/ArgusReportShell";
+import { LegacySection } from "../reports/argus/primitives";
+import { CodeChapter } from "../reports/argus/chapters/CodeChapter";
+import { buildCodeView } from "../reports/argus/codeView";
 import { ScoreComposition } from "./ScoreComposition";
 import { ReportChallengeButton } from "./ReportChallengeButton";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
 import { VerdictHero } from "./VerdictHero";
 import { ReportActionsRow } from "./ReportActionsRow";
-import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
+import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, projectAxisScores, tokenDimensionChapters } from "../lib/dimensionChapters";
 import {
   BasicFactsPanel,
   type BasicFactLeadView,
@@ -1298,6 +1284,12 @@ export function InvestigationReport({
 
   // Same mint the Share button uses, composed into the TLDR at copy time so a
   // pasted summary opens without sign-in and unfurls into the report card.
+  /** The share panel's minting call: the same link, surfaced with its failure. */
+  const shareUrl = async (): Promise<string> => {
+    const url = await mintShareUrl();
+    if (!url) throw new Error("Secure share link creation failed.");
+    return url;
+  };
   const mintShareUrl = async (): Promise<string | null> => {
     try {
       const response = await fetch("/api/share", {
@@ -1436,111 +1428,76 @@ export function InvestigationReport({
   const scanDetailsChapterNumber = challengeChapterNumber + 1;
   const chapterLabel = (chapter: number, label: string) =>
     `${String(chapter).padStart(2, "0")} · ${label}`;
-  const reportNavItems: ReportCanvasNavItem[] = [
-    { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
-    ...(projectAccount?.entityContinuity?.events.length ? [{ href: "#key-developments" as const, label: "Key developments", icon: <ArrowClockwise size={16} weight="duotone" aria-hidden="true" /> }] : []),
-    { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
-    { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
-    ...(socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
-    ...(accountLeads.subjectLeads.length > 0 ? [{ href: "#subject-leads" as const, label: "Accusations", icon: <WarningCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
-    { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
-    ...(hasConnectionsChapter ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
-    ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
-    ...(token.axes?.length ? [{ href: "#composition" as const, label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> }] : []),
-    { href: "#investigation-methodology", label: "Method", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
-    ...(!shareView ? [{ href: "#investigation-challenge" as const, label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
+
+  const codeView = buildCodeView({
+    shipping: token.shipping ?? null,
+    people: [],
+    linkedOrg: ghOrg,
+    absentReason: ghOrg
+      ? "A repository is linked but this saved investigation did not read it."
+      : "No repository is linked from a surface this project controls, so no development read was taken.",
+  });
+
+  const codeLegacy = (
+    <LegacySection title="Development panels on record" note="The frozen scorecard the engine scored, and the deeper live read. The live panel charges a panel cost and reads GitHub now, not at scan time.">
+        {/* frozen development read: scored by the engine, closed on the checklist,
+            printed with the PDF; the same saved fact the token report shows */}
+        <ShippingScorecard shipping={token.shipping} delta={token.reportDelta} githubOrg={ghOrg} id="investigation-development" />
+    </LegacySection>
+  );
+
+  const moreActions: MoreAction[] = shareView ? [] : [
+    ...(onOpenBrief ? [{ label: "Case brief", detail: "Analyst decision brief for this case", onClick: onOpenBrief }] : []),
+    ...(onReAudit ? [{ label: "Rescan", detail: "Run this investigation again with current evidence", onClick: onReAudit }] : []),
+    { label: "Print the full report", detail: "Every chapter, through your browser", onClick: () => printReportPdf(inv.token.name || inv.token.symbol) },
+    { label: "Open the token report", detail: "The token leg of this investigation", onClick: onOpenToken },
+    ...(projectAccount ? [{ label: "Open the project account report", detail: "The account leg of this investigation", onClick: onOpenProjectAccount }] : []),
+    { label: "New investigation", onClick: onReset },
   ];
 
   return (
-    <div className="investigation-story relative min-h-full pb-24">
-      <header className="report-toolbar sticky top-0 z-30 border-b backdrop-blur">
-        <div className="report-frame flex flex-nowrap items-center gap-2 py-2.5 sm:py-3">
-          {!shareView && (
-            <button onClick={onReset} className="btn-ghost flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 px-2 text-[12.5px] sm:min-w-0 sm:justify-start sm:px-1">
-              <ArrowLeft size={15} weight="bold" aria-hidden="true" />
-              <span className="max-sm:sr-only">New investigation</span>
-            </button>
-          )}
-          <span className="mono hidden text-[11px] text-ink-faint sm:inline" aria-label={caseLabel ? `Case ${caseLabel}` : undefined}>
-            / {caseLabel ?? "token + project report"}
-          </span>
-          <span className={`chip shrink-0 ${versionContext ? "" : "tint-signal"}`}>
-            <span className="sm:hidden">{versionContext ? `v${versionContext.version}` : "live"}</span>
-            <span className="hidden sm:inline">{versionContext ? `saved report v${versionContext.version}` : "new scan"}</span>
-          </span>
-          <div className="ml-auto flex min-w-0 items-center gap-2">
-            {onOpenBrief && (
-              <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact investigation case" className="btn-primary btn-brand flex min-h-11 shrink-0 items-center gap-2 px-3 text-[12.5px] font-medium">
-                <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
-              </button>
-            )}
-            {!shareView && <a href="#investigation-challenge" title="Tell ARGUS what looks wrong or missing in this report" className="btn-secondary hidden min-h-11 items-center justify-center gap-2 px-3 text-[12.5px] font-medium sm:flex">
-              <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
-            </a>}
-            {!shareView && onReAudit && (
-              <button onClick={onReAudit} title="Run this investigation again with current evidence" className="btn-secondary hidden min-h-11 items-center justify-center gap-2 px-3 text-[12.5px] font-medium sm:flex">
-                <ArrowClockwise size={16} weight="duotone" aria-hidden="true" />
-                Rescan
-              </button>
-            )}
-            <div className="hidden items-center gap-2 sm:flex">
-              <button type="button" onClick={() => printReportPdf(inv.token.name || inv.token.symbol)} title="Save this report as a PDF (opens the print dialog)" className="btn-secondary print:hidden flex min-h-10 items-center gap-2 px-3 text-[12.5px]">Export PDF</button>
-              {canShare && (
-                <button type="button" onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Share link could not be created or copied. Try again." : "Copy a report link that works for 30 days"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
-                  <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
-                  {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share"}
-                </button>
-              )}
-              {canMutateWorkspace && (
-                <button type="button" onClick={watch} aria-pressed={watched} title="Add this report to your watchlist so later scans can flag changes" className={`btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] ${watched ? "tint-signal" : ""}`}>
-                  <Star size={16} weight={watched ? "fill" : "duotone"} aria-hidden="true" />
-                  {watched ? "Watching" : "Watch"}
-                </button>
-              )}
-            </div>
-            {!shareView && <details className="group relative sm:hidden">
-                <summary
-                  aria-label="More report actions"
-                  className="btn-secondary flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center px-2.5 [&::-webkit-details-marker]:hidden"
-                >
-                  <DotsThree size={19} weight="bold" aria-hidden="true" />
-                  <span className="sr-only">More report actions</span>
-                </summary>
-                <div className="absolute right-0 top-[calc(100%+0.4rem)] z-20 min-w-52 overflow-hidden rounded-lg border border-line bg-panel py-1 soft-shadow">
-                  <a href="#investigation-challenge" className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
-                    <ShieldWarning size={16} weight="duotone" aria-hidden="true" />
-                    Challenge report
-                  </a>
-                  {onReAudit && (
-                    <button type="button" onClick={onReAudit} className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
-                      <ArrowClockwise size={16} weight="duotone" aria-hidden="true" />
-                      Rescan current evidence
-                    </button>
-                  )}
-                  {canShare && (
-                    <button type="button" onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink disabled:cursor-wait disabled:opacity-60">
-                      <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
-                      {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share report"}
-                    </button>
-                  )}
-                  {canMutateWorkspace && (
-                    <button type="button" onClick={watch} aria-pressed={watched} className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
-                      <Star size={16} weight={watched ? "fill" : "duotone"} aria-hidden="true" />
-                      {watched ? "Watching report" : "Add to watchlist"}
-                    </button>
-                  )}
-                </div>
-              </details>}
-          </div>
-        </div>
-      </header>
+    <ArgusReportShell
+      runtime={{
+        subjectName: token.name || `$${token.symbol}`,
+        subjectRef: token.address,
+        caseLabel,
+        auditId: token.address,
+        ...(frozenReportVersionId ? { reportVersionId: frozenReportVersionId } : {}),
+        ...(versionContext?.version != null ? { version: versionContext.version } : {}),
+        ...(versionContext?.createdAt ? { savedAt: versionContext.createdAt } : {}),
+        officialDomain: siteUrl ?? null,
+      }}
+      shareView={shareView}
+      breadcrumbName={`$${token.symbol}`}
+      versionLabel={versionContext ? `v${versionContext.version}` : "new scan"}
+      topScores={[
+        { label: "Token safety", value: token.score == null ? "n/a" : String(token.score) },
+        ...(accountReport?.governing_score != null
+          ? [{ label: "Project diligence", value: String(accountReport.governing_score) }]
+          : []),
+      ]}
+      savedLine={versionContext
+        ? `SAVED REPORT · ${new Date(versionContext.createdAt).toUTCString().replace(/^\w+, /, "").replace(/ GMT$/, " UTC")}`
+        : "LIVE INVESTIGATION · NOT YET SAVED"}
+      issues={[]}
+      watch={canMutateWorkspace ? { watched, toggle: watch } : null}
+      exportBrief={async () => { printReportPdf(inv.token.name || inv.token.symbol); }}
+      share={shareView || privateSession ? null : {
+        ...(canShare ? { create: shareUrl } : {
+          unavailableReason: "This investigation has not been saved as an immutable version yet, so a share link cannot be created.",
+        }),
+        subjectLabel: `$${token.symbol}`,
+        versionLabel: versionContext ? `Version ${versionContext.version}` : "Saved version",
+      }}
+      more={moreActions}
+      chapters={{
+        decision: () => (
+          <div className="investigation-story rd-legacy">
       {rescanError && (
         <div role="alert" className="report-frame mt-4 rounded-xl border border-avoid/30 bg-avoid/5 px-4 py-3 text-[12.5px] leading-relaxed text-avoid">
           {rescanError}
         </div>
       )}
-
-      <div className={`report-frame report-style-${reportStyle}`} data-report-style={reportStyle}>
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -1668,7 +1625,11 @@ export function InvestigationReport({
               verdictLabel: verdictMeta(accountReport.composite_verdict).label,
               context: "Who runs the project, what it has built, and what evidence supports its claims about backing and use.",
               composition: projectCompositionRows,
-              unavailableCopy: "The linked project report did not publish a diligence score.",
+              // A withheld score states its own cause. "N/A, not measured" with
+              // no reason reads as a broken product rather than as the honest
+              // coverage limit it is.
+              unavailableCopy: withheldScoreReason(projectAccount)
+                ?? "The linked project report did not publish a diligence score.",
             } : undefined}
           />
 
@@ -1842,60 +1803,6 @@ export function InvestigationReport({
               The account's dimensions lead with the team; the token's follow.
               Two recorded scores stay two honest strips, never blended. The
               full ledger is progressively disclosed after the decision brief. */}
-          {token.axes?.length > 0 && (
-          <details id="composition" open={reportStyle === 2 ? true : undefined} className="evidence-appendix af-doc group mt-8 scroll-mt-28">
-              <summary className="evidence-appendix-summary cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                <div>
-                  <p className="af-sec-label">Evidence ledger</p>
-                  <h2 className="af-h2 mt-2">{accountAxes.length > 0 ? "Two separate scores. Every dimension preserved." : compositionHeadline(token.axes.length)}</h2>
-                  <p className="af-prose mt-2">Open the complete score math and every evidence chapter.</p>
-                </div>
-                <span className="mono shrink-0 text-[10.5px] uppercase tracking-[0.1em] text-signal-lift">
-                  <span className="group-open:hidden">Open evidence</span>
-                  <span className="hidden group-open:inline">Close evidence</span>
-                </span>
-              </summary>
-              <div className="evidence-appendix-body">
-            {accountAxes.length > 0 && (
-              <ScoreComposition
-                heading={`The project account · ${projectAccount?.handle ?? "its own 100"}`}
-                rows={orderByPlainAxis(accountAxes.map(([key, a]) => ({
-                  axis: key,
-                  label: plainAxisLabel(key, axisLabel(key)),
-                  score: a.score,
-                  weight: a.weight,
-                  rationale: a.rationale,
-                  evidenceHref: "#investigation-people" as const,
-                })))}
-                totalScore={accountGoverning?.score_total ?? null}
-                challengeAnchor={shareView ? null : "#investigation-challenge"}
-              />
-            )}
-            <ScoreComposition
-              heading={accountAxes.length > 0 ? "The token · its own 100" : "How the score is built"}
-              rows={tokenCompositionRows}
-              totalScore={token.score}
-              capNote={token.capApplied ? `limited to ${token.score}` : null}
-              challengeAnchor={shareView ? null : "#investigation-challenge"}
-            />
-            {/* the reading spine: Auric File chapters only (Enigma: do not use
-              the dossier-beats layout here; it stays available as the
-              standalone sharing format). */}
-                <div className="af-doc">
-                {projectAccount?.projectStrengthBands && (
-                  <DimensionChapters
-                    chapters={personDimensionChapters(projectAccount.projectStrengthBands)}
-                    checksHref="#investigation-methodology"
-                  />
-                )}
-                <DimensionChapters
-                  chapters={tokenDimensionChapters(token)}
-                  checksHref="#investigation-methodology"
-                />
-                </div>
-              </div>
-            </details>
-          )}
 
           {(requiredGapChecks.length > 0 || readiness.status !== "ready") && <section
             className="panel clearance-boundary mt-3 flex flex-col gap-4 p-4 tint-var sm:flex-row sm:items-center sm:justify-between"
@@ -1980,19 +1887,74 @@ export function InvestigationReport({
           )}
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
-
-        {reportLane.definition.navigation === "sticky" && (
-          <ReportStickyTableOfContents
-            items={reportNavItems}
-            stickyOffsetClass="top-[101px] sm:top-[65px]"
-          />
-        )}
-
-        <ReportExperienceLayout
-          items={reportNavItems}
-          showGuideNavigation={reportLane.definition.navigation === "guide"}
-        >
-
+          </div>
+        ),
+        scores: () => (
+          <LegacySection title="How these scores were composed" note="Two recorded scores stay two honest strips. Every dimension of each is preserved with its evidence.">
+            {!token.axes?.length && (
+              <p className="text-[12.5px] text-ink-dim">No scoring composition is saved with this investigation, so no dimension can be opened here. The decision chapter carries the recorded result and what it rests on.</p>
+            )}
+            <div className="investigation-story">
+          {token.axes?.length > 0 && (
+          <details id="composition" open={reportStyle === 2 ? true : undefined} className="evidence-appendix af-doc group mt-8 scroll-mt-28">
+              <summary className="evidence-appendix-summary cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <div>
+                  <p className="af-sec-label">Evidence ledger</p>
+                  <h2 className="af-h2 mt-2">{accountAxes.length > 0 ? "Two separate scores. Every dimension preserved." : compositionHeadline(token.axes.length)}</h2>
+                  <p className="af-prose mt-2">Open the complete score math and every evidence chapter.</p>
+                </div>
+                <span className="mono shrink-0 text-[10.5px] uppercase tracking-[0.1em] text-signal-lift">
+                  <span className="group-open:hidden">Open evidence</span>
+                  <span className="hidden group-open:inline">Close evidence</span>
+                </span>
+              </summary>
+              <div className="evidence-appendix-body">
+            {accountAxes.length > 0 && (
+              <ScoreComposition
+                heading={`The project account · ${projectAccount?.handle ?? "its own 100"}`}
+                rows={orderByPlainAxis(accountAxes.map(([key, a]) => ({
+                  axis: key,
+                  label: plainAxisLabel(key, axisLabel(key)),
+                  score: a.score,
+                  weight: a.weight,
+                  rationale: a.rationale,
+                  evidenceHref: "#investigation-people" as const,
+                })))}
+                totalScore={accountGoverning?.score_total ?? null}
+                challengeAnchor={shareView ? null : "#investigation-challenge"}
+              />
+            )}
+            <ScoreComposition
+              heading={accountAxes.length > 0 ? "The token · its own 100" : "How the score is built"}
+              rows={tokenCompositionRows}
+              totalScore={token.score}
+              capNote={token.capApplied ? `limited to ${token.score}` : null}
+              challengeAnchor={shareView ? null : "#investigation-challenge"}
+            />
+            {/* the reading spine: Auric File chapters only (Enigma: do not use
+              the dossier-beats layout here; it stays available as the
+              standalone sharing format). */}
+                <div className="af-doc">
+                {projectAccount?.projectStrengthBands && (
+                  <DimensionChapters
+                    chapters={personDimensionChapters(projectAccount.projectStrengthBands, projectAxisScores(projectAccount.report))}
+                    checksHref="#investigation-methodology"
+                  />
+                )}
+                <DimensionChapters
+                  chapters={tokenDimensionChapters(token)}
+                  checksHref="#investigation-methodology"
+                />
+                </div>
+              </div>
+            </details>
+          )}
+            </div>
+          </LegacySection>
+        ),
+        product: () => (
+          <LegacySection title="The project behind this investigation" note="Lifecycle, point-in-time intelligence, the research plan, the control surface, the basic facts, and the live research cluster.">
+            <div className="investigation-story">
         {projectAccount?.entityContinuity && <EntityContinuityTimeline snapshot={projectAccount.entityContinuity} />}
 
         {projectAccount?.intelligence && (
@@ -2037,70 +1999,21 @@ export function InvestigationReport({
             </p>
           )}
         </div>
-
-        <div id="investigation-visuals" className="story-chapter report-section scroll-mt-28 mt-7">
-          <ReportSectionHeading
-            index="03 · Market"
-            title="What the market tells us"
-            challengeAnchorId={shareView ? null : "investigation-challenge"}
-            description={`Company funding and the $${token.symbol} token are separate. Then review price, liquidity, ownership, and usage.`}
-          />
-          <div className="mt-3 space-y-3">
-            <CapitalStructurePanel
-              facts={projectBasicFacts}
-              indexedRounds={projectAccount?.protocolFunding?.rounds ?? []}
-              tokenSymbol={token.symbol}
-              tokenMarketCap={projectAccount?.projectToken?.marketCapUsd ?? token.cg?.mcapUsd ?? marketCap}
-              tokenFdv={projectAccount?.projectToken?.fdvUsd ?? fullyDilutedValue}
-            />
-            <MarketPerformancePanel
-              token={token}
-              projectToken={projectAccount?.projectToken}
-              showCurrentIntelligence={showCurrentIntelligence}
-              refreshCurrentMarket={currentIntelligenceEnabled}
-              onLoadCurrentIntelligence={loadCurrentIntelligence}
-            />
-            <TokenSnapshotVisuals token={token} showPriceMomentum={false} />
-            {/* Live on-chain custody trace. An anonymous share-link viewer has
-                no session, so its /api/nftlock call is a guaranteed 401 that
-                only hides the panel after a wasted request - skip it there. */}
-            {!shareView && isConcentratedLiquidityPool(token.dexId, token.dexLabels) && token.pairAddress && (
-              <LpCustody chain={token.chain} pairAddress={token.pairAddress} />
-            )}
-            {(projectAccount?.protocolTvl || projectAccount?.protocolFees || projectAccount?.holderProfile) && (
-              <UsageVisuals
-                tvl={projectAccount.protocolTvl}
-                fees={projectAccount.protocolFees}
-                holders={projectAccount.holderProfile}
-              />
-            )}
-            <DiligenceEvidenceLedgers
-              company={projectAccount?.companyEnrichment}
-              officialWebsite={projectAccount?.website ?? siteUrl}
-              protocolFunding={projectAccount?.protocolFunding}
-              protocolTvl={projectAccount?.protocolTvl}
-              canonicalGeckoId={projectAccount?.projectToken?.coingeckoId}
-            />
-            {socialActivity && (
-              <SocialActivityPanel
-                snapshot={socialActivity}
-                className="mt-3"
-                panelCostToken={panelCostToken}
-                afterActivity={accountLeads.subjectAdverseLeads.length > 0 || (socialActivity.adverseMentions?.length ?? 0) > 0 ? (
-                  <div id="subject-leads" className="scroll-mt-28">
-                    <SubjectAccusationStage
-                      leads={accountLeads.subjectAdverseLeads}
-                      socialLeads={socialActivity.adverseMentions}
-                      subject={accountLeadSubject}
-                      panelCostToken={panelCostToken}
-                    />
-                  </div>
-                ) : undefined}
-              />
-            )}
+        {/* unified project research: news & press, documents & resources, domain
+            intelligence, and GitHub forensics — the same cluster every report uses */}
+        {showCurrentIntelligence && (
+          <div className="mt-3">
+            <ProjectResearch name={token.name} symbol={token.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${token.symbol}`} newsHandle={projectX} record={canRecordCurrentIntelligence} sectorText={[recon?.title, recon?.retrieval?.description].filter(Boolean).join(" · ") || null} docsText={recon?.retrieval?.content ?? null} token={{ address: token.address, chain: token.chain, deployer: token.deployer, mcap: token.mcap ?? undefined, ageDays: token.ageDays ?? undefined }} projectHandle={projectX} previousShipping={token.reportDelta?.category === "development" ? token.reportDelta.previousShipping ?? null : null} {...(panelCostToken ? { panelCostToken } : {})} />
           </div>
-        </div>
+        )}
 
+            </div>
+          </LegacySection>
+        ),
+        code: () => <CodeChapter subjectKind="token" code={codeView} legacy={codeLegacy} />,
+        people: () => (
+          <LegacySection title="Who is behind this project" note="The saved roster, the token record, the deployer and the identity evidence behind each name.">
+            <div className="investigation-story">
         <div id="investigation-people" className="story-chapter story-chapter-muted report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
             index="04 · People"
@@ -2497,44 +2410,89 @@ export function InvestigationReport({
             </section>
           </div>
         </div>
-
-        {!shareView && <DeepLaunchPanel chain={token.chain} reportVersionId={frozenReportVersionId} />}
-        {/* on-chain forensic suite — the same cluster the token report uses:
-            market intel, holders, clustering, operator trace, EVM deployer +
-            bytecode, and the OFAC sanctions screen, in one canonical order. */}
-        {showCurrentIntelligence && panelCostToken && (
-          <div className="mt-3">
-            <OnChainForensics token={token} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} projectHandle={projectX} projectWebsite={siteUrl} />
-            {arkhamEnabled && (arkhamState === "rescan_required" || arkhamState === "unavailable") && (
-              <PanelRequestNotice failure={arkhamState} label="Wallet identity labels" className="mt-3" />
+            </div>
+          </LegacySection>
+        ),
+        market: () => (
+          <LegacySection title="What the market tells us" note="Funding and the token are separate. Then price, liquidity, ownership and usage, as the scan captured them.">
+            <div className="investigation-story">
+        <div id="investigation-visuals" className="story-chapter report-section scroll-mt-28 mt-7">
+          <ReportSectionHeading
+            index="03 · Market"
+            title="What the market tells us"
+            challengeAnchorId={shareView ? null : "investigation-challenge"}
+            description={`Company funding and the $${token.symbol} token are separate. Then review price, liquidity, ownership, and usage.`}
+          />
+          <div className="mt-3 space-y-3">
+            <CapitalStructurePanel
+              facts={projectBasicFacts}
+              indexedRounds={projectAccount?.protocolFunding?.rounds ?? []}
+              tokenSymbol={token.symbol}
+              tokenMarketCap={projectAccount?.projectToken?.marketCapUsd ?? token.cg?.mcapUsd ?? marketCap}
+              tokenFdv={projectAccount?.projectToken?.fdvUsd ?? fullyDilutedValue}
+            />
+            <MarketPerformancePanel
+              token={token}
+              projectToken={projectAccount?.projectToken}
+              showCurrentIntelligence={showCurrentIntelligence}
+              refreshCurrentMarket={currentIntelligenceEnabled}
+              onLoadCurrentIntelligence={loadCurrentIntelligence}
+            />
+            <TokenSnapshotVisuals token={token} showPriceMomentum={false} />
+            {/* Live on-chain custody trace. An anonymous share-link viewer has
+                no session, so its /api/nftlock call is a guaranteed 401 that
+                only hides the panel after a wasted request - skip it there. */}
+            {!shareView && isConcentratedLiquidityPool(token.dexId, token.dexLabels) && token.pairAddress && (
+              <LpCustody chain={token.chain} pairAddress={token.pairAddress} />
             )}
-            {arkhamEnabled && canRecordCurrentIntelligence && <ArkhamGraphBridge subject={`$${token.symbol}`} labels={arkham} />}
-            {arkhamEnabled && token.deployer && <MoneyFlowStory address={token.deployer} chain={token.chain} panelCostToken={panelCostToken} roleLabel={deployerRoleLabel(token.deployerAttribution)} />}
-            {arkhamEnabled && token.deployer && <Counterparties address={token.deployer} subject={`$${token.symbol}`} chain={token.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />}
-            {arkhamEnabled && token.deployer && <RiskPaths address={token.deployer} panelCostToken={panelCostToken} />}
-            {arkhamEnabled && token.deployer && <div className="mt-3"><Holdings address={token.deployer} symbol={token.symbol} panelCostToken={panelCostToken} /></div>}
+            {(projectAccount?.protocolTvl || projectAccount?.protocolFees || projectAccount?.holderProfile) && (
+              <UsageVisuals
+                tvl={projectAccount.protocolTvl}
+                fees={projectAccount.protocolFees}
+                holders={projectAccount.holderProfile}
+              />
+            )}
+            <DiligenceEvidenceLedgers
+              company={projectAccount?.companyEnrichment}
+              officialWebsite={projectAccount?.website ?? siteUrl}
+              protocolFunding={projectAccount?.protocolFunding}
+              protocolTvl={projectAccount?.protocolTvl}
+              canonicalGeckoId={projectAccount?.projectToken?.coingeckoId}
+            />
           </div>
-        )}
-
-        {/* token provenance: who it's named after, and whether they're behind it */}
-        {showCurrentIntelligence && panelCostToken && (
-          <div className="mt-3">
-            <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} panelCostToken={panelCostToken} onAudit={onAudit} />
-          </div>
-        )}
-
-        {/* frozen development read: scored by the engine, closed on the checklist,
-            printed with the PDF; the same saved fact the token report shows */}
-        <ShippingScorecard shipping={token.shipping} delta={token.reportDelta} githubOrg={ghOrg} id="investigation-development" />
-
-        {/* unified project research: news & press, documents & resources, domain
-            intelligence, and GitHub forensics — the same cluster every report uses */}
-        {showCurrentIntelligence && (
-          <div className="mt-3">
-            <ProjectResearch name={token.name} symbol={token.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${token.symbol}`} newsHandle={projectX} record={canRecordCurrentIntelligence} sectorText={[recon?.title, recon?.retrieval?.description].filter(Boolean).join(" · ") || null} docsText={recon?.retrieval?.content ?? null} token={{ address: token.address, chain: token.chain, deployer: token.deployer, mcap: token.mcap ?? undefined, ageDays: token.ageDays ?? undefined }} projectHandle={projectX} previousShipping={token.reportDelta?.category === "development" ? token.reportDelta.previousShipping ?? null : null} {...(panelCostToken ? { panelCostToken } : {})} />
-          </div>
-        )}
-
+        </div>
+            </div>
+          </LegacySection>
+        ),
+        social: () => (
+          <LegacySection title="Conversation on record" note="The saved social snapshot and the direct-subject leads the search matched. Attention is not endorsement, and a lead is not a finding.">
+            {!socialActivity && (
+              <p className="text-[12.5px] text-ink-dim">No social activity snapshot is saved with this investigation. Missing activity data is not a finding about the project.</p>
+            )}
+            <div className="investigation-story">
+            {socialActivity && (
+              <SocialActivityPanel
+                snapshot={socialActivity}
+                className="mt-3"
+                panelCostToken={panelCostToken}
+                afterActivity={accountLeads.subjectAdverseLeads.length > 0 || (socialActivity.adverseMentions?.length ?? 0) > 0 ? (
+                  <div id="subject-leads" className="scroll-mt-28">
+                    <SubjectAccusationStage
+                      leads={accountLeads.subjectAdverseLeads}
+                      socialLeads={socialActivity.adverseMentions}
+                      subject={accountLeadSubject}
+                      panelCostToken={panelCostToken}
+                    />
+                  </div>
+                ) : undefined}
+              />
+            )}
+            </div>
+          </LegacySection>
+        ),
+        connections: () => (
+          <LegacySection title="How these people and wallets connect" note="The connection web, the project account dossier, and the on-chain forensic panels for the deployer.">
+            <div className="investigation-story">
         {/* Connection web: the subject's graph + its ties to everything else you've
             audited — the deeper map, below the team. */}
         {hasConnectionsChapter && invGraph && (
@@ -2598,6 +2556,37 @@ export function InvestigationReport({
           </div>
         )}
 
+        {!shareView && <DeepLaunchPanel chain={token.chain} reportVersionId={frozenReportVersionId} />}
+        {/* on-chain forensic suite — the same cluster the token report uses:
+            market intel, holders, clustering, operator trace, EVM deployer +
+            bytecode, and the OFAC sanctions screen, in one canonical order. */}
+        {showCurrentIntelligence && panelCostToken && (
+          <div className="mt-3">
+            <OnChainForensics token={token} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} projectHandle={projectX} projectWebsite={siteUrl} />
+            {arkhamEnabled && (arkhamState === "rescan_required" || arkhamState === "unavailable") && (
+              <PanelRequestNotice failure={arkhamState} label="Wallet identity labels" className="mt-3" />
+            )}
+            {arkhamEnabled && canRecordCurrentIntelligence && <ArkhamGraphBridge subject={`$${token.symbol}`} labels={arkham} />}
+            {arkhamEnabled && token.deployer && <MoneyFlowStory address={token.deployer} chain={token.chain} panelCostToken={panelCostToken} roleLabel={deployerRoleLabel(token.deployerAttribution)} />}
+            {arkhamEnabled && token.deployer && <Counterparties address={token.deployer} subject={`$${token.symbol}`} chain={token.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />}
+            {arkhamEnabled && token.deployer && <RiskPaths address={token.deployer} panelCostToken={panelCostToken} />}
+            {arkhamEnabled && token.deployer && <div className="mt-3"><Holdings address={token.deployer} symbol={token.symbol} panelCostToken={panelCostToken} /></div>}
+          </div>
+        )}
+
+        {/* token provenance: who it's named after, and whether they're behind it */}
+        {showCurrentIntelligence && panelCostToken && (
+          <div className="mt-3">
+            <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} panelCostToken={panelCostToken} onAudit={onAudit} />
+          </div>
+        )}
+
+            </div>
+          </LegacySection>
+        ),
+        evidence: () => (
+          <LegacySection title="Evidence, method and challenge" note="Every check ARGUS ran, what it could not close, and the way to contest any of it.">
+            <div className="investigation-story">
         {!shareView && (
           <div className="story-chapter report-section scroll-mt-28 mt-7">
             <ReportSectionHeading
@@ -2672,9 +2661,18 @@ export function InvestigationReport({
         <div className="mt-4 panel p-4 text-[12.5px] leading-relaxed text-ink-faint">
           ARGUS checked the token, website, project account, and public team. Open a person to run a deeper review. Names without a verified profile stay unconfirmed.
         </div>
-        </ReportExperienceLayout>
-      </div>
-      {!shareView && <ArgusEyeAssistant inv={inv} reportVersionId={frozenReportVersionId} />}
-    </div>
+            </div>
+            {!shareView && <ArgusEyeAssistant inv={inv} reportVersionId={frozenReportVersionId} />}
+          </LegacySection>
+        ),
+      }}
+      footerNote={`Snapshot ${versionContext ? `v${versionContext.version}` : "live"}${caseLabel ? ` · Case ${caseLabel}` : ""} · Token ${token.address}`}
+      scope={(
+        <>
+          <p>This investigation covers one token contract and the project account behind it. Each leg has its own score and its own evidence.</p>
+          <p>Open either leg for its full report. A gap in one leg is never filled with the other leg's evidence.</p>
+        </>
+      )}
+    />
   );
 }

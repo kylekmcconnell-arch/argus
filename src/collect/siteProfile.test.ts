@@ -243,6 +243,20 @@ describe("pages that are not a project", () => {
     expect(verdict.capApplied).toBe("coming_soon");
   });
 
+  it("does not retire a working product because one feature card says coming soon", () => {
+    // A live trading site: the hero sells the product, a bot is linked, and a
+    // roadmap card carries a "Coming Soon" badge. Reading the badge as the
+    // page's message retired real products on thin crawler renders.
+    const recon = analyzeContent({
+      url: "https://altcoinist.example/", status: "rendered", title: "Get More Tokens, Every Trade",
+      content: "Get More Tokens, Every Trade\nYou're losing up to 4% per trade to bad routing. Smart routing and algo order splitting get you better fills.\nOpen the app or start on Telegram: https://t.me/examplebot\nBASE ETH SOL BNB\nMobile app Coming Soon",
+      stages: [{ method: "direct fetch", outcome: "ok", chars: 260, note: "" }], coverageNote: "direct",
+    });
+
+    expect(recon.profile?.kind).not.toBe("coming-soon");
+    expect(scoreProject(recon).capApplied).not.toBe("coming_soon");
+  });
+
   it("does not mint a confident PASS from a page with no identity signals at all", () => {
     const recon = analyzeContent({
       url: "https://mystery.xyz/", status: "rendered", title: "Mystery",

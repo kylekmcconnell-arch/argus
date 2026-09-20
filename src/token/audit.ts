@@ -278,6 +278,8 @@ export type CollectTokenShippingFn = (
     deadlineAt?: number;
     /** The token behind the project, so the lane can join its chart and its deployer's creations. */
     token?: { address: string; chain: string; deployer?: string | null };
+    /** The project's own words, so the lane can pick the sector it is compared with. */
+    sectorText?: string | null;
   },
 ) => Promise<ShippingSummary | undefined>;
 
@@ -1267,7 +1269,7 @@ async function runTokenAudit(
     ? "Holder data not verifiable keyless."
     : !holdersReliable
       ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.`
-      : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
+      : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct < 10 ? topPct.toFixed(2) : topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
 
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
@@ -1275,7 +1277,7 @@ async function runTokenAudit(
   if (washSignature) aT5 = 2; // churn without price movement = manufactured volume
   else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
 
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
@@ -1358,7 +1360,12 @@ async function runTokenAudit(
   if (githubOrg && opts?.collectShipping) {
     step({ phase: "Corroborate", label: "Development", detail: `Reading github.com/${githubOrg}: cadence, committers, substance, whether the code reaches production.`, tone: "neutral" });
     opts?.signal?.throwIfAborted();
-    shipping = await opts.collectShipping(githubOrg, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt, token: { address, chain, deployer: deployerAttribution?.address ?? null } }).catch(() => undefined);
+    shipping = await opts.collectShipping(githubOrg, {
+      fetchImpl: fetcher,
+      deadlineAt: opts?.deadlineAt,
+      token: { address, chain, deployer: deployerAttribution?.address ?? null },
+      sectorText: [pair.baseToken.name, cg?.description].filter(Boolean).join(" · ") || null,
+    }).catch(() => undefined);
     if (shipping) {
       step({ phase: "Corroborate", label: "Development read", detail: shipping.headline, tone: shipping.grade === "stalled" ? "bad" : shipping.grade === "thin" ? "warn" : shipping.grade === "unknown" ? "neutral" : "good" });
       if (shipping.market === "price-without-shipping") findings.push({ claim: "The token's price rose over the last quarter while commits to the linked repositories fell: the move is not backed by visible development.", tone: "warn", source: "github" });

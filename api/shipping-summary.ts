@@ -16,6 +16,7 @@ import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import { assessShipping, summarizeShipping, type ShippingDeploy, type ShippingPeerRepo, type ShippingPricePoint, type ShippingSummary } from "../src/threat/shipping.js";
 import { collectShipping, GITHUB_LOGIN_RE, GITHUB_REPO_RE, type CallCounter } from "../src/threat/shippingCollect.js";
 import { deployTrailReadable, readDeployTrail } from "../src/threat/deployTrail.js";
+import { peerSectorById } from "../src/threat/shippingPeers.js";
 import { fetchOhlcv } from "../src/lib/priceHistory.js";
 
 export const config = { maxDuration: 30 };
@@ -46,11 +47,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const address = typeof req.query.address === "string" && ADDR_RE.test(req.query.address.trim()) ? req.query.address.trim() : "";
   const chain = typeof req.query.chain === "string" && CHAIN_RE.test(req.query.chain.trim().toLowerCase()) ? req.query.chain.trim().toLowerCase() : "";
   const deployer = typeof req.query.deployer === "string" && /^0x[a-fA-F0-9]{40}$/.test(req.query.deployer.trim()) ? req.query.deployer.trim() : "";
+  const sector = typeof req.query.sector === "string" ? peerSectorById(req.query.sector.trim()) : null;
   const target = repoParam || org;
   if (!target || !(repoParam ? GITHUB_REPO_RE.test(repoParam) : GITHUB_LOGIN_RE.test(target))) { res.status(400).json({ error: "org or repo required" }); return; }
   if (!key) { res.status(200).json({ target, available: false, note: "GitHub not configured (no GITHUB_TOKEN)." } satisfies ShippingSummaryResponse); return; }
 
-  const ck = `ghsummary:${target.toLowerCase()}:${address.toLowerCase()}:${chain}:${deployer.toLowerCase()}:${Math.floor(Date.now() / CACHE_BUCKET_MS)}:v2`;
+  const ck = `ghsummary:${target.toLowerCase()}:${address.toLowerCase()}:${chain}:${deployer.toLowerCase()}:${sector?.id ?? ""}:${Math.floor(Date.now() / CACHE_BUCKET_MS)}:v3`;
   const cached = await cacheGetJson<ShippingSummaryResponse>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
@@ -63,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const etherscanKey = process.env.ETHERSCAN_API_KEY;
     // The joins run beside the GitHub read; each is best-effort and says so.
     const [input, priceSeries, trail] = await Promise.all([
-      collectShipping({ target, kind: repoParam ? "repo" : "org", key, usage, peerCache }),
+      collectShipping({ target, kind: repoParam ? "repo" : "org", key, usage, peerCache, sector }),
       address && chain ? readPriceSeries(address, chain) : Promise.resolve(undefined),
       deployer && chain && deployTrailReadable(chain, etherscanKey) ? readDeployTrail({ chain, wallet: deployer, etherscanKey }) : Promise.resolve(null),
     ]);
