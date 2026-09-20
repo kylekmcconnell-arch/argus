@@ -1158,3 +1158,62 @@ describe("individual humans never route as the companies they lead (PA-14D1862DD
     expect(roles).not.toContain(SubjectClass.PROJECT);
   });
 });
+
+describe("a registry link array alone never re-routes a person to PROJECT (#359)", () => {
+  /** A founder whose handle a namesake coin's registry row happens to carry. */
+  const founderNamedByANamesakeCoin = () => {
+    const evidence = resolvedProjectProfile(
+      "building things on-chain. previously at a fintech.",
+      "https://adaexample.dev/",
+    );
+    evidence.profile.handle = "@ada_example";
+    evidence.profile.display_name = "Ada Example";
+    evidence.subjectOrientation = {
+      kind: "FOUNDER",
+      what: "A developer building tools.",
+      audience: "developers",
+      boundHandle: "@ada_example",
+      boundDomain: null,
+      sourceUrls: ["https://x.com/ada_example"],
+      mentionedHandles: [],
+    };
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Clutch",
+      symbol: "CLUTCH",
+      coingeckoId: "clutch",
+      rank: null,
+      address: "0x572c4fa77623652411574c51b5ddb7e1b750aba3",
+      chain: "ethereum",
+      officialX: "@ada_example",
+      sourceUrl: "https://www.coingecko.com/en/coins/clutch",
+      capturedAt: "2026-09-20T03:34:00.000Z",
+    };
+    return evidence;
+  };
+
+  it("leaves a FOUNDER as FOUNDER when nothing of the subject's adopts the token", () => {
+    const roles = providerBackedRoles(founderNamedByANamesakeCoin());
+    expect(roles).toContain(SubjectClass.FOUNDER);
+    expect(roles).not.toContain(SubjectClass.PROJECT);
+  });
+
+  it("re-routes once the subject's own bio claims the token by contract", () => {
+    const evidence = founderNamedByANamesakeCoin();
+    evidence.profile.bio = "building things on-chain. CA 0x572c4fa77623652411574c51b5ddb7e1b750aba3";
+    expect(providerBackedRoles(evidence)).toContain(SubjectClass.PROJECT);
+  });
+
+  it("re-routes once the subject's own bio claims the token by ticker", () => {
+    const evidence = founderNamedByANamesakeCoin();
+    evidence.profile.bio = "official account for $CLUTCH";
+    expect(providerBackedRoles(evidence)).toContain(SubjectClass.PROJECT);
+  });
+
+  it("re-routes on an official-domain bind, where the subject's own profile published the site", () => {
+    const evidence = founderNamedByANamesakeCoin();
+    evidence.projectToken = { ...evidence.projectToken!, verification: "official_domain" };
+    expect(providerBackedRoles(evidence)).toContain(SubjectClass.PROJECT);
+  });
+});
