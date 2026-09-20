@@ -19,6 +19,7 @@ import { isOrganizationAccount } from "../src/lib/investorSubject";
 import { portfolioRelationshipBinding } from "../src/lib/portfolioRelationshipBinding";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
 import { repeatBackingSignal } from "../src/engine/taxonomy";
+import { isSourceGroundedTeamMember, isStrictlyVerifiedFact } from "../src/lib/evidenceTier.js";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
@@ -1889,10 +1890,7 @@ export function deriveProjectStrengthBands(
   // the single scoring gate that isolates recall facts from floors.
   const verifiedFacts = (...predicates: string[]): Record<string, unknown>[] => basicFacts.filter((fact) =>
     predicates.includes(String(fact.predicate ?? "").toLowerCase())
-    && fact.artifact_verified === true
-    && (fact.status === "verified" || fact.status === "corroborated")
-    && fact.floorEligible !== false
-    && fact.providerProjection !== true);
+    && isStrictlyVerifiedFact(fact));
   // Ceiling-only sibling: verified facts whose floorEligible flag was cleared
   // (a self-description, ARGUS's own live-site fetch, recall corroboration).
   // Press headlines already open band ceilings, and these are strictly
@@ -1906,7 +1904,7 @@ export function deriveProjectStrengthBands(
     .map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`)
     .join(" ");
   const team = records(packet.team).filter((member) =>
-    member.artifact_verified === true && member.evidence_origin !== "model_lead");
+    isSourceGroundedTeamMember(member));
   const leaders = team.filter((member) => PROJECT_LEADER_TEAM_ROLE.test(String(member.role ?? "")));
   const leaderNames = new Set(leaders.map((member) => String(member.name ?? "").trim().toLowerCase()).filter(Boolean));
   const profile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile)

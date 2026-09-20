@@ -125,6 +125,7 @@ import type { InvestigationDecisionCanvasProps } from "../reports/shared/reportL
 import { printReportPdf, reportPdfFilename } from "../lib/printPdf";
 import { exportReportDoc } from "../lib/reportExport";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
+import { isSourceGroundedTeamMember } from "../lib/evidenceTier";
 import {
   SUBJECT_LEAD_RELATIONSHIP,
   actionableInvestigativeLead,
@@ -1366,9 +1367,7 @@ function meaningfulTeamMember(member: ReportTeamMember): boolean {
 }
 
 function groundedTeamMember(member: ReportTeamMember): boolean {
-  return meaningfulTeamMember(member)
-    && member.evidence_origin !== "model_lead"
-    && member.artifact_verified === true;
+  return meaningfulTeamMember(member) && isSourceGroundedTeamMember(member);
 }
 
 function sanitizedGroundedTeamMember(member: ReportTeamMember): ReportTeamMember {
