@@ -1446,6 +1446,22 @@ export interface CollectedEvidence {
   /** Evidence-aware delegation plan frozen with the scan for auditability. */
   researchPlan?: import("../lib/researchDirector").ResearchPlan;
   /**
+   * What the scoring pass did, and why, frozen with the report.
+   *
+   * A withheld score is an honest outcome, but it used to render as a bare
+   * "N/A, not measured": the reason existed only in the live scan stream and
+   * in the in-memory provider snapshot, both gone by the time anyone reads the
+   * saved report. Freezing it here lets the report state whether the score is
+   * missing because no methodology was routed, because the decision review
+   * never ran, or because no axis carried substantive evidence.
+   */
+  scoringOutcome?: {
+    state: "executed" | "partial" | "skipped" | "failed";
+    /** The scan's own sentence about this outcome, verbatim. */
+    detail: string;
+    capturedAt: string;
+  };
+  /**
    * Roles the subject's own employment record has CLOSED, with the date it
    * ends. A founder who quietly stopped listing a venture is a finding no
    * team page shows; the record states the end date and nothing about why.

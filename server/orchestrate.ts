@@ -43,6 +43,7 @@ import { teamIdentityKeys } from "../src/lib/teamIdentity";
 import { teamCandidateSourceMatchesIdentity } from "../src/lib/teamCandidateIdentity";
 import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
+import { captureTimestamp } from "./captureTime";
 import { deriveTokenApplicability } from "./tokenApplicability";
 import { launchVenueForOfficialDomain } from "../src/threat/launch";
 import { deriveSubjectCategory } from "./subjectCategory";
@@ -6142,8 +6143,23 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
       analystState,
       analystDetail,
     );
+    // Freeze the same sentence with the report. The provider snapshot lives
+    // only in memory, so without this the reason a score was withheld is gone
+    // by the time anyone opens the saved version.
+    evidence.scoringOutcome = {
+      state: analystState === "executed" || analystState === "partial" || analystState === "failed"
+        ? analystState
+        : "skipped",
+      detail: analystDetail,
+      capturedAt: captureTimestamp(),
+    };
   } else {
     checkTracker.provider("ai-analyst", "AI analyst", "unavailable", "analyst provider is not configured");
+    evidence.scoringOutcome = {
+      state: "skipped",
+      detail: "the analyst provider is not configured, so no scorer call was made",
+      capturedAt: captureTimestamp(),
+    };
   }
   finishRuntimeStage("analyst", analystStartedAt);
 
