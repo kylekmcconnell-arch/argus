@@ -675,13 +675,33 @@ const COINGECKO_LINK_ARRAYS = [
   "chat_url",
 ] as const;
 
+/**
+ * The subset of those arrays that may BIND the audited account as the token's
+ * official X.
+ *
+ * `announcement_url`, `chat_url`, `official_forum_url` and `blockchain_site`
+ * routinely hold a link posted by whoever announced or discussed the coin, not
+ * by the project. Treating an X profile found there as the token's official
+ * account let a person who once appeared in a namesake coin's registry row be
+ * bound to that coin, and then re-routed from FOUNDER to PROJECT (#359).
+ *
+ * `homepage` stays, because it is the registry's record of the project's own
+ * site list, and it is the case the broad scan existed for: a renamed or stale
+ * `twitter_screen_name` alongside the current X URL in `homepage`.
+ *
+ * The contradiction check below deliberately keeps reading ALL the arrays: any
+ * registry handle that is not the audited one is evidence against a bind, and
+ * evidence against is safe to take from anywhere.
+ */
+const COINGECKO_OFFICIAL_X_BIND_ARRAYS = ["homepage"] as const;
+
 function firstMatchingOfficialX(details: JsonRecord, auditedHandle: string): string | null {
   const audited = normalizeHandle(auditedHandle);
   if (!audited) return null;
   const links = isRecord(details.links) ? details.links : {};
   const officialHandle = cleanText(links.twitter_screen_name).replace(/^@/, "");
   if (officialHandle && normalizeHandle(officialHandle) === audited) return officialHandle;
-  for (const key of COINGECKO_LINK_ARRAYS) {
+  for (const key of COINGECKO_OFFICIAL_X_BIND_ARRAYS) {
     const value = links[key];
     const rows = Array.isArray(value) ? value : value ? [value] : [];
     for (const row of rows) {
