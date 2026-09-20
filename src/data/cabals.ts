@@ -99,6 +99,27 @@ const BASE = "base";
 
 export const CABALS: Cabal[] = [
   {
+    id: "rh-wirebot-fee-farm",
+    name: "$wire (wire bot) creator fee farm",
+    kind: "launch-farm",
+    intent: "nefarious",
+    summary:
+      "A Robinhood Chain token whose operator lives on the launchpad's creator fee stream, paid in the token itself and sold back into the token's own market through two intermediary wallets. The launch mechanics were clean: no bonding curve, the full billion went straight to the pair, the deployer bought 1.44 percent in the launch transaction and took no allocation, and there is no honeypot, no tax and no liquidity pull. What followed is the record: the deployer has claimed 84.3M tokens, 8.43 percent of supply, in 210 payments worth about 52,000 USD at the prices on the days they arrived, and was still claiming on 2026-09-20. It has never sold a token itself. It forwards to a sink wallet that sells into the pair and passes the rest to a second wallet that also sells, together about 78,000 USD at sale-time prices. Indexed nefarious for the combination of continuous extraction at that scale and the two-hop routing that leaves the deployer's own sell record empty, which is what separates it from a creator who simply claims fees. Holders are the counterparty to the stream, and the token is down 99 percent from its peak. The judgement is on the operator, not the launch: the 84 percent fall across 2026-09-18 and 09-19 was 886 wallets selling, not an operator dump.",
+    firstSeen: "2026-07-17",
+    lastSeen: "2026-09-20",
+    wallets: [
+      { chain: RH, address: "0xfe4b46c8dbdf982a4f68c5268de440d1db790920", role: "deployer", label: "creator wallet: claims the fee stream, never sells", evidence: "sent launch tx 0x274e45dc79f3b3074cc262d95d81034afdd85ac717c432e685094d7b0df0c1ff to factory 0x0c37a24f at 2026-07-17 19:04:11 UTC paying 0.0205 ETH and receiving 14,395,208 tokens (1.44%) from the pair; received 84,349,332 tokens in 210 payments from fee contract 0x31ca5e10; its visible transaction history is 260 fee claims plus one setFeeRedirect call; forwarded 63,661,037 to 0xf7b84493; zero attributed sales into the pair across 314,399 transfers; holds 0 tokens and 0.0004 ETH, read 2026-09-20" },
+      { chain: RH, address: "0xf7b844930315e6b0b20268ec0f69553232eafcd0", role: "off-ramp", label: "first-hop wallet that sells the fee stream", evidence: "received 63,661,037 tokens from the deployer; 71,163,310 attributed sales into the pair worth about 25,100 USD at sale-time prices, and forwarded 43,420,226 to 0xa58bdd0a; EOA, nonce 185, holds 0, read 2026-09-20" },
+      { chain: RH, address: "0xa58bdd0ab5ebbb8dc425090fea8fd0ba969c1668", role: "off-ramp", label: "second-hop seller", evidence: "received 43,420,226 tokens from 0xf7b84493 and sold 84,887,615 directly into the pair, about 53,300 USD at sale-time prices, read 2026-09-20" },
+    ],
+    accounts: [
+      { handle: "wirebotRH", role: "project", label: "$wire (wire bot) project account", evidence: "the token's listed X account, with a Telegram at t.me/rh_wirebot, carried on every DexScreener pair for 0x8ecea3d0 (read 2026-09-20). Not to be confused with a separate token also called Wire, 0x15f3d1ba06aeeb26470bf4995305f58082a20859, account wireonrh, launched on the same chain 2026-09-18 and unrelated to this cluster." },
+    ],
+    launches: [
+      { chain: RH, address: "0x8ecea3d0e648db646d824aa51eedeb16ac3d6878", symbol: "wire", name: "wire bot", launchedAt: "2026-07-17", venue: "unknown factory 0x0c37a24f5d23a486fa692d1500881d698b1f77a4", outcome: "fee-farmed", note: "No bonding curve: the full 1,000,000,000 supply went to the pair inside the launch transaction. Peaked 2026-07-21 and is down 99 percent from there, including 84 percent across 2026-09-18 and 09-19 on rising volume. That fall was dispersed across 886 selling wallets with the top ten at 29.5 percent, and the deployer sold nothing in the window, so the fee stream is a persistent drag rather than the trigger. Over the token's life 12,378 wallets have sold with the top ten at 9.7 percent of flow, the pair holds 25.6 percent of supply and 3,912 wallets carry a balance. The factory has launched roughly 1,896 tokens.", evidence: "314,399 transfers read from Robinhood RPC logs over blocks 12,356,072 to 67,869,616 on 2026-09-20; sales attributed by walking router hops inside each transaction after classifying every busy address with eth_getCode; GeckoTerminal daily and hourly candles for the price path" },
+    ],
+  },
+  {
     id: "base-b20-basecat-creator",
     name: "BaseCat creator's Base launch series",
     kind: "launch-farm",
