@@ -450,7 +450,18 @@ export function streamInvestigation(
           // token. The X-handle half of this fallback is gated the same way by
           // the account binding check below.
           if (!siteUrl && id.website && /^https?:\/\//i.test(id.website)) { siteUrl = id.website; siteUrlOrigin = "model_lead"; }
-          if (!projectX && id.x_handle) projectX = id.x_handle;
+          // A model handle resolved by symbol or name alone is a namesake
+          // risk: "$CLUTCH" reaches Clutch Markets. The binding check below
+          // is the real gate, but a low-confidence guess should not even be
+          // presented as the project's account (#372).
+          if (!projectX && id.x_handle && id.confidence !== "low") projectX = id.x_handle;
+          else if (!projectX && id.x_handle) {
+            h.onStep(milestone(
+              "Identity lead withheld",
+              `A low-confidence model guess (${id.x_handle}) was not adopted as the project account. ARGUS binds an account to a contract, never to a symbol or a name.`,
+              "warn",
+            ));
+          }
 
           const bits = [id.website && `site ${shorten(id.website)}`, id.x_handle && `X ${id.x_handle}`, id.founder && `unverified founder lead ${id.founder}${id.founder_handle ? ` (${id.founder_handle})` : ""}`].filter(Boolean) as string[];
           h.onStep(milestone("Identity leads found", bits.length ? `Suggested ${bits.join(", ")} (${id.confidence} model confidence). Account and founder bindings still require verification.` : "No identity leads were returned.", "warn"));
@@ -518,6 +529,9 @@ export function streamInvestigation(
       let projectAccountAudit: ProjectAccountAuditOutcome;
       let projectAccountBinding: ProjectAccountBinding | null = null;
       if (projectX) {
+        // Fixed for this block: a mismatch below clears projectX, and the
+        // audit branch still needs the handle it actually checked.
+        const boundProjectX: string = projectX;
         // Verify the account↔token binding from the token side before the
         // audit: does the account itself publish this CA (bio or linked
         // page)? Cheap, keyed the same as the threat scanner's authenticity
@@ -554,6 +568,13 @@ export function streamInvestigation(
             note: `The account ${projectX} was not verified against the scanned contract, so its audit was not attached to this investigation.`,
           };
           h.onStep(milestone("Project account rejected", projectAccountAudit.note, "warn"));
+          // A mismatch is a positive finding that this account is NOT the
+          // token's: the binding check read the account and the contract was
+          // not there. Keep the recorded binding as evidence, but stop
+          // publishing the handle as the project's official account (#372).
+          // "absent" and "unreadable" are unknowns, not contradictions, so
+          // they keep the lead visible.
+          if (projectAccountBinding?.status === "mismatch") projectX = null;
         } else if (analystLive) {
           h.onHop("backgrounding the project's X account");
           h.onStep(milestone("Step 3 · Background the project account", `Live people-audit of ${projectX}. This is the project's own account, not a named founder.`, "neutral"));
@@ -563,7 +584,7 @@ export function streamInvestigation(
             // PRIVATE: the project account is audited AS PART OF this investigation
             // and shown inside it — it must NOT be saved as a separate standalone
             // report (that's what made @Uniswap appear as a loose "PERSON" card).
-            abortLive = streamAudit(projectX, true, {
+            abortLive = streamAudit(boundProjectX, true, {
               onStep: (s) => { if (!aborted) h.onStep(s); },
               onDone: (d) => resolve({ dossier: d, error: null }),
               onError: (error) => resolve({ dossier: null, error }),
