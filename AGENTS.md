@@ -33,3 +33,11 @@ workflow. Never bypass protected branches or required checks.
 
 Repository-specific instructions below remain mandatory within this routing and
 authority contract.
+
+## New to this repository
+
+Read `docs/ONBOARDING.md` first: what ARGUS is, the doctrines that govern what a
+report is allowed to say, the architecture and scan pipeline, the subsystems, the
+verification battery, and where the work currently stands. For review tasks, pair
+it with `docs/CODEX-REVIEW-BRIEF.md`, which ranks the failure modes that matter and
+records what is already known, fixed, or disproven.
