@@ -13,7 +13,7 @@ import {
   coverageQualifiedCompleteness,
   presentPublicReport,
 } from "../../src/lib/reportPresentation.js";
-import { claimScanReceipt, recordScanReceipt } from "../_scanReceipts.js";
+import { claimScanReceipt, describeClaimedRun, recordScanReceipt } from "../_scanReceipts.js";
 
 export const config = { maxDuration: 600 };
 
@@ -155,10 +155,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     startedAt: new Date(requestStartedAt).toISOString(),
   });
   if (claim !== "written") {
-    res.status(claim === "duplicate" ? 409 : 503).json({
-      error: claim === "duplicate" ? "scan_run_already_claimed" : "scan_run_claim_unavailable",
-      message: "This scan could not be started. Open its saved result or use a new scan identifier.",
-    });
+    if (claim !== "duplicate") {
+      res.status(503).json({
+        error: "scan_run_claim_unavailable",
+        message: "This scan could not be started. Try again shortly.",
+      });
+      return;
+    }
+    const prior = await describeClaimedRun(auth, idempotencyKey, "/api/v1/person", handle);
+    res.status(409).json(prior === "subject_mismatch"
+      ? {
+        error: "idempotency_subject_mismatch",
+        message: "This Idempotency-Key was already used for a different subject. Retry with a new key.",
+      }
+      : {
+        error: "scan_run_already_claimed",
+        message: "This scan has already run under that Idempotency-Key. Open its saved result or retry with a new key.",
+      });
     return;
   }
 
