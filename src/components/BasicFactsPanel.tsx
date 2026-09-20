@@ -21,6 +21,7 @@ import { ExpandableText } from "./ExpandableText";
 import { EvidenceTip } from "./EvidenceTip";
 import { ProvenanceTag } from "./ProvenanceTag";
 import { provenanceForBasicFactStatus } from "../lib/provenance";
+import { isStrictlyVerifiedFact as strictlyVerifiedFact } from "../lib/evidenceTier";
 
 export type { BasicFactsAudience } from "../lib/basicFactQuestions";
 
@@ -835,12 +836,10 @@ function factRows(
   });
 }
 
-function isStrictlyVerifiedFact(fact: BasicFactView): boolean {
-  return (fact.status === "verified" || fact.status === "corroborated")
-    && fact.providerProjection !== true
-    && fact.floorEligible !== false
-    && fact.attributionScope !== "identity_unresolved";
-}
+// The one definition, shared with the scoring bands and the check writer.
+// This panel used to omit artifact_verified, so a fact whose artifact was
+// never fetched counted as an answered question (#472, ARGUS-04).
+const isStrictlyVerifiedFact = strictlyVerifiedFact;
 
 function isSourceReportedFact(fact: BasicFactView): boolean {
   return (fact.status === "verified" || fact.status === "corroborated")

@@ -147,6 +147,7 @@ import {
 } from "./adapters/monid";
 import { collectOperatorLaunches, describeLaunchHistory } from "./adapters/operatorLaunches";
 import { collectSocialActivity } from "./socialActivity";
+import { isRetainedSourceFact, isStrictlyVerifiedFact } from "../src/lib/evidenceTier.js";
 import {
   hydrateOfficialProjectIdentityFromFacts,
   verifiedOfficialProjectIdentity,
@@ -2333,17 +2334,9 @@ export function strictOrganizationLegalEntity(
  * roster. The search model only suggests candidates; every row admitted here
  * already passed an independent page fetch plus exact excerpt verification.
  */
-const isRetainedSourceFact = (fact: BasicFact): boolean =>
-  fact.artifact_verified === true
-  && (fact.status === "verified" || fact.status === "corroborated");
-
-// A provider projection or ceiling-only record is useful investigator context,
-// but it is deliberately ineligible to become ARGUS verification. Keep this
-// predicate shared by every project check that publishes the word "verified".
-const isStrictlyVerifiedFact = (fact: BasicFact): boolean =>
-  isRetainedSourceFact(fact)
-  && fact.providerProjection !== true
-  && fact.floorEligible !== false;
+// isRetainedSourceFact / isStrictlyVerifiedFact now live in
+// src/lib/evidenceTier.ts so the scoring bands, this check writer, the person
+// roster and the key-facts panel cannot drift apart again (#472, ARGUS-04/09).
 
 const sameOfficialDomain = (candidateUrl: string | undefined, officialWebsite: string | undefined): boolean => {
   const expected = canonicalOfficialWebsite(officialWebsite)?.domain;
