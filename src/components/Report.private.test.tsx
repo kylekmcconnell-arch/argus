@@ -135,13 +135,14 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    // The report is eight chapters behind one sticky horizontal navigation.
+    // The report is nine chapters behind one sticky horizontal navigation.
     const nav = container.querySelector('nav[aria-label="Report sections"]');
     const tabs = [...(nav?.querySelectorAll("button") ?? [])];
     expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
       "Decision",
       "Scores",
       "What the product is",
+      "Code",
       "People",
       "Market",
       "Social",
@@ -309,6 +310,71 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={base} onReset={() => {}} onAudit={() => {}} />);
     });
     expect(container.querySelector('[data-testid="fundraising"]')).toBeNull();
+  });
+
+  it("renders the frozen development read in the Code chapter and names who commits", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: { ...base.report, roles: [SubjectClass.PROJECT] },
+      threat: {
+        dossier: {
+          score: 70,
+          verdict: "PASS",
+          axes: [],
+          shipping: {
+            version: 1,
+            target: "example-org",
+            capturedAt: "2026-09-01T00:00:00.000Z",
+            windowDays: 90,
+            grade: "shipping-solo",
+            headline: "Shipping, one builder: 120 commits in 90 days",
+            cadenceStatus: "shipping",
+            totalCommits: 120,
+            activeWeeks: 10,
+            distinctHuman: 2,
+            concentration: "single-author",
+            authorship: "mixed",
+            origin: "original",
+            stars: "suspect",
+            market: "insufficient",
+            claimsSupported: 0,
+            claimsUnsupported: 0,
+            live: "live",
+            adoption: "unused",
+            health: "mixed",
+            leadDeparted: false,
+            reposRead: 3,
+            commitsRead: 120,
+            releasesInWindow: 2,
+            license: "none",
+            starsTotal: 700,
+            starBurstSharePct: 68,
+            committers: [
+              { name: "Unlisted Builder", login: "unlisted", commits: 100, sharePct: 83, kind: "human", freshAccount: true, last30: 40, prior60: 60 },
+            ],
+          },
+        },
+      } as unknown as ThreatScan,
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => undefined} onRescan={() => undefined} onAudit={() => undefined} />);
+    });
+    const codeTab = [...container.querySelectorAll('nav[aria-label="Report sections"] button')]
+      .find((tab) => tab.textContent?.trim() === "Code") as HTMLButtonElement;
+    act(() => { codeTab.click(); });
+
+    const chapter = container.querySelector('[data-chapter="code"]') as HTMLElement;
+    expect(chapter.textContent).toContain("Shipping, one builder: 120 commits in 90 days");
+    // This fixture publishes no roster, so the committer is not called
+    // unnamed: the chapter says there is nobody to match him against.
+    expect(chapter.textContent).toContain("Unlisted Builder");
+    expect(chapter.textContent).toContain("No roster to match");
+    expect(chapter.textContent).toContain("This report names no team");
+    // An unlicensed repository is not open source, and a star burst is named.
+    expect(chapter.textContent).toContain("Not open source");
+    expect(chapter.textContent).toContain("68%");
   });
 
   it("uses the linked token scan as Style 2's separate second score", () => {
@@ -1153,7 +1219,10 @@ describe("private person report evidence boundary", () => {
     expect(card.querySelector('a[href="https://t.me/ada_example"]')?.textContent).toContain("@ada_example");
     expect(card.querySelector('a[href="mailto:ada@fixture.example"]')?.textContent).toContain("ada@fixture.example");
     expect(card.querySelector('a[href="https://linkedin.com/in/ada-example"]')).not.toBeNull();
-    expect(card.querySelector('img[src="https://pbs.twimg.com/profile_images/1/ada.jpg"]')).not.toBeNull();
+    // Portrait preference: the project's own site, then LinkedIn, then X. This
+    // fixture has no site portrait, so LinkedIn is shown and the X photo is
+    // the fallback if it fails to load.
+    expect(card.querySelector('img[src^="https://unavatar.io/linkedin/ada-example"]')).not.toBeNull();
     expect(card.textContent).toContain("The employment record lists this role as current.");
     // The person's evidence opens inline: role source and developer profiles.
     const review = [...card.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("Review evidence"))!;

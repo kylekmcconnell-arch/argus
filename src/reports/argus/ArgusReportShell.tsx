@@ -3,7 +3,7 @@ import "./argus-report.css";
 import { ArgusReportProvider, type ArgusReportRuntime } from "./context";
 import { DisclosureButton, DisclosureProvider, InlinePanel, useDisclosures } from "./disclosure";
 import { CHAPTERS, type ChapterId, type ReportIssue } from "./model";
-import { Badge } from "./primitives";
+import { Badge, ChallengeButton, ChallengePanel } from "./primitives";
 import { panelTargetForContext } from "./challengeText";
 import { ChallengeForm, SignupGate } from "./challenge";
 import { CHALLENGE_EVENT, type ChallengeDetail } from "../../lib/challenge";
@@ -52,6 +52,15 @@ function Toast({ text }: { text: string | null }) {
   return <div className="toast" role="status" aria-live="polite" hidden={!text}>{text}</div>;
 }
 
+/** Each audit row is challengeable on its own, like every other claim. */
+function auditChallenge(issue: ReportIssue) {
+  return {
+    id: `audit-${issue.id}`,
+    title: issue.title,
+    claim: `Report quality audit, ${issue.severity} in ${issue.area}: ${issue.title}. ${issue.observed} How this report handles it: ${issue.handling}`,
+  };
+}
+
 export function AuditList({ issues, critical }: { issues: ReportIssue[]; critical: boolean }) {
   const shown = issues.filter((issue) => !critical || issue.severity === "Critical");
   return (
@@ -70,6 +79,8 @@ export function AuditList({ issues, critical }: { issues: ReportIssue[]; critica
           <h3>{issue.title}</h3>
           <p>{issue.observed}</p>
           <p className="fix"><strong>How this report handles it:</strong> {issue.handling}</p>
+          <ChallengeButton target={auditChallenge(issue)} />
+          <ChallengePanel target={auditChallenge(issue)} />
         </article>
       ))}
     </>

@@ -8,12 +8,13 @@
 import type { WebTeamMember, BasicFact } from "../../data/evidence";
 import type { IntelligenceQuestionState, IntelligenceSourceRef } from "../../intelligence/types";
 
-export type ChapterId = "decision" | "scores" | "product" | "people" | "market" | "social" | "connections" | "evidence";
+export type ChapterId = "decision" | "scores" | "product" | "code" | "people" | "market" | "social" | "connections" | "evidence";
 
 export const CHAPTERS: ReadonlyArray<{ id: ChapterId; label: string }> = [
   { id: "decision", label: "Decision" },
   { id: "scores", label: "Scores" },
   { id: "product", label: "What the product is" },
+  { id: "code", label: "Code" },
   { id: "people", label: "People" },
   { id: "market", label: "Market" },
   { id: "social", label: "Social" },

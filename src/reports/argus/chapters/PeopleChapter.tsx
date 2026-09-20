@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { DisclosureButton, InlinePanel } from "../disclosure";
 import { useArgusReport } from "../context";
 import { Badge, ChallengeButton, ChallengePanel, ChapterHead, ExtLink, Panel, ReviewBanner, type ChallengeTarget } from "../primitives";
@@ -35,7 +35,21 @@ export function ContactList({ name, contacts }: { name: string; contacts: Person
   );
 }
 
-function PersonCard({ person }: { person: PersonCardView }) {
+/* The portrait walks the preferred sources in order: the project's own site,
+   then LinkedIn, then X. A source that fails to load (LinkedIn blocks most
+   automated image requests) falls through to the next, and initials are the
+   last resort, so a person never renders as a broken image. */
+function PersonPortrait({ person }: { person: PersonCardView }) {
+  const candidates = person.avatarCandidates?.length
+    ? person.avatarCandidates
+    : person.avatarUrl ? [person.avatarUrl] : [];
+  const [index, setIndex] = useState(0);
+  const src = candidates[index];
+  if (!src) return <>{initials(person.name)}</>;
+  return <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setIndex((current) => current + 1)} />;
+}
+
+function PersonCard({ person, onAudit }: { person: PersonCardView; onAudit?: (handle: string) => void }) {
   const panelId = `person:${person.key}`;
   const challenge: ChallengeTarget = {
     id: findingId("people", person.key),
@@ -47,7 +61,7 @@ function PersonCard({ person }: { person: PersonCardView }) {
       <article className="panel person">
         <div className="person-top">
           <span className="avatar" aria-hidden="true">
-            {person.avatarUrl ? <img src={person.avatarUrl} alt="" referrerPolicy="no-referrer" /> : initials(person.name)}
+            <PersonPortrait person={person} />
           </span>
           <div>
             <h3>{person.name}</h3>
@@ -55,12 +69,18 @@ function PersonCard({ person }: { person: PersonCardView }) {
           </div>
         </div>
         <Badge tone={person.badge.tone}>{person.badge.label}</Badge>
+        {person.recordSummary && <> <Badge tone={person.recordSummary.tone}>{person.recordSummary.label}</Badge></>}
         <p>{person.text}</p>
         <ContactList name={person.name} contacts={person.contacts} />
         <div className="person-actions">
           <small>Contacts from the saved report</small>
           <DisclosureButton id={panelId} className="textbtn">Review evidence →</DisclosureButton>
         </div>
+        {onAudit && person.auditHandle && (
+          <button type="button" className="btn person-audit" onClick={() => onAudit(person.auditHandle!)}>
+            Run a full audit on {person.name} →
+          </button>
+        )}
         <ChallengeButton target={challenge} />
       </article>
       <InlinePanel id={panelId} label={person.name}>
@@ -88,9 +108,36 @@ function PersonCard({ person }: { person: PersonCardView }) {
               <h3>Verification needed</h3>
               <p>Confirm exact platform identity, current role, start and end dates, and first-party or independently corroborated employment evidence. Do not infer prior misconduct or a departure from an absent provider match.</p>
             </div>
+            {person.records && person.records.length > 0 && (
+              <div className="dialog-section">
+                <h3>What this report records about {person.name}</h3>
+                <p>
+                  Every saved item naming this person: recorded roles and their sources, leads, warning posts, contradictions and other affiliations. A lead is a lead, not a finding, and none of it is scored against them here.
+                </p>
+                <ul className="record-list">
+                  {person.records.map((record, index) => (
+                    <li key={`${record.kind}-${index}`}>
+                      <Badge tone={record.tone}>{record.label}</Badge>
+                      <p>{record.detail}</p>
+                      {record.url && <ExtLink href={record.url}>Open the source</ExtLink>}
+                      {record.date && <small> · {record.date.slice(0, 10)}</small>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {person.sourceUrl
               ? <ExtLink href={person.sourceUrl}>Open recorded role source ({person.sourceLabel})</ExtLink>
               : <p className="status-box">Recorded by {person.sourceLabel}. The saved report has no direct public artifact link for this role.</p>}
+            {onAudit && person.auditHandle && (
+              <div className="dialog-section">
+                <h3>Go deeper on this person</h3>
+                <p>
+                  A full audit of {person.auditHandle} opens its own report: their own history, their other projects, adverse findings recorded against them and the sources behind each one. This report covers the company, and carries a person only as far as their role here.
+                </p>
+                <button type="button" className="btn" onClick={() => onAudit(person.auditHandle!)}>Run a full audit on {person.auditHandle} →</button>
+              </div>
+            )}
           </>
         )}
       </InlinePanel>
@@ -99,7 +146,7 @@ function PersonCard({ person }: { person: PersonCardView }) {
   );
 }
 
-export function PeopleChapter({ view, legacy }: { view: ReportView; legacy?: ReactNode }) {
+export function PeopleChapter({ view, legacy, onAudit }: { view: ReportView; legacy?: ReactNode; onAudit?: (handle: string) => void }) {
   const report = useArgusReport();
   const people = view.people;
   const isPerson = view.subjectKind === "person";
@@ -123,7 +170,7 @@ export function PeopleChapter({ view, legacy }: { view: ReportView; legacy?: Rea
       <div id="identity-evidence" className="scroll-mt-28">
       {people.cards.length > 0 ? (
         <div className="person-grid">
-          {people.cards.map((person) => <PersonCard key={person.key} person={person} />)}
+          {people.cards.map((person) => <PersonCard key={person.key} person={person} onAudit={onAudit} />)}
         </div>
       ) : people.identityNote ? (
         <Panel challenge={{ id: findingId("people", "identity-note"), title: "Identity note", claim: people.identityNote }}>

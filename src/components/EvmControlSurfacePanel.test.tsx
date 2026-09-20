@@ -320,7 +320,9 @@ describe("EVM control surface saved snapshot", () => {
       />,
     ));
 
-    expect(container.querySelector('a[href="#evm-control-surface"]')?.textContent).toContain("Control surface");
+    // The panel lives in the product chapter of the interactive report; its
+    // anchor stays resolvable for links from elsewhere in the report.
+    expect(container.querySelector('[id="evm-control-surface"]')).not.toBeNull();
     expect(container.querySelectorAll('[data-testid="evm-control-surface"]')).toHaveLength(1);
     expect(container.querySelector('[data-testid="evm-control-surface"]')?.textContent).toContain("rpc.saved.test");
   });
