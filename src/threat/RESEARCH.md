@@ -680,12 +680,22 @@ A question about who sold the apple-emoji token 0xb200...36601 on Base turned
 into a full read of the wallet behind it, 0x48c7ab8f. The wallet is indexed as
 `base-b20-basecat-creator`. Three things are worth keeping.
 
-**The identity link is a string, not just a sender.** The same wallet sent the
-createLaunch for the apple token (o1 Launchpad, 2026-09-08) and for BASECAT
-(B20 launchpad, 2026-08-15). Both calldatas carry the same embedded tag,
-`bc_4raffiaj`, and so does every one of the 169 fee-claim calls, where it sits
-in the third argument. A shared sender can be a relayer; a shared creator tag
-that also keys the fee claims is the operator.
+**The identity link is the sender, and only the sender.** The same wallet sent
+the createLaunch for the apple token (o1 Launchpad, 2026-09-08) and for BASECAT
+(B20 launchpad, 2026-08-15), and it is the recipient of the fee claims. That is
+what ties the two launches together, and it is enough here because the wallet
+has 572 transactions of its own and is the fee beneficiary, so it is not
+behaving as a relayer.
+
+Corrected 2026-09-20: this section originally claimed the embedded calldata tag
+`bc_4raffiaj`, which appears in both launches and in all 169 fee-claim calls,
+was a creator identifier and therefore corroborated the link. It is not. The
+Zuckasaurus launch on 2026-08-28 (0xb200...9ec01, B20 factory 0xff70918e)
+carries the identical tag and was sent by 0x58d0fdcb, an unrelated serial
+launcher with 35 launches, no shared funder and no shared sweep wallet. The tag
+is a client or referral code shared across many creators on these factories.
+Treat it as a launch-client fingerprint, useful for grouping launches by the
+tool that made them, never as evidence that two launches share an operator.
 
 **Fee income, no supply.** The wallet took no allocation at any launch, never
 held BASECAT at all, and sold nothing into any of its own pools. Its income is
