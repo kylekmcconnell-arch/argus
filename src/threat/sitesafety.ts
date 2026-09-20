@@ -18,6 +18,29 @@ function xHandle(socials: { label: string; url: string }[]): string | null {
   return null;
 }
 
+// The account timeline as the API returns it, validated row by row. It crosses
+// the network, so a malformed entry is dropped rather than rendered: the panel
+// shows dates to a reader who will act on them.
+export function parseTimeline(value: unknown): NonNullable<SiteSafety["xHistory"]>["accounts"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const account = raw as Record<string, unknown>;
+    if (!Array.isArray(account.names)) return [];
+    const names = account.names.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const name = entry as Record<string, unknown>;
+      if (typeof name.handle !== "string") return [];
+      return [{
+        handle: name.handle,
+        firstSeen: typeof name.firstSeen === "string" ? name.firstSeen : null,
+        lastSeen: typeof name.lastSeen === "string" ? name.lastSeen : null,
+      }];
+    });
+    return names.length ? [{ id: typeof account.id === "string" ? account.id : "", names }] : [];
+  });
+}
+
 // Prior screen names for the linked account (api/x-handle-history -> memory.lol).
 // Never throws and never blocks the scan: an archive miss returns null and the
 // rest of the site lane reports as normal.
@@ -38,6 +61,7 @@ async function handleHistory(handle: string): Promise<SiteSafety["xHistory"]> {
       handleReused: d.handleReused === true,
       currentSince: typeof d.currentSince === "string" ? d.currentSince : null,
       lastRenameSeen: typeof d.lastRenameSeen === "string" ? d.lastRenameSeen : null,
+      accounts: parseTimeline(d.accounts),
       note: d.note,
     };
   } catch { return null; }
