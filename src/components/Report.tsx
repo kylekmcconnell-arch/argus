@@ -1,4 +1,5 @@
 import { evidenceRetryPlan, evidenceRetryReason } from "../lib/evidenceRetry";
+import { withheldScoreReason } from "../lib/withheldScore";
 import { useEffect, useState } from "react";
 import {
   Briefcase,
@@ -2721,7 +2722,11 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     presentedVerdict,
     scoreFinal: presentation.final,
     publishedScore: presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null,
-    withheldNote: legacyCoverageNotCaptured ? readinessGuidance : plainLanguageSummary(presentation.note ?? readinessGuidance),
+    // A withheld score names the step that fell short (the frozen scoring
+    // outcome, the routing state, the axis coverage) before falling back to
+    // generic readiness guidance, which never told the reader what to do.
+    withheldNote: withheldScoreReason(f)
+      ?? (legacyCoverageNotCaptured ? readinessGuidance : plainLanguageSummary(presentation.note ?? readinessGuidance)),
     compositionRows: presentation.primaryScore ? compositionRows : [],
     decisionRows: decisionBasisSummary.rows,
     capNote: report.cap_applied ? `limited by ${capLabel(report.cap_applied)}` : null,

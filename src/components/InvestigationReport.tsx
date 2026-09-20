@@ -3,6 +3,7 @@ import { tokenCompositionRow, tokenMarketPresentation } from "../lib/tokenPresen
 import { investigationFacets } from "../lib/investigationFacets";
 import { useRef, useState } from "react";
 import { verdictMeta, axisLabel } from "../lib/verdict";
+import { withheldScoreReason } from "../lib/withheldScore";
 import { printReportPdf } from "../lib/printPdf";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import {
@@ -1624,7 +1625,11 @@ export function InvestigationReport({
               verdictLabel: verdictMeta(accountReport.composite_verdict).label,
               context: "Who runs the project, what it has built, and what evidence supports its claims about backing and use.",
               composition: projectCompositionRows,
-              unavailableCopy: "The linked project report did not publish a diligence score.",
+              // A withheld score states its own cause. "N/A, not measured" with
+              // no reason reads as a broken product rather than as the honest
+              // coverage limit it is.
+              unavailableCopy: withheldScoreReason(projectAccount)
+                ?? "The linked project report did not publish a diligence score.",
             } : undefined}
           />
 
