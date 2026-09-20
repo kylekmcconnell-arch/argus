@@ -826,3 +826,40 @@ outcome is recorded as fee-farmed rather than dumped.
 same chain on 2026-09-18. Two tokens sharing a name on one chain is a reason to
 confirm the address before any read, and portfolio tools will resolve the
 ticker to whichever pair they rank first.
+
+## Volume launching on Base: 35 tokens, three alive (read 2026-09-20)
+
+Indexed as `base-b20-serial-launcher-58d0fdcb`. A second Base wallet running
+the same business as the BaseCat creator, at five times the launch count and a
+fraction of the hit rate.
+
+**The shape.** 35 createLaunch transactions between 2026-07-17 and 2026-09-15
+across both B20 factories and the o1 factory. Thirty-two have no live pair and
+holder counts in the low single digits; Sparkplug (81 holders) and Zuckasaurus
+(52) barely trade, and O1DOLL (319 holders, about 43,900 USD of liquidity) is
+the only one with depth. Names borrow identity (ELON, COINBASE, COBIE, BALD)
+and repeat within days (TRILLIONS, BAPU and MACBOOK each twice), which is what
+volume launching looks like when the cost of a launch is a rounding error.
+
+**The income is fees, in ETH.** 125 claims delivering 10.0776 ETH, measured by
+balance delta at each claim block rather than from the explorer's internal
+index, swept to a single controller wallet that has taken 13.36 ETH. No
+allocation at any launch, and no trace of the deployer ever holding or selling
+one of its own tokens. Because the factories pay these fees in ETH rather than
+in the launched token, the stream costs holders nothing directly, which is the
+distinction from `rh-wirebot-fee-farm` where the same model is paid in-token
+and sold into the market. Recorded as unestablished rather than nefarious on
+that basis.
+
+**Address poisoning in the funder list.** The controller wallet
+0x85ce0965...ed7b is shadowed by two lookalikes, 0x85ceef79...ed7b and
+0x85cea55c...1d7b, that match at both ends and appear in the deployer's
+counterparty list on zero-value transfers. Reading the first and last four
+characters of an address is how a cluster gets attributed to the wrong wallet;
+compare the whole string.
+
+**Zuckasaurus itself is the least interesting part.** Launched 2026-08-28
+against tokenized Meta stock, no creator allocation, 1,000,000,000 straight to
+the pool, the deployer absent from its transfer ledger, top holder 3.0 percent,
+and its only listed link is a news article about a Facebook privacy mascot.
+The token is a shell; the wallet behind it is the record worth keeping.
