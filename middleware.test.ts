@@ -441,3 +441,112 @@ describe("Case Brief middleware policy", () => {
   });
 
 });
+
+describe("one analyst cannot spend the whole workspace day (#356)", () => {
+  beforeEach(() => {
+    vi.mocked(next).mockClear();
+    vi.stubEnv("SUPABASE_URL", "https://database.example");
+    vi.stubEnv("SUPABASE_PUBLISHABLE_KEY", "publishable-test-key");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const authThenMember = () => vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      id: "00000000-0000-4000-8000-000000000010",
+      email_confirmed_at: "2026-07-11T00:00:00.000Z",
+    }))
+    .mockResolvedValueOnce(jsonResponse([{
+      organization_id: "00000000-0000-4000-8000-000000000001",
+      role: "analyst",
+      active: true,
+    }]));
+
+  // /api/ask reserves in its handler, so the middleware-side reservation is
+  // asserted on a middleware-metered panel instead.
+  const askRequest = () => new Request("https://argus.example/api/arkham", {
+    headers: { authorization: "Bearer analyst-token" },
+  });
+
+  it("passes the configured per-user cap to the reservation", async () => {
+    vi.stubEnv("ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT", "25");
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 99, reason: null }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await middleware(askRequest());
+
+    const reservation = fetchMock.mock.calls.find(([input]) => String(input).includes("reserve_supplemental_budget"));
+    expect(reservation).toBeDefined();
+    expect(JSON.parse(String(reservation![1].body))).toMatchObject({ p_user_daily_limit: 25 });
+  });
+
+  it("tells an analyst who hit their own cap that the workspace still has budget", async () => {
+    vi.stubEnv("ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT", "25");
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: false, used: 40, remaining: 60, reason: "user_daily_limit" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(askRequest());
+
+    expect(response.status).toBe(429);
+    const body = await response.json();
+    expect(body).toMatchObject({ error: "supplemental_user_daily_limit_reached", limit: 25 });
+    expect(String(body.message)).toContain("workspace still has budget");
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("still reports a genuinely exhausted workspace as a workspace limit", async () => {
+    vi.stubEnv("ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT", "25");
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: false, used: 100, remaining: 0, reason: "workspace_daily_limit" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(askRequest());
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({ error: "supplemental_daily_limit_reached" });
+  });
+
+  it("sends no per-user cap when none is configured, keeping the previous behaviour", async () => {
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 99, reason: null }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await middleware(askRequest());
+
+    const reservation = fetchMock.mock.calls.find(([input]) => String(input).includes("reserve_supplemental_budget"));
+    expect(JSON.parse(String(reservation![1].body)).p_user_daily_limit).toBeNull();
+  });
+
+  it("forwards the workspace so a gated panel can attribute its spend", async () => {
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 99, reason: null }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await middleware(askRequest());
+
+    const forwarded = (next.mock.calls[0]?.[0] as { request?: { headers?: Headers } } | undefined)?.request?.headers;
+    expect(forwarded?.get("x-argus-organization-id")).toBe("00000000-0000-4000-8000-000000000001");
+  });
+
+  it("overwrites a client-supplied workspace header instead of trusting it", async () => {
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 99, reason: null }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await middleware(new Request("https://argus.example/api/arkham", {
+      headers: {
+        authorization: "Bearer analyst-token",
+        "x-argus-organization-id": "00000000-0000-4000-8000-0000000000ff",
+      },
+    }));
+
+    const forwarded = (next.mock.calls[0]?.[0] as { request?: { headers?: Headers } } | undefined)?.request?.headers;
+    expect(forwarded?.get("x-argus-organization-id")).toBe("00000000-0000-4000-8000-000000000001");
+  });
+});

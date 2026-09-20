@@ -113,3 +113,33 @@ describe("x-authenticity - CA in the project's X bio", () => {
     expect(c.body.status).toBe("verified");
   });
 });
+
+describe("x-authenticity does not leak or spend silently (#356)", () => {
+  it("keeps an authenticated, per-subject answer out of shared caches", async () => {
+    stubBio("no contract here");
+    const { res, captured } = response();
+
+    await handler(
+      { query: { handle: "someproject", address: "0x" + "a".repeat(40), chain: "ethereum" }, headers: {} } as any,
+      res as any,
+    );
+
+    // A shared directive let one workspace's answer be served to another.
+    expect(captured.headers["cache-control"]).toContain("private");
+    expect(captured.headers["cache-control"]).not.toContain("s-maxage");
+  });
+
+  it("still answers when the request carries no workspace to attribute to", async () => {
+    stubBio("no contract here");
+    const { res, captured } = response();
+
+    // A missing organization header means "do not attribute". Writing the
+    // receipt must never be able to break a panel that would otherwise answer.
+    await handler(
+      { query: { handle: "someproject", address: "0x" + "a".repeat(40), chain: "ethereum" }, headers: {} } as any,
+      res as any,
+    );
+
+    expect(captured.body).toMatchObject({ available: true, status: "absent" });
+  });
+});
