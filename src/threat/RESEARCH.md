@@ -786,3 +786,43 @@ infrastructure to walk through, and remember that EIP-7702 accounts carry code
 but are user wallets. Log queries also need care: the launch window exceeds the
 10,000-log cap and needs recursive splitting, and address-less queries time
 out.
+
+## Fee farming as the business model ($wire / wire bot, Robinhood Chain, read 2026-09-20)
+
+Indexed as `rh-wirebot-fee-farm`. A token can be clean at launch and still be
+built to extract, and this one shows the shape of it.
+
+**The launch gives you nothing to flag.** On 2026-07-17 the deployer paid
+0.0205 ETH to factory 0x0c37a24f, which has launched roughly 1,896 tokens. There
+was no bonding curve: the whole billion went straight into the pair in the
+launch transaction, and the deployer's only allocation was 14,395,208 tokens,
+1.44 percent, bought at the same moment as everyone else. No honeypot, no tax,
+no liquidity pull, nothing a contract scanner would return.
+
+**The extraction is the fee stream.** The launchpad pays creator fees in the
+token itself. Over two months the deployer claimed 84,349,332 tokens, 8.43
+percent of supply, across 210 payments worth about 52,000 USD at the prices on
+the days they landed, and it was still claiming on the day of this read. Its
+visible transaction history is almost nothing but those claims: 260 of them,
+plus a single setFeeRedirect call.
+
+**The deployer never sells, which is the point.** It has zero attributed sales
+across 314,399 transfers. It forwards to 0xf7b84493, which sells into the pair
+and passes the remainder to 0xa58bdd0a, which sells as well, about 78,000 USD
+between them at sale-time prices. Anyone checking the creator wallet for sell
+pressure finds a clean record. The pressure is two hops away.
+
+**Separate the operator read from the token read.** The token is down 99
+percent from its 2026-07-21 peak, including 84 percent across 09-18 and 09-19,
+but that fall was 886 wallets selling with the top ten at 29.5 percent and the
+deployer selling nothing in the window. Over the token's life 12,378 wallets
+have sold with the top ten at 9.7 percent, which is a genuinely dispersed
+market. The fee stream is a constant drag on it, not the trigger for the crash.
+The cluster is indexed nefarious for the extraction and the routing; the launch
+outcome is recorded as fee-farmed rather than dumped.
+
+**Watch for namesakes.** A different token also called Wire
+(0x15f3d1ba06aeeb26470bf4995305f58082a20859, account wireonrh) launched on the
+same chain on 2026-09-18. Two tokens sharing a name on one chain is a reason to
+confirm the address before any read, and portfolio tools will resolve the
+ticker to whichever pair they rank first.
