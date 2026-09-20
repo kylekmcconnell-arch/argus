@@ -38,6 +38,7 @@ import { explorer, shortAddr, walletBindingLabel, walletScreenView, walletTier }
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
+import { GithubShipping } from "./GithubShipping";
 import { GithubAssessment } from "./GithubAssessment";
 import { ThreatReport } from "./ThreatScanPage";
 import { MethodologyChecklist } from "./MethodologyChecklist";
@@ -109,6 +110,8 @@ import { buildPersonReportView } from "../reports/argus/buildView";
 import { DecisionChapter } from "../reports/argus/chapters/DecisionChapter";
 import { ScoresChapter } from "../reports/argus/chapters/ScoresChapter";
 import { ProductChapter } from "../reports/argus/chapters/ProductChapter";
+import { CodeChapter } from "../reports/argus/chapters/CodeChapter";
+import { buildCodeView } from "../reports/argus/codeView";
 import { PeopleChapter } from "../reports/argus/chapters/PeopleChapter";
 import { MarketChapter } from "../reports/argus/chapters/MarketChapter";
 import { SocialChapter } from "../reports/argus/chapters/SocialChapter";
@@ -2790,6 +2793,19 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     const { downloadBriefPdf } = await import("../reports/argus/downloadBrief");
     await downloadBriefPdf(reportView, `${reportPdfFilename(f.display_name || f.handle)}.pdf`);
   };
+  // The Code chapter reads the development summary the scan froze onto the
+  // token dossier, the saved account assessment, and this report's own roster
+  // so committers can be matched against the people it names.
+  const codeView = buildCodeView({
+    shipping: f.threat?.dossier?.shipping ?? null,
+    github: f.githubAssessment ?? null,
+    people: reportView.people.cards,
+    linkedOrg: f.githubAssessment?.login ?? null,
+    absentReason: f.threat?.dossier
+      ? "This saved report carries a token scan without a development read: no repository was linked from a site the project controls, or the GitHub lane was unavailable when it ran."
+      : "No token scan with a development read is saved with this report.",
+  });
+
   const moreActions: MoreAction[] = [
     ...(onOpenBrief ? [{ label: "Case brief", detail: "Analyst decision brief for this case", onClick: onOpenBrief }] : []),
     ...(onRescan ? [{ label: "Rescan", detail: "Run this audit again, fresh", onClick: onRescan }] : []),
@@ -3043,15 +3059,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         </div>
       )}
       {f.entityContinuity && <div id="key-developments" className="scroll-mt-28"><EntityContinuityTimeline snapshot={f.entityContinuity} /></div>}
-      {f.githubAssessment && (
-        <Section title="GitHub assessment" kicker="quality of work · account history · bio claims vs GitHub reality">
-          <Card className="p-4">
-            {reportLane.renderers.githubSynthesis?.(f.githubAssessment)}
-            <GithubAssessment a={f.githubAssessment} />
-          </Card>
-        </Section>
-      )}
-      {showCurrentIntelligence && panelCostToken && <PersonGithub className="min-w-0" handle={report.handle} name={f.display_name} bio={f.bio} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />}
       {(() => {
         // PROJECT accounts: domain age + audit-claim check from the bio link.
         const dom = (() => {
@@ -3067,6 +3074,31 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           </Section>
         ) : null;
       })()}
+    </LegacySection>
+  );
+
+  // Code chapter: the frozen development read is rendered by the chapter; the
+  // live tools (account assessment, the paid shipping panel with the roster
+  // chart, the person-level GitHub read) stay the existing components.
+  const codeLegacy = (
+    <LegacySection title="Code panels on record" note="The saved account assessment and the deeper live reads. The live panels charge a panel cost and read GitHub now, not at scan time.">
+      {f.githubAssessment && (
+        <Section title="GitHub assessment" kicker="quality of work · account history · bio claims vs GitHub reality">
+          <Card className="p-4">
+            {reportLane.renderers.githubSynthesis?.(f.githubAssessment)}
+            <GithubAssessment a={f.githubAssessment} />
+          </Card>
+        </Section>
+      )}
+      {showCurrentIntelligence && panelCostToken && f.githubAssessment?.login && (
+        <GithubShipping
+          org={f.githubAssessment.login}
+          sectorText={[f.display_name, f.headline, f.bio].filter(Boolean).join(" · ")}
+          projectHandle={report.handle}
+          panelCostToken={panelCostToken}
+        />
+      )}
+      {showCurrentIntelligence && panelCostToken && <PersonGithub className="min-w-0" handle={report.handle} name={f.display_name} bio={f.bio} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />}
     </LegacySection>
   );
 
@@ -3825,7 +3857,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           decision: () => <DecisionChapter view={reportView} before={decisionBefore} after={decisionAfter} onRescan={shareView ? undefined : onRescan} />,
           scores: () => <ScoresChapter view={reportView} legacy={scoresLegacy} />,
           product: () => <ProductChapter view={reportView} legacy={productLegacy} />,
-          people: () => <PeopleChapter view={reportView} legacy={peopleLegacy} />,
+          code: () => <CodeChapter view={reportView} code={codeView} legacy={codeLegacy} />,
+          people: () => <PeopleChapter view={reportView} legacy={peopleLegacy} onAudit={shareView ? undefined : onAudit} />,
           market: ({ active }) => <MarketChapter view={reportView} active={active} reconciliation={holderReconciliation} legacy={marketLegacy} />,
           social: () => <SocialChapter view={reportView} legacy={socialLegacy} />,
           connections: () => <ConnectionsChapter view={reportView} legacy={connectionsLegacy} />,

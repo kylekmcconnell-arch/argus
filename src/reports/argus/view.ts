@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { ChapterId, HolderRow, PersonContacts, ReportIssue, Tone } from "./model";
 import type { IntelligenceQuestion, IntelligenceSourceRef } from "../../intelligence/types";
 import type { SocialActivitySnapshot } from "../../data/socialActivity";
+import type { PersonRecord } from "./personEvidence";
 
 /* The presentation contract every chapter reads. Adapters build it from one
    frozen report version; chapters never reach back into the scoring engine.
@@ -90,6 +91,11 @@ export interface PersonCardView {
   sourceUrl?: string | null;
   sourceLabel: string;
   developerProfiles?: Array<{ label: string; url: string; proofUrl?: string | null }>;
+  /** X handle to run a full audit on this person, when the roster recorded one. */
+  auditHandle?: string | null;
+  /** What else the saved report records about this person. */
+  records?: PersonRecord[];
+  recordSummary?: { label: string; tone: Tone } | null;
 }
 
 export interface ConnectionView {

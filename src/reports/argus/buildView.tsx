@@ -7,6 +7,7 @@
    source tier, and absent evidence stays absent. */
 
 import type { Dossier } from "../../data/dossier";
+import { personRecordSummary, personRecords } from "./personEvidence";
 import type { WebTeamMember } from "../../data/evidence";
 import type { DecisionBasisRow } from "../../lib/decisionBasis";
 import type { FundingEvidenceSummary } from "../../lib/fundingEvidence";
@@ -930,6 +931,17 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
     else if (!departure) parts.push("Independent current-role verification is unresolved.");
     if (!record?.priorCompanies?.length && member.evidence && !/^prior:/i.test(member.evidence)) parts.push(sentence(plainLanguageSummary(member.evidence)));
     if (!record?.priorCompanies?.length && member.evidence && /^prior:/i.test(member.evidence)) parts.push(`Prior affiliation recorded: ${member.evidence.replace(/^prior:\s*/i, "")}.`);
+    const records = personRecords({
+      name: member.name,
+      handle: member.handle ?? null,
+      basicFacts: f.basicFacts,
+      leads: f.report?.investigative_leads,
+      adverseMentions: f.socialActivity?.adverseMentions,
+      contradictions: input.contradictions,
+      ventures: f.evidence?.ventures,
+      associates: f.evidence?.associates,
+      intelligenceSources: f.intelligence?.sources,
+    });
     return {
       key: `${member.name}-${index}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-"),
       name: member.name,
@@ -947,6 +959,9 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
         .filter((profile) => profile.url),
       badge,
       text: parts.join(" "),
+      auditHandle: member.handle ?? null,
+      records,
+      recordSummary: personRecordSummary(records),
       contacts,
       sourceUrl: safeHttpUrl(member.sourceUrl),
       sourceLabel: provider,
