@@ -200,4 +200,17 @@ describe("the credit RPC exposes the replay signal", () => {
     expect(sql).toContain("return query select false, v_balance, false;");
     expect(sql).toContain("return query select true, v_balance - p_cost_millis, false;");
   });
+
+  it("restores the service-role boundary that dropping the function discards", async () => {
+    // `drop function` discards grants. Without these two statements the
+    // recreated credit RPC is executable by PUBLIC, which the database gate
+    // caught as "credit consume is service-role only".
+    const { readFileSync } = await import("node:fs");
+    const sql = readFileSync(
+      new URL("../supabase/migrations/20260920140000_credit_replay_is_visible.sql", import.meta.url),
+      "utf8",
+    );
+    expect(sql).toMatch(/revoke all on function public\.consume_investigation_credit\(uuid, uuid, text, bigint\)\s*\n\s*from public, anon, authenticated;/);
+    expect(sql).toMatch(/grant execute on function public\.consume_investigation_credit\(uuid, uuid, text, bigint\)\s*\n\s*to service_role;/);
+  });
 });

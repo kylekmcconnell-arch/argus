@@ -92,6 +92,16 @@ begin
 end;
 $$;
 
+-- `drop function` discards the grants the original migration set, which would
+-- leave the recreated function executable by PUBLIC. Restore the service-role
+-- boundary in the same transaction so the credit ledger is never briefly
+-- callable by anon or authenticated.
+revoke all on function public.consume_investigation_credit(uuid, uuid, text, bigint)
+  from public, anon, authenticated;
+
+grant execute on function public.consume_investigation_credit(uuid, uuid, text, bigint)
+  to service_role;
+
 comment on function public.consume_investigation_credit(uuid, uuid, text, bigint) is
   'Debits one investigation credit. Returns replayed=true when the key was already paid for, so callers can refuse to start new work on it.';
 
