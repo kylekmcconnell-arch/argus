@@ -252,6 +252,12 @@ export interface QuotaResult {
   creditRemaining?: number;
   error?: string;
   reason?: "credit_budget_exhausted";
+  /**
+   * The key was already paid for, so nothing was charged for this call. The
+   * caller must not start fresh work on it: that spends one credit twice
+   * (#355). A legitimate replay is a retry, and its receipt already exists.
+   */
+  replayed?: boolean;
 }
 
 export async function consumeInvestigationQuota(
@@ -293,7 +299,9 @@ export async function consumeInvestigationQuota(
     if (row.allowed !== true) {
       return { allowed: false, used: 0, remaining: creditRemaining, creditRemaining, reason: "credit_budget_exhausted" };
     }
-    return { allowed: true, used: 1, remaining: creditRemaining, creditRemaining };
+    const replayed = row.replayed === true;
+    // A replay is not a second charge, so it must not report a credit used.
+    return { allowed: true, used: replayed ? 0 : 1, remaining: creditRemaining, creditRemaining, replayed };
   } catch (error) {
     console.error("[credits] ledger check failed", error, metadata);
     return { allowed: false, used: 0, remaining: 0, error: "credit_ledger_unavailable" };

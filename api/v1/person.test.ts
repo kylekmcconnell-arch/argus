@@ -19,13 +19,14 @@ vi.mock("../_auth.js", () => ({
     displayName: "Analyst",
   })),
 }));
-vi.mock("../_scanReceipts.js", () => ({ claimScanReceipt: vi.fn(async () => "written"), recordScanReceipt: vi.fn() }));
+vi.mock("../_scanReceipts.js", () => ({ claimScanReceipt: vi.fn(async () => "written"), recordScanReceipt: vi.fn(), describeClaimedRun: vi.fn(async () => "unknown") }));
 
 vi.mock("../audit.js", () => ({
   persistServerDossier: vi.fn(),
 }));
 
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
+import { claimScanReceipt, describeClaimedRun } from "../_scanReceipts.js";
 import { resolveInput, runAudit } from "../_collector.js";
 import { persistServerDossier } from "../audit.js";
 import type { Dossier } from "../../src/data/dossier";
@@ -348,5 +349,66 @@ describe("v1 person OpenAPI readiness contract", () => {
       preliminary_model_signal: { $ref: "#/components/schemas/PreliminaryPersonModelSignal" },
       score: { type: ["number", "null"] },
     });
+  });
+});
+
+describe("one credit cannot be replayed into a second person scan (#355)", () => {
+  const withKey = (handle: string, key: string) => {
+    const req = request(handle);
+    req.headers["idempotency-key"] = key;
+    return req;
+  };
+
+  beforeEach(() => {
+    vi.mocked(claimScanReceipt).mockResolvedValue("duplicate");
+    vi.mocked(runAudit).mockClear();
+  });
+
+  it("never starts a second collector run for a replayed key", async () => {
+    // The credit RPC treats a repeated key as already paid and allows it, so
+    // the receipt claim is what has to stop the run.
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 0, replayed: true });
+    vi.mocked(describeClaimedRun).mockResolvedValue("same_subject");
+    const { res, captured } = response();
+
+    await handler(withKey("argus", "replay-key-12345"), res);
+
+    expect(captured.statusCode).toBe(409);
+    expect(captured.body).toMatchObject({ error: "scan_run_already_claimed" });
+    expect(runAudit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a replayed key presented for a different subject, and says so", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 0, replayed: true });
+    vi.mocked(describeClaimedRun).mockResolvedValue("subject_mismatch");
+    const { res, captured } = response();
+
+    await handler(withKey("someoneelse", "replay-key-12345"), res);
+
+    expect(captured.statusCode).toBe(409);
+    expect(captured.body).toMatchObject({ error: "idempotency_subject_mismatch" });
+    expect(runAudit).not.toHaveBeenCalled();
+  });
+
+  it("does not advise opening a saved result that belongs to another subject", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 0, replayed: true });
+    vi.mocked(describeClaimedRun).mockResolvedValue("subject_mismatch");
+    const { res, captured } = response();
+
+    await handler(withKey("someoneelse", "replay-key-12345"), res);
+
+    expect(String((captured.body as { message?: string }).message)).not.toContain("saved result");
+  });
+
+  it("separates a storage failure from a replay instead of reporting both as claimed", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(claimScanReceipt).mockResolvedValue("unavailable");
+    const { res, captured } = response();
+
+    await handler(withKey("argus", "fresh-key-12345"), res);
+
+    expect(captured.statusCode).toBe(503);
+    expect(captured.body).toMatchObject({ error: "scan_run_claim_unavailable" });
+    expect(runAudit).not.toHaveBeenCalled();
   });
 });

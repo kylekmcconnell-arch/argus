@@ -1,4 +1,4 @@
-vi.mock("./_scanReceipts.js", () => ({ claimScanReceipt: vi.fn(async () => "written"), recordScanReceipt: vi.fn(async () => true) }));
+vi.mock("./_scanReceipts.js", () => ({ claimScanReceipt: vi.fn(async () => "written"), recordScanReceipt: vi.fn(async () => true), describeClaimedRun: vi.fn(async () => "unknown") }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
@@ -47,7 +47,7 @@ vi.mock("./_graph.js", () => ({ activateReportVersionWithAuthoritativeGraph }));
 import { consumeInvestigationQuota, requireArgusAuth, serviceCredentials } from "./_auth.js";
 import { activateReportVersion } from "./_provenance.js";
 import { resolveInput, runAudit } from "./_collector.js";
-import { claimScanReceipt, recordScanReceipt } from "./_scanReceipts.js";
+import { claimScanReceipt, describeClaimedRun, recordScanReceipt } from "./_scanReceipts.js";
 import handler, { config } from "./audit";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
@@ -101,7 +101,11 @@ describe("person audit input guard", () => {
     vi.unstubAllGlobals();
   });
 
-  it.each(["argus", "different"])("rejects a replay for %s before a second collector starts", async (secondHandle) => {
+  it.each([
+    ["argus", "same_subject", "scan_run_already_claimed"],
+    ["different", "subject_mismatch", "idempotency_subject_mismatch"],
+  ] as const)("rejects a replay for %s before a second collector starts", async (secondHandle, prior, expectedError) => {
+    vi.mocked(describeClaimedRun).mockResolvedValue(prior);
     vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 0, used: 1 });
     vi.mocked(serviceCredentials).mockReturnValue({ url: "https://db.example", key: "test" });
     const actual = await vi.importActual<typeof import("./_scanReceipts.js")>("./_scanReceipts.js");
@@ -121,6 +125,8 @@ describe("person audit input guard", () => {
     await handler(request(secondHandle, { creditKey: "replay-key-123" }), second.res);
     expect(first.captured.statusCode).toBe(200);
     expect(second.captured.statusCode).toBe(409);
+    expect(second.captured.body).toMatchObject({ error: expectedError });
+    // The credit bought exactly one collector run.
     expect(runAudit).toHaveBeenCalledTimes(1);
   });
 
