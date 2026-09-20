@@ -3,7 +3,7 @@
 Written for a coding agent (Codex, Claude, Cursor, Grok, Copilot) joining this
 repository with no prior context. Read this before opening code. It explains what
 the product is, the doctrines that govern what it is allowed to say, how the system
-is built, and where the work currently stands.
+is built, and how to find out where the work currently stands.
 
 For review work specifically, `docs/CODEX-REVIEW-BRIEF.md` is the companion
 document: it ranks the failure modes that matter and lists what is already known,
@@ -284,37 +284,38 @@ Gotchas that have cost real time:
 - Report exports follow `<subject>_<date>_Argus_Forensic_due_diligence.<ext>`
   (`src/lib/printPdf.ts`).
 
-## 6. Where things stand (2026-09-20)
+## 6. Finding the current state
 
-Recently shipped, in rough order: subject categorization and the stock/registry and
-launchpad lanes (#441, #442, #445, #446); report copy overhaul, tokenless security
-audits, self-published backers and the stale-tab heartbeat (#449, #463); the
-verified challenge flow (#450); sitemap-driven GitHub discovery, roster contacts,
-person-vs-company routing, the fundraising section, slug recall and the scan tray
-(#451, #452, #456, #457, #458, #460); the namesake-token reciprocity gate and the
-challenge dialog styling fix (#465); site-scan depth (#466); the backer-edge
-ownership gate (#467); the cross-scan VC ranking (#468); a one-time flush of
-`provider_cache` and `entity_facts` so no pre-fix cached answers feed new scans
-(#469); and the report audit series plus the eight-chapter interactive redesign
-(#473, #475, #476, #478, #479, #480).
+This document deliberately does not list what shipped last week or which issues are
+open. That drifts within days, and a stale status section is worse than none
+because it invites an agent to act on a world that has moved. Read the state from
+the source instead:
 
-Open work to be aware of:
+```
+gh issue list --state open --limit 40    # the durable specification trail
+gh pr list --state open                  # work in flight, possibly another agent's
+git log --oneline -30                    # what landed recently, and in which PR
+npm run check-env                        # which provider keys are configured
+```
 
-- **#472, the Altcoinist v4 defect register (ARGUS-01..20)** is the live quality
-  thread. Much of it landed across #473/#475/#476/#478; check the register before
-  touching report presentation, and follow its ground rules, reproduce against the
-  saved version first, never invent corrected scores, never rescan to conceal
-  history, never mutate frozen evidence, and version any presentation repair.
-- **#440** tracks the subject-categorization doctrine end to end.
-- A cluster of engine and hygiene issues: #374, #375, #376, #378, #379, #380, #381,
-  #382, #383, #384.
-- Open pull requests: #477 (machine-checked "no personal approval gates" contract),
-  #410 (forensic outages unavailable until saved) and #412 (draft, fail closed on
-  unusable market figures). #410 and #412 predate the current report work and need
-  rebasing before review.
-- Environment keys still unset in production: `RESEND_API_KEY` and `RESEND_FROM`
-  (challenge verification email), `COMPANIES_HOUSE_API_KEY`,
-  `OPENCORPORATES_API_TOKEN`. `CRYPTORANK_API_KEY` is set.
+GitHub issues are the specification: a defect register or doctrine thread there
+carries more authority than any summary, including this one. Before starting, find
+the issue covering your area and read it end to end, then check whether an open
+pull request is already doing the work.
+
+Two durable facts about that state, rather than a snapshot of it:
+
+**Report presentation is governed by a standing repair discipline.** It came out of
+a defect register against a saved report and applies to any presentation fix:
+reproduce against the saved version first, never invent a corrected score, never
+rescan to conceal history, never mutate frozen evidence, and version a presentation
+repair explicitly. Search the issue tracker for the register covering the report
+surface you are touching before you change it.
+
+**Some optional provider keys are unset in production**, so lanes that depend on
+them (transactional email for challenge verification, certain company registries)
+record `unavailable` rather than failing. That is the intended behavior, not a
+bug to fix in the adapter. `npm run check-env` reports what is configured.
 
 ## 7. Glossary
 

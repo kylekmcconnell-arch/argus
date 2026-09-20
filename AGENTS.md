@@ -38,6 +38,6 @@ authority contract.
 
 Read `docs/ONBOARDING.md` first: what ARGUS is, the doctrines that govern what a
 report is allowed to say, the architecture and scan pipeline, the subsystems, the
-verification battery, and where the work currently stands. For review tasks, pair
-it with `docs/CODEX-REVIEW-BRIEF.md`, which ranks the failure modes that matter and
-records what is already known, fixed, or disproven.
+verification battery, and how to read the current state of the work. For review
+tasks, pair it with `docs/CODEX-REVIEW-BRIEF.md`, which ranks the failure modes
+that matter and records what is already known, fixed, or disproven.
