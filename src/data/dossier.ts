@@ -290,6 +290,7 @@ export interface Dossier {
   evidenceAttempts?: import("../lib/evidenceRetry").EvidenceAttempt[];
   /** What the investigation director asked, delegated, and could not finish. */
   researchPlan?: ResearchPlan;
+  scoringOutcome?: CollectedEvidence["scoringOutcome"];
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
@@ -702,6 +703,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),
     ...(intelligence ? { intelligence } : {}),
+    ...(ev.scoringOutcome ? { scoringOutcome: { ...ev.scoringOutcome } } : {}),
     ...(ev.researchPlan ? {
       researchPlan: {
         ...ev.researchPlan,
