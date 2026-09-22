@@ -943,3 +943,45 @@ percent drawdown from the 09-10 peak on 4,950 USD of daily volume is consistent
 with nothing being wrong with the project. Do not let shipping evidence carry a
 token thesis it cannot support, and do not read a falling chart on a real build
 as evidence of a farm.
+
+## A clean distribution with the fee-farm routing inside it ($MEME, Robinhood Chain, read 2026-09-21)
+
+Indexed as `rh-meme-amc`, intent `unestablished`. Launched 2026-09-03 through
+factory 0x22e99278, the $TAIWAN venue, which mints the full billion to hook
+0xeb7c0347 and then to the shared DopplerHookInitializer 0x4e346895. That
+contract holds inventory in about 21,000 tokens, so a transfer from it is a
+launchpad payout, not an operator link.
+
+**The holder side is as clean as this chain gets.** 31,023 holders and about
+3.04M transfers. The top ten non-pool holders own 14.96 percent of supply and
+the largest non-pool holder, at 3.87 percent, is a custody proxy carrying more
+than 20 unrelated tokens. The deployer's first buy came 371 blocks after
+launch, so it is not a launch-block snipe.
+
+**The deployer side repeats the wire and LEMON routing.** A 0.1 ETH buy of
+1.18 percent of supply, then a creator fee paid in the token: 28 claims of
+selector 0x817db73b totalling 5.01M, still running on 2026-09-21. None of it
+went to the pool from the deployer. It went one hop out to wallets that are all
+empty now. One sold 5.0M into the PoolManager and the others bridged 6.08M out
+through Relay. The recipe from the LEMON section finds it in two queries.
+
+**Why unestablished and not nefarious.** The routing is the same, the size is
+not. The stream is 0.50 percent of supply against 4.69 percent on LEMON and
+8.43 percent on wire, and it has decayed from 3.87M on 2026-09-04 to under
+17,000 per claim. On those two tokens the fee stream was the business. Here it
+reads as a creator cashing launchpad fees quietly on a token that trades on
+its own. Revisit if the claims grow again or a new wallet starts selling in
+size.
+
+**The AMC narrative has no AMC behind it.** From 2026-09-19 the project account
+pitched $MEME as a way to "fix" AMC ahead of the 2026-09-24 annual meeting. No
+project address holds a meaningful balance of tokenized AMC 0x05a3d1cd. The
+AMC in this ecosystem sits in the AMC/MEME pool as liquidity, about 2.0M USD
+of MEME's 4.22M headline liquidity. Liquidity cannot be voted. Treat a token
+pitched as a vehicle for shareholder action as unbacked unless a treasury
+address holding the stock is named and checkable.
+
+**Explorer trap.** Blockscout indexes this token's symbol as AMC while the
+contract returns MEME and has no rename function. Any balance view on the
+explorer lists it beside the real stock token. Read `symbol()` from the
+contract before trusting an explorer label on this chain.

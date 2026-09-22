@@ -249,6 +249,27 @@ export const CABALS: Cabal[] = [
     ],
   },
   {
+    id: "rh-meme-amc",
+    name: "A Meme Coin ($MEME) and its AMC campaign",
+    kind: "launch-farm",
+    intent: "unestablished",
+    summary:
+      "$MEME launched on Robinhood Chain on 2026-09-03 through factory 0x22e99278, the venue behind $TAIWAN, and on 2026-09-19 repositioned itself as a campaign to 'Fix AMC' ahead of AMC's 2026-09-24 annual meeting. Distribution is the flattest indexed on this chain: 31,023 holders, the top ten non-pool holders at 14.96 percent of supply, no creator allocation and no launch-block snipe. The deployer bought 1.18 percent of supply for 0.1 ETH 37 seconds after launch and has drawn a recurring creator fee paid in the token, 5.01M across 28 claims through 2026-09-21. It never sold from its own address. It forwarded 17.62M to intermediaries that are now empty: 5.0M sold into the pool, 0.47M sold through the Robinhood app settler, 6.08M bridged out through Relay. That is the same routing as rh-wirebot-fee-farm and rh-lemonfun-fee-farm. Intent is recorded as unestablished, not nefarious, because the stream is small, 0.50 percent of supply against 4.69 and 8.43 percent on those two, and holders have not been sold into at scale. No project address holds tokenized AMC in any meaningful amount, so the campaign is not backed by a position that could be voted.",
+    firstSeen: "2026-09-03",
+    lastSeen: "2026-09-21",
+    wallets: [
+      { chain: RH, address: "0xa72a5b06927badb020d235f5f43ce56507ab2399", role: "deployer", label: "$MEME deployer and creator-fee recipient", evidence: "sent launch tx 0x75c36932619070f16f65bd7d252f689a4e6cf7d170a99ee72774d56f4315e41e (block 53,697,172, 2026-09-03 20:30 UTC) to factory 0x22e99278, which minted 1,000,000,000 to hook 0xeb7c0347; bought 11,816,778 at block +371 in tx 0xc72f60f08d9133d698b396381e56c04cb2a8afe6dbf04d083bdedc9cc81e478d, 0.1 ETH through RelayRouterV3 0xb92fe925; received 5,010,685 in 28 creator-fee claims (selector 0x817db73b) from the shared DopplerHookInitializer 0x4e346895 between 2026-09-04 and 2026-09-21; 17,940,485 in, 17,621,349 out, zero sent to the pool; holds 319,135 and 0.11 ETH, nonce 100, read 2026-09-21. Also holds 1.08B NEB, 430M SIGNAL, 273M SCOUT, 249M TERRA and 98M SZN, none with any market." },
+      { chain: RH, address: "0x8e74a2b037d29934d12c04becccb627a7883acb7", role: "farm", label: "$MEME forwarding wallet A, sold into the pool", evidence: "received 12,029,478 from the deployer 2026-09-04 04:34 to 16:25; sent 5,000,000 to PoolManager 0x8366a39c in 15 transfers, 4,683,059 through proxy 0xdeadc0de, 1,846,419 through RelayRouterV3 and 500,000 to swap router 0xbdbae060, last transfer 2026-09-05 00:24; holds zero, read 2026-09-21" },
+      { chain: RH, address: "0x8bc35bf8844123c93d8399f3c35f232ce201b328", role: "off-ramp", label: "$MEME forwarding wallet B, bridged out", evidence: "received 4,700,053, of which 3,296,638 from the deployer on 2026-09-04 and 09-05; sent 4,232,318 through RelayRouterV3 0xb92fe925 in 11 transfers and sold 467,735 through RobinHoodSettler 0x39b38686, last transfer 2026-09-05 03:49; holds zero, read 2026-09-21" },
+    ],
+    accounts: [
+      { handle: "amemecoinrh", role: "project", label: "A Meme Coin project account, 12.3k followers, follows three", evidence: "listed on every DexScreener pair for 0x385f4f8a; pinned post 2026-09-19 'Today, A $MEME Coin gets a new mission. Fix @AMCTheatres.' quoting Vlad Tenev's 2026-09-14 post on voting for Robinhood Stock Tokens; 2026-09-20 post lists the 2026-09-24 AMC annual meeting; read 2026-09-21" },
+    ],
+    launches: [
+      { chain: RH, address: "0x385f4f8ae47651ce5f58f5265395a669f8281e18", symbol: "MEME", name: "A Meme Coin", launchedAt: "2026-09-03", venue: "unknown factory 0x22e99278308b393ea1260859b181ad7e78f5eeed", outcome: "unestablished", note: "EIP-1167 clone of implementation 0x3be8b97f; one mint, no burns, no mint or rename function. Peaked at 0.063651 USD on 2026-09-13 and set a new low of 0.025312 on 2026-09-21, down 59 percent, with daily volume falling from 11.7M to 2.4M USD. About 2.0M USD of its 4.22M headline liquidity is the AMC/MEME pool, where MEME is the quote asset. Blockscout indexes the symbol as AMC while the contract returns MEME, so explorer balance views list it beside the real tokenized AMC 0x05a3d1cd.", evidence: "Blockscout holders, counters and per-address token transfers, and Robinhood RPC reads of name, symbol, supply and the mint log, all read 2026-09-21; GeckoTerminal hourly candles for pool 0x46525dc1 from 2026-09-13" },
+    ],
+  },
+  {
     id: "rh-snipe-infra",
     name: "Robinhood Chain snipe infrastructure",
     kind: "infra",
