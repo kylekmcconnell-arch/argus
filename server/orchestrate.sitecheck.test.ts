@@ -450,3 +450,17 @@ describe("bio website domain extraction covers the TLDs crypto projects register
     expect(bioWebsiteDomain("Watch us on youtube.com, then visit stonkbrokers.cash")).toBe("stonkbrokers.cash");
   });
 });
+
+it("preserves website description separately from the scoring packet", () => {
+  const { ctx, evidence } = context();
+  const site: SiteSubstance = { url: "https://project.example", status: "live", detail: "live product website" };
+  applySiteSubstanceOutcome(ctx, "project.example", site);
+  const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+    .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+  const before = JSON.stringify(buildScoringEvidencePacket({ ...evidence }, axes));
+  const productDescription = "A platform for AI models, agents and cloud computers with managed Linux workspaces.";
+  applySiteSubstanceOutcome(ctx, "project.example", { ...site, productDescription });
+  expect(evidence.officialProductDescription).toMatchObject({ text: productDescription, sourceUrl: site.url });
+  expect(JSON.stringify(buildScoringEvidencePacket({ ...evidence }, axes))).not.toContain(productDescription);
+  expect(JSON.stringify(buildScoringEvidencePacket({ ...evidence }, axes))).toBe(before);
+});

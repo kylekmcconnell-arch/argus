@@ -36,6 +36,8 @@ export interface SiteSubstance {
   url: string;
   status: SiteSubstanceStatus;
   detail: string;
+  /** Bounded official metadata, retained as a claim, never proof of product operation. */
+  productDescription?: string;
   /** Machine-readable attribution. Coming-soon reasons are verified markers. */
   reason?: SiteSubstanceReason;
   /** How official-page bytes were obtained. Reader recovery is the same official site, not an independent source. */
@@ -450,6 +452,7 @@ async function classifyServedPage(page: PageSuccess): Promise<SiteSubstance> {
     return {
       url: page.url,
       status: "live",
+      ...(meta.trim().length >= 24 ? { productDescription: stripText(meta).slice(0, 1200) } : {}),
       retrievalMethod,
       detail: withOfficialReaderRecovery(`live site${excerpt ? `: "${excerpt.slice(0, 80)}"` : ""}`, retrievalMethod),
     };

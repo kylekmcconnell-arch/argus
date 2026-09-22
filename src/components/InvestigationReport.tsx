@@ -928,6 +928,7 @@ export function InvestigationReport({
         bio: projectAccount.bio,
         ...(projectAccount.website ? { website: projectAccount.website } : {}),
         ...(projectAccount.subjectOrientation ? { subjectOrientation: projectAccount.subjectOrientation } : {}),
+        ...(projectAccount.officialProductDescription ? { officialProductDescription: projectAccount.officialProductDescription } : {}),
         ...(projectAccount.basicFacts?.length ? { basicFacts: projectAccount.basicFacts } : {}),
         ...(projectAccount.projectToken ? { projectToken: projectAccount.projectToken } : {}),
       })

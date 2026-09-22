@@ -403,7 +403,8 @@ function tokenScoreView(input: PersonViewInput, context: TokenContext, issues: R
     score: token.score,
     verdict: token.verdict,
     verdictWord: verdictWord(token.verdict),
-    tone: verdictTone(token.verdict),
+    tone: lensConflict ? "red" : verdictTone(token.verdict),
+    ...(lensConflict ? { status: "Current reading: market risk flagged. Saved PASS is not overall clearance." } : {}),
     foot: `Contract and market checks.${lensConflict ? " Conflicts with the detailed risk assessment." : ""}`,
     rows,
     arithmetic: arithmeticNote(rows, token.score),
@@ -570,6 +571,25 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
   const sourceCards = intelligenceSources.length
     ? intelligenceSources.map(sourceCardFromRef)
     : fallbackSources(f, input.basicFacts);
+  const productSource = f.officialProductDescription;
+  if (productSource && safeHttpUrl(productSource.sourceUrl) && f.website) {
+    try {
+      const sourceHost = new URL(productSource.sourceUrl).hostname.replace(/^www\./, "");
+      const officialHost = new URL(f.website).hostname.replace(/^www\./, "");
+      if (sourceHost === officialHost && Number.isFinite(Date.parse(productSource.capturedAt))) {
+        sourceCards.push({
+          id: `S${String(sourceCards.length + 1).padStart(2, "0")}`,
+          title: "Official website product description",
+          tier: "First party",
+          tone: "amber",
+          excerpt: `The project's own description; not independent product validation. ${plainLanguageSummary(productSource.text.slice(0, 1200))}`,
+          url: productSource.sourceUrl,
+          provider: "Official website",
+          capturedAt: productSource.capturedAt,
+        });
+      }
+    } catch { /* Ignore unbound metadata from malformed saved snapshots. */ }
+  }
 
   // ── hero ──
   const label = f.subjectOrientation?.what ? productLabel(name, f.subjectOrientation.what) : null;
@@ -750,7 +770,9 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
     {
       key: "Trader",
       eyebrow: "What the token evidence supports",
-      title: tokenScore?.verdict
+      title: reconciliation.some((issue) => issue.id === "token-lens-conflict")
+        ? "Market risk is flagged; the saved token PASS is not overall clearance."
+        : tokenScore?.verdict
         ? `${judgmentLine(tokenScore.verdict)}${reconciliation.some((issue) => issue.chapter === "market" || issue.id === "token-lens-conflict") ? " Control and concentration remain unsettled." : ""}`
         : token ? "The token is bound, but no token-safety score is saved." : "No token is attributed to this subject.",
       body: context.headline

@@ -558,3 +558,10 @@ describe("checkSiteSubstance attribution", () => {
     });
   });
 });
+
+it("retains complete product metadata beyond the short liveness note", async () => {
+  const description = "Access AI models, run managed agents, and use Linux workspaces through a single platform for building and running applications.";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(`<html><head><title>Example</title><meta name="description" content="${description}"></head><body>${"Docs and pricing for our application platform. ".repeat(20)}</body></html>`)));
+  expect(await checkSiteSubstance("example.org")).toMatchObject({ status: "live", productDescription: description });
+  vi.unstubAllGlobals();
+});

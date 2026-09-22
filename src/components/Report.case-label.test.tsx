@@ -100,3 +100,19 @@ describe("saved report case identity", () => {
     expect(identity9).not.toContain("Report PA-AAF133F87A134DF0AE17");
   });
 });
+
+it("renders an access failure as a system problem while retaining the saved product description", () => {
+  const dossier = savedDossier(1, "TEST-PROVIDER-FAILURE");
+  dossier.report = { ...dossier.report, roles: ["PROJECT"], governing_role: "PROJECT", governing_score: null, composite_verdict: "INCOMPLETE", role_reports: [] };
+  dossier.subjectOrientation = undefined;
+  dossier.bio = "A platform for AI models, agents and cloud computers.";
+  dossier.website = "https://example.org";
+  dossier.officialProductDescription = { text: dossier.bio, sourceUrl: "https://example.org", capturedAt: "2026-09-22T00:00:00Z" };
+  dossier.scoringOutcome = { state: "failed", detail: "Grok rejected access", capturedAt: "2026-09-22T00:00:00Z", failure: { kind: "provider_access", provider: "grok", httpStatus: 403, diagnostic: "access_denied" } };
+  act(() => root.render(<Report dossier={dossier} onReset={() => {}} onRescan={vi.fn()} />));
+  expect(container.textContent).toContain("Provider access needs attention");
+  expect(container.textContent).toContain("administrator must restore provider access");
+  expect(container.textContent).toContain("platform for AI models, agents and cloud computers");
+  expect(container.textContent).not.toContain("Retry scoring investigation");
+  expect(container.textContent).toContain("Presentation 2026-09-22.1");
+});

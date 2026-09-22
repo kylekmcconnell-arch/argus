@@ -499,7 +499,7 @@ export function reconciliationIssues(input: ReconciliationInput): ReportIssue[] 
       area: "Scoring",
       title: `Token ${verdictWord(input.tokenScore.verdict).toUpperCase()} conflicts with ${String(input.riskLens.verdict).toUpperCase()}`,
       observed: `${finite(input.tokenScore.score) ? `${input.tokenScore.score}/100 ` : ""}${String(input.tokenScore.verdict).toUpperCase()} is the saved token safety result; the market-mechanics lens for ${symbol} reports ${riskText}. The two use different scales, and no saved rule states how they interact.`,
-      handling: "Both historical outputs are kept and labelled with their scales. Treat the token result as unsettled until a versioned rule reconciles them; no corrected score is inferred here.",
+      handling: "Presentation rule 2026-09-22.1: an adverse market assessment blocks overall token reassurance. PASS remains a saved component result, not overall clearance. Both scores retain their original values and scales; no combined score is inferred.",
       bannerLabel: "token risk scales",
       chapter: "scores",
       kind: "reconciliation",

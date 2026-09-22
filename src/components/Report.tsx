@@ -20,6 +20,7 @@ import { VerdictArgumentBlock } from "./InvestigatorBrief";
 import { subjectCategoryLabel } from "../lib/subjectCategory";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { requestChallenge } from "../lib/challenge";
+import { scoringAccessFailure } from "../lib/scoringAccessFailure";
 import { DecisionBasis } from "./DecisionBasis";
 import type { DecisionLensId } from "../intelligence/types";
 import { ArgusMark } from "./ArgusMark";
@@ -1814,6 +1815,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         bio: f.bio,
         ...(f.website ? { website: f.website } : {}),
         ...(f.subjectOrientation ? { subjectOrientation: f.subjectOrientation } : {}),
+        ...(f.officialProductDescription ? { officialProductDescription: f.officialProductDescription } : {}),
         ...(basicFacts.length ? { basicFacts } : {}),
         ...(f.projectToken ? { projectToken: f.projectToken } : {}),
       })
@@ -1920,6 +1922,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const routingUnresolved = roles.length === 0;
   const scoringOutputIncomplete = roles.length > 0 && governingAxes.length === 0;
   const decisionFrameworkUnavailable = routingUnresolved || scoringOutputIncomplete;
+  const scoringAccessError = scoringAccessFailure(f, scoringOutputIncomplete);
   const resolvedRoleLabel = report.governing_role
     ? ROLE_META[report.governing_role as SubjectClass]?.label ?? report.governing_role
     : roles[0]
@@ -2878,18 +2881,18 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           <span className="review-icon" aria-hidden="true">△</span>
           <div>
             <strong>
-              {routingUnresolved
+              {scoringAccessError ? "Provider access needs attention" : routingUnresolved
                 ? "Project routing unresolved: ARGUS collected intelligence, but did not select a scoring methodology."
                 : `Scoring output incomplete: ARGUS resolved this subject to ${resolvedRoleLabel}, but the scoring pass did not complete.`}
             </strong>
             <p>
-              {routingUnresolved
+              {scoringAccessError ?? (routingUnresolved
                 ? "ARGUS could not confirm whether this is a project, organization, token, or person. The sources remain available, but this report does not have a usable result."
-                : `The scoring step did not finish. The sources remain available, but this report does not have a usable result.`}
+                : `The scoring step did not finish. The sources remain available, but this report does not have a usable result.`)}
               {` ${readiness.successful} checks completed; ${visibleIntelligenceCount} sources and possible leads saved.`}
             </p>
           </div>
-          {onRescan && !shareView && (
+          {onRescan && !shareView && !scoringAccessError && (
             <button type="button" className="textbtn" onClick={onRescan}>{routingUnresolved ? "Run corrected investigation →" : "Retry scoring investigation →"}</button>
           )}
         </div>
@@ -3007,7 +3010,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           catalog={f.axisEvidenceCatalog}
           lineageVersion={f.axisCitationVersion}
           unavailableReason={routingUnresolved ? "routing" : scoringOutputIncomplete ? "scoring" : undefined}
-          onRescan={shareView ? undefined : onRescan}
+          operationalFailure={scoringAccessError}
+          onRescan={shareView || scoringAccessError ? undefined : onRescan}
         />
       </div>
       {f.projectStrengthBands && (
@@ -3873,7 +3877,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         }}
         more={shareView ? [] : moreActions}
         chapters={{
-          decision: () => <DecisionChapter view={reportView} before={decisionBefore} after={decisionAfter} onRescan={shareView ? undefined : onRescan} />,
+          decision: () => <DecisionChapter view={reportView} before={decisionBefore} after={decisionAfter} onRescan={shareView || scoringAccessError ? undefined : onRescan} />,
           scores: () => <ScoresChapter view={reportView} legacy={scoresLegacy} />,
           product: () => <ProductChapter view={reportView} legacy={productLegacy} />,
           code: () => <CodeChapter subjectKind={reportView.subjectKind} code={codeView} legacy={codeLegacy} />,
