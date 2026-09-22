@@ -165,6 +165,11 @@ export interface SiteSafety {
     handleReused: boolean;
     currentSince: string | null;
     lastRenameSeen: string | null;
+    // The dated timeline the archive actually holds, per account id: every
+    // screen name this account has worn and the window it was seen under each.
+    // Carried in full so the report can show the sequence rather than one
+    // sentence about it. More than one entry means the HANDLE changed hands.
+    accounts: { id: string; names: { handle: string; firstSeen: string | null; lastSeen: string | null }[] }[];
     note: string;
   } | null;
 }
