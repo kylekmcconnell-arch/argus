@@ -985,3 +985,93 @@ address holding the stock is named and checkable.
 contract returns MEME and has no rename function. Any balance view on the
 explorer lists it beside the real stock token. Read `symbol()` from the
 contract before trusting an explorer label on this chain.
+
+## A clean launch with no business behind it ($AILE, Solana, read 2026-09-22)
+
+Deliberately not a cabal entry, for the same reason as $MERRYMEN: there is no
+cluster to record. The point of the section is that a token can pass every
+mechanical check and still be carrying a valuation its own numbers do not
+support.
+
+**Everything mechanical is clean.** A pump.fun launch on the Token-2022
+program, created 2026-09-11 19:24 UTC, graduated to PumpSwap thirteen minutes
+later. Token-2022 is where transfer fees, transfer hooks and permanent
+delegates would sit, so check the extension list rather than assuming: this one
+carries only a metadata pointer and the metadata. Mint authority, freeze
+authority and metadata update authority are all null.
+
+**The creator never sold, and this is checkable in one query.** The creator
+wallet bought 348,534 tokens, 0.035 percent of supply, for 0.0231 SOL at
+launch. Its token account has 570 signatures and exactly one of them succeeded:
+that buy. The other 569 failed and moved nothing. Balance today is the same
+348,535. Pull the creator's token account signature list and count the
+successes before repeating any claim that a dev dumped.
+
+**The usage page is the finding.** The project publishes its own network
+totals, and they read: 975 requests, 21.4M tokens and **4.80 USD of settled
+value** across all time since 2026-08-17, generating 0.70 USD of protocol fee.
+One day, 09-13, carries 16.0M of the 21.4M tokens in 44 requests. The token
+peaked at a 490,109 USD market cap on 2026-09-20 and sits at about 35,800 USD
+with 285 holders and 16,700 USD of liquidity. A buyback announced 2026-09-21,
+funded by the settlement fee, is drawing on a lifetime pool of 0.70 USD.
+Credit where it is due: most projects at this stage do not publish this at all,
+and it was linked from the footer.
+
+**The business model needs the supply side to break its own contracts.**
+Lenders rent out AI subscriptions and API keys they already pay for, and the
+catalogue advertises Claude model access at 20 to 35 percent below list.
+Reselling or sharing access is prohibited by the major providers' terms and
+they enforce it by terminating accounts. That is not one bad listing, it is the
+inventory the marketplace is built on. Scaling the lender side raises the odds
+of enforcement against it.
+
+**Who actually sold, and a funder signal that is a false positive.** The
+current top ten are not the sellers; nine of them bought from the pool after
+graduation, four of those on 09-19 and 09-20 immediately before the peak, and
+none bought on the bonding curve. The sellers are earlier buyers who exited in
+full: the top hundred traders realised about 110,900 USD, accumulating between
+4,300 and 145,000 USD of market cap and distributing between 94,000 and
+320,000. Several of the winners shared a funding address, which normally means
+a coordinated cluster. It holds 5,094 SOL and processes roughly 436,000
+transactions a day, so it is a trading terminal's relay account. Profile a
+shared funder's transaction rate before calling it a ring. The same trap exists
+on Robinhood Chain, where the exchange's own hot wallets fund thousands of
+unrelated user wallets.
+
+## Machi exits $TAIWAN in full, and a correction (re-read 2026-09-23)
+
+The 2026-09-17 read of `rh-machi-taiwan` has been overtaken. Three things it
+recorded are no longer true, and one was wrong when written.
+
+**He did have creator income.** The entry said he took no creator allocation.
+That was true at the mint, but on 09-19 07:18 the deployer received 5,886,504
+tokens, 0.59 percent of supply, from the shared launchpad fee contract
+0x4e346895. A token paying no allocation at launch can still pay the creator
+later. Check the deployer's inbound transfers from the fee contract across the
+whole life of the token, not just the launch window.
+
+**He bought before he sold, and the buy moved the price.** In the same hour as
+the fee claim he took 19,108,118 more through the Robinhood app settler in six
+transactions. The hourly candle went from 0.00014663 to 0.00018609, up 27
+percent on 36,158 USD of volume, against about 1,000 USD the day before.
+
+**Then he exited everything.** On 09-23 00:00:34 UTC the deployer sold all
+33,994,623 in one transaction, routed into TSM and out as 27,125 STANDARD,
+roughly 5,350 USD. The price did not move: the hour closed up 0.3 percent. A
+3.4 percent supply position on this token is only worth about 5,000 USD, so
+size in supply terms says little about price impact once a token is down 92
+percent. The FomoScan wallet had already emptied its last 8,000,001 through the
+Relay router between 09-18 and 09-20. Both wallets now read zero.
+
+**What changes and what does not.** Across both wallets he acquired 49,909,964
+tokens, 5.0 percent of supply, and sold all of it. In the 09-17 to 09-23 window
+he is the largest single seller at 17.3 percent of sell flow, where the earlier
+read had him 238th. But he is still roughly 15,000 USD down on the token, he
+posted nothing about it during the exit window, and the 92 percent collapse
+happened on 09-11, twelve days before he sold. Intent stays unestablished.
+
+**Router lines are not sellers.** The two largest sell-flow lines in the window
+are UniversalRouter 0x88767899 at 21.7 percent and RelayRouterV3 0xb92fe925 at
+14.6 percent. Both are infrastructure carrying other people's trades, and the
+Relay line contains his own FomoScan wallet's 8,000,001. Attribute through the
+hops before ranking sellers, or the routers take the top of every table.
