@@ -452,20 +452,20 @@ function LpBadge({ status }: { status: ThreatScan["tokenomics"]["lp"]["status"] 
 // Launch provenance: how the token came to market - fair launch vs launchpad,
 // bonding-curve state, quote asset, the venue's LP mechanics, and what the
 // creator does with platform fee revenue.
-function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]["launch"]> }) {
+export function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]["launch"]> }) {
   const row = (label: string, body: React.ReactNode) => (
-    <div className="flex items-start justify-between gap-3 border-b border-line/60 py-2 last:border-0">
-      <span className="shrink-0 text-[12.5px] text-ink-dim">{label}</span>
-      <span className="text-right text-[12px] text-ink-faint">{body}</span>
+    <div className="launch-fact" key={`${label}:${typeof body === "string" ? body : "row"}`}>
+      <dt>{label}</dt>
+      <dd>{body}</dd>
     </div>
   );
   const cf = launch.creatorFees;
   const cfGood = cf && (cf.usage === "lp-add" || cf.usage === "buyback-burn" || cf.usage === "buyback");
   return (
-    <div className="mt-4 panel p-4">
+    <section className="mt-4 panel p-4 launch-panel" aria-label="Launch mechanics">
       <h2 className="display-sm text-[18px] leading-tight text-ink">Launch</h2>
-      <p className="mt-0.5 text-[11.5px] text-ink-faint">How this token came to market - the venue's mechanics decide what "locked liquidity" even means here.</p>
-      <div className="mt-2">
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">How this token came to market - venue mechanics provide context; this pool's custody needs its own evidence.</p>
+      <dl className="launch-facts">
         {row("Venue", launch.kind === "fair-launch"
           ? "Fair launch - listed directly on a DEX, no launchpad"
           : <span className="mono text-ink">{launch.venue ?? "unknown launchpad"}</span>)}
@@ -474,20 +474,22 @@ function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]["launc
           : launch.graduated
             ? <span style={{ color: "var(--color-pass)" }}>graduated - curve completed, liquidity migrated</span>
             : "state unknown")}
-        {launch.quote && row("Bonded to", <span className="flex flex-col items-end gap-0.5"><span className="mono text-ink">{launch.quote}</span>{launch.quoteNote && <span>{launch.quoteNote}</span>}</span>)}
+        {launch.quote && row("Bonded to", <span className="flex flex-col items-start gap-0.5"><span className="mono text-ink">{launch.quote}</span>{launch.quoteNote && <span>{launch.quoteNote}</span>}</span>)}
+        {launch.attribution && row("Attribution", `${launch.attribution.state}: ${launch.attribution.basis}`)}
         {launch.lpNote && row("LP custody", launch.lpNote)}
+        {cf && cf.platformPays && cf.asset && cf.asset !== "unknown" && row("Paid in", cf.asset === "quote" ? `the quote asset${launch.quote ? ` (${launch.quote})` : ""}` : cf.asset === "token" ? "the token itself" : cf.asset === "mixed" ? `the token and ${launch.quote ?? "the quote asset"}` : "no standing creator fee")}
         {cf && cf.platformPays && row("Creator fees", (
-          <span className="flex flex-col items-end gap-0.5">
+          <span className="flex flex-col items-start gap-0.5">
             <span style={{ color: cfGood ? "var(--color-pass)" : cf.usage === "dump" ? "var(--color-caution)" : undefined }}>
-              {cf.usage === "unknown" ? (cf.claimCount != null && cf.claimCount > 0 ? `${cf.claimCount} claim${cf.claimCount === 1 ? "" : "s"} observed - usage untraced` : "platform pays creator fees - claims not observed") : cf.usage.replace(/-/g, " ")}
+              {cf.usage === "unknown" ? (cf.claimCount != null && cf.claimCount > 0 ? `${cf.claimCount} claim${cf.claimCount === 1 ? "" : "s"} observed - usage untraced` : "platform pays creator fees - claims not observed") : `${cf.usage.replace(/-/g, " ")}${cf.claimCount ? ` · ${cf.claimCount} claim${cf.claimCount === 1 ? "" : "s"}` : ""}${cf.claimedTokens ? ` · ${Math.round(cf.claimedTokens).toLocaleString()} tokens` : ""}`}
             </span>
             {cf.note && <span>{cf.note}</span>}
           </span>
         ))}
         {launch.snipe && row("Launch window", `${launch.snipe.sameBlockBuyers} same-block buyer${launch.snipe.sameBlockBuyers === 1 ? "" : "s"}${launch.snipe.pctOfSupply != null ? ` · ~${launch.snipe.pctOfSupply.toFixed(0)}% of supply` : ""} (${launch.snipe.window})`)}
         {launch.notes.map((n, i) => row(i === 0 ? "Notes" : "", n))}
-      </div>
-    </div>
+      </dl>
+    </section>
   );
 }
 
@@ -876,7 +878,7 @@ function Report({ scan }: { scan: ThreatScan }) {
   const m = VERDICT_META[call.verdict];
   const rs = useLedgerStats();
   return (
-    <div className="report-frame pb-16">
+    <div className="report-frame pb-16 threat-record">
       {/* header — the standard scan-output hero: panel, serif subject, ring */}
       <div className="panel mt-6 flex items-start gap-5 p-5 max-sm:flex-col">
         <RiskRing risk={call.risk} verdict={call.verdict} />
@@ -939,7 +941,7 @@ function Report({ scan }: { scan: ThreatScan }) {
           <span className="mono text-[10.5px] text-ink-faint">
             {code.verified
               ? `${code.contractName ?? "contract"} · ${code.stats?.functions ?? 0} fns · ${code.stats?.gatedFunctions ?? 0} privileged · via ${code.origin}`
-              : code.checked ? "no verified source" : "SPL - no per-token code"}
+              : code.checked ? "no verified source" : code.system === "b20" ? "B20 system asset - no per-token code" : "SPL - no per-token code"}
           </span>
         </div>
         {code.verified && code.flags.length === 0 && (
@@ -949,7 +951,10 @@ function Report({ scan }: { scan: ThreatScan }) {
         {!code.verified && code.checked && (
           <p className="mt-2 text-[13px] text-ink-dim">The source is not published on any public verification database. Unreadable code is a risk in itself - nobody outside the team knows what it does.</p>
         )}
-        {!code.checked && (
+        {!code.checked && code.system === "b20" && (
+          <p className="mt-2 text-[13px] text-ink-dim">This is a Base B20 asset: the chain's native token standard. The address holds a one-byte marker and the token runs on the B20 precompile, so there is no per-token source to verify and no hidden code to read. The supply cap, mint and owner reads above are its whole power surface.</p>
+        )}
+        {!code.checked && code.system !== "b20" && (
           <p className="mt-2 text-[13px] text-ink-dim">Solana tokens share the standard token program - there is no per-token code to read. The mint, freeze, and transfer-hook authorities above carry the equivalent risk.</p>
         )}
         <EngineRead scan={scan} />

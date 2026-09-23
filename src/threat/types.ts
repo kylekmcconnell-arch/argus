@@ -62,8 +62,13 @@ export interface CodeStats {
 }
 
 export interface CodeReview {
-  checked: boolean; // false when the chain has no per-token code (Solana SPL) or fetch failed
+  checked: boolean; // false when the chain has no per-token code (Solana SPL, Base B20) or fetch failed
   verified: boolean;
+  // Set when the token is a chain-native asset standard with no per-token
+  // bytecode at all: Base B20 assets carry a 1-byte 0xef marker and run on the
+  // chain's precompile, so "no verified source" is not a finding - there is no
+  // source to verify. The authority reads are the whole power surface.
+  system?: "b20" | null;
   origin: ContractSource["origin"];
   contractName: string | null;
   compiler: string | null;
@@ -228,6 +233,7 @@ export interface RegistryVerification {
 // (LP add / buyback-burn = bullish; dump = bearish) a first-class signal.
 export interface LaunchProvenance {
   kind: "launchpad" | "fair-launch" | "unknown";
+  attribution?: { state: "confirmed" | "candidate" | "unresolved"; basis: string; candidate: string | null };
   venue: string | null; // e.g. "pump.fun", "bonk.fun", "bags", "virtuals", "pons"
   // Bonding-curve state. null = not curve-based or unknown.
   onCurve: boolean | null;
@@ -243,8 +249,14 @@ export interface LaunchProvenance {
   // creator doing with it?
   creatorFees: {
     platformPays: boolean;
+    // What the venue pays the creator in. "token" or "mixed" means every fee
+    // claim hands the creator fresh supply of the launched token: a structural
+    // fact about the venue, disclosed as a note and never scored on its own.
+    // Optional so cached scans frozen before this field existed still parse.
+    asset?: "quote" | "token" | "mixed" | "none" | "unknown";
     claimCount: number | null; // observed claims (null = couldn't observe)
     claimedUsd: number | null;
+    claimedTokens?: number | null; // observed claims in the launched token
     usage: "lp-add" | "buyback-burn" | "buyback" | "hold" | "dump" | "unknown";
     note: string;
   } | null;

@@ -167,10 +167,13 @@ export async function goplusMeta(chain: string, address: string): Promise<GoPlus
 // The fingerprint bridges byte-identical contracts: a fresh token that clones a
 // known-AVOID rug lights up on its own. Server-side (needs RPC egress).
 export interface Fingerprint {
-  fingerprint: string;
+  fingerprint: string; // "" for a system asset: nothing per-token to hash
   isToken: boolean;
   proxy: boolean;
   capabilities: { name: string; risk: string }[];
+  // Base B20 assets have no per-token bytecode (1-byte 0xef marker); the
+  // route reports the standard instead of a fingerprint.
+  system: "b20" | null;
 }
 export async function codeFingerprint(chain: string, address: string): Promise<Fingerprint | null> {
   if (!GP_CHAIN[chain]) return null;
@@ -180,12 +183,15 @@ export async function codeFingerprint(chain: string, address: string): Promise<F
     });
     if (!res.ok) return null;
     const d = rec(await res.json());
-    if (!d.available || !d.fingerprint) return null;
+    if (!d.available) return null;
+    const system = str(d.system) === "b20" ? "b20" : null;
+    if (!d.fingerprint && !system) return null;
     return {
-      fingerprint: str(d.fingerprint).toLowerCase(),
+      fingerprint: str(d.fingerprint ?? "").toLowerCase(),
       isToken: bool(d.isToken),
       proxy: bool(d.proxy),
       capabilities: arr(d.capabilities).map(rec).map((capability) => ({ name: str(capability.name), risk: str(capability.risk) })),
+      system,
     };
   } catch {
     return null;

@@ -174,6 +174,8 @@ export interface Investigation {
    * the project evidence ledger exists or why it could not be produced.
    */
   projectAccountAudit?: ProjectAccountAuditOutcome;
+  /** Saved separately: a failed lookup is not evidence that a project has no identity. */
+  identityDiscovery?: { state: "not_needed" | "complete" | "failed"; note: string };
   /**
    * Token-side account↔token binding verification. Older frozen
    * investigations omit this field; crediting then relies solely on the
@@ -395,15 +397,15 @@ function founderNote(siteUrl: string | null, recon: Recon | null, founders: Foun
 // Knowledge fallback: resolve the token's official site / X / founder from Grok
 // when its on-chain sources (DexScreener + CoinGecko) came up empty.
 interface TokenIdentity { website: string | null; x_handle: string | null; founder: string | null; founder_handle: string | null; confidence: string }
-async function fetchTokenIdentity(symbol: string, name: string, contract: string, chain: string): Promise<TokenIdentity | null> {
+async function fetchTokenIdentity(symbol: string, name: string, contract: string, chain: string): Promise<{ identity: TokenIdentity | null; note: string; failed: boolean }> {
   try {
     const p = new URLSearchParams({ symbol, name: name || "", contract: contract || "", chain: chain || "" });
     const r = await fetch(`/api/token-identity?${p.toString()}`, { signal: AbortSignal.timeout(40000) });
-    if (!r.ok) return null;
-    const d = await r.json() as Partial<TokenIdentity> & { available?: boolean };
-    if (d.available === false) return null;
-    return { website: d.website ?? null, x_handle: d.x_handle ?? null, founder: d.founder ?? null, founder_handle: d.founder_handle ?? null, confidence: d.confidence ?? "low" };
-  } catch { return null; }
+    if (!r.ok) return { identity: null, failed: true, note: `Identity discovery did not complete (HTTP ${r.status}). Project context remains unassessed.` };
+    const d = await r.json() as Partial<TokenIdentity> & { available?: boolean; error?: string };
+    if (d.available === false || d.error) return { identity: null, failed: true, note: "Identity discovery was unavailable or failed. Project context remains unassessed." };
+    return { identity: { website: d.website ?? null, x_handle: d.x_handle ?? null, founder: d.founder ?? null, founder_handle: d.founder_handle ?? null, confidence: d.confidence ?? "low" }, failed: false, note: "Identity discovery completed; suggested identities require contract binding." };
+  } catch { return { identity: null, failed: true, note: "Identity discovery failed or timed out. Project context remains unassessed." }; }
 }
 
 export function streamInvestigation(
@@ -429,6 +431,7 @@ export function streamInvestigation(
       if (aborted) return;
       if (!token) { h.onError("Could not resolve that contract on any DEX."); return; }
 
+      let identityDiscovery: NonNullable<Investigation["identityDiscovery"]> = { state: "not_needed", note: "Token sources supplied project identity links." };
       let projectX = token.projectX;
       let siteUrl = token.socials.find((s) => /^https?:\/\//i.test(s.url) && !/x\.com|twitter\.com|t\.me|discord|github\.com/i.test(s.url))?.url ?? null;
       let siteUrlOrigin: SiteUrlOrigin = "token-sources";
@@ -442,7 +445,10 @@ export function streamInvestigation(
       if (!siteUrl || !projectX) {
         h.onHop("resolving the project's official identity");
         h.onStep(milestone("Step 1c · Resolve identity", `On-chain sources are thin. Resolving $${token.symbol}'s official site, X account, and founder from knowledge…`, "neutral"));
-        const id = await fetchTokenIdentity(token.symbol, token.name, token.address, token.chain);
+        const discovery = await fetchTokenIdentity(token.symbol, token.name, token.address, token.chain);
+        identityDiscovery = { state: discovery.failed ? "failed" : "complete", note: discovery.note };
+        const id = discovery.identity;
+        if (!aborted && discovery.failed) h.onStep(milestone("Identity discovery incomplete", discovery.note, "warn"));
         if (!aborted && id) {
           // A model-suggested site is a LEAD with recorded provenance. It becomes
           // "the project site" only once it binds to the scanned contract (see
@@ -611,7 +617,9 @@ export function streamInvestigation(
       } else {
         projectAccountAudit = {
           state: "unavailable",
-          note: "Embedded project-account audit was unavailable because no official project X account was resolved.",
+          note: identityDiscovery.state === "failed"
+            ? `${identityDiscovery.note} The project-account audit could not run without a bound account.`
+            : "Embedded project-account audit was unavailable because no official project X account was resolved.",
         };
         h.onStep(milestone("Step 3 · Project account", "No project X account to background.", "warn"));
       }
@@ -626,9 +634,11 @@ export function streamInvestigation(
 
       // ── Founders (honesty-gated; no auto-spend beyond the project account) ──
       const founders = deriveFounders(siteBound ? recon : null, projectX, projectAccount);
-      const note = founderNote(siteUrl, recon, founders, siteBinding);
+      const note = !siteUrl && identityDiscovery.state === "failed"
+        ? `${identityDiscovery.note} The project website and team have not been assessed.`
+        : founderNote(siteUrl, recon, founders, siteBinding);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
-      h.onDone({ rootRef: input.ref, token, projectX, siteUrl, siteUrlOrigin, siteBinding, recon, projectAccount, projectAccountAudit, projectAccountBinding, founders, founderNote: note, deployerTrail, webTeam });
+      h.onDone({ rootRef: input.ref, token, projectX, siteUrl, siteUrlOrigin, siteBinding, recon, projectAccount, projectAccountAudit, identityDiscovery, projectAccountBinding, founders, founderNote: note, deployerTrail, webTeam });
     } catch (e) {
       if (!aborted) h.onError(String(e));
     }

@@ -1,0 +1,13 @@
+# Holder intelligence foundation — issue #525
+
+This change makes the requested 25-address investigation explicit in token, investigation and canonical-project reports. It stores the observed rows, source, capture time, optional block, collection coverage and the exact registry revision/matches with the immutable report. It does not silently enrich old reports against today's registry.
+
+GoPlus supplies only ten holder rows. Configured Blockscout explorers can supply 25; unavailable endpoints fall back to explicitly partial coverage. A live public Base request returned HTTP 403, so universal live coverage is not verified. Solana token-account samples are grouped only when their owner is explicitly reported; these samples do not establish the globally largest 25 owners. Unknown contract wallets remain visible; only positively classified infrastructure is separated from wallet concentration. Registry keys preserve Solana case and retain multiple memberships. A registry match does not establish present common control or misconduct.
+
+Workspace history uses a service-only view over existing immutable report versions. The authenticated read endpoint constrains organization, chain and token; failures are distinguished from empty history. Token/investigation owner views offer an explicit read action, absent from private/shared surfaces. Historical provider observations do not prove buys, sells or exits. The project report displays its frozen snapshot; its history control is not yet exposed.
+
+Validation: after rebasing onto the merged B20 and CI changes, the full quality battery passed 5,264 tests plus one expected failure, all seven offline canaries and all 21 calibration cases, and client/server/API type checks. Production build passed. Required CI database permission/projection tests and deployment checks passed. The populated holder panel was visually verified at desktop and 390px mobile width using the in-app browser after the Chrome connection failed. Production Catalyst's restored Decision design was visually verified earlier in this work.
+
+Still open: guaranteed ranked coverage across chains, budgeted Arkham/Fomo enrichment, full launch universes and backfill receipts, independently corroborated launchpad attribution, 24h/7d/30d rankings and exchange-listing history, behavioral deltas/alerts, outcome calibration, context recovery and remaining legacy contract-panel styling. No bulk paid enrichment ran. This foundation does not close issue #525 or constitute a completed launchpad study.
+
+Rollout: normal protected-main CI and deployment. The new view is additive and does not rewrite saved reports. Rollback can remove report presentation/API use while retaining immutable payload fields.

@@ -30,6 +30,7 @@ export interface KyleDecisionItem {
 }
 
 export interface KyleSecondaryScore {
+  unavailableCopy?: string | undefined;
   label: string;
   score: number | null;
   verdictLabel: string;
@@ -139,7 +140,7 @@ function cleanName(value: string | undefined): string {
   return (value ?? "ARGUS subject").replace(/[.\s]+$/, "").trim() || "ARGUS subject";
 }
 
-function verdictHeadline(rows: CompositionRow[], adverseCount: number): string {
+function verdictHeadline(rows: CompositionRow[], adverseCount: number, concernCount: number, provisional: boolean): string {
   const strongest = [...rows]
     .filter((row) => row.applicability === undefined && row.weight > 0 && (row.supportCount ?? 0) > 0)
     .sort((left, right) => {
@@ -151,12 +152,13 @@ function verdictHeadline(rows: CompositionRow[], adverseCount: number): string {
   // solid is the best-evidenced area, and is anything alarming on record. The
   // open-work pointer ("Next to check") is navigation, not a verdict, and
   // lives in Verify Next; putting it in the headline read as unintelligible.
-  const supportCount = strongest?.supportCount ?? 0;
   const lead = strongest
-    ? `${strongest.label.replace(/\s*&\s*/g, " and ")} is ${supportCount >= 5 ? "well documented" : "documented"}, with ${supportCount} saved supporting source${supportCount === 1 ? "" : "s"}.`
+    ? `${strongest.label.replace(/\s*&\s*/g, " and ")} has recorded supporting evidence.`
     : "Read the saved findings alongside the score.";
-  return adverseCount > 0
-    ? `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`
+  if (provisional) return `${lead} Required checks remain open; this assessment is provisional.`;
+  if (adverseCount > 0) return `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`;
+  return concernCount > 0
+    ? `${lead} Recorded concerns still require review.`
     : `${lead} No leading concern is on record.`;
 }
 
@@ -381,6 +383,7 @@ function AnimatedVerdictScore({
   checkScopeLabel,
   context,
   size,
+  unavailableCopy,
 }: {
   kind: "primary" | "secondary";
   label: string;
@@ -393,6 +396,7 @@ function AnimatedVerdictScore({
   checkScopeLabel?: string;
   context?: string | undefined;
   size: number;
+  unavailableCopy?: string | undefined;
 }) {
   const buildRows = rows.filter((row) => row.applicability === undefined && row.score > 0);
   const applicableWeight = assessedPoints(rows) || 100;
@@ -451,6 +455,7 @@ function AnimatedVerdictScore({
         <strong>{score ?? "N/A"}</strong>
         <span>{score == null ? "not measured" : "/ 100"}</span>
       </p>
+      {score == null && unavailableCopy && <p className="kyle-score-unavailable">{unavailableCopy}</p>}
       <div
         className="kyle-interactive-score-ring"
         data-active-axis={explainedRow?.axis}
@@ -619,7 +624,7 @@ export function KyleIntelligenceDecisionCanvas({
   const summary = sentence(neutralizeProductCopy(subjectSummary ?? ""));
   const checksComplete = applicable > 0 && successful >= applicable;
   const nextCheckFallback = checksComplete ? "No required check remains open." : "Review the check ledger for evidence gaps; a specific next step was not recorded.";
-  const headline = verdictHeadline(composition, adverseCount);
+  const headline = verdictHeadline(composition, adverseCount, concerns.length, Boolean(scoreIsProvisional));
 
   const sortedComposition = useMemo(() => [...composition].sort((left, right) => right.weight - left.weight), [composition]);
   const totalPossible = assessedPoints(composition);
@@ -691,6 +696,7 @@ export function KyleIntelligenceDecisionCanvas({
               successful={dualScore.successful}
               applicable={dualScore.applicable}
               checkScopeLabel={dualScore.checkScopeLabel}
+              unavailableCopy={dualScore.unavailableCopy}
               context={dualScore.context}
               size={208}
             />
@@ -908,7 +914,7 @@ export function KyleIntelligenceDecisionCanvas({
         </section>
       )}
 
-      {decisionBoundary && decisionBoundaryEvidenceHref && showDecisionDetails && (
+      {!scoreIsProvisional && decisionBoundary && decisionBoundaryEvidenceHref && showDecisionDetails && (
         <section className="kyle-decision-lock" aria-labelledby="kyle-decision-lock-title" data-testid="decision-boundary">
           <div>
             <p className="kyle-overline mono">Decision lock</p>
@@ -932,7 +938,7 @@ export function KyleIntelligenceDecisionCanvas({
           <h2 id="kyle-counter-thesis-title">The strongest case against the current thesis.</h2>
           <dl>
             <div><dt>Strongest counter-signal</dt><dd>{sentence(favorable ? mainConcern?.label : strongestSupport?.label) || "No counter-signal was recorded."}</dd></div>
-            <div><dt>Why it has not changed the verdict</dt><dd>{sentence(favorable ? argument?.againstLine : argument?.forLine) || "The saved report does not explain how this affected the score."}</dd></div>
+            <div><dt>{scoreIsProvisional ? "What remains unresolved" : "Why it has not changed the verdict"}</dt><dd>{scoreIsProvisional ? "Required evidence is missing. The current score cannot settle this concern." : sentence(favorable ? argument?.againstLine : argument?.forLine) || "The saved report does not explain how this affected the score."}</dd></div>
             <div><dt>What would make it material</dt><dd>{sentence(argument?.moveLine) || sentence(topNextStep?.label) || "New source-backed evidence would be required."}</dd></div>
           </dl>
           <ReportChallengeButton context={`Report conclusion · ${thesis}`} anchorId={challengeAnchorId} label="Challenge the thesis" />

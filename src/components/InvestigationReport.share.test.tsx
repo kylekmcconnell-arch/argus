@@ -162,7 +162,10 @@ describe("investigation exact sharing", () => {
     // One canonical frame: the interactive chapter shell.
     expect(container.querySelector(".argus-rd")).not.toBeNull();
     expect(container.querySelector('nav[aria-label="Report sections"]')).not.toBeNull();
-    expect(container.textContent).toContain("what the evidence tells us");
+    expect(container.textContent).toContain("The decision brief");
+    expect(container.querySelectorAll(".hero .score-card")).toHaveLength(2);
+    expect(container.querySelector(".investigation-story-cover")).toBeNull();
+    expect(container.querySelector(".kyle-intelligence-report")).toBeNull();
   });
 
   it("ignores a legacy Style 1 deep link and keeps the canonical investigation", () => {
@@ -170,7 +173,7 @@ describe("investigation exact sharing", () => {
     render(investigation());
     expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
     expect(container.querySelector(".argus-rd")).not.toBeNull();
-    expect(container.textContent).toContain("what the evidence tells us");
+    expect(container.textContent).toContain("The decision brief");
   });
 
   it("keeps the header case label stable across saved versions of the same case", () => {
@@ -309,9 +312,9 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).not.toContain("Score while checks are open");
     expect(container.textContent).toContain("REVIEW WITH GAPS");
     expect(container.textContent).toContain("Before you use this report");
-    expect(container.textContent).toContain("Known connections must finish before this report is ready");
-    expect(container.querySelector<HTMLElement>('[role="progressbar"][aria-label="Checks finished"]')?.getAttribute("aria-valuenow")).toBe("85.7");
-    expect(container.textContent).toContain("What supports this result");
+    expect(container.textContent).toContain("The score is provisional. Known connections");
+    expect(container.querySelector('section[aria-label="Finished checks"]')?.textContent).toContain("6/7 required investigation checks complete · provisional");
+    expect(container.textContent).toContain("What looks credible");
     expect(container.textContent).not.toContain("INCOMPLETE");
     expect(container.textContent).not.toContain("Investigation incomplete");
 
@@ -368,7 +371,7 @@ describe("investigation exact sharing", () => {
     }));
 
     const decisionBrief = container.querySelector('[data-canonical-decision-brief="true"]')?.textContent ?? "";
-    expect(decisionBrief).toContain("5/7 token safety checks complete · provisional");
+    expect(decisionBrief).toContain("5/7 required investigation checks complete · provisional");
     expect(decisionBrief).toContain("Required: Tradeability check");
     expect(decisionBrief).toContain("Required: Connected holder wallets");
   });
@@ -810,7 +813,6 @@ describe("investigation exact sharing", () => {
     // Chapters are read one at a time, in the canonical order: the numbered
     // legacy headings keep their own labels inside their chapter.
     expect(chapterLabels).toEqual([
-      "01 · Report summary",
       "02 · Why",
       "04 · People",
       "03 · Market",
@@ -879,10 +881,10 @@ describe("investigation exact sharing", () => {
     expect(methodTargets).toHaveLength(1);
     expect(methodTargets[0]?.querySelector(".report-section-heading h2")?.textContent).toBe("What ARGUS checked");
 
-    expect(container.textContent).toContain("What supports this result");
+    expect(container.textContent).toContain("What looks credible");
     expect(container.textContent).toContain("Finished checks");
-    expect(container.textContent).toContain("What is still open");
-    expect(container.querySelector('[role="progressbar"][aria-label="Checks finished"]')).not.toBeNull();
+    expect(container.textContent).toContain("Still open");
+    expect(container.querySelector('section[aria-label="Finished checks"]')).not.toBeNull();
   });
 
   it("renders frozen visual intelligence on a snapshot without enabling live panels", () => {
@@ -1076,7 +1078,7 @@ describe("investigation exact sharing", () => {
     expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("threat"))).toBe(true);
   });
 
-  it("the document actions row mints the same read-only link and offers the PDF", async () => {
+  it("the single shell toolbar mints the same read-only link and offers the brief", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ url: "/?share=opaque" }),
@@ -1095,11 +1097,12 @@ describe("investigation exact sharing", () => {
       },
     }));
 
-    const buttons = [...container.querySelectorAll<HTMLButtonElement>("button")];
-    expect(buttons.some((button) => button.textContent?.trim() === "Export PDF ↓")).toBe(true);
-    const rowShare = buttons.find((button) => button.textContent?.trim() === "Share ↗");
-    expect(rowShare).toBeDefined();
-    await act(async () => { rowShare?.click(); await Promise.resolve(); });
+    const findButton = (label: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === label);
+    expect(container.querySelector('button[title="Download PDF brief"]')).not.toBeNull();
+    expect([...container.querySelectorAll("button")].filter(button => button.textContent?.trim() === "Share")).toHaveLength(1);
+    act(() => findButton("Share")?.click());
+    await act(async () => { findButton("Create share link")?.click(); await Promise.resolve(); });
+    await act(async () => { findButton("Copy link")?.click(); await Promise.resolve(); });
 
     const request = fetchMock.mock.calls.find((call) => String(call[0]) === "/api/share");
     expect(request).toBeDefined();
@@ -1125,8 +1128,9 @@ describe("investigation exact sharing", () => {
       },
     }));
 
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="More report actions"]')?.click());
     const tldr = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Copy summary");
+      .find((button) => button.textContent?.trim().startsWith("Copy summary"));
     expect(tldr).toBeDefined();
     await act(async () => tldr?.click());
 

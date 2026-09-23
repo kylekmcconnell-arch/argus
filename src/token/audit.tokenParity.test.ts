@@ -10,7 +10,6 @@ import { tokenChecks } from "../lib/scanChecklist";
 
 const ADDRESS = "0x1111111111111111111111111111111111111111";
 const POOL = "0x2222222222222222222222222222222222222222";
-const STAKING = "0x3333333333333333333333333333333333333333";
 const WALLET = "0x4444444444444444444444444444444444444444";
 const FACTORY = "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb";
 const input = { kind: "token", via: "evm", ref: ADDRESS } as const;
@@ -106,7 +105,6 @@ describe("finding 8: an all-infrastructure holder list leaves the top wallet unm
   it("does not republish the excluded pool as the top holder", async () => {
     stubProviders({ goplus: { ...CLEAN_GOPLUS, holders: [
       { address: POOL, percent: "0.60", is_contract: 1 },
-      { address: STAKING, percent: "0.30", is_contract: 1, tag: "StakingRewards" },
     ] } });
     const d = await auditToken(input, undefined, { force: true, skipSim: true });
     expect(d?.safety.topHolderPct).toBeNull();

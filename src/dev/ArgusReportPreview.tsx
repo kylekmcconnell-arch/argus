@@ -1,4 +1,9 @@
+import { HolderIntelligencePanel } from "../reports/argus/HolderIntelligencePanel";
+import { buildHolderIntelligence } from "../lib/holderIntelligence";
+import { LaunchPanel } from "../components/ThreatScanPage";
 import { Report } from "../components/Report";
+import { InvestigationReport } from "../components/InvestigationReport";
+import type { Investigation } from "../lib/investigation";
 import { TokenReport } from "../components/TokenReport";
 import type { TokenDossier } from "../token/audit";
 import { storedPersonDossier, type StoredReport } from "../lib/reports";
@@ -111,21 +116,45 @@ const DEMO_SHIPPING: ShippingSummary = {
 export function ArgusReportPreview() {
   const params = new URLSearchParams(window.location.search);
   const share = params.get("mode") === "share";
+  if (params.get("kind") === "holders") return <div className="argus-rd"><main className="rd-main">
+    <p className="subtle-note">Synthetic holder layout only. Not a live token assessment.</p>
+    <HolderIntelligencePanel snapshot={buildHolderIntelligence({ chain: "base", tokenAddress: "0x1111111111111111111111111111111111111111", capturedAt: "2026-09-23T20:00:00Z", source: "Synthetic preview", ranked: true,
+      rows: Array.from({ length: 25 }, (_, i) => ({ address: `0x${(i+100).toString(16).padStart(40,"0")}`, percent: (25-i)/10, isContract: i === 2 })) })} />
+  </main></div>;
+  if (params.get("kind") === "launch") return <div className="argus-rd"><main className="rd-main">
+    <p className="subtle-note">Synthetic layout example only. No live scan or factual token assessment.</p>
+    <div className="threat-record"><LaunchPanel launch={{
+      kind: "launchpad", venue: "Example launchpad", onCurve: false, graduated: true,
+      curveProgressPct: 100, quote: "ETH", quoteNote: "The pool is quoted in ETH.",
+      lpDisposition: "protocol-owned", lpNote: "Recorded protocol custody; inspect the saved contracts for control rights.",
+      creatorFees: { platformPays: true, asset: "quote", claimCount: 26, claimedUsd: null, usage: "hold", note: "Synthetic example: claims observed; no subsequent sale established." },
+      snipe: { window: "first block", buyers: 9, sameBlockBuyers: 9, pctOfSupply: null, note: "Timing alone does not establish common control." },
+      notes: ["Fee denomination is context, not a penalty. Observed conduct is assessed separately."],
+    }} /></div>
+  </main></div>;
   const dossier = storedPersonDossier(fixture as unknown as StoredReport);
   // The token leg of the same saved case, rendered as a token scan.
-  if (params.get("kind") === "token") {
-    const token = { ...(dossier.threat?.dossier as TokenDossier) };
+  if (["token", "investigation"].includes(params.get("kind") ?? "")) {
+    const token = { ...(dossier.threat?.dossier as TokenDossier), versionContext: (fixture as unknown as StoredReport).versionContext };
+    const partial = params.get("coverage") === "partial";
+    if (partial) { token.projectX = null; token.socials = []; token.cg = null; }
     if (params.get("code") === "demo") token.shipping = DEMO_SHIPPING;
     return (
       <div className="flex h-screen overflow-hidden bg-void">
         <main className="thin-scroll flex-1 overflow-x-hidden overflow-y-auto">
-          <TokenReport
+          {params.get("kind") === "investigation" ? <InvestigationReport inv={{
+            rootRef: token.address, token, projectX: partial ? null : token.projectX,
+            siteUrl: partial ? null : dossier.website ?? null, siteUrlOrigin: "token-sources", recon: null,
+            projectAccount: partial ? null : dossier,
+            projectAccountAudit: { state: partial ? "unavailable" : "complete", note: partial ? "Offline fixture: no project assessment was saved." : "Saved project assessment." },
+            founders: [], founderNote: "Read the saved project roster.", deployerTrail: null, webTeam: [], versionContext: token.versionContext,
+          } as Investigation} onReset={() => undefined} onAudit={() => undefined} onOpenToken={() => undefined} onOpenProjectAccount={() => undefined} shareView={share} /> : <TokenReport
             dossier={token}
             onReset={() => undefined}
             onAudit={() => undefined}
             onRescan={() => undefined}
             shareView={share}
-          />
+          />}
         </main>
       </div>
     );

@@ -83,7 +83,7 @@ export async function threatScan(
       : "Simulating sells for real holders - selective honeypots, siphoned wallets, max caps…",
     tone: "neutral",
   });
-  const [code, rc, hp, meta, fp, xchain, launch] = await Promise.all([
+  const [codeRead, rc, hp, meta, fp, xchain, launch] = await Promise.all([
     reviewCode(dossier.chain, dossier.address),
     sol ? rugcheckReport(dossier.address) : Promise.resolve(null),
     sol ? Promise.resolve(null) : honeypotDeep(dossier.chain, dossier.address),
@@ -92,6 +92,13 @@ export async function threatScan(
     sol ? Promise.resolve(null) : crossChain(dossier.chain, dossier.address, dossier.liquidityUsd ?? 0),
     launchProvenance(dossier),
   ]);
+  // A Base B20 asset has no per-token bytecode (the route reports the
+  // standard, not a fingerprint), so the source databases' silence is not
+  // "unverified": there is nothing to verify. Folded into the review here so
+  // every consumer - trace, judge, check row, report - reads one fact.
+  const code: CodeReview = fp?.system === "b20"
+    ? { ...codeRead, checked: false, verified: false, system: "b20" }
+    : codeRead;
   // Linked-site safety: is the token's own website a drainer / blacklisted host,
   // and does it even have an X account. The danger here is off-chain.
   const site = await siteSafety(dossier.socials ?? [], dossier.address, dossier.chain);
@@ -135,10 +142,12 @@ export async function threatScan(
       : launch.graduated
         ? "graduated - curve completed"
         : launch.kind === "fair-launch" ? "direct DEX listing" : "state unknown";
+    const feeAsset = launch.creatorFees?.asset;
+    const paidIn = feeAsset === "token" ? " · creator paid in the token" : feeAsset === "mixed" ? " · creator paid in token + quote" : "";
     emit?.({
       phase: "ARGUS · Launch",
       label: launch.venue ?? "Fair launch",
-      detail: `${state}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${launch.lpNote ? ` · ${launch.lpNote}` : ""}`,
+      detail: `${state}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${paidIn}${launch.lpNote ? ` · ${launch.lpNote}` : ""}`,
       tone: "neutral",
     });
   }
@@ -164,7 +173,7 @@ export async function threatScan(
   // Known-rug-clone check: does this contract's bytecode fingerprint match a
   // token we already flagged? A byte-identical clone of a known rug is the same
   // trap wearing a new ticker.
-  const clones = fp ? await knownRugClones(fp.fingerprint, dossier.address) : [];
+  const clones = fp?.fingerprint ? await knownRugClones(fp.fingerprint, dossier.address) : [];
   if (clones.length) {
     // A fingerprint identifies a template (see judge): only a confirmed trap
     // on a non-launchpad token is a known-rug clone; the rest is a disclosure.
@@ -175,13 +184,15 @@ export async function threatScan(
   }
   emit?.({
     phase: "ARGUS · Code",
-    label: code.verified ? `${code.contractName ?? "Contract"} read` : code.checked ? "No verified source" : "No per-token code on this chain",
+    label: code.verified ? `${code.contractName ?? "Contract"} read` : code.checked ? "No verified source" : code.system === "b20" ? "B20 system asset" : "No per-token code on this chain",
     detail: code.verified
       ? `${code.stats?.functions ?? 0} functions, ${code.stats?.gatedFunctions ?? 0} privileged, ${code.flags.length} code flags${code.ai ? ", AI read complete" : ""}.`
       : code.checked
         ? "Source is not verified on any public database - the code cannot be read."
-        : "SPL tokens share the standard token program; authorities carry the risk.",
-    tone: code.verified ? (code.flags.some((f) => f.severity === "critical") ? "bad" : "good") : "warn",
+        : code.system === "b20"
+          ? "Base-native asset standard: no per-token bytecode exists, so there is no source to verify and no hidden code to read; the authority reads are the whole power surface."
+          : "SPL tokens share the standard token program; authorities carry the risk.",
+    tone: code.verified ? (code.flags.some((f) => f.severity === "critical") ? "bad" : "good") : code.system === "b20" ? "neutral" : "warn",
   });
 
   // Re-run classification now that the code has been read - what the tax
@@ -536,6 +547,11 @@ export function judge( // exported for unit tests only
   } else if (code.checked && EVM(d.chain)) {
     soft(15);
     warnings.push("UNVERIFIED contract - the source is hidden, so nobody can read what the code really does");
+  } else if (code.system === "b20") {
+    // Not a verified contract and not an unverified one: a chain-native asset
+    // with no per-token code. No source to read means no hidden code either,
+    // so the mint, owner and pause reads above are the complete power surface.
+    positives.push("Base B20 system asset - no per-token contract exists to hide anything in; the token runs on the chain's asset precompile and the authority reads above are its whole power surface");
   }
 
   // --- taxes: the % AND what the tax DOES ---
@@ -605,7 +621,11 @@ export function judge( // exported for unit tests only
     } else if (cf.usage === "buyback") {
       positives.push(`Creator claims ${launch.venue} fees and buys the token back. ${cf.note}`);
     } else if (cf.usage === "dump" && !established) {
-      soft(8); warnings.push(`Creator claims ${launch.venue} fee revenue and sells it - fees are an income stream, not a reinvestment. ${cf.note}`);
+      // The warning is for conduct, never for the venue's fee model: a
+      // claimer who keeps drawing fees and selling them, with no buyback or
+      // burn balancing the claims (the claim tracer in api/launch.ts).
+      const cadence = cf.claimCount != null && cf.claimCount > 0 ? ` across ${cf.claimCount} claim${cf.claimCount === 1 ? "" : "s"}` : "";
+      soft(8); warnings.push(`Creator keeps claiming ${launch.venue} fees${cadence} and selling them${cf.asset === "token" || cf.asset === "mixed" ? " - on this venue the claims arrive in the token, so each one is supply sold into holders" : ""}, with no buyback or burn balancing it. ${cf.note}`);
     }
   }
   if (launch?.snipe && !established && !migration?.isPostMigrationToken) {
@@ -791,6 +811,14 @@ const UNCLASSIFIED: TokenClassification = { kind: "unknown", confidence: "low", 
 const EVM = (chain: string) => chain !== "solana";
 
 // ---- the transparent checklist: what was examined, including clean results ----
+/** "3.2x" or "unbounded": the day's volume as a multiple of the pool's depth. */
+function volumeToLiquidity(d: TokenDossier): string {
+  const vol = d.vol24 ?? 0; const liq = d.liquidityUsd ?? 0;
+  if (liq <= 0) return vol > 0 ? "unbounded relative to" : "0x";
+  const r = vol / liq;
+  return `${r.toFixed(r >= 100 ? 0 : 1)}x`;
+}
+
 export function buildChecks( // exported for unit tests only
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
@@ -898,7 +926,7 @@ export function buildChecks( // exported for unit tests only
         : "pass",
       launch == null || launch.kind === "unknown" ? "Venue not identified"
         : launch.kind === "fair-launch" ? `Fair launch - listed directly on ${d.dexId}${launch.quote ? ` vs ${launch.quote}` : ""}`
-        : `${launch.venue}${launch.onCurve ? ` - on curve${launch.curveProgressPct != null ? ` (${launch.curveProgressPct.toFixed(0)}%)` : ""}` : launch.graduated ? " - graduated" : ""}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${launch.creatorFees && launch.creatorFees.usage !== "unknown" ? ` · creator fees: ${launch.creatorFees.usage}` : ""}`),
+        : `${launch.venue}${launch.onCurve ? ` - on curve${launch.curveProgressPct != null ? ` (${launch.curveProgressPct.toFixed(0)}%)` : ""}` : launch.graduated ? " - graduated" : ""}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${launch.creatorFees && launch.creatorFees.usage !== "unknown" ? ` · creator fees: ${launch.creatorFees.usage}${launch.creatorFees.claimCount ? ` (${launch.creatorFees.claimCount} claims)` : ""}` : ""}${launch.creatorFees?.asset === "token" ? " · creator paid in the token" : launch.creatorFees?.asset === "mixed" ? " · creator paid in token + quote" : ""}`),
     chk("tax", "market", "Buy/sell tax & destination",
       na ? "na" : s.sellTax >= 15 && !tk.tax.destinations.includes("rwa-distribution") ? "fail" : tk.tax.tone === "good" ? "pass" : s.sellTax > 5 ? "warn" : "pass",
       na ? "Unchecked" : tk.tax.note),
@@ -957,12 +985,17 @@ export function buildChecks( // exported for unit tests only
       !code.checked ? "na"
         : d.capApplied === "documented_scanner_concealment" || d.findings.some((f) => f.tone === "bad" && f.source === "contract source") ? "fail"
         : code.verified ? (code.flags.some((f) => f.severity === "critical") ? "fail" : code.flags.some((f) => f.severity === "high") ? "warn" : "pass") : "warn",
-      !code.checked ? (sol ? "SPL - standard program, no per-token code" : "Not checked")
+      !code.checked ? (sol ? "SPL - standard program, no per-token code" : code.system === "b20" ? "B20 system asset - no per-token code, nothing to verify" : "Not checked")
         : d.capApplied === "documented_scanner_concealment" || d.findings.some((f) => f.tone === "bad" && f.source === "contract source") ? "The source documents defeating a safety scanner"
         : code.verified ? `${code.stats?.functions ?? 0} functions read, ${code.flags.length} flag${code.flags.length === 1 ? "" : "s"}` : "Source unverified - unreadable"),
     chk("market", "market", "Market conduct",
-      d.findings.some((f) => /wash-trad/i.test(f.claim)) ? "fail" : (d.liquidityUsd ?? 0) < 15000 ? "warn" : "pass",
-      d.findings.some((f) => /wash-trad/i.test(f.claim)) ? "Wash-trading signature" : `${money(d.liquidityUsd ?? 0)} liquidity, ${money(d.vol24 ?? 0)} 24h volume`),
+      d.findings.some((f) => /wash-trad|fake-volume|cycled|manufactured/i.test(f.claim)) ? "fail" : (d.liquidityUsd ?? 0) < 15000 ? "warn" : "pass",
+      // The ratio is printed beside every volume figure so the reader sees the
+      // denominator: volume means nothing until it is set against the pool.
+      d.findings.some((f) => /fabricated|without a pool/i.test(f.claim)) ? `Fake-volume signature: ${money(d.vol24 ?? 0)} of volume on ${money(d.liquidityUsd ?? 0)} of liquidity`
+        : d.findings.some((f) => /cycled|manufactured/i.test(f.claim)) ? `Cycled-volume signature: 24h volume is ${volumeToLiquidity(d)} the pool`
+        : d.findings.some((f) => /wash-trad/i.test(f.claim)) ? `Wash-trading signature: 24h volume is ${volumeToLiquidity(d)} the pool with a flat price`
+        : `${money(d.liquidityUsd ?? 0)} liquidity, ${money(d.vol24 ?? 0)} 24h volume (${volumeToLiquidity(d)} the pool)`),
     chk("structure", "market", "Market structure",
       d.pairAddress ? "pass" : "na",
       d.pairAddress ? "Trading ranges, volume concentration and fib zones charted from pool candles on this report" : "No pool candles to chart"),

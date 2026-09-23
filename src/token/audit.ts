@@ -1,3 +1,4 @@
+import { buildHolderIntelligence, HOLDER_TARGET, type HolderIntelligence } from "../lib/holderIntelligence";
 import { hasThreatApiContext } from "../threat/net";
 import { officialXProfileHandle } from "../lib/officialXProfile";
 // Token audit: contract / DexScreener URL -> a forensic rug verdict, computed
@@ -22,14 +23,14 @@ import { classifyMarketAddress } from "../lib/marketAddresses";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
 import {
   dexByPairResult, dexByTokenResult, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
-  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource, rugcheckReport,
+  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutHolderSourceUrl, blockscoutContractSource, rugcheckReport,
   largestInsiderClusterPercent, hasCompleteGoplusTradeability,
   type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo, type ExplorerHolder,
   type ExplorerContractSource, type RugcheckReport,
 } from "./sources";
 
 export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string; assessed?: boolean; nominalWeight?: number; evidenceRefs?: string[] }
-export interface Holder { address: string; percent: number; tag?: string; isContract?: boolean }
+export interface Holder { address: string; percent: number; tag?: string; isContract?: boolean; marketKind?: "pool" | "exchange" | "locker" }
 
 export interface NormalizedSafety {
   available: boolean;
@@ -178,6 +179,7 @@ export interface TokenDossier {
   /** Which source named the deployer, and whether it proved the creation. */
   deployerAttribution?: DeployerAttribution;
   topHolders: Holder[];
+  holderIntelligence?: HolderIntelligence;
   insiderPct: number;
   bundleCount: number;
   bundleRisk: "low" | "elevated" | "high";
@@ -452,6 +454,62 @@ export async function screenAddressSanctions(
   } catch {
     return { available: false, checked: unique.length, sanctioned: [], completedAt, reason: "list_unavailable" as const };
   }
+}
+
+/**
+ * The volume-to-liquidity guard. Three shapes of manufactured volume, in the
+ * order they were learned:
+ *
+ * 1. Volume on no liquidity. A pool that reports millions in 24h volume with
+ *    nothing in it cannot have hosted that trading; the figure is fabricated
+ *    or the pool was drained after the churn. The old ratio divided by zero
+ *    to 0 and read these as clean (the fake-BTC, GREEN, FCAT and SHIB rows of
+ *    the 2026-09-22 Robinhood Chain ring, RESEARCH.md).
+ * 2. Volume more than a hundred times the pool. Real demand at that ratio
+ *    would move the price violently and drain one side; a pool that turns
+ *    over a hundred times its depth in a day and is still there is being
+ *    cycled by its operator. The price may well have moved, so no flat-price
+ *    condition applies here (PGREM 136x, CRAIL 108x, HITBUY 61x on
+ *    280K, musebook clone 5,407x).
+ * 3. Heavy churn with a flat price: fifteen times the pool with the price
+ *    going nowhere. High turnover alone is normal for thin meme tokens; it is
+ *    the absence of price impact that gives the signature away.
+ *
+ * Any of the three fails the market check and floors trading authenticity.
+ * The ratio itself is exported to be printed beside every volume figure the
+ * report shows, so a reader sees the denominator.
+ */
+export function washSignatureFor(m: { vol24: number; liquidityUsd: number; pc24: number | null; buys: number; sells: number }): {
+  wash: boolean; ratio: number; rationale: string; claim: string;
+} {
+  const vol = Number.isFinite(m.vol24) ? Math.max(0, m.vol24) : 0;
+  const liq = Number.isFinite(m.liquidityUsd) ? Math.max(0, m.liquidityUsd) : 0;
+  const txns = (m.buys ?? 0) + (m.sells ?? 0);
+  const ratio = liq > 0 ? vol / liq : vol > 0 ? Number.POSITIVE_INFINITY : 0;
+  const rx = Number.isFinite(ratio) ? `${ratio.toFixed(ratio >= 100 ? 0 : 1)}x` : "unbounded";
+  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+  if (liq < 1000 && vol >= 10_000) {
+    return {
+      wash: true, ratio,
+      rationale: `${money(vol)} of 24h volume on ${money(liq)} of liquidity: volume without a pool to carry it, a fake-volume signature.`,
+      claim: `${money(vol)} of 24h volume is reported against ${money(liq)} of liquidity. No pool that shallow can host that trading; the volume is fabricated or the pool was drained after it. A fake-volume signature.`,
+    };
+  }
+  if (ratio >= 100 && txns >= 20) {
+    return {
+      wash: true, ratio,
+      rationale: `vol/liquidity ${rx} in 24h: the pool turned over ${rx} its depth and is still standing, a cycled-volume signature.`,
+      claim: `Volume is ${rx} liquidity in 24h (${money(vol)} on ${money(liq)}). A pool cycled a hundred times its depth in a day without being drained is being traded against itself; treat the volume as manufactured until the buyers are shown to be distinct wallets.`,
+    };
+  }
+  if (m.pc24 != null && Number.isFinite(m.pc24) && ratio >= 15 && Math.abs(m.pc24) < 10 && txns >= 50) {
+    return {
+      wash: true, ratio,
+      rationale: `vol/liquidity ${ratio.toFixed(1)}x but price flat (${m.pc24.toFixed(1)}%): wash-trade signature.`,
+      claim: `Volume is ${ratio.toFixed(0)}x liquidity in 24h while the price moved only ${m.pc24.toFixed(1)}%: a wash-trading or fake-volume signature.`,
+    };
+  }
+  return { wash: false, ratio: Number.isFinite(ratio) ? ratio : 0, rationale: "", claim: "" };
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -738,11 +796,9 @@ async function runTokenAudit(
   const sells = pair.txns?.h24?.sells ?? 0;
   const pc24 = pair.priceChange?.h24 ?? 0;
   const ageDays = pair.pairCreatedAt ? (Date.now() - pair.pairCreatedAt) / 86400000 : undefined;
-  // Trading-authenticity signals. High volume-to-liquidity churn is normal for
-  // thin meme tokens, so it is NOT wash trading on its own — the signature is
-  // heavy churn with the price going nowhere (volume that does not move price).
-  const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
-  const washSignature = pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
+  const wash = washSignatureFor({ vol24, liquidityUsd, pc24: pair.priceChange?.h24 ?? null, buys, sells });
+  const volLiq = wash.ratio;
+  const washSignature = wash.wash;
   step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
 
   // ---- safety (chain-specific) ----
@@ -827,7 +883,7 @@ async function runTokenAudit(
       opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address, fetcher),
       // Where GoPlus cannot order holders, the chain's own explorer is the
       // only correct distribution source. Runs in parallel: no added latency.
-      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address, fetcher) : Promise.resolve(null),
+      blockscoutHolders(chain, address, fetcher),
       // What the deployer wrote about their own contract. Free, and the only
       // place an intent to defeat safety scanners is ever stated outright.
       blockscoutContractSource(chain, address, fetcher),
@@ -1074,7 +1130,7 @@ async function runTokenAudit(
   if (pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd) && liquidityUsd < 15000) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
   // ---- manipulation & price-action signals ----
-  if (washSignature) findings.push({ claim: `Volume is ${volLiq.toFixed(0)}x liquidity in 24h while the price moved only ${pc24.toFixed(1)}%: a wash-trading or fake-volume signature.`, tone: "bad", source: "dexscreener" });
+  if (washSignature) findings.push({ claim: wash.claim, tone: "bad", source: "dexscreener" });
   if (pc24 <= -60) findings.push({ claim: `Down ${Math.abs(pc24).toFixed(0)}% in 24h. The token appears to have already dumped.`, tone: "bad", source: "dexscreener" });
   else if (pc24 >= 300 && liquidityUsd < 100000) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity. This is a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
 
@@ -1138,21 +1194,21 @@ async function runTokenAudit(
     });
     return false;
   });
-  const eoaHolders = walletRows.filter(
-    (h) => !(h.is_contract === 1 || h.is_contract === "1") && h.is_locked !== 1 && !/lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(h.tag || ""),
-  );
+  // Smart accounts and team multisigs remain holders. Contract status and a
+  // provider tag alone cannot establish independent custody or a lock.
+  const eoaHolders = walletRows.filter(h => !/^0x(?:0{40}|0{36}dead)$/i.test(h.address ?? h.account ?? ""));
   // Free-tier GoPlus sometimes returns a short, self-inconsistent holder list
   // whose percentages sum past 100%. When that happens the distribution data is
   // untrustworthy, so we suppress the concentration signal rather than report a
   // nonsensical figure.
-  const topSum = eoaHolders.slice(0, 15).reduce((a, h) => a + Number(h.percent) * 100, 0);
-  const holdersReliable = rawHolders.length > 0 && topSum <= 101;
+  const topSum = eoaHolders.slice(0, 25).reduce((a, h) => a + Number(h.percent) * 100, 0);
+  const holdersReliable = rawHolders.length > 0 && rawHolders.every(h => Number.isFinite(Number(h.percent)) && Number(h.percent) >= 0) && rawHolders.reduce((sum, h) => sum + Number(h.percent) * 100, 0) <= 101;
   // Top-holder concentration must also read the wallet list, not the pool.
   // When every returned row is infrastructure (the pool, a staking contract)
   // the top WALLET is unmeasured (null): the provider's raw row 0 is exactly the
   // pool the exclusion above just set aside, and republishing it as "top
   // holder 60%" beside the finding that excluded it contradicted the report.
-  const topWalletPct = eoaHolders.length ? Number(eoaHolders[0].percent) * 100 : null;
+  const topWalletPct = eoaHolders.length ? Math.max(...eoaHolders.map(h => Number(h.percent) * 100)) : null;
   const concentrationTopPct = topWalletPct;
   const insiderPct = holdersReliable ? Math.round(topSum) : 0;
   // Material wallets, largest first. The register's own order is not trusted
@@ -1284,7 +1340,7 @@ async function runTokenAudit(
   if (washSignature) aT5 = 2; // churn without price movement = manufactured volume
   else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? wash.rationale : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
 
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
@@ -1388,12 +1444,29 @@ async function runTokenAudit(
   // creation signed earns the word "deployer"; everything else is an address a
   // source attributes, which can be a program holding an authority.
   const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
-  const topHolders: Holder[] = rawHolders.slice(0, 10).map((h) => ({
+  let topHolders: Holder[] = rawHolders.slice(0, HOLDER_TARGET).map((h) => ({
     address: h.address ?? h.account ?? "",
     percent: Number(h.percent) * 100,
     tag: h.tag || undefined,
     isContract: h.is_contract === 1 || h.is_contract === "1",
+    marketKind: classifyMarketAddress(h.address ?? h.account ?? "", { poolAddresses, knownAccounts })?.kind,
   })).filter((h) => h.address);
+
+  const holderIntelligence = buildHolderIntelligence({
+    chain, tokenAddress: address, capturedAt: new Date().toISOString(),
+    source: explorerHolders ? "blockscout" : chain === "solana" && rugcheck?.topHolders?.length ? "rugcheck" : "goplus",
+    sourceUrl: explorerHolders ? blockscoutHolderSourceUrl(chain, address) : chain === "solana" && rugcheck?.topHolders?.length
+      ? `https://api.rugcheck.xyz/v1/tokens/${address}/report`
+      : `https://api.gopluslabs.io/api/v1/${chain === "solana" ? "solana/token_security" : `token_security/${gpChain}`}?contract_addresses=${address}`,
+    rows: chain === "solana" && rugcheck?.topHolders?.length ? rugcheck.topHolders : topHolders,
+    ranked: chain !== "solana" && !GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) || Boolean(explorerHolders),
+    aggregateOwners: chain === "solana" && Boolean(rugcheck?.topHolders?.length),
+    poolAddresses, ...(knownAccounts ? { knownAccounts } : {}),
+  });
+
+  if (chain === "solana" && rugcheck?.topHolders?.length) {
+    topHolders = holderIntelligence.rows.map(row => ({ address: row.address, percent: row.percent }));
+  }
 
   // ---- Deployer forensics: OFAC is required; provider funding risk is optional.
   const screenFn = opts?.screenSanctions ?? ((chain, addresses) => screenAddressSanctions(chain, addresses, fetcher));
@@ -1521,7 +1594,7 @@ async function runTokenAudit(
     verdict, score, assessment, capApplied, headline, axes, ...(decisionBoundary ? { decisionBoundary } : {}), safety: { ...s, topHolderPct: concentrationTopPct }, socials,
     holdersAssessed: holdersReliable,
     projectX, ...(socialActivity ? { socialActivity } : {}), ...(shipping ? { shipping } : {}), deployer, ...(deployerAttribution ? { deployerAttribution } : {}),
-    topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
+    topHolders, holderIntelligence, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
     sanctionsScreen,
     deployerRisk,
     ...(cloneCheck ? { cloneCheck } : {}),
@@ -1572,7 +1645,7 @@ function buildGraph(chain: string, address: string, symbol: string, verdict: str
         : {}),
     });
   }
-  holders.slice(0, 4).forEach((h) => {
+  holders.slice(0, HOLDER_TARGET).forEach((h) => {
     // Roles and short labels are display metadata; the identity is always the
     // chain plus the complete address. The same wallet therefore stays the same
     // node whether it later appears as a holder, deployer or funder.

@@ -45,11 +45,10 @@ describe("collectHolderProfile", () => {
     const out = await collectHolderProfile("Ethereum", "0xabc");
     expect(out.available).toBe(true);
     if (!out.available) throw new Error("expected available");
-    // 0x1 holds the most supply but is a CONTRACT, so it is not a wallet
-    // holder and does not set concentration: 4% and 3% are the wallet rows.
-    expect(out.value.topHolderPct).toBeCloseTo(4, 5);
-    expect(out.value.top10Pct).toBeCloseTo(7, 5);
-    expect(out.value.assessedWalletCount).toBe(2);
+    // Contract status alone does not exclude a smart account or team multisig.
+    expect(out.value.topHolderPct).toBeCloseTo(5.6, 5);
+    expect(out.value.top10Pct).toBeCloseTo(12.6, 5);
+    expect(out.value.assessedWalletCount).toBe(3);
     expect(out.value.top10PctIsFloor).toBe(true);
     expect(out.value.distributionNote).toContain("floor across those assessed wallets");
     expect(out.value.holderCount).toBe(370_041);
@@ -61,7 +60,7 @@ describe("collectHolderProfile", () => {
   it("returns a completed no-data outcome for an unmapped chain without fetching", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    const out = await collectHolderProfile("Solana", "So11111111111111111111111111111111111111112");
+    const out = await collectHolderProfile("unsupported", "So11111111111111111111111111111111111111112");
     expect(out.available).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -284,7 +283,7 @@ describe("collectHolderProfile", () => {
   // what it excluded. Reading every row instead publishes the DEX pool as the
   // project's largest holder, which is both wrong and a different number than
   // the token report shows for the same token from the same provider.
-  it("measures concentration over wallets, not the pool the token trades in", async () => {
+  it("retains unclassified contracts and provider-labelled pools until custody is evidenced", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(goplusBody({
       holders: [
         { address: "0xpool", percent: "0.42", is_contract: 1, tag: "Uniswap V3: Pool" },
@@ -296,12 +295,12 @@ describe("collectHolderProfile", () => {
     }))));
     const out = await collectHolderProfile("ethereum", "0xabc");
     if (!out.available) throw new Error("expected available");
-    expect(out.value.topHolderPct).toBeCloseTo(3, 5);
-    expect(out.value.top10Pct).toBeCloseTo(4, 5);
-    expect(out.value.distributionNote).toMatch(/pool|contract|locked/i);
+    expect(out.value.topHolderPct).toBeCloseTo(42, 5);
+    expect(out.value.top10Pct).toBeCloseTo(77, 5);
+    expect(out.value.distributionNote).toContain("floor");
   });
 
-  it("suppresses concentration when every holder row was a contract or a pool", async () => {
+  it("retains a contract-only holder register without claiming it is benign", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(goplusBody({
       holders: [
         { address: "0xpool", percent: "0.42", is_contract: 1, tag: "Uniswap V3: Pool" },
@@ -310,9 +309,9 @@ describe("collectHolderProfile", () => {
     }))));
     const out = await collectHolderProfile("ethereum", "0xabc");
     if (!out.available) throw new Error("expected available");
-    expect(out.value.holdersAssessed).toBe(false);
-    expect(out.value.topHolderPct).toBeNull();
-    expect(out.value.top10Pct).toBeNull();
+    expect(out.value.holdersAssessed).toBe(true);
+    expect(out.value.topHolderPct).toBe(42);
+    expect(out.value.top10Pct).toBe(53);
   });
 
   // GoPlus's creator_address is whichever address GoPlus called the creator; on

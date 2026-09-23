@@ -13,7 +13,7 @@
 //   honest project's launch (SYNAPSE). The launch `outcome` carries the token
 //   read; the cabal `intent` carries the operator read.
 // - EVM addresses are lowercase; Solana base58 addresses keep their case (lookups
-//   compare case-insensitively); chains use the dossier vocabulary
+//   preserve Solana case); chains use the dossier vocabulary
 //   ("robinhood", "base", "solana"). Handles carry no "@".
 // - Shared infrastructure (bundlers, executors) is its own cabal of kind
 //   "infra" so two operators renting the same contract are not merged into one.
@@ -585,13 +585,13 @@ export const CABALS: Cabal[] = [
 
 // ---- lookups ----
 
-const walletKey = (chain: string, address: string) => `${chain.trim().toLowerCase()}:${address.trim().toLowerCase()}`;
+const walletKey = (chain: string, address: string) => `${chain.trim().toLowerCase()}:${chain.trim().toLowerCase() === "solana" ? address.trim() : address.trim().toLowerCase()}`;
 
 export interface CabalWalletHit { cabal: Cabal; wallet: CabalWallet }
 export interface CabalLaunchHit { cabal: Cabal; launch: CabalLaunch }
 export interface CabalAccountHit { cabal: Cabal; account: CabalAccount }
 
-let walletIndex: Map<string, CabalWalletHit> | null = null;
+let walletIndex: Map<string, CabalWalletHit[]> | null = null;
 let launchIndex: Map<string, CabalLaunchHit> | null = null;
 let handleIndex: Map<string, CabalAccountHit[]> | null = null;
 
@@ -605,7 +605,9 @@ function buildIndexes() {
       // never a match: exact-match only, the same rule marketAddresses.ts keeps.
       if (!/^0x[0-9a-f]{40}$/i.test(wallet.address) && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet.address)) continue;
       const k = walletKey(wallet.chain, wallet.address);
-      if (!walletIndex.has(k)) walletIndex.set(k, { cabal, wallet });
+      const matches = walletIndex.get(k) ?? [];
+      matches.push({ cabal, wallet });
+      walletIndex.set(k, matches);
     }
     for (const launch of cabal.launches) {
       launchIndex.set(walletKey(launch.chain, launch.address), { cabal, launch });
@@ -623,8 +625,22 @@ function buildIndexes() {
 export function findCabalWallet(chain: string | null | undefined, address: string | null | undefined): CabalWalletHit | null {
   if (!chain || !address) return null;
   if (!walletIndex) buildIndexes();
-  return walletIndex!.get(walletKey(chain, address)) ?? null;
+  return findCabalWallets(chain, address)[0] ?? null;
 }
+
+/** All independently recorded memberships; a first match must not hide others. */
+export function findCabalWallets(chain: string | null | undefined, address: string | null | undefined): CabalWalletHit[] {
+  if (!chain || !address) return [];
+  if (!walletIndex) buildIndexes();
+  return [...(walletIndex!.get(walletKey(chain, address)) ?? [])];
+}
+
+/** Content version frozen with matches, so later registry edits do not rewrite a report. */
+export const CABAL_REGISTRY_VERSION = (() => {
+  let hash = 2166136261;
+  for (const char of JSON.stringify(CABALS)) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return `curated-${(hash >>> 0).toString(16)}`;
+})();
 
 /** Exact-match lookup of a token contract against indexed launches. */
 export function findCabalLaunch(chain: string | null | undefined, address: string | null | undefined): CabalLaunchHit | null {

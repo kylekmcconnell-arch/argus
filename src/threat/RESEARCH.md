@@ -1123,3 +1123,16 @@ this file attributed to the Pons hook is not in Pons's docs or hook getters;
 the documented guard is a 99 percent buy-side tax decaying over five seconds.
 STONKBROKER's supply was minted as 4,444 × 666,666 and the 1,314 payments of
 666,666 to its treasury were NFT seat purchases, not a hidden mint.
+
+**Now in the scanner (2026-09-23).** `src/threat/launch.ts` resolves LONG by
+the `…1e18` suffix and Doppler-era Bankr by `…ba3`, and `/api/launch` names
+Pons v1 apart from v2, any other Doppler-factory token as `doppler`, and
+StonkBrokers from its pads. Every venue now carries `creatorFeeAsset`; a
+venue that pays in the token is disclosed as a note on the Launch panel and
+never scored. On Doppler venues and Pons v1 the endpoint also reads the
+creator's fee claims from the launch sender's own transfer feed (never the
+initializer's, which carries every swap) and follows the token leg one hop;
+three or more claims with most of the token leg sold and nothing bought back
+or burned is the `dump` warning. Validated live against MEME (26 claims,
+5,010,685 claimed, all sold one hop out: dump), TAIWAN (one claim: unknown)
+and MOTION (85 claims, all held: hold).

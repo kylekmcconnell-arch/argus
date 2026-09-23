@@ -30,9 +30,9 @@ describe("robinhoodCreatorVenue - factory via case-tolerant v1 route", () => {
     expect(await robinhoodCreatorVenue("0xff23d2eab1e714949afa26851855a0a70e51bff3")).toBe("pons");
   });
 
-  it("detects a Pons v1 launch via the original factory", async () => {
+  it("detects a Pons v1 launch via the original factory, named apart from v2 because v1 paid creators in the token", async () => {
     stub({ message: "OK", result: [{ contractCreator: "0xabc", contractFactory: "0xA5aAB3F0C6EEadf30eF1D3eB997108e976351fEB" }] });
-    expect(await robinhoodCreatorVenue("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")).toBe("pons");
+    expect(await robinhoodCreatorVenue("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")).toBe("pons v1");
   });
 
   it("detects an o1 Launchpad launch from the token deployer Blockscout reports ($WRESTLER shape)", async () => {

@@ -314,7 +314,9 @@ function threatBlock(d: Dossier): string {
     ? `${esc(code.contractName ?? "contract")} · ${code.stats?.functions ?? 0} functions · ${code.stats?.gatedFunctions ?? 0} privileged${code.origin ? ` · via ${esc(code.origin)}` : ""}`
     : code.checked
       ? "no verified source - the code cannot be read"
-      : "SPL - standard token program, no per-token code";
+      : code.system === "b20"
+        ? "Base B20 system asset - no per-token code, nothing to verify"
+        : "SPL - standard token program, no per-token code";
   const codeFlags = code.flags
     .map(
       (f) => `

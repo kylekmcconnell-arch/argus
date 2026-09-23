@@ -84,8 +84,17 @@ describe("blockscoutHolders", () => {
 
   it("returns null for a chain with no configured explorer, and on a failed lookup", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ total_supply: "0" })));
-    expect(await blockscoutHolders("ethereum", "0xabc")).toBeNull();
+    expect(await blockscoutHolders("unsupported", "0xabc")).toBeNull();
     expect(await blockscoutHolders("robinhood", "0xabc")).toBeNull();
+  });
+
+  it("collects 25 holders including contract wallets instead of stopping at ten", async () => {
+    const request = vi.fn(async (url: string | URL | Request) => String(url).endsWith("/holders")
+      ? json({ items: Array.from({ length: 30 }, (_, i) => ({ value: String(30-i), address: { hash: `0x${(i+1).toString(16).padStart(40,"0")}`, is_contract: i === 24 } })) })
+      : json({ total_supply: "1000" }));
+    const result = await blockscoutHolders("base", "0x1111111111111111111111111111111111111111", request as typeof fetch);
+    expect(result).toHaveLength(25);
+    expect(result?.[24].isContract).toBe(true);
   });
 
   it("marks Robinhood Chain holder ordering as untrusted from GoPlus", () => {
