@@ -1,3 +1,4 @@
+import { buildHolderIntelligence } from "./holderIntelligence";
 import { describe, expect, it } from "vitest";
 import type { BasicFact } from "../data/evidence";
 import type { TokenDossier } from "../token/audit";
@@ -198,4 +199,22 @@ describe("buildMaterialReportDelta · development", () => {
     const delta = buildMaterialReportDelta("token", prior({ ...token(), shipping: shipping() }), { ...token(), shipping: shipping({ totalCommits: 30, distinctHuman: 2 }) });
     expect(delta).toBeNull();
   });
+});
+
+it("surfaces an indexed holder observation through saved report changes without trade conclusions", () => {
+  const before = token(), after = token();
+  const address = (n: number) => `0x${n.toString(16).padStart(40,"0")}`;
+  const make = (day: number) => buildHolderIntelligence({ chain: before.chain, tokenAddress: before.address, capturedAt: `2026-09-${day}T00:00:00Z`, source:"fixture", ranked:true,
+    rows:Array.from({length:25},(_,i)=>({address:address(i+100),percent:1})) });
+  before.holderIntelligence=make(20); after.holderIntelligence=make(21);
+  after.holderIntelligence.rows[0].percent=4;
+  const result=buildMaterialReportDelta("token",prior(before),after);
+  expect(result?.category).toBe("holder_observation");
+  expect(result?.consequence).toContain("does not establish a buy, sale, exit");
+  expect(result?.evidenceHref).toBe("#holder-intelligence");
+});
+it("does not fall back to a concentration alert when new holder coverage is partial", () => {
+  const before=token(),after=token({topHolderPct:70});
+  after.holderIntelligence=buildHolderIntelligence({chain:after.chain,tokenAddress:after.address,capturedAt:"2026-09-21",source:"fixture",ranked:true,rows:[]});
+  expect(buildMaterialReportDelta("token",prior(before),after)).toBeNull();
 });
