@@ -1,6 +1,7 @@
+import type { ThreatScan } from "../threat/types";
 import { HolderIntelligencePanel } from "../reports/argus/HolderIntelligencePanel";
 import { buildHolderIntelligence } from "../lib/holderIntelligence";
-import { LaunchPanel } from "../components/ThreatScanPage";
+import { LaunchPanel, ThreatReport } from "../components/ThreatScanPage";
 import { Report } from "../components/Report";
 import { InvestigationReport } from "../components/InvestigationReport";
 import type { Investigation } from "../lib/investigation";
@@ -116,6 +117,10 @@ const DEMO_SHIPPING: ShippingSummary = {
 export function ArgusReportPreview() {
   const params = new URLSearchParams(window.location.search);
   const share = params.get("mode") === "share";
+  if (params.get("kind") === "contract") return <div className="argus-rd"><main className="rd-main">
+    <p className="subtle-note">Historical fixture. Opening this preview does not run fresh analysis.</p>
+    <ThreatReport scan={fixture.payload.threat as unknown as ThreatScan} embedded />
+  </main></div>;
   if (params.get("kind") === "holders") return <div className="argus-rd"><main className="rd-main">
     <p className="subtle-note">Synthetic holder layout only. Not a live token assessment.</p>
     <HolderIntelligencePanel snapshot={buildHolderIntelligence({ chain: "base", tokenAddress: "0x1111111111111111111111111111111111111111", capturedAt: "2026-09-23T20:00:00Z", source: "Synthetic preview", ranked: true,

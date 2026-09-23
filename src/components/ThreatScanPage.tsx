@@ -1,3 +1,4 @@
+import { tokenSubjectIdentity } from "../lib/tokenIdentity";
 // Token Threat Scanner - run view + report. A self-contained page: token ref in,
 // live trace while the scan runs, then the threat report: risk gauge (higher =
 // worse), one-line action, three tiers of plain-English findings, the ARGUS
@@ -32,9 +33,9 @@ const VERDICT_META: Record<ThreatVerdict, { color: string; blurb: string }> = {
 };
 
 // Ledger stats: instant local first paint, then the shared server figures.
-function useLedgerStats() {
+function useLedgerStats(enabled = true) {
   const [stats, setStats] = useState(() => receiptStats());
-  useEffect(() => { sharedReceiptStats().then((s) => setStats({ flagged: s.flagged, confirmedDead: s.confirmedDead, checked: s.checked })); }, []);
+  useEffect(() => { if (enabled) void sharedReceiptStats().then((s) => setStats({ flagged: s.flagged, confirmedDead: s.confirmedDead, checked: s.checked })); }, [enabled]);
   return stats;
 }
 
@@ -169,7 +170,7 @@ function InsiderClusters({ scan }: { scan: ThreatScan }) {
     if (state === "loading") return;
     setState("loading");
     insiderClusters(scan.chain, scan.address).then((r) => {
-      if (r && r.clusters.length) { setData(r); setState("done"); }
+      if (r) { setData(r); setState("done"); }
       else setState("empty");
     });
   };
@@ -177,22 +178,22 @@ function InsiderClusters({ scan }: { scan: ThreatScan }) {
     <div className="mt-4 panel p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="display-sm text-[18px] leading-tight text-ink">Creator & insider clusters</h2>
-          <p className="mt-0.5 text-[11.5px] text-ink-faint">Which of the "separate" top holders are secretly one hand - proven from the funding graph.</p>
+          <h2 className="display-sm text-[18px] leading-tight text-ink">Holder funding connections</h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-faint">Shared funders and transfers are relationship leads. They do not by themselves prove one operator or coordinated trading.</p>
         </div>
         {state === "idle" && (
           <button onClick={run} className="mono shrink-0 rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink">run detection ↯</button>
         )}
       </div>
       {state === "loading" && <p className="mt-2 animate-pulse text-[12.5px] text-ink-faint">Tracing funders and transfers across the top holders…</p>}
-      {state === "empty" && <p className="mt-2 text-[12.5px] text-ink-dim">No coordinated wallet groups found among the top holders (or clustering unavailable on this chain/tier).</p>}
+      {state === "empty" && <p className="mt-2 text-[12.5px] text-ink-dim">Clustering returned no usable result. Common control and coordination remain unassessed.</p>}
       {state === "done" && data && (
         <>
           <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">{data.note}</p>
           <div className="mt-3 space-y-1.5">
             {data.clusters.slice(0, 5).map((c, i) => (
               <div key={i} className="flex items-center justify-between gap-3 border-b border-line/60 py-1.5">
-                <span className="text-[12.5px] text-ink-dim">{c.size} wallets = 1 operator{c.includesCreator ? " · incl. creator" : ""}{c.sharedFunders.length ? " · shared funder" : ""}</span>
+                <span className="text-[12.5px] text-ink-dim">{c.size} connected wallets{c.includesCreator ? " · incl. creator" : ""}{c.sharedFunders.length ? " · shared funder" : ""}</span>
                 <span className="mono text-[12px] font-semibold" style={{ color: c.combinedPct >= 25 ? "var(--color-avoid)" : c.combinedPct >= 10 ? "var(--color-caution)" : "var(--color-ink-dim)" }}>{c.combinedPct.toFixed(1)}%</span>
               </div>
             ))}
@@ -404,16 +405,16 @@ function BehindLedger({ scan }: { scan: ThreatScan }) {
   );
 }
 
-function EngineRead({ scan }: { scan: ThreatScan }) {
-  const [state, setState] = useState<"loading" | "done" | "off">(scan.code.verified ? "loading" : "off");
+function EngineRead({ scan, allowSupplemental = true }: { scan: ThreatScan; allowSupplemental?: boolean }) {
+  const [state, setState] = useState<"loading" | "done" | "off">(allowSupplemental && scan.code.verified ? "loading" : scan.code.ai ? "done" : "off");
   const [ai, setAi] = useState(scan.code.ai);
   const fired = useRef(false);
   useEffect(() => {
-    if (!scan.code.verified || fired.current) return;
+    if (!allowSupplemental || !scan.code.verified || fired.current) return;
     fired.current = true;
     aiCodeRead(scan.chain, scan.address, scan.code, { verdict: scan.call.verdict, risk: scan.call.risk })
       .then((r) => { setAi(r); setState(r ? "done" : "off"); });
-  }, [scan]);
+  }, [scan, allowSupplemental]);
   if (state === "off" && !ai) return null;
   return (
     <div className="mt-3 rounded-lg border border-line/70 bg-line/20 p-3">
@@ -798,7 +799,7 @@ function MarketRiskSummary({ scan }: { scan: ThreatScan }) {
  * read directly beneath it instead of burying a second threat report near the
  * methodology appendix.
  */
-export function ProjectMarketIntelligence({ scan }: { scan: ThreatScan }) {
+export function ProjectMarketIntelligence({ scan, allowSupplemental = false }: { scan: ThreatScan; allowSupplemental?: boolean }) {
   const launchLpOverride = scan.deep.launch && !scan.deep.launch.onCurve
     && (scan.deep.launch.lpDisposition === "burned" || scan.deep.launch.lpDisposition === "protocol-owned" || scan.deep.launch.lpDisposition === "locked")
     && (scan.tokenomics.lp.status === "unconfirmed" || scan.tokenomics.lp.status === "unlocked")
@@ -813,7 +814,7 @@ export function ProjectMarketIntelligence({ scan }: { scan: ThreatScan }) {
           <p className="mt-1 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">Largest holders, known insider exposure, deployer history, and related-wallet clustering.</p>
         </div>
         <OwnershipSnapshot scan={scan} />
-        <InsiderClusters scan={scan} />
+        {allowSupplemental && <InsiderClusters scan={scan} />}
       </section>
 
       <section aria-labelledby="market-trading-title">
@@ -823,8 +824,8 @@ export function ProjectMarketIntelligence({ scan }: { scan: ThreatScan }) {
           <p className="mt-1 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">Realized selling, buyer cohorts, common holdings, and the origin of tokens reaching the market.</p>
         </div>
         {scan.deep.sellers && (scan.deep.sellers.sellerCount > 0 || scan.deep.sellers.devSold || scan.deep.sellers.recentTape) && <SellStructurePanel s={scan.deep.sellers} chain={scan.chain} />}
-        <BuyerCohort scan={scan} />
-        <BehindLedger scan={scan} />
+        {allowSupplemental && <BuyerCohort scan={scan} />}
+        {allowSupplemental && <BehindLedger scan={scan} />}
       </section>
 
       <section aria-labelledby="market-mechanics-title">
@@ -869,18 +870,18 @@ function ShareButton({ scan }: { scan: ThreatScan }) {
 // The full threat report body, exported for surfaces that already HOLD a scan
 // (the person report's frozen token leg) - EmbeddedThreatScan stays the entry
 // point when only an address is known.
-export function ThreatReport({ scan }: { scan: ThreatScan }) {
-  return <Report scan={scan} />;
+export function ThreatReport({ scan, embedded = false }: { scan: ThreatScan; embedded?: boolean }) {
+  return <Report scan={scan} embedded={embedded} allowSupplemental={false} />;
 }
 
-function Report({ scan }: { scan: ThreatScan }) {
+function Report({ scan, embedded = false, allowSupplemental = true }: { scan: ThreatScan; embedded?: boolean; allowSupplemental?: boolean }) {
   const { call, dossier: d, code, deployer, checks } = scan;
   const m = VERDICT_META[call.verdict];
-  const rs = useLedgerStats();
+  const rs = useLedgerStats(allowSupplemental);
   return (
     <div className="report-frame pb-16 threat-record">
-      {/* header — the standard scan-output hero: panel, serif subject, ring */}
-      <div className="panel mt-6 flex items-start gap-5 p-5 max-sm:flex-col">
+      {embedded && <div className="section-top"><h2>Contract risk evidence</h2><p className="subtle-note">Saved mechanical checks, separate from project diligence. Risk points increase with risk.</p></div>}
+      {!embedded && <div className="panel mt-6 flex items-start gap-5 p-5 max-sm:flex-col">
         <RiskRing risk={call.risk} verdict={call.verdict} />
         <div className="min-w-0 flex-1">
           <div className="eyebrow">Threat scan · {scan.chain}</div>
@@ -915,8 +916,7 @@ function Report({ scan }: { scan: ThreatScan }) {
             ))}
           </div>
         </div>
-      </div>
-
+      </div>}
       {/* the composition strip, in the risk model's own units: grouped check
           outcomes, never invented weights. Expand a row for what tripped. */}
       <ScoreComposition
@@ -957,7 +957,7 @@ function Report({ scan }: { scan: ThreatScan }) {
         {!code.checked && code.system !== "b20" && (
           <p className="mt-2 text-[13px] text-ink-dim">Solana tokens share the standard token program - there is no per-token code to read. The mint, freeze, and transfer-hook authorities above carry the equivalent risk.</p>
         )}
-        <EngineRead scan={scan} />
+        <EngineRead scan={scan} allowSupplemental={allowSupplemental} />
       </div>
 
       {/* launch provenance */}
@@ -984,7 +984,7 @@ function Report({ scan }: { scan: ThreatScan }) {
       {scan.deep.posture && <TechnicalPosturePanel p={scan.deep.posture} />}
 
       {/* market structure: chart, trading ranges, volume concentration, fib zones */}
-      <MarketStructurePanel address={scan.address} chain={scan.chain} pairAddress={scan.dossier.pairAddress} />
+      {allowSupplemental && <MarketStructurePanel address={scan.address} chain={scan.chain} pairAddress={scan.dossier.pairAddress} />}
 
       {/* migration */}
       {scan.deep.migration?.migrated && (
@@ -1053,13 +1053,13 @@ function Report({ scan }: { scan: ThreatScan }) {
       )}
 
       {/* creator & insider clusters (lazy, #9) */}
-      <InsiderClusters scan={scan} />
+      {allowSupplemental && <InsiderClusters scan={scan} />}
 
       {/* buyer cohort · common coins (lazy, RAVN-style) */}
-      <BuyerCohort scan={scan} />
+      {allowSupplemental && <BuyerCohort scan={scan} />}
 
       {/* behind the ledger (lazy): the deep transfer-graph read */}
-      <BehindLedger scan={scan} />
+      {allowSupplemental && <BehindLedger scan={scan} />}
 
       {/* checklist */}
       <div id="threat-checklist" className="mt-4 scroll-mt-28 panel p-4">
@@ -1069,7 +1069,7 @@ function Report({ scan }: { scan: ThreatScan }) {
       </div>
 
       {/* ledger line */}
-      {rs.flagged > 0 && (
+      {allowSupplemental && rs.flagged > 0 && (
         <p className="mono mt-4 text-center text-[10.5px] text-ink-faint">
           ledger: {rs.flagged} token{rs.flagged === 1 ? "" : "s"} flagged to date{rs.checked > 0 ? ` · ${rs.confirmedDead}/${rs.checked} re-checked flags confirmed dead` : ""}
         </p>
@@ -1092,20 +1092,18 @@ export function EmbeddedThreatScan({ address, chain }: { address: string; chain:
   const [scan, setScan] = useState<ThreatScan | null>(null);
   const [steps, setSteps] = useState<TraceStep[]>([]);
   const [failed, setFailed] = useState(false);
-  const started = useRef(false);
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
+    setScan(null); setSteps([]); setFailed(false);
     // The scan outlives a fast unmount, so every state write is gated. Without
     // this the trailing update lands after React has torn the tree down.
     let cancelled = false;
-    const input: ResolvedInput = { kind: "token", ref: address, via: chain === "solana" ? "solana" : "evm" };
+    const input: ResolvedInput = { kind: "token", ref: address, chain, via: chain === "solana" ? "solana" : "evm" };
     (async () => {
       try {
         const r = await fetch(`/api/threat-scan?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(6000) });
         const d = r.ok ? ((await r.json()) as { hit?: boolean; scan?: ThreatScan }) : null;
         if (cancelled) return;
-        if (d?.hit && d.scan?.address) { setScan(d.scan); return; }
+        if (d?.hit && d.scan?.address && tokenSubjectIdentity(d.scan.chain, d.scan.address)?.ref === tokenSubjectIdentity(chain, address)?.ref) { setScan(d.scan); return; }
       } catch { /* live scan below */ }
       if (cancelled) return;
       threatScan(input, (s) => { if (!cancelled) setSteps((prev) => [...prev, s]); })
@@ -1129,7 +1127,8 @@ export function EmbeddedThreatScan({ address, chain }: { address: string; chain:
       </div>
     );
   }
-  return <Report scan={scan} />;
+  if (tokenSubjectIdentity(scan.chain, scan.address)?.ref !== tokenSubjectIdentity(chain, address)?.ref) return <p>Loading the requested token’s contract evidence…</p>;
+  return <Report scan={scan} embedded />;
 }
 
 export function ThreatLanding({ onScan }: { onScan: (ref: string, mode: "token" | "wallet") => void }) {

@@ -3307,7 +3307,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 : f.threatNote ?? "the token threat leg of this audit"}
           >
             {f.threat ? (
-              <Card className="p-2"><ThreatReport scan={f.threat} /></Card>
+              <Card className="p-2"><ThreatReport scan={f.threat} embedded /></Card>
             ) : (
               <Card className="p-4"><p className="text-[12.5px] leading-relaxed text-ink-dim">{f.threatNote}</p></Card>
             )}
