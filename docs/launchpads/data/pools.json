@@ -1,0 +1,1910 @@
+{
+"robinhood_0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca": {
+"pool": "0x52e65b17fb6e5ba00ed806f37afcd2daa50271ca",
+"name": "USDG / WETH 0.01%",
+"base": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 16265303.554,
+"vol24": 361775224.107752,
+"mcap": "3265843306.15261",
+"fdv": "716032507.250125",
+"created": "2026-07-02T20:51:08Z",
+"chg24": "-0.058",
+"tx24": {
+"buys": 224165,
+"sells": 242156,
+"buyers": 31476,
+"sellers": 32400
+}
+},
+"robinhood_0xbac3aa3b91584a53a579b3c999a56756e954e59247e497bad1d25a4334bde551": {
+"pool": "0xbac3aa3b91584a53a579b3c999a56756e954e59247e497bad1d25a4334bde551",
+"name": "WETH / USDG",
+"base": "0x0000000000000000000000000000000000000000",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 30068048.2014,
+"vol24": 80101924.3195554,
+"mcap": null,
+"fdv": "6731766843.73898",
+"created": "2026-08-20T07:58:27Z",
+"chg24": "-0.538",
+"tx24": {
+"buys": 9258,
+"sells": 8930,
+"buyers": 3000,
+"sellers": 3002
+}
+},
+"robinhood_0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269": {
+"pool": "0xf2a0be59ab76b96f957bd5e5b967f2b75e8db269",
+"name": "PONS / USDG 0.3%",
+"base": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 1649698.4667,
+"vol24": 24821083.441091,
+"mcap": "474338837.811858",
+"fdv": "474313676.349079",
+"created": "2026-08-11T03:34:02Z",
+"chg24": "9.451",
+"tx24": {
+"buys": 15076,
+"sells": 15369,
+"buyers": 1558,
+"sellers": 1778
+}
+},
+"robinhood_0xa0412d8ef17f67323b9fc1c85838d5172925ab328ceb84c9e62f4293af41d28e": {
+"pool": "0xa0412d8ef17f67323b9fc1c85838d5172925ab328ceb84c9e62f4293af41d28e",
+"name": "PGREM / WETH 0.3%",
+"base": "0xb57ed3c7ffeaa75ceb6c772cb7a3be422782e250",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 170098.0125,
+"vol24": 23171191.4936275,
+"mcap": null,
+"fdv": "1711802.644",
+"created": "2026-09-22T09:25:56Z",
+"chg24": "68.806",
+"tx24": {
+"buys": 10015,
+"sells": 9184,
+"buyers": 3414,
+"sellers": 2985
+}
+},
+"robinhood_0xfae65eaa11943f45e83d5b45dc7a7c801c51bfb0": {
+"pool": "0xfae65eaa11943f45e83d5b45dc7a7c801c51bfb0",
+"name": "WETH / USDG 0.01%",
+"base": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 550733.3988,
+"vol24": 21674388.523042,
+"mcap": "97353011.6396324",
+"fdv": "101084922.707985",
+"created": "2026-08-19T16:09:34Z",
+"chg24": "-0.637",
+"tx24": {
+"buys": 19518,
+"sells": 17986,
+"buyers": 2675,
+"sellers": 2795
+}
+},
+"robinhood_0xafde27f87075e1b89da38f88e3c56cc91635d6a6039ea137d7454da9f385f870": {
+"pool": "0xafde27f87075e1b89da38f88e3c56cc91635d6a6039ea137d7454da9f385f870",
+"name": "BTC / USDB 0.25%",
+"base": "0x30ed6a37665c50f799125923185b0fc171d36f0c",
+"quote": "0x65f1f83dd8b702a195e24ea171f8136fb1888888",
+"reserve": 98528273.6568,
+"vol24": 21604137.1316693,
+"mcap": null,
+"fdv": "6717886341.97087",
+"created": "2026-09-22T12:01:04Z",
+"chg24": "1.511",
+"tx24": {
+"buys": 40,
+"sells": 22,
+"buyers": 16,
+"sellers": 8
+}
+},
+"robinhood_0x69bfaf19c9f377bb306a89aed9f6b07e2c1a8d9a": {
+"pool": "0x69bfaf19c9f377bb306a89aed9f6b07e2c1a8d9a",
+"name": "USDG / WETH 0.05%",
+"base": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 5329849.3985,
+"vol24": 20425459.9319565,
+"mcap": "3266149465.36469",
+"fdv": "716099632.316362",
+"created": "2026-06-29T09:34:25Z",
+"chg24": "-0.119",
+"tx24": {
+"buys": 15830,
+"sells": 16649,
+"buyers": 3701,
+"sellers": 4048
+}
+},
+"robinhood_0x01bd2e5a15b3a607699f3ee1ee498480ecfa27dfd13b201d4d52d1de28404c70": {
+"pool": "0x01bd2e5a15b3a607699f3ee1ee498480ecfa27dfd13b201d4d52d1de28404c70",
+"name": "CRAIL / WETH 0.3%",
+"base": "0xc8d8d13eea8a47bc265f4f26c8b5b72425b611c2",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 171481.4048,
+"vol24": 18603793.3647506,
+"mcap": null,
+"fdv": "2916425.191",
+"created": "2026-09-22T13:00:58Z",
+"chg24": "9128.842",
+"tx24": {
+"buys": 8026,
+"sells": 7345,
+"buyers": 3324,
+"sellers": 2692
+}
+},
+"robinhood_0xed50bdeea8adc232f159486192a4157281d722ff": {
+"pool": "0xed50bdeea8adc232f159486192a4157281d722ff",
+"name": "PONS / WETH 0.3%",
+"base": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 6507769.6588,
+"vol24": 17686504.5590607,
+"mcap": "474877479.817916",
+"fdv": "474852289.782691",
+"created": "2026-07-16T15:39:37Z",
+"chg24": "9.33",
+"tx24": {
+"buys": 9159,
+"sells": 8121,
+"buyers": 1244,
+"sellers": 1641
+}
+},
+"robinhood_0xe972dfc9032d148f4b1618fb914fbbd2fc41d6dc": {
+"pool": "0xe972dfc9032d148f4b1618fb914fbbd2fc41d6dc",
+"name": "musebook / WETH 1%",
+"base": "0x91a2dae9699f0b82540b5886b0d8759c22820ba3",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 639364.2787,
+"vol24": 17273736.7149237,
+"mcap": "31026907.27",
+"fdv": "31026013.1287222",
+"created": "2026-09-16T08:27:21Z",
+"chg24": "58.044",
+"tx24": {
+"buys": 14596,
+"sells": 11274,
+"buyers": 3667,
+"sellers": 3311
+}
+},
+"robinhood_0x5d8910badaa313e4f945a6993d95b40a7e1562dd29750c6437271eb6140c30a1": {
+"pool": "0x5d8910badaa313e4f945a6993d95b40a7e1562dd29750c6437271eb6140c30a1",
+"name": "HITBUY / WETH 0.3%",
+"base": "0x4d8a95531f6e05cc2a6300485f5048ea5379d14d",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 283078.2222,
+"vol24": 17207992.6912313,
+"mcap": null,
+"fdv": "415677.8392",
+"created": "2026-09-23T05:28:50Z",
+"chg24": "1023.343",
+"tx24": {
+"buys": 8108,
+"sells": 6517,
+"buyers": 4224,
+"sellers": 2568
+}
+},
+"robinhood_0x541bedd98337d22c46ff8196494f14e7d9922ddedf07b74df44c7020487e5fdf": {
+"pool": "0x541bedd98337d22c46ff8196494f14e7d9922ddedf07b74df44c7020487e5fdf",
+"name": "Agrippa / musebook",
+"base": "0x83a49b808f8d5e02cb2931cd2352988f498e5ba3",
+"quote": "0x91a2dae9699f0b82540b5886b0d8759c22820ba3",
+"reserve": 2128391.847,
+"vol24": 16648159.3337194,
+"mcap": "0.0",
+"fdv": "6976703.72386725",
+"created": "2026-09-17T16:01:41Z",
+"chg24": "3784.105",
+"tx24": {
+"buys": 20912,
+"sells": 30354,
+"buyers": 3628,
+"sellers": 3560
+}
+},
+"robinhood_0xd4eb21209c4d6093f80b5b84f5c45cc093ea14a3": {
+"pool": "0xd4eb21209c4d6093f80b5b84f5c45cc093ea14a3",
+"name": "NVDA / USDG 0.05%",
+"base": "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 5829352.7072,
+"vol24": 15760754.7984133,
+"mcap": "20057869.3791989",
+"fdv": "19991100.7476828",
+"created": "2026-07-21T11:02:06Z",
+"chg24": "0.411",
+"tx24": {
+"buys": 18566,
+"sells": 16984,
+"buyers": 6478,
+"sellers": 6627
+}
+},
+"robinhood_0xf8a1468fca4504e3f1f62c324afd9cf41345e7d3e7a1a7cd11a3e86236f7cea8": {
+"pool": "0xf8a1468fca4504e3f1f62c324afd9cf41345e7d3e7a1a7cd11a3e86236f7cea8",
+"name": "PKRT / WETH 0.3%",
+"base": "0x6a603bcd27c2913dc76802bd0f4f136ca7253cf0",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 73936.2732,
+"vol24": 15677802.1943615,
+"mcap": null,
+"fdv": "527215.848",
+"created": "2026-09-22T07:14:58Z",
+"chg24": "-65.255",
+"tx24": {
+"buys": 6566,
+"sells": 6045,
+"buyers": 3070,
+"sellers": 2732
+}
+},
+"robinhood_0x3613f0c822f9728c0824fcc996bc66804ba89e5d": {
+"pool": "0x3613f0c822f9728c0824fcc996bc66804ba89e5d",
+"name": "musebook / WETH 0.01%",
+"base": "0x17e900c2a7a16695431469a40ea060d508edd6d2",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 2806.4748,
+"vol24": 15173998.0031736,
+"mcap": null,
+"fdv": "2802.057407",
+"created": "2026-09-22T10:28:56Z",
+"chg24": "-99.347",
+"tx24": {
+"buys": 14761,
+"sells": 8652,
+"buyers": 3116,
+"sellers": 2122
+}
+},
+"robinhood_0x5875d407a42965b0e768c8925cea290e06fa50603ef34fc99eb92a1050e6ae36": {
+"pool": "0x5875d407a42965b0e768c8925cea290e06fa50603ef34fc99eb92a1050e6ae36",
+"name": "META / USDG 0.3%",
+"base": "0xc0d6457c16cc70d6790dd43521c899c87ce02f35",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 4386724.8094,
+"vol24": 14624221.7263679,
+"mcap": "6700823.44863102",
+"fdv": "6661124.73588153",
+"created": "2026-07-11T12:18:48Z",
+"chg24": "0.103",
+"tx24": {
+"buys": 22766,
+"sells": 19691,
+"buyers": 5411,
+"sellers": 6584
+}
+},
+"robinhood_0x16679e2ac1a798865ecf1c1639e67693ddb1c220": {
+"pool": "0x16679e2ac1a798865ecf1c1639e67693ddb1c220",
+"name": "WETH / USDG 0.05%",
+"base": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 567737.5421,
+"vol24": 13477871.6712989,
+"mcap": "97353011.6396324",
+"fdv": "101084922.707985",
+"created": "2026-07-21T03:25:23Z",
+"chg24": "-0.637",
+"tx24": {
+"buys": 21102,
+"sells": 19108,
+"buyers": 3382,
+"sellers": 4026
+}
+},
+"robinhood_0x40a433930370f6cdf0a78debc2c6dd599c23bd428c0d67dd8b5373e4f101557f": {
+"pool": "0x40a433930370f6cdf0a78debc2c6dd599c23bd428c0d67dd8b5373e4f101557f",
+"name": "musebook / META",
+"base": "0x91a2dae9699f0b82540b5886b0d8759c22820ba3",
+"quote": "0xc0d6457c16cc70d6790dd43521c899c87ce02f35",
+"reserve": 8191006.423,
+"vol24": 12583038.7786705,
+"mcap": "31737357.42",
+"fdv": "31736442.8047897",
+"created": "2026-09-16T05:51:12Z",
+"chg24": "61.686",
+"tx24": {
+"buys": 16354,
+"sells": 24753,
+"buyers": 3126,
+"sellers": 3139
+}
+},
+"robinhood_0xaf69d9d9d0dbeaaa2e03eddbd7971d5b536627ba": {
+"pool": "0xaf69d9d9d0dbeaaa2e03eddbd7971d5b536627ba",
+"name": "Euler / WETH 0.01%",
+"base": "0xa2508b15ab16826c720631b9afa0a90c453ae8a4",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 172950.0409,
+"vol24": 12490793.4016931,
+"mcap": null,
+"fdv": "4209499.774",
+"created": "2026-09-23T02:25:33Z",
+"chg24": "152422.103",
+"tx24": {
+"buys": 11430,
+"sells": 2353,
+"buyers": 3180,
+"sellers": 1580
+}
+},
+"robinhood_0xc61284332117c3fb23a2a56cceffd07f7af60029": {
+"pool": "0xc61284332117c3fb23a2a56cceffd07f7af60029",
+"name": "SPCX / USDG 0.05%",
+"base": "0x4a0e65a3eccec6dbe60ae065f2e7bb85fae35eea",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 2515758.6473,
+"vol24": 12273003.9410845,
+"mcap": "11169382.203987",
+"fdv": "11169183.3845426",
+"created": "2026-07-23T11:56:34Z",
+"chg24": "0.766",
+"tx24": {
+"buys": 7824,
+"sells": 7756,
+"buyers": 2988,
+"sellers": 3464
+}
+},
+"robinhood_0x486435a1f76cd58193f854c6e6213cd05fd58d637865d02065ff558b387fa6ea": {
+"pool": "0x486435a1f76cd58193f854c6e6213cd05fd58d637865d02065ff558b387fa6ea",
+"name": "PONS / USDG",
+"base": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 8811081.2261,
+"vol24": 11618227.126028,
+"mcap": "474572685.890765",
+"fdv": "474547512.023437",
+"created": "2026-09-08T13:29:28Z",
+"chg24": "10.013",
+"tx24": {
+"buys": 4582,
+"sells": 2993,
+"buyers": 886,
+"sellers": 783
+}
+},
+"robinhood_0xb6fe1035f6edfaeb7a9f7d4c19e11d35b3bd7c57": {
+"pool": "0xb6fe1035f6edfaeb7a9f7d4c19e11d35b3bd7c57",
+"name": "NOSH / WETH 0.01%",
+"base": "0xabe99cf268cdc8bd70a71a5283fdacbcb36714fd",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 24026.2237,
+"vol24": 9962838.63819855,
+"mcap": null,
+"fdv": "65904.69634",
+"created": "2026-09-23T00:45:40Z",
+"chg24": "2285.104",
+"tx24": {
+"buys": 9697,
+"sells": 2240,
+"buyers": 4291,
+"sellers": 1516
+}
+},
+"robinhood_0x7a35168956f129c032ec035cc47383a605a71df0": {
+"pool": "0x7a35168956f129c032ec035cc47383a605a71df0",
+"name": "WETH / USDG 0.004%",
+"base": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 219222.2547,
+"vol24": 9711714.54891092,
+"mcap": "97353011.6396324",
+"fdv": "101084922.707985",
+"created": "2026-08-20T06:35:54Z",
+"chg24": "-0.637",
+"tx24": {
+"buys": 21846,
+"sells": 20946,
+"buyers": 1505,
+"sellers": 2049
+}
+},
+"robinhood_0x2d8ad2945c6185bdc4fb87a291f0224bcb055a0e06956aa595f88332e57c9b43": {
+"pool": "0x2d8ad2945c6185bdc4fb87a291f0224bcb055a0e06956aa595f88332e57c9b43",
+"name": "PROUTE / WETH 0.3%",
+"base": "0x7af49cb48abbf70d11d786d99242173698119892",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 65781.1658,
+"vol24": 9644028.6890808,
+"mcap": null,
+"fdv": "536907.7809",
+"created": "2026-09-22T19:09:16Z",
+"chg24": "1367.356",
+"tx24": {
+"buys": 4234,
+"sells": 3960,
+"buyers": 2481,
+"sellers": 1901
+}
+},
+"robinhood_0x7138f96a6fb1aa0ebaa9fab58016d0eaa6536dca64127b87e9dc5feb6e9aecfd": {
+"pool": "0x7138f96a6fb1aa0ebaa9fab58016d0eaa6536dca64127b87e9dc5feb6e9aecfd",
+"name": "GOOSE / WETH",
+"base": "0x348cc963411fb82cd6e0b64345714fec94f242cb",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 12581495.2147,
+"vol24": 9575228.44081385,
+"mcap": "117764059.6",
+"fdv": "117764059.6",
+"created": "2026-09-14T11:03:56Z",
+"chg24": "-2.453",
+"tx24": {
+"buys": 216,
+"sells": 205,
+"buyers": 129,
+"sellers": 135
+}
+},
+"robinhood_0x270b58f90b2ef79924f9d7c85d2f2cc15bb31153": {
+"pool": "0x270b58f90b2ef79924f9d7c85d2f2cc15bb31153",
+"name": "Agrippa / WETH 0.01%",
+"base": "0x10f5ba270b0b5da5a4d21369f2c74a300bb16a8b",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 3274.1719,
+"vol24": 9284930.20266702,
+"mcap": null,
+"fdv": "3463.185758",
+"created": "2026-09-22T21:22:52Z",
+"chg24": "25.752",
+"tx24": {
+"buys": 12970,
+"sells": 4963,
+"buyers": 3582,
+"sellers": 2161
+}
+},
+"robinhood_0x3416b8d8aa6ae642ffdc2f65165ff479d4bd3007": {
+"pool": "0x3416b8d8aa6ae642ffdc2f65165ff479d4bd3007",
+"name": "astro / WETH",
+"base": "0x5b81efe5e0ba2b31c0ed843b908a2c45fe6e14c5",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 544514.7614,
+"vol24": 9123333.32333746,
+"mcap": "34040361.76",
+"fdv": "32121955.6859519",
+"created": "2026-09-08T17:01:52Z",
+"chg24": "244.67",
+"tx24": {
+"buys": 4010,
+"sells": 1166,
+"buyers": 795,
+"sellers": 1041
+}
+},
+"robinhood_0x0f0aeac337e7f0872101bcd27a599e7ce5af9adc": {
+"pool": "0x0f0aeac337e7f0872101bcd27a599e7ce5af9adc",
+"name": "HOOD6900 / WETH 0.01%",
+"base": "0x8d5c42c096344e3ad4d5fcac8fe7a4b4ffca0150",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 3523.0715,
+"vol24": 8460970.40563362,
+"mcap": null,
+"fdv": "3237.531684",
+"created": "2026-09-22T18:53:02Z",
+"chg24": "17.495",
+"tx24": {
+"buys": 8940,
+"sells": 4218,
+"buyers": 3133,
+"sellers": 1240
+}
+},
+"robinhood_0x7aebd80541bfaaf23dbb6e99ce13d4d31c1a84c91414f971eadbff7db5f85995": {
+"pool": "0x7aebd80541bfaaf23dbb6e99ce13d4d31c1a84c91414f971eadbff7db5f85995",
+"name": "AI / USDG 0.23%",
+"base": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 1754940.6296,
+"vol24": 7992473.56548436,
+"mcap": "264125059.687145",
+"fdv": "263579708.502566",
+"created": "2026-09-03T14:04:34Z",
+"chg24": "8.876",
+"tx24": {
+"buys": 5629,
+"sells": 5611,
+"buyers": 1733,
+"sellers": 1899
+}
+},
+"robinhood_0xc58bb68060bcb7b3ea0f6d4a4afef1e57f628722e808db12afb6d1733552872f": {
+"pool": "0xc58bb68060bcb7b3ea0f6d4a4afef1e57f628722e808db12afb6d1733552872f",
+"name": "META / USDG 0.031%",
+"base": "0xc0d6457c16cc70d6790dd43521c899c87ce02f35",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 302871.4413,
+"vol24": 7893384.04849216,
+"mcap": "6707472.97931364",
+"fdv": "6667734.87173297",
+"created": "2026-09-17T07:57:05Z",
+"chg24": "0.174",
+"tx24": {
+"buys": 12281,
+"sells": 11166,
+"buyers": 1896,
+"sellers": 1728
+}
+},
+"robinhood_0x4be9657ec9002e528f4f17a5c43edc525a07f888f7b180c2afbf75e096c4f38a": {
+"pool": "0x4be9657ec9002e528f4f17a5c43edc525a07f888f7b180c2afbf75e096c4f38a",
+"name": "PONS / USDG 0.3%",
+"base": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 7385808.7873,
+"vol24": 7065545.48763476,
+"mcap": "474773382.15888",
+"fdv": "474748197.64555",
+"created": "2026-07-18T01:42:13Z",
+"chg24": "9.02",
+"tx24": {
+"buys": 4253,
+"sells": 3997,
+"buyers": 584,
+"sellers": 565
+}
+},
+"robinhood_0xcfa7bb34e23a7022c3de3e1618e1ff29cde8f16a76c341eca19d16f928968a3d": {
+"pool": "0xcfa7bb34e23a7022c3de3e1618e1ff29cde8f16a76c341eca19d16f928968a3d",
+"name": "MONITOR / PLTR",
+"base": "0x1a911bb954daa9cb38513423075be74450351e18",
+"quote": "0x894e1ec2d74ffe5aef8dc8a9e84686accb964f2a",
+"reserve": 877929.4334,
+"vol24": 7058488.43724605,
+"mcap": null,
+"fdv": "6573031.469",
+"created": "2026-09-02T01:38:15Z",
+"chg24": "585.235",
+"tx24": {
+"buys": 11988,
+"sells": 13117,
+"buyers": 1639,
+"sellers": 1660
+}
+},
+"robinhood_0x93cc54eb4e1928e841cb8b2e488bd82e8d97d56e0aab16cf078ef71c576dcded": {
+"pool": "0x93cc54eb4e1928e841cb8b2e488bd82e8d97d56e0aab16cf078ef71c576dcded",
+"name": "musebook / USDG 0.75%",
+"base": "0x91a2dae9699f0b82540b5886b0d8759c22820ba3",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 449998.9904,
+"vol24": 6777678.9155952,
+"mcap": "31480390.37",
+"fdv": "31479483.1601313",
+"created": "2026-09-17T07:47:24Z",
+"chg24": "60.084",
+"tx24": {
+"buys": 14246,
+"sells": 12054,
+"buyers": 2887,
+"sellers": 3009
+}
+},
+"robinhood_0x4462922a33f2b906f132c58e4c8aff6551707abbd302ce584df1cad90f447dc8": {
+"pool": "0x4462922a33f2b906f132c58e4c8aff6551707abbd302ce584df1cad90f447dc8",
+"name": "CAPYTL / WETH 0.3%",
+"base": "0xe5d808900343c08c8c464aee9196f07d6aff92ca",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 496669.5677,
+"vol24": 6066159.87227105,
+"mcap": null,
+"fdv": "1749344.457",
+"created": "2026-09-23T09:20:55Z",
+"chg24": "4702.328",
+"tx24": {
+"buys": 2675,
+"sells": 2327,
+"buyers": 2025,
+"sellers": 1249
+}
+},
+"robinhood_0xbe0048170200c178a9bd1318c53949860c6d82d4": {
+"pool": "0xbe0048170200c178a9bd1318c53949860c6d82d4",
+"name": "GROK / WETH 0.01%",
+"base": "0x55683371036401f8cae676c260efcde9be36a7f4",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 2900.5326,
+"vol24": 5451127.4559926,
+"mcap": null,
+"fdv": "3003.848276",
+"created": "2026-09-22T13:40:16Z",
+"chg24": "9.128",
+"tx24": {
+"buys": 3246,
+"sells": 2167,
+"buyers": 1551,
+"sellers": 423
+}
+},
+"robinhood_0x24107d152f14a76d292123265ae3f3c71f863fc2f4ef7ba49d64e78d28ea379e": {
+"pool": "0x24107d152f14a76d292123265ae3f3c71f863fc2f4ef7ba49d64e78d28ea379e",
+"name": "WETH / USDG 0.01%",
+"base": "0x0000000000000000000000000000000000000000",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 381501.9326,
+"vol24": 5095070.00210807,
+"mcap": null,
+"fdv": "6722550593.17845",
+"created": "2026-07-02T08:58:08Z",
+"chg24": "-0.632",
+"tx24": {
+"buys": 17045,
+"sells": 16143,
+"buyers": 3684,
+"sellers": 4272
+}
+},
+"robinhood_0x8ea31af5f7708acd8666131390c310a00d7b66de": {
+"pool": "0x8ea31af5f7708acd8666131390c310a00d7b66de",
+"name": "USDB / ATC 0.3%",
+"base": "0x65f1f83dd8b702a195e24ea171f8136fb1888888",
+"quote": "0xbfaa6082d6c82e0752a2aa7558746fc5a5daaaaa",
+"reserve": 26775261.9322,
+"vol24": 5013833.67243334,
+"mcap": "0.0",
+"fdv": "10037459929.0",
+"created": "2026-09-13T19:38:46Z",
+"chg24": "0.739",
+"tx24": {
+"buys": 67,
+"sells": 37,
+"buyers": 26,
+"sellers": 14
+}
+},
+"robinhood_0xddcbba3666f578e3f09516f21ff85bfee859ab5e": {
+"pool": "0xddcbba3666f578e3f09516f21ff85bfee859ab5e",
+"name": "SPY / WETH 0.05%",
+"base": "0x117cc2133c37b721f49de2a7a74833232b3b4c0c",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 1739393.7555,
+"vol24": 4970476.24754253,
+"mcap": "21583332.1317864",
+"fdv": "21583324.8436737",
+"created": "2026-08-03T13:56:47Z",
+"chg24": "-0.137",
+"tx24": {
+"buys": 4014,
+"sells": 4410,
+"buyers": 1491,
+"sellers": 1590
+}
+},
+"robinhood_0x62ab521f71431f78ac374cdbadc6cda3c8916b6c": {
+"pool": "0x62ab521f71431f78ac374cdbadc6cda3c8916b6c",
+"name": "NVDA / WETH 0.05%",
+"base": "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 1115873.3071,
+"vol24": 4949916.84884773,
+"mcap": "20095212.3923297",
+"fdv": "19988697.1589708",
+"created": "2026-07-24T14:31:36Z",
+"chg24": "0.398",
+"tx24": {
+"buys": 8070,
+"sells": 8561,
+"buyers": 3133,
+"sellers": 3380
+}
+},
+"robinhood_0xd42a491087a15e5afd51feb3606066cc152d2b09": {
+"pool": "0xd42a491087a15e5afd51feb3606066cc152d2b09",
+"name": "CASHCAT / WETH 0.3%",
+"base": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 2512770.4662,
+"vol24": 4930524.42318369,
+"mcap": "163677295.60595",
+"fdv": "163677294.941523",
+"created": "2026-07-01T19:38:42Z",
+"chg24": "-1.69",
+"tx24": {
+"buys": 5027,
+"sells": 5574,
+"buyers": 930,
+"sellers": 919
+}
+},
+"robinhood_0x670066b2122757fe7e25f5773c51b6248cf33463e2e7a9a83f804b79d5bc46e2": {
+"pool": "0x670066b2122757fe7e25f5773c51b6248cf33463e2e7a9a83f804b79d5bc46e2",
+"name": "PURRF / WETH 0.3%",
+"base": "0x91737810403b892364edf677344e2719f9083f21",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 138867.3085,
+"vol24": 4808335.89738418,
+"mcap": null,
+"fdv": "491881.8498",
+"created": "2026-09-23T04:58:14Z",
+"chg24": "4629.292",
+"tx24": {
+"buys": 3355,
+"sells": 2959,
+"buyers": 2267,
+"sellers": 1429
+}
+},
+"robinhood_0x46525dc119850396470f132c4a989d7192cb692139db891b5a4cdcd684c11b17": {
+"pool": "0x46525dc119850396470f132c4a989d7192cb692139db891b5a4cdcd684c11b17",
+"name": "MEME / USDG 0.297%",
+"base": "0x385f4f8ae47651ce5f58f5265395a669f8281e18",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 1563500.0814,
+"vol24": 4553801.05879136,
+"mcap": "38243660.21",
+"fdv": "38243660.1924356",
+"created": "2026-09-10T22:53:28Z",
+"chg24": "32.542",
+"tx24": {
+"buys": 3861,
+"sells": 4206,
+"buyers": 1208,
+"sellers": 1415
+}
+},
+"robinhood_0xe2b46c905e12ab8e2f864e4821a4325884c1b126": {
+"pool": "0xe2b46c905e12ab8e2f864e4821a4325884c1b126",
+"name": "GME / USDG 0.05%",
+"base": "0x1b0e319c6a659f002271b69db8a7df2f911c153e",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 363749.8314,
+"vol24": 4532119.74255239,
+"mcap": "3593574.79289948",
+"fdv": "3592903.49800589",
+"created": "2026-07-23T20:27:17Z",
+"chg24": "2.016",
+"tx24": {
+"buys": 4889,
+"sells": 5505,
+"buyers": 1878,
+"sellers": 2382
+}
+},
+"robinhood_0xc3c9f0171490ef0f4536fe493f3b0ebb5ee0cb5e": {
+"pool": "0xc3c9f0171490ef0f4536fe493f3b0ebb5ee0cb5e",
+"name": "SPCX / WETH 0.05%",
+"base": "0x4a0e65a3eccec6dbe60ae065f2e7bb85fae35eea",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 1017121.4124,
+"vol24": 4111050.69581807,
+"mcap": "11186952.1636915",
+"fdv": "11186753.0314948",
+"created": "2026-07-20T10:15:53Z",
+"chg24": "0.923",
+"tx24": {
+"buys": 5710,
+"sells": 6007,
+"buyers": 1916,
+"sellers": 2347
+}
+},
+"robinhood_0x7c91df263a3210fb0b94f97cf63e0a55daf35b0bf68cec28f27f1f33621f7afb": {
+"pool": "0x7c91df263a3210fb0b94f97cf63e0a55daf35b0bf68cec28f27f1f33621f7afb",
+"name": "BTC / WETH 0.25%",
+"base": "0x95e7b9b1bdb96748cdfdc2efe1234f849b6136ed",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 0.0,
+"vol24": 4081072.4738902,
+"mcap": null,
+"fdv": "1613030.625",
+"created": "2026-09-22T13:23:58Z",
+"chg24": "53063.679",
+"tx24": {
+"buys": 2590,
+"sells": 2867,
+"buyers": 2378,
+"sellers": 1632
+}
+},
+"robinhood_0x8f15bd8e3dccc4ecd08203664bceb354ac1ec4ce730ca2f9d479aad4e7e54b31": {
+"pool": "0x8f15bd8e3dccc4ecd08203664bceb354ac1ec4ce730ca2f9d479aad4e7e54b31",
+"name": "TTV / WETH 0.25%",
+"base": "0xd79e23da4d8e8df3eb740bc04a10601a9886a44e",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 2408.556,
+"vol24": 3879618.8825166,
+"mcap": null,
+"fdv": "4135.080296",
+"created": "2026-09-22T21:31:12Z",
+"chg24": "-81.053",
+"tx24": {
+"buys": 3031,
+"sells": 3192,
+"buyers": 2774,
+"sellers": 1826
+}
+},
+"robinhood_0x6c96006423d90e4aca950b72e50b143db065917b28537c7ca8fe7cd7d6e30022": {
+"pool": "0x6c96006423d90e4aca950b72e50b143db065917b28537c7ca8fe7cd7d6e30022",
+"name": "CREDITS / WETH",
+"base": "0x39679b59289cce7c7f6e0feacdf39a1e543de751",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 53923.9046,
+"vol24": 3812285.89500651,
+"mcap": null,
+"fdv": "327258.3373",
+"created": "2026-09-23T02:57:10Z",
+"chg24": "419.389",
+"tx24": {
+"buys": 10489,
+"sells": 10354,
+"buyers": 2417,
+"sellers": 2334
+}
+},
+"robinhood_0xba2f1ed4ceb2169d538d1e614d847e83c5a55913": {
+"pool": "0xba2f1ed4ceb2169d538d1e614d847e83c5a55913",
+"name": "gld / USDG 0.05%",
+"base": "0xc9a981fee1f9dec688bb123ccdecc63d0debfc4e",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 1668142.1474,
+"vol24": 3496586.45111904,
+"mcap": "8828760.55054808",
+"fdv": "8828760.13140987",
+"created": "2026-08-26T14:34:45Z",
+"chg24": "-0.178",
+"tx24": {
+"buys": 1542,
+"sells": 1566,
+"buyers": 661,
+"sellers": 770
+}
+},
+"robinhood_0x9f13c53fd8a739b22872366017207845bdb633c09443e82d48630fed492311cb": {
+"pool": "0x9f13c53fd8a739b22872366017207845bdb633c09443e82d48630fed492311cb",
+"name": "SI / NVDA",
+"base": "0x51377fe2ad6137e323500c9db71bb63b867cecab",
+"quote": "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec",
+"reserve": 69145.8923,
+"vol24": 3442053.5589492,
+"mcap": null,
+"fdv": "812663.3045",
+"created": "2026-09-21T15:45:07Z",
+"chg24": "248.898",
+"tx24": {
+"buys": 8959,
+"sells": 8855,
+"buyers": 2081,
+"sellers": 2239
+}
+},
+"robinhood_0xf8ff7ad2a8e79136983d9f8b298886650f234563106c1eddb4efa8c0a960cade": {
+"pool": "0xf8ff7ad2a8e79136983d9f8b298886650f234563106c1eddb4efa8c0a960cade",
+"name": "Grace / WETH 0.01%",
+"base": "0x589be08a24f853baf0e54e0eb56192e0dacfc60f",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 57235.7618,
+"vol24": 3436191.13051324,
+"mcap": null,
+"fdv": "89180.51969",
+"created": "2026-09-23T00:28:55Z",
+"chg24": "545.762",
+"tx24": {
+"buys": 3656,
+"sells": 4588,
+"buyers": 1461,
+"sellers": 1439
+}
+},
+"robinhood_0x34d0dc122cf9a8eb296fc5e0d3a233625d7d19b7": {
+"pool": "0x34d0dc122cf9a8eb296fc5e0d3a233625d7d19b7",
+"name": "GOOGL / USDG 0.05%",
+"base": "0x2e0847e8910a9732eb3fb1bb4b70a580adad4fe3",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 1213520.9643,
+"vol24": 3269613.71211205,
+"mcap": "5668661.96084185",
+"fdv": "5667593.6159482",
+"created": "2026-07-10T22:04:49Z",
+"chg24": "0.266",
+"tx24": {
+"buys": 1830,
+"sells": 2064,
+"buyers": 704,
+"sellers": 894
+}
+},
+"robinhood_0xd64fbda67e1015df43fa5e49f02ca844729e5f94": {
+"pool": "0xd64fbda67e1015df43fa5e49f02ca844729e5f94",
+"name": "DELTA / WETH 1%",
+"base": "0xe8ffd7e24187f72afb08d75b1bb13088a989a791",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 1628463.4943,
+"vol24": 3221723.96820298,
+"mcap": "24361555.41",
+"fdv": "26932926.9605077",
+"created": "2026-07-31T22:59:31Z",
+"chg24": "12.81",
+"tx24": {
+"buys": 2061,
+"sells": 2023,
+"buyers": 750,
+"sellers": 937
+}
+},
+"robinhood_0x2f393b60ef0cfaf669af63284e5592dc3a657b73": {
+"pool": "0x2f393b60ef0cfaf669af63284e5592dc3a657b73",
+"name": "PONS / USDG 0.3%",
+"base": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 405755.6746,
+"vol24": 3177800.19895392,
+"mcap": "475500941.178119",
+"fdv": "475475718.071177",
+"created": "2026-08-19T20:13:45Z",
+"chg24": "9.363",
+"tx24": {
+"buys": 3620,
+"sells": 3250,
+"buyers": 449,
+"sellers": 583
+}
+},
+"robinhood_0x8068ab043efd411b87506c41be1add38faaf18c0af0016c663ca92feff0b8159": {
+"pool": "0x8068ab043efd411b87506c41be1add38faaf18c0af0016c663ca92feff0b8159",
+"name": "WETH / USDG",
+"base": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 56551.605,
+"vol24": 3105377.68660617,
+"mcap": "97353011.6396324",
+"fdv": "101084922.707985",
+"created": "2026-07-10T16:44:02Z",
+"chg24": "-0.637",
+"tx24": {
+"buys": 23973,
+"sells": 19899,
+"buyers": 1906,
+"sellers": 2537
+}
+},
+"robinhood_0x9bcc119a4293ad41b78ee4ad6ced3edf80fc2f53e84ae99eae80d5514c1c4134": {
+"pool": "0x9bcc119a4293ad41b78ee4ad6ced3edf80fc2f53e84ae99eae80d5514c1c4134",
+"name": "Agrippa / USDG 3%",
+"base": "0x83a49b808f8d5e02cb2931cd2352988f498e5ba3",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 378342.6457,
+"vol24": 3056694.92372143,
+"mcap": "0.0",
+"fdv": "6984403.5268671",
+"created": "2026-09-22T20:42:33Z",
+"chg24": "55.238",
+"tx24": {
+"buys": 4235,
+"sells": 3575,
+"buyers": 934,
+"sellers": 985
+}
+},
+"robinhood_0x960f79d8dfec7f2f0c1b24cdac6bb9df1371c6e2": {
+"pool": "0x960f79d8dfec7f2f0c1b24cdac6bb9df1371c6e2",
+"name": "META / USDG 0.3%",
+"base": "0xc0d6457c16cc70d6790dd43521c899c87ce02f35",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 81094.8051,
+"vol24": 3033885.34343402,
+"mcap": "6711306.36866878",
+"fdv": "6671545.55035352",
+"created": "2026-08-11T03:15:51Z",
+"chg24": "0.239",
+"tx24": {
+"buys": 3881,
+"sells": 3129,
+"buyers": 605,
+"sellers": 629
+}
+},
+"robinhood_0x9b050cb1f265094b0977160a2bd7da8c9e529c3c": {
+"pool": "0x9b050cb1f265094b0977160a2bd7da8c9e529c3c",
+"name": "WETH / USDG 0.05%",
+"base": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 1497180.6845,
+"vol24": 3025957.77539865,
+"mcap": "97413482.6824224",
+"fdv": "101147711.835754",
+"created": "2026-08-08T06:52:18Z",
+"chg24": "-0.674",
+"tx24": {
+"buys": 4250,
+"sells": 4060,
+"buyers": 569,
+"sellers": 707
+}
+},
+"robinhood_0xb8c6160c2f2e4674def13c0933a1a7c7d0b8dc73": {
+"pool": "0xb8c6160c2f2e4674def13c0933a1a7c7d0b8dc73",
+"name": "KCAT / WETH",
+"base": "0x6bb7a811e5d542e8cfaeaca2e9d56c35d9078dc4",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 6541.8322,
+"vol24": 3014429.96861845,
+"mcap": null,
+"fdv": "12514.25435",
+"created": "2026-09-22T11:49:05Z",
+"chg24": "354.618",
+"tx24": {
+"buys": 2825,
+"sells": 1876,
+"buyers": 215,
+"sellers": 202
+}
+},
+"robinhood_0xc4a21f9d6485fc5893dd4a491b320a83daf4da1d": {
+"pool": "0xc4a21f9d6485fc5893dd4a491b320a83daf4da1d",
+"name": "AI / WETH 1%",
+"base": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 3685100.0707,
+"vol24": 2896033.61378321,
+"mcap": "265035347.552228",
+"fdv": "264488116.854339",
+"created": "2026-07-22T16:37:33Z",
+"chg24": "7.293",
+"tx24": {
+"buys": 1319,
+"sells": 802,
+"buyers": 660,
+"sellers": 461
+}
+},
+"robinhood_0x51b6ca77deae9f17c1d89edfb301ae50053c57a5": {
+"pool": "0x51b6ca77deae9f17c1d89edfb301ae50053c57a5",
+"name": "PONS / WETH 1%",
+"base": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 672640.7123,
+"vol24": 2851964.19878374,
+"mcap": "475649914.812625",
+"fdv": "475624683.803327",
+"created": "2026-08-06T21:01:23Z",
+"chg24": "9.688",
+"tx24": {
+"buys": 5729,
+"sells": 5984,
+"buyers": 1184,
+"sellers": 1293
+}
+},
+"robinhood_0xe1761b79c14dee11eacff82a172b7cd8cc5c6c679a4fc93c3d6d698c1f56375d": {
+"pool": "0xe1761b79c14dee11eacff82a172b7cd8cc5c6c679a4fc93c3d6d698c1f56375d",
+"name": "GREEN / WETH 0.25%",
+"base": "0x983eb0bc4274919671fce93164f5c3e1af2f9be5",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 0.0,
+"vol24": 2797473.64873588,
+"mcap": null,
+"fdv": "3425.125147",
+"created": "2026-09-22T10:57:14Z",
+"chg24": "12.258",
+"tx24": {
+"buys": 2187,
+"sells": 1768,
+"buyers": 1894,
+"sellers": 1006
+}
+},
+"robinhood_0x53bc8698e8bd26c5708542e58dd5397f71f20236": {
+"pool": "0x53bc8698e8bd26c5708542e58dd5397f71f20236",
+"name": "ShinyHunters / WETH 0.01%",
+"base": "0x9d2a08c3fc38f51c3a9dff56fa552f884e78659e",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 44739.7409,
+"vol24": 2776327.95402682,
+"mcap": null,
+"fdv": "63306.41623",
+"created": "2026-09-23T07:52:30Z",
+"chg24": "361.716",
+"tx24": {
+"buys": 3090,
+"sells": 2949,
+"buyers": 1656,
+"sellers": 1558
+}
+},
+"robinhood_0xb59001413cb070e28433826f927b7265a0813213ba21f454d86896cee3cce674": {
+"pool": "0xb59001413cb070e28433826f927b7265a0813213ba21f454d86896cee3cce674",
+"name": "PONS / WETH",
+"base": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 1663986.5564,
+"vol24": 2759406.58754748,
+"mcap": "474997361.28027",
+"fdv": "474972164.885893",
+"created": "2026-09-04T21:25:11Z",
+"chg24": "9.498",
+"tx24": {
+"buys": 2087,
+"sells": 1648,
+"buyers": 627,
+"sellers": 597
+}
+},
+"robinhood_0x432733840e61898919abd6850d94e2a708621d82fa84656cea0db33142f610a3": {
+"pool": "0x432733840e61898919abd6850d94e2a708621d82fa84656cea0db33142f610a3",
+"name": "AGI / WETH 0.3%",
+"base": "0xfa31d04462746aaa24bc7e5626403e09e4b106ec",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 190609.2492,
+"vol24": 2735548.99431175,
+"mcap": "2869432.305",
+"fdv": "2869432.305",
+"created": "2026-09-21T08:42:23Z",
+"chg24": "1679.88",
+"tx24": {
+"buys": 6303,
+"sells": 5443,
+"buyers": 1371,
+"sellers": 1249
+}
+},
+"robinhood_0xa92a3df27a00a276183ff7265fd8affa11df1fe8bb23ddfaf13f6c879a3f818b": {
+"pool": "0xa92a3df27a00a276183ff7265fd8affa11df1fe8bb23ddfaf13f6c879a3f818b",
+"name": "CASHCAT / USDG 0.269%",
+"base": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 2239776.8249,
+"vol24": 2676936.14832088,
+"mcap": "164429572.127401",
+"fdv": "164429571.45992",
+"created": "2026-07-15T13:39:15Z",
+"chg24": "-1.449",
+"tx24": {
+"buys": 3331,
+"sells": 3579,
+"buyers": 513,
+"sellers": 461
+}
+},
+"robinhood_0x7fb39eb653999feb9f0d3b1410848911383dfc681f3585229df4aa5b560bf0ba": {
+"pool": "0x7fb39eb653999feb9f0d3b1410848911383dfc681f3585229df4aa5b560bf0ba",
+"name": "HOOD / USDG 0.2%",
+"base": "0x32ac8c1d7672667d5ebdea22935f7b06fc8d496f",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 375345.7661,
+"vol24": 2666567.69597335,
+"mcap": null,
+"fdv": "1606183.68000961",
+"created": "2026-09-03T05:36:21Z",
+"chg24": "0.025",
+"tx24": {
+"buys": 1413,
+"sells": 1964,
+"buyers": 347,
+"sellers": 491
+}
+},
+"robinhood_0x18a5af4e442f8be68968cc1f00d537f8af2d12cd": {
+"pool": "0x18a5af4e442f8be68968cc1f00d537f8af2d12cd",
+"name": "NVDA / USDG 0.3%",
+"base": "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 172357.7054,
+"vol24": 2661332.35490673,
+"mcap": "20091372.3829129",
+"fdv": "19984877.5036309",
+"created": "2026-07-22T23:23:27Z",
+"chg24": "0.379",
+"tx24": {
+"buys": 7313,
+"sells": 6348,
+"buyers": 1416,
+"sellers": 1584
+}
+},
+"robinhood_0xb8d9b6b622bb03dd06d95790553f327710a73d85d845a59fa9e652638ca96ae6": {
+"pool": "0xb8d9b6b622bb03dd06d95790553f327710a73d85d845a59fa9e652638ca96ae6",
+"name": "SPY / PLTR 0.05%",
+"base": "0x117cc2133c37b721f49de2a7a74833232b3b4c0c",
+"quote": "0x894e1ec2d74ffe5aef8dc8a9e84686accb964f2a",
+"reserve": 370757.679,
+"vol24": 2654040.75120481,
+"mcap": "21573818.607685",
+"fdv": "21573811.3227847",
+"created": "2026-08-03T19:56:40Z",
+"chg24": "-0.067",
+"tx24": {
+"buys": 1564,
+"sells": 1394,
+"buyers": 735,
+"sellers": 635
+}
+},
+"robinhood_0x02175608f1b5e6b5ed221ccfdc7be197d111d915": {
+"pool": "0x02175608f1b5e6b5ed221ccfdc7be197d111d915",
+"name": "USO / USDG 0.3%",
+"base": "0xa30fa36db767ad9ed3f7a60fc79526fb4d56d344",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 1764338.853,
+"vol24": 2629817.13023395,
+"mcap": "3017335.89830721",
+"fdv": "3017328.38582972",
+"created": "2026-07-17T09:45:08Z",
+"chg24": "0.392",
+"tx24": {
+"buys": 1575,
+"sells": 1211,
+"buyers": 546,
+"sellers": 655
+}
+},
+"robinhood_0x85513696664eb7fed854dce3817252225a01ac2b": {
+"pool": "0x85513696664eb7fed854dce3817252225a01ac2b",
+"name": "SI / WETH 0.01%",
+"base": "0x50c35c073e95d7e4143847502806f3bb1cf46059",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 4445.7445,
+"vol24": 2615450.9450116,
+"mcap": null,
+"fdv": "4618.643849",
+"created": "2026-09-22T17:44:21Z",
+"chg24": "67.672",
+"tx24": {
+"buys": 3019,
+"sells": 2638,
+"buyers": 1307,
+"sellers": 628
+}
+},
+"robinhood_0xe85f633a1374ee279140fa997b547d6a2ccd94fc5eae0e98f7d15ce0e3ddfa93": {
+"pool": "0xe85f633a1374ee279140fa997b547d6a2ccd94fc5eae0e98f7d15ce0e3ddfa93",
+"name": "AI / WETH",
+"base": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 764719.0259,
+"vol24": 2559294.60517704,
+"mcap": "266063733.971968",
+"fdv": "265514379.917238",
+"created": "2026-09-08T13:29:50Z",
+"chg24": "9.215",
+"tx24": {
+"buys": 1470,
+"sells": 1352,
+"buyers": 545,
+"sellers": 641
+}
+},
+"robinhood_0xa77fcf880f58eddc250114ec51876edfd55b03574c12e0c69e48bd84b3ef964b": {
+"pool": "0xa77fcf880f58eddc250114ec51876edfd55b03574c12e0c69e48bd84b3ef964b",
+"name": "NODIUM / WETH 0.05%",
+"base": "0x753bd40e11921abf2a1a01a05ddc836c61753bc1",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 691.006,
+"vol24": 2550969.51038009,
+"mcap": null,
+"fdv": "64258.15504",
+"created": "2026-09-22T19:36:54Z",
+"chg24": "359.22",
+"tx24": {
+"buys": 2437,
+"sells": 1539,
+"buyers": 298,
+"sellers": 289
+}
+},
+"robinhood_0x38453c115607463ac284820ce959831042f3df4e": {
+"pool": "0x38453c115607463ac284820ce959831042f3df4e",
+"name": "SPY / USDG 0.01%",
+"base": "0x117cc2133c37b721f49de2a7a74833232b3b4c0c",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 414249.6958,
+"vol24": 2504130.52449327,
+"mcap": "21547443.6456986",
+"fdv": "21547436.3697045",
+"created": "2026-08-19T22:11:37Z",
+"chg24": "-0.224",
+"tx24": {
+"buys": 2525,
+"sells": 2630,
+"buyers": 953,
+"sellers": 1124
+}
+},
+"robinhood_0x654e4143e82a5824445ade0824351c2a9acd95a8": {
+"pool": "0x654e4143e82a5824445ade0824351c2a9acd95a8",
+"name": "CRCL / USDG 0.3%",
+"base": "0xdf0992e440dd0be65bd8439b609d6d4366bf1cb5",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 1939427.8693,
+"vol24": 2497446.25510825,
+"mcap": "3800387.00222677",
+"fdv": "3800684.12266605",
+"created": "2026-08-14T17:09:39Z",
+"chg24": "-2.451",
+"tx24": {
+"buys": 1267,
+"sells": 1697,
+"buyers": 435,
+"sellers": 497
+}
+},
+"robinhood_0xaae0d815ee56e4092a5e5c2911e676fea50b2d6d": {
+"pool": "0xaae0d815ee56e4092a5e5c2911e676fea50b2d6d",
+"name": "AAPL / USDG 0.05%",
+"base": "0xaf3d76f1834a1d425780943c99ea8a608f8a93f9",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 555072.8206,
+"vol24": 2427100.96356705,
+"mcap": "5394249.90364898",
+"fdv": "5394206.47308867",
+"created": "2026-07-27T16:51:58Z",
+"chg24": "0.205",
+"tx24": {
+"buys": 1600,
+"sells": 1796,
+"buyers": 705,
+"sellers": 862
+}
+},
+"robinhood_0x2be4059b18d9ed7bab3b6772edaefd495252f8508363b5425865b860514ea03c": {
+"pool": "0x2be4059b18d9ed7bab3b6772edaefd495252f8508363b5425865b860514ea03c",
+"name": "PURRF / WETH 0.3%",
+"base": "0x6ef17777216eefdbc8906c80877b46a8a3cdd4ad",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 7583.9496,
+"vol24": 2419186.46242887,
+"mcap": null,
+"fdv": "344201.6885",
+"created": "2026-09-22T12:22:56Z",
+"chg24": "3792.917",
+"tx24": {
+"buys": 1790,
+"sells": 1407,
+"buyers": 1483,
+"sellers": 753
+}
+},
+"robinhood_0x92dac68c563be3905ff1a0f6e8a8d635cb536b861516ebb3abb370ed0aa81ea4": {
+"pool": "0x92dac68c563be3905ff1a0f6e8a8d635cb536b861516ebb3abb370ed0aa81ea4",
+"name": "RIG / WETH 0.05%",
+"base": "0x4c7c1f29bc6be6c51d372f4edb3f68e77e34ab40",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 831.8919,
+"vol24": 2399919.84704511,
+"mcap": null,
+"fdv": "58111.84226",
+"created": "2026-09-22T17:12:05Z",
+"chg24": "88.826",
+"tx24": {
+"buys": 2384,
+"sells": 1590,
+"buyers": 300,
+"sellers": 290
+}
+},
+"robinhood_0x54f7883914619af9105355bf83ed678bcf9f63560218ac61c9963b9503d0ba32": {
+"pool": "0x54f7883914619af9105355bf83ed678bcf9f63560218ac61c9963b9503d0ba32",
+"name": "WETH / USDG 0.046%",
+"base": "0x0000000000000000000000000000000000000000",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 1624464.9746,
+"vol24": 2340488.78824307,
+"mcap": null,
+"fdv": "6726726320.64422",
+"created": "2026-07-08T14:30:35Z",
+"chg24": "-0.614",
+"tx24": {
+"buys": 5976,
+"sells": 6297,
+"buyers": 1429,
+"sellers": 1408
+}
+},
+"robinhood_0xb2db274d30cc14242c08300e04462c69533860793ca93b17859c98f5c06e1a67": {
+"pool": "0xb2db274d30cc14242c08300e04462c69533860793ca93b17859c98f5c06e1a67",
+"name": "FCAT / WETH 0.01%",
+"base": "0x1608502531e59c2aa5168921d3850285624c17f6",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 0.0,
+"vol24": 2335185.17552188,
+"mcap": null,
+"fdv": "1247018.989",
+"created": "2026-09-22T14:54:56Z",
+"chg24": "4446.368",
+"tx24": {
+"buys": 1350,
+"sells": 1998,
+"buyers": 461,
+"sellers": 447
+}
+},
+"robinhood_0x039f6bb9a27d1e84981e167e507a0912c18b1efecc7a5f64c196ee1b5dc125e2": {
+"pool": "0x039f6bb9a27d1e84981e167e507a0912c18b1efecc7a5f64c196ee1b5dc125e2",
+"name": "BOBCOIN / WETH 0.05%",
+"base": "0x86259b991f25c94135d4b5150da16fb2908b0730",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 1120.7471,
+"vol24": 2334045.51368073,
+"mcap": null,
+"fdv": "119753.1376",
+"created": "2026-09-22T20:22:26Z",
+"chg24": "364.659",
+"tx24": {
+"buys": 2263,
+"sells": 1441,
+"buyers": 309,
+"sellers": 295
+}
+},
+"robinhood_0xee430ee1003e1985e1828a01b9a20dad67ad4302994fe2abb4a173de4ac54623": {
+"pool": "0xee430ee1003e1985e1828a01b9a20dad67ad4302994fe2abb4a173de4ac54623",
+"name": "PLTR / USDG 1%",
+"base": "0x894e1ec2d74ffe5aef8dc8a9e84686accb964f2a",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 963216.9098,
+"vol24": 2315638.13050316,
+"mcap": "2753171.70701854",
+"fdv": "2753168.67701297",
+"created": "2026-07-11T16:17:29Z",
+"chg24": "0.908",
+"tx24": {
+"buys": 1837,
+"sells": 1555,
+"buyers": 470,
+"sellers": 615
+}
+},
+"robinhood_0x23734c5f0fad281c2b6b7b21ea55f0a2ed2b4098fc7ff9af8a004f979b6de958": {
+"pool": "0x23734c5f0fad281c2b6b7b21ea55f0a2ed2b4098fc7ff9af8a004f979b6de958",
+"name": "SI / WETH 0.05%",
+"base": "0xb805bdcf7abc82c8c1d8d0ec4ed71ff67b58f048",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 932.3531,
+"vol24": 2312718.21582205,
+"mcap": null,
+"fdv": "81627.05866",
+"created": "2026-09-22T15:28:25Z",
+"chg24": "138.164",
+"tx24": {
+"buys": 2620,
+"sells": 1545,
+"buyers": 326,
+"sellers": 301
+}
+},
+"robinhood_0xb4619c2502932d4c10623f1862982b477536c2788648b2fda718aaf05c748523": {
+"pool": "0xb4619c2502932d4c10623f1862982b477536c2788648b2fda718aaf05c748523",
+"name": "SHIB / WETH 0.25%",
+"base": "0xd136b862ebbb1bd362a637ed67b7b0efe1052e7f",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 0.0,
+"vol24": 2295231.38148063,
+"mcap": null,
+"fdv": "3580.856301",
+"created": "2026-09-23T08:27:21Z",
+"chg24": "-81.639",
+"tx24": {
+"buys": 1945,
+"sells": 1515,
+"buyers": 1697,
+"sellers": 749
+}
+},
+"robinhood_0x4934df89697bbea8898b4aaccca9e1d83cdb70409d9e90a1a9036384117aef52": {
+"pool": "0x4934df89697bbea8898b4aaccca9e1d83cdb70409d9e90a1a9036384117aef52",
+"name": "BET / WETH 0.05%",
+"base": "0x1df7abb9d130e373f00bb1edec798cd4194a3845",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 1174.2461,
+"vol24": 2247049.57601863,
+"mcap": null,
+"fdv": "132556.0145",
+"created": "2026-09-22T19:14:53Z",
+"chg24": "290.513",
+"tx24": {
+"buys": 2004,
+"sells": 1427,
+"buyers": 301,
+"sellers": 292
+}
+},
+"robinhood_0xf89d70906c1464e5f0853fbb0601c111bfb48ef54537c0527694a559b33dd801": {
+"pool": "0xf89d70906c1464e5f0853fbb0601c111bfb48ef54537c0527694a559b33dd801",
+"name": "META / WETH 0.21%",
+"base": "0xc0d6457c16cc70d6790dd43521c899c87ce02f35",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 449143.7869,
+"vol24": 2243018.67759948,
+"mcap": "6731982.50649171",
+"fdv": "6692099.19337227",
+"created": "2026-09-22T14:44:08Z",
+"chg24": "-1.084",
+"tx24": {
+"buys": 2713,
+"sells": 1657,
+"buyers": 1379,
+"sellers": 963
+}
+},
+"robinhood_0xc73f3cd3fb68288e63f008e08ef69caa0437224e420963c6aeb4526178e87ad9": {
+"pool": "0xc73f3cd3fb68288e63f008e08ef69caa0437224e420963c6aeb4526178e87ad9",
+"name": "STANDARD / WETH 1%",
+"base": "0x88ad8ddf1e3898412146a534538d418c6f8a9062",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 13080517.932,
+"vol24": 2237272.23169104,
+"mcap": "17904559.6464856",
+"fdv": "17903674.3676195",
+"created": "2026-09-15T01:00:30Z",
+"chg24": "-10.161",
+"tx24": {
+"buys": 505,
+"sells": 407,
+"buyers": 234,
+"sellers": 285
+}
+},
+"robinhood_0x63eeaac7a218d31dc36a404cf66b2e2843de4e7c5dd05fed3a9d7ce4e5b19527": {
+"pool": "0x63eeaac7a218d31dc36a404cf66b2e2843de4e7c5dd05fed3a9d7ce4e5b19527",
+"name": "NOSH / USDG 2%",
+"base": "0xe02c53d448a62067b2ac10ed70f5bc6c29471386",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 246197.7534,
+"vol24": 2215679.92966863,
+"mcap": "3317301.6349878",
+"fdv": "3316708.97504436",
+"created": "2026-09-21T02:50:19Z",
+"chg24": "20.685",
+"tx24": {
+"buys": 3368,
+"sells": 3213,
+"buyers": 864,
+"sellers": 1063
+}
+},
+"robinhood_0xf399bd1544377680d48c62fd85c2105b869e55906c4189cc5ab3b4e83446928c": {
+"pool": "0xf399bd1544377680d48c62fd85c2105b869e55906c4189cc5ab3b4e83446928c",
+"name": "U / USDG 0.008%",
+"base": "0xce24439f2d9c6a2289f741120fe202248b666666",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 3039593.098,
+"vol24": 2147178.69504996,
+"mcap": "1417920518.13853",
+"fdv": "29968317.4674512",
+"created": "2026-09-10T09:04:36Z",
+"chg24": "-0.061",
+"tx24": {
+"buys": 1917,
+"sells": 1921,
+"buyers": 423,
+"sellers": 473
+}
+},
+"robinhood_0x778a632fdd85577efe9cfce4a2c9ac91b9decdb24c351f9b56e25d38fbe587b4": {
+"pool": "0x778a632fdd85577efe9cfce4a2c9ac91b9decdb24c351f9b56e25d38fbe587b4",
+"name": "SHROOM / USDG 0.9%",
+"base": "0xab093def657f15df31b33922a95e047add645b29",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 1385272.1447,
+"vol24": 2144288.91187822,
+"mcap": "19798567.2603714",
+"fdv": "19798516.227505",
+"created": "2026-09-03T14:09:24Z",
+"chg24": "62.804",
+"tx24": {
+"buys": 2748,
+"sells": 4001,
+"buyers": 764,
+"sellers": 1036
+}
+},
+"robinhood_0x6ac6b3a1e78c32ab48152ec079c12014d2a72e8c": {
+"pool": "0x6ac6b3a1e78c32ab48152ec079c12014d2a72e8c",
+"name": "ZFORGE / WETH",
+"base": "0xb6a906d2d95e862cf4fd43b9e30162aee19eed8d",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 34472.1428,
+"vol24": 2140520.99775773,
+"mcap": "56621.15469",
+"fdv": "53059.3477747267",
+"created": "2026-09-10T13:56:56Z",
+"chg24": "-4.33",
+"tx24": {
+"buys": 3787,
+"sells": 3566,
+"buyers": 302,
+"sellers": 254
+}
+},
+"robinhood_0xea9f200e13055b82f175f44f592c4c13dd8c9d9320a66487d3c5cd90d68550ef": {
+"pool": "0xea9f200e13055b82f175f44f592c4c13dd8c9d9320a66487d3c5cd90d68550ef",
+"name": "ORBIO / USDG 0.8%",
+"base": "0xaa07a0e9209e16ac99708c3ec70159c6ef3128a3",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 761638.7282,
+"vol24": 2135937.22164555,
+"mcap": "75500296.6655",
+"fdv": "75500286.6294421",
+"created": "2026-09-20T07:06:54Z",
+"chg24": "11.502",
+"tx24": {
+"buys": 2165,
+"sells": 2308,
+"buyers": 861,
+"sellers": 1071
+}
+},
+"robinhood_0x1e311f680bfd847c3a78121837186afcc5d6a7a1402388783d1b27abfd5a96c1": {
+"pool": "0x1e311f680bfd847c3a78121837186afcc5d6a7a1402388783d1b27abfd5a96c1",
+"name": "JEV / WETH 0.05%",
+"base": "0x675279fe3259dcd20b1520399d2977dad042bf3f",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 1085.2545,
+"vol24": 2107678.00408186,
+"mcap": null,
+"fdv": "157098.765",
+"created": "2026-09-22T16:47:50Z",
+"chg24": "282.186",
+"tx24": {
+"buys": 2068,
+"sells": 1483,
+"buyers": 194,
+"sellers": 191
+}
+},
+"robinhood_0x4e3c581d3043cfc06bfd425011cc3f590f2db319cd9f2103927f5a978194914d": {
+"pool": "0x4e3c581d3043cfc06bfd425011cc3f590f2db319cd9f2103927f5a978194914d",
+"name": "Agrippa / USDG 1.01%",
+"base": "0x83a49b808f8d5e02cb2931cd2352988f498e5ba3",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 228781.4499,
+"vol24": 2103714.11403498,
+"mcap": "0.0",
+"fdv": "6922530.66286828",
+"created": "2026-09-22T20:52:47Z",
+"chg24": "5.171",
+"tx24": {
+"buys": 8414,
+"sells": 6731,
+"buyers": 1486,
+"sellers": 1472
+}
+},
+"robinhood_0xb7f10f74b39291b9290b779978e19a7637c742d6": {
+"pool": "0xb7f10f74b39291b9290b779978e19a7637c742d6",
+"name": "PIPEDOG / WETH 1%",
+"base": "0x5cb6f181081301b44905f3ae15419112ecabd8a6",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 8714162.0865,
+"vol24": 2028282.72617528,
+"mcap": "26549429.9200087",
+"fdv": "26549429.8867108",
+"created": "2026-07-28T20:31:52Z",
+"chg24": "-7.359",
+"tx24": {
+"buys": 523,
+"sells": 1934,
+"buyers": 148,
+"sellers": 167
+}
+},
+"robinhood_0x31608601d541e868706aa557558a4d4f99c57e6dd13bd3362edcf05d00a16212": {
+"pool": "0x31608601d541e868706aa557558a4d4f99c57e6dd13bd3362edcf05d00a16212",
+"name": "CASHCAT / USDG",
+"base": "0x020bfc650a365f8bb26819deaabf3e21291018b4",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 712157.3625,
+"vol24": 1978972.85726131,
+"mcap": "163654611.032864",
+"fdv": "163654610.36853",
+"created": "2026-09-04T21:25:02Z",
+"chg24": "-1.989",
+"tx24": {
+"buys": 1172,
+"sells": 1393,
+"buyers": 324,
+"sellers": 386
+}
+},
+"robinhood_0xa4bdb396a69617eb7f70e2cc1ef526f7340b1b0d": {
+"pool": "0xa4bdb396a69617eb7f70e2cc1ef526f7340b1b0d",
+"name": "META / WETH 0.3%",
+"base": "0xc0d6457c16cc70d6790dd43521c899c87ce02f35",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 503795.1347,
+"vol24": 1973006.49554878,
+"mcap": "6727670.42602218",
+"fdv": "6687812.65962028",
+"created": "2026-08-01T05:05:10Z",
+"chg24": "0.691",
+"tx24": {
+"buys": 2859,
+"sells": 3876,
+"buyers": 1318,
+"sellers": 1087
+}
+},
+"robinhood_0x1e3ba04aa20ecccfb9a174a5b2cb15c81f2c9c2c20cf40e895fadfdf33367c4f": {
+"pool": "0x1e3ba04aa20ecccfb9a174a5b2cb15c81f2c9c2c20cf40e895fadfdf33367c4f",
+"name": "SI / WETH",
+"base": "0x7c2ce195c5260c45d0980d21a2822df6a35d9a80",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 6829.2407,
+"vol24": 1969590.94231131,
+"mcap": null,
+"fdv": "4240.888203",
+"created": "2026-09-23T03:48:46Z",
+"chg24": "-92.631",
+"tx24": {
+"buys": 13885,
+"sells": 9899,
+"buyers": 3361,
+"sellers": 2979
+}
+},
+"robinhood_0x10cc6bd38112cac182db90b6a71d8bb5939526ba": {
+"pool": "0x10cc6bd38112cac182db90b6a71d8bb5939526ba",
+"name": "PONS / WETH 1%",
+"base": "0x39dbed3a2bd333467115de45665cc57f813c4571",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 4794849.6433,
+"vol24": 1956873.47979469,
+"mcap": "482400319.46136",
+"fdv": "482374730.374582",
+"created": "2026-07-13T20:42:21Z",
+"chg24": "10.431",
+"tx24": {
+"buys": 2004,
+"sells": 1220,
+"buyers": 351,
+"sellers": 301
+}
+},
+"robinhood_0x9245e13dec0f99a31b201a2f930471f077d5b82f64bfffdf1a91cf32abb5df13": {
+"pool": "0x9245e13dec0f99a31b201a2f930471f077d5b82f64bfffdf1a91cf32abb5df13",
+"name": "GTC / WETH 0.05%",
+"base": "0x179bf4b6b504f1e067512c0a171ff9a07d22cdc9",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 1255.346,
+"vol24": 1943076.31876256,
+"mcap": null,
+"fdv": "199671.9678",
+"created": "2026-09-22T16:27:39Z",
+"chg24": "303.583",
+"tx24": {
+"buys": 2069,
+"sells": 1250,
+"buyers": 295,
+"sellers": 286
+}
+},
+"robinhood_0x6e936b0fdb7d187ff3b1518c38d5f7ee91284b6a": {
+"pool": "0x6e936b0fdb7d187ff3b1518c38d5f7ee91284b6a",
+"name": "Tweenix / WETH 0.01%",
+"base": "0x135f8f75ec9605517cc0ff008a0f216445e23ecd",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 16572.86,
+"vol24": 1882749.72456378,
+"mcap": null,
+"fdv": "16707.00056",
+"created": "2026-09-22T12:07:27Z",
+"chg24": "1.458",
+"tx24": {
+"buys": 2403,
+"sells": 2017,
+"buyers": 1630,
+"sellers": 1303
+}
+},
+"robinhood_0xf4d0171f995d576b972aa982080eaf4da456cf9e": {
+"pool": "0xf4d0171f995d576b972aa982080eaf4da456cf9e",
+"name": "WETH / USDG 0.005%",
+"base": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 193630.8802,
+"vol24": 1722886.03065675,
+"mcap": "97353011.6396324",
+"fdv": "101084922.707985",
+"created": "2026-09-10T11:03:33Z",
+"chg24": "-0.637",
+"tx24": {
+"buys": 12247,
+"sells": 11859,
+"buyers": 2361,
+"sellers": 3025
+}
+},
+"robinhood_0x2a4e49b6f4026be2d9c4cc273f389d986256e27b18950a8967d1daa095b27978": {
+"pool": "0x2a4e49b6f4026be2d9c4cc273f389d986256e27b18950a8967d1daa095b27978",
+"name": "AD / WETH 0.25%",
+"base": "0x63ffd4aa844f4befcee1b4606e467d1d209a926b",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 68366.801,
+"vol24": 688975.230968577,
+"mcap": "362253.3205",
+"fdv": "362253.3205",
+"created": "2026-09-17T17:07:49Z",
+"chg24": "-11.327",
+"tx24": {
+"buys": 9293,
+"sells": 8747,
+"buyers": 5168,
+"sellers": 4918
+}
+},
+"robinhood_0xdde13ccbbcd10c5fc3351c284eabc77114d2a88078eb1cfd20062124e939d4cf": {
+"pool": "0xdde13ccbbcd10c5fc3351c284eabc77114d2a88078eb1cfd20062124e939d4cf",
+"name": "WETH / USDG 0.009%",
+"base": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"quote": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"reserve": 101825.5353,
+"vol24": 349384.007401587,
+"mcap": "97369829.0302308",
+"fdv": "101102384.773104",
+"created": "2026-09-08T10:22:25Z",
+"chg24": "-0.657",
+"tx24": {
+"buys": 7661,
+"sells": 6865,
+"buyers": 479,
+"sellers": 844
+}
+},
+"robinhood_0xb5600a49c1a3fe21e8a2fb97e6ca0241d3fb0999915b9443f1c9a9986d75abcc": {
+"pool": "0xb5600a49c1a3fe21e8a2fb97e6ca0241d3fb0999915b9443f1c9a9986d75abcc",
+"name": "META / museic",
+"base": "0xc0d6457c16cc70d6790dd43521c899c87ce02f35",
+"quote": "0xed97b68ae1be330963eb161a11beb1cf5fe71ba3",
+"reserve": 172648.8914,
+"vol24": 1290489.98940127,
+"mcap": "6703871.70666388",
+"fdv": "6664154.93465332",
+"created": "2026-09-18T01:50:44Z",
+"chg24": "0.089",
+"tx24": {
+"buys": 8004,
+"sells": 5141,
+"buyers": 1019,
+"sellers": 1015
+}
+},
+"robinhood_0x84bd4e2d8be11aeb0afc1195b38f587b61e90068548f1063fdbe448fb8cad0b6": {
+"pool": "0x84bd4e2d8be11aeb0afc1195b38f587b61e90068548f1063fdbe448fb8cad0b6",
+"name": "USDG / WETH 0.02%",
+"base": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+"quote": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+"reserve": 376455.2531,
+"vol24": 1741185.47741884,
+"mcap": "3267510981.41951",
+"fdv": "716398143.194872",
+"created": "2026-07-16T14:37:48Z",
+"chg24": "0.042",
+"tx24": {
+"buys": 5958,
+"sells": 6921,
+"buyers": 2126,
+"sellers": 2016
+}
+},
+"robinhood_0x9ad47e7843a1cc7ca08414a91cf1ab7b6076f4c123daf0b4a690f7d6eaaa0639": {
+"pool": "0x9ad47e7843a1cc7ca08414a91cf1ab7b6076f4c123daf0b4a690f7d6eaaa0639",
+"name": "GIT / WETH",
+"base": "0xa7a3a32fc7ac9b2159b451b9014f85a44b7d394e",
+"quote": "0x0000000000000000000000000000000000000000",
+"reserve": 7393.6494,
+"vol24": 1794877.29216318,
+"mcap": null,
+"fdv": "5708.820328",
+"created": "2026-09-22T18:08:01Z",
+"chg24": "-90.166",
+"tx24": {
+"buys": 5821,
+"sells": 6216,
+"buyers": 1616,
+"sellers": 1684
+}
+}
+}
