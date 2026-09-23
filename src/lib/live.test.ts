@@ -15,6 +15,14 @@ describe("audit SSE liveness", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([false, true])("opts into server token completion only for a public scan (private=%s)", async priv => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('event: error\ndata: {"error":"stopped"}\n\n'));
+    vi.stubGlobal("fetch", fetcher);
+    streamAudit("@argus", priv, { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() }, "investment_due_diligence", undefined, "owned-run-123", true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(String(fetcher.mock.calls[0][0]).includes("tokenExecution=server")).toBe(!priv);
+  });
+
   it("allows a responsive audit to run past the former 195 second client cap", async () => {
     let streamController!: ReadableStreamDefaultController<Uint8Array>;
     const body = new ReadableStream<Uint8Array>({

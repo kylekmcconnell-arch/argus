@@ -128,6 +128,7 @@ export function startPersonAudit(
   const recoveryController = new AbortController();
   let recoveryStarted = false;
   let finalizationStarted = false;
+  let serverOwnsToken = false;
   let threatLeg: Promise<ThreatScan | null> | null = null;
   /** Provenance is absent only when a stale server announced without it. */
   type AnnouncedCandidate = Omit<TokenCandidate, "binding"> & { binding?: TokenCandidate["binding"] };
@@ -178,7 +179,7 @@ export function startPersonAudit(
     // last resort here; it is gone on purpose (#321): anyone can mint a token
     // in anyone's name, so a same-name listing is never evidence that the
     // token is the subject's, and the server rightly refused to save it.
-    if (!threatLeg) {
+    if (!threatLeg && d.tokenAssessment?.owner !== "server") {
       const cand = tokenFromVerifiedProjectToken(d.projectToken)
         ?? tokenFromBio(d.bio)
         ?? tokenFromPromotions(d.evidence?.promotions);
@@ -278,7 +279,9 @@ export function startPersonAudit(
       const result = await fetchPersonRun(run.runKey!, run.handle, recoveryController.signal);
       if (runs.get(key) !== run || recoveryController.signal.aborted || finalizationStarted) return;
       if (result.state === "saved") {
-        pushStep({ phase: "ARGUS · Recovery", label: "Project evidence recovered", detail: "The exact saved result was recovered. Completing and saving its linked-token assessment.", source: "argus", tone: "good" });
+        pushStep({ phase: "ARGUS · Recovery", label: "Project evidence recovered", detail: result.dossier.tokenAssessment?.owner === "server"
+          ? "The server saved the project and linked-token assessment. Opening that exact version."
+          : "The exact saved result was recovered. Completing and saving its linked-token assessment.", source: "argus", tone: "good" });
         await finalize(result.dossier);
         return;
       }
@@ -305,12 +308,13 @@ export function startPersonAudit(
   const abortStream = streamAudit(key, priv, {
     onStep: (s) => {
       if (runs.get(key) !== run || finalizationStarted) return;
+      if (s.tokenExecution === "server") serverOwnsToken = true;
       run.steps = [...run.steps, s];
       // Open-ended progress: ramp asymptotically toward ~92% by step count.
       run.pct = Math.min(92, run.steps.length * 11);
       emit();
       // The server's mid-stream token announcement - start the parallel leg.
-      if (s.token) startThreatLeg(s.token);
+      if (s.token && !serverOwnsToken) startThreatLeg(s.token);
     },
     onDone: (d) => { void finalize(d); },
     onError: (e, failure) => {
@@ -323,9 +327,9 @@ export function startPersonAudit(
       aborts.delete(key);
       emit();
     },
-  }, intent, undefined, run.runKey);
-  // Cancelling a run stops both legs: the SSE stream and any threat scan
-  // still spending on its behalf.
+  }, intent, undefined, run.runKey, !priv);
+  // Cancelling detaches this view and stops browser-owned work. An opted-in
+  // server investigation remains authorized and finishes its bounded save.
   aborts.set(key, () => {
     abortStream();
     recoveryController.abort();

@@ -76,10 +76,9 @@ arrived. Completion waits for the final combined save. A failed combined save is
 shown as a failure, not completion of the earlier project-only version. Late
 stream events and cancelled recovery responses cannot finalize the run again.
 
-This recovery requires the browser session to remain alive. Closing or reloading
-the page can still interrupt the browser-owned token leg; durable server-side
-execution of that leg is separate work. Recovery does not rerun a failed scorer,
-fill missing evidence, or rewrite a historical snapshot.
+Legacy browser-owned runs still need the browser session to remain alive. New
+public scans use the server-owned completion path below. Recovery does not rerun
+a failed scorer, fill missing evidence, or rewrite a historical snapshot.
 
 Presentation revision `2026-09-23.1` clarifies that a displayed partial score
 covers assessed areas only and remains provisional. Unmeasured areas are not
@@ -93,3 +92,44 @@ combined saves. Run the full test suite, typecheck, build, calibration and relea
 canaries before merging through the protected branch. No database migration is
 required. Roll back this recovery change by reverting its commit through the
 same protected workflow; immutable saved reports remain intact.
+
+
+## Server-owned linked-token completion
+
+New public person/project launches request `tokenExecution=server`. After the
+normal authentication, credit reservation and unique run claim, the API announces
+ownership before token trace events. The browser then displays progress without
+starting a duplicate token leg. Older clients and private scans retain their
+existing behavior; the explicit opt-in also lets a new browser use an older API.
+
+The server completes collection, selects the attributed contract using the same
+canonical/bio/promotion provenance, then runs the shared token scanner. A known
+canonical chain constrains resolution. A namesake, wrong contract or wrong chain
+cannot become the linked result. Token work has at most 180 seconds and stops
+before the final 30 seconds of the existing 600-second invocation budget, which
+are reserved for persistence. Sequential finalization may add latency compared
+with the older parallel browser leg, but never extends the function ceiling.
+
+`waitUntil` keeps the authorized invocation alive when the browser disconnects.
+The server persists one combined immutable snapshot, publishes the existing
+server audit/graph binding and finishes the receipt. The browser reads version
+metadata instead of creating a second combined version. Token failures remain
+explicitly unavailable and mark the receipt degraded; they do not erase project
+evidence or fabricate token scores. The server's receipt names the combined
+version, so exact-run recovery reopens it without another scan.
+
+Internal API calls use request-local network context with the initiating user's
+bearer and the scan-bound panel capability. Normal middleware permission and
+spending controls still apply; this path does not use the internal admin bypass.
+Credentials are sent only to relative API routes on the deployment hostname from
+server configuration. Authenticated redirects are rejected. Public provider
+requests receive no injected credentials, and concurrent organizations cannot
+share request context. Server-capable transport also enables the same sanctions,
+creator and deployer checks that previously required a browser origin.
+
+This is bounded completion within one function invocation, not a durable queue.
+A platform crash, forced termination, expired user credential or provider outage
+can still prevent completion. Closing/cancelling the view does not revoke the
+already-authorized server investigation. No automatic replacement project scan
+or additional project-scan credit is introduced. No migration is required;
+rollback uses the protected revert workflow.

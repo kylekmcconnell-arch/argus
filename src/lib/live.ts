@@ -73,6 +73,7 @@ export function streamAudit(
   intent: ResearchIntent = "investment_due_diligence",
   seed?: { tokenAddress?: string; tokenChain?: string; tokenSymbol?: string },
   creditKey: string = crypto.randomUUID(),
+  serverToken = false,
 ): () => void {
   const ctrl = new AbortController();
   let settled = false;
@@ -101,6 +102,7 @@ export function streamAudit(
         params.set("chain", seed.tokenChain);
         if (seed.tokenSymbol) params.set("symbol", seed.tokenSymbol);
       }
+      if (serverToken && !priv) params.set("tokenExecution", "server");
       const res = await fetch(`/api/audit?${params.toString()}`, {
         method: "POST",
         cache: "no-store",
