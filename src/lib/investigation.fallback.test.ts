@@ -71,7 +71,7 @@ function namesakeRecon(content: string) {
   };
 }
 
-function modelLeadFetch(website: string) {
+function modelLeadFetch(website: string | null) {
   return vi.fn(async (input: string | URL | Request) => {
     if (String(input).startsWith("/api/token-identity?")) {
       return new Response(JSON.stringify({ available: true, website, x_handle: null, founder: null, founder_handle: null, confidence: "low" }), { status: 200 });
@@ -154,6 +154,7 @@ describe("combined token investigation fallback", () => {
   });
 
   it("keeps a thin memecoin as an honest token-only result when no project identity resolves", async () => {
+    vi.stubGlobal("fetch", modelLeadFetch(null));
     const steps: string[] = [];
     const result = await new Promise<Investigation>((resolve, reject) => {
       streamInvestigation({ kind: "token", via: "evm", ref: MEME_ADDRESS }, {
@@ -176,4 +177,22 @@ describe("combined token investigation fallback", () => {
     expect(harness.runRecon).not.toHaveBeenCalled();
     expect(harness.streamAudit).not.toHaveBeenCalled();
   });
+});
+
+
+it.each([409, 429, 503])("preserves an identity lookup HTTP %s as an assessment gap", async (status) => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status })));
+  const { result, steps } = await runInvestigation();
+  expect(result.identityDiscovery?.state).toBe("failed");
+  expect(result.projectAccountAudit?.note).toContain(`HTTP ${status}`);
+  expect(result.founderNote).toContain("have not been assessed");
+  expect(result.founderNote).not.toContain("team is not stated");
+  expect(steps.join(" ")).toContain("Identity discovery incomplete");
+});
+
+it("does not treat a provider error in a successful HTTP response as a completed identity search", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ available: true, error: "provider failure" }))));
+  const { result } = await runInvestigation();
+  expect(result.identityDiscovery?.state).toBe("failed");
+  expect(result.projectAccountAudit?.note).toContain("Project context remains unassessed");
 });

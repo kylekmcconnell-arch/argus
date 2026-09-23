@@ -368,6 +368,14 @@ describe("provider usage status attribution", () => {
     );
   });
 
+  it("does not publish malformed identity output as a completed search", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ output_text: "{}" }), { status: 200 })));
+    const { res, captured } = response();
+    await tokenIdentityHandler({ headers: panelHeaders, query: { symbol: "ARGUS" } } as never, res as never);
+    expect(captured.body).toMatchObject({ available: false, error: "identity_output_invalid" });
+    expect(cacheSetJson).not.toHaveBeenCalled();
+  });
+
   it("records an unreadable token-identity response as failed", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));
     const { res } = response();

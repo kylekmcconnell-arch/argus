@@ -29,7 +29,7 @@ import {
 } from "./sources";
 
 export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string; assessed?: boolean; nominalWeight?: number; evidenceRefs?: string[] }
-export interface Holder { address: string; percent: number; tag?: string; isContract?: boolean }
+export interface Holder { address: string; percent: number; tag?: string; isContract?: boolean; marketKind?: "pool" | "exchange" | "locker" }
 
 export interface NormalizedSafety {
   available: boolean;
@@ -1447,6 +1447,7 @@ async function runTokenAudit(
     percent: Number(h.percent) * 100,
     tag: h.tag || undefined,
     isContract: h.is_contract === 1 || h.is_contract === "1",
+    marketKind: classifyMarketAddress(h.address ?? h.account ?? "", { poolAddresses, knownAccounts })?.kind,
   })).filter((h) => h.address);
 
   // ---- Deployer forensics: OFAC is required; provider funding risk is optional.

@@ -319,3 +319,14 @@ describe("deriveNoticedSignals · development", () => {
     expect(deriveNoticedSignals({ shipping: shipping() })).toEqual([]);
   });
 });
+
+
+it("never presents pool, custody or unclassified contract balances as ten ordinary holders", () => {
+  const wallets = Array.from({ length: 9 }, () => ({ percent: 1 }));
+  const pool = "0x1111111111111111111111111111111111111111";
+  expect(top10ShareFromRows([{ address: pool, percent: 80 }, ...wallets], true, [pool])).toBeNull();
+  expect(top10ShareFromRows([{ address: "0x28c6c06298d514db089934071355e5743bf21d60", percent: 80 }, ...wallets], true)).toBeNull();
+  expect(top10ShareFromRows([{ marketKind: "pool", percent: 80 }, ...wallets], true)).toBeNull();
+  expect(top10ShareFromRows([{ isContract: true, percent: 80 }, ...wallets], true)).toBeNull();
+  expect(top10ShareFromRows([{ percent: 60 }, ...wallets], true)).toBe(69);
+});

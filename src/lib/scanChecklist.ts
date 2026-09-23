@@ -331,7 +331,7 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
           decisionCritical: true,
           label: "Contract safety",
           status: "unavailable",
-          note: `no contract-safety provider response recorded for ${dossier.chain}`,
+          note: `complete contract-control evidence was not recorded for ${dossier.chain}; individual ownership or trading observations do not complete this check`,
         },
   );
 

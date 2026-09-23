@@ -212,7 +212,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const deployerLabel = deployerRoleLabel(attribution);
   const creatorPercentLabel = s.creatorPercent >= 10 ? `${s.creatorPercent.toFixed(0)}%` : `${s.creatorPercent.toFixed(1)}%`;
   const topSum = d.topHolders.reduce((a, h) => a + h.percent, 0);
-  const top10FromRows = top10ShareFromRows(d.topHolders, d.holdersAssessed);
+  const top10FromRows = top10ShareFromRows(d.topHolders, d.holdersAssessed, [d.pairAddress ?? ""]);
   const decisionDiscovery = deriveDecisionDiscovery(deriveNoticedSignals({
     lpLockedPct: d.safetyChecked && d.safety.available && d.safety.lpAssessed !== false
       ? (d.safety.lpLockedPct ?? 0) + (d.safety.lpBurnedPct ?? 0)

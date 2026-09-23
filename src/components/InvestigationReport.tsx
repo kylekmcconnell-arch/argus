@@ -932,7 +932,8 @@ export function InvestigationReport({
         ...(projectAccount.basicFacts?.length ? { basicFacts: projectAccount.basicFacts } : {}),
         ...(projectAccount.projectToken ? { projectToken: projectAccount.projectToken } : {}),
       })
-    : token.cg?.description;
+    : token.cg?.description || (isProjectSiteBound(inv) && inv.recon?.retrieval.status !== "gap"
+      ? inv.recon?.profile?.selfDescription ?? undefined : undefined);
   const market = tokenMarketPresentation(token);
   const marketCap = market.marketCap ?? undefined;
   const fullyDilutedValue = market.fullyDilutedValuation ?? undefined;
@@ -1145,7 +1146,7 @@ export function InvestigationReport({
   // Summing the audit's own rows is only a top-ten share when the token lane
   // trusted its register and returned ten of them; otherwise it is a floor, and
   // a floor must not backfill a project-side figure that was suppressed.
-  const top10FromRows = top10ShareFromRows(token.topHolders, token.holdersAssessed);
+  const top10FromRows = top10ShareFromRows(token.topHolders, token.holdersAssessed, [token.pairAddress ?? ""]);
   const projectHolderAggregate = projectAccount?.holderProfile?.top10Pct != null;
   const circulatingSupplyPct = (() => {
     const circulating = projectAccount?.projectToken?.circulatingSupply;
@@ -1631,7 +1632,15 @@ export function InvestigationReport({
               // coverage limit it is.
               unavailableCopy: withheldScoreReason(projectAccount)
                 ?? "The linked project report did not publish a diligence score.",
-            } : undefined}
+            } : {
+              label: "Project diligence score",
+              score: null,
+              verdictLabel: "Not assessed",
+              context: "Project diligence is separate from token trading and safety measurements.",
+              composition: [],
+              unavailableCopy: inv.projectAccountAudit?.note
+                ?? "No linked project assessment was saved. The token score does not assess what the project does or who operates it.",
+            }}
           />
 
           <section aria-label="Investigation coverage by area" className="mt-4 grid gap-3 md:grid-cols-3">

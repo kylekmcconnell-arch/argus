@@ -125,7 +125,7 @@ describe("Kyle intelligence report opening", () => {
     />));
 
     expect(container.textContent).toContain(
-      "Team and leadership is documented, with 3 saved supporting sources. No leading concern is on record.",
+      "Team and leadership has recorded supporting evidence. No leading concern is on record.",
     );
     expect(container.textContent).not.toContain("Independent evidence remains incomplete.");
   });
@@ -141,7 +141,7 @@ describe("Kyle intelligence report opening", () => {
       ]}
     />));
 
-    expect(container.textContent).toContain("Team and leadership is well documented, with 8 saved supporting sources.");
+    expect(container.textContent).toContain("Team and leadership has recorded supporting evidence.");
     expect(container.textContent).not.toContain("Product and execution is");
     // An investor reads this one report on its own merits: no comparative or
     // leaderboard framing survives in the lead sentence.
@@ -303,3 +303,27 @@ describe("Kyle intelligence report opening", () => {
     expect(container.textContent).not.toContain("No decision-critical gap is recorded");
     expect(container.textContent).toContain("2 checks still lack evidence");
   });
+
+
+it("does not deny recorded concerns when the composition has no scored counter-signals", () => {
+  act(() => root.render(<KyleIntelligenceDecisionCanvas {...props} />));
+  expect(container.querySelector(".kyle-verdict-headline")?.textContent).toContain("Recorded concerns still require review");
+  expect(container.querySelector(".kyle-verdict-headline")?.textContent).not.toContain("No leading concern");
+});
+
+it("withholds a PASS decision boundary while required checks remain open", () => {
+  const boundary = { schemaVersion: 1 as const, kind: "threshold" as const, evidenceArea: "method" as const, controllingFact: "PASS", boundary: "Two points above PASS", willNotChange: "Saved PASS", unlockCondition: "More evidence" };
+  act(() => root.render(<KyleIntelligenceDecisionCanvas {...props} scoreIsProvisional decisionBoundary={boundary} decisionBoundaryEvidenceHref="#evidence-ledger" showDecisionDetails />));
+  expect(container.querySelector('[data-testid="decision-boundary"]')).toBeNull();
+  expect(container.querySelector(".kyle-verdict-headline")?.textContent).toContain("assessment is provisional");
+  expect(container.querySelector(".kyle-counter-thesis")?.textContent).not.toContain("Why it has not changed the verdict");
+  act(() => root.render(<KyleIntelligenceDecisionCanvas {...props} decisionBoundary={boundary} decisionBoundaryEvidenceHref="#evidence-ledger" showDecisionDetails />));
+  expect(container.querySelector('[data-testid="decision-boundary"]')).not.toBeNull();
+});
+
+
+it("keeps missing project diligence explicit in the two-score layout", () => {
+  act(() => root.render(<KyleIntelligenceDecisionCanvas {...props} presentationStyle={2} secondaryScore={{ label: "Project diligence score", score: null, verdictLabel: "Not assessed", unavailableCopy: "Identity discovery failed. Project context remains unassessed." }} />));
+  expect(container.querySelector('[data-report-score="dual"]')).not.toBeNull();
+  expect(container.textContent).toContain("Identity discovery failed. Project context remains unassessed.");
+});
