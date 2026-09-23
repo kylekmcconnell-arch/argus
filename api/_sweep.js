@@ -18,6 +18,13 @@ var GROK_ANALYST_MODEL = process.env.ARGUS_GROK_ANALYST_MODEL || process.env.ARG
 var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
+// src/threat/net.ts
+var legacyContext;
+var contextForRequest;
+function hasThreatApiContext() {
+  return !!(contextForRequest?.() ?? legacyContext)?.base;
+}
+
 // src/lib/officialXProfile.ts
 var X_RESERVED_PATHS = /* @__PURE__ */ new Set([
   "i",
@@ -1315,7 +1322,7 @@ function deployerWalletAddress(d) {
 }
 async function resolveEvmCreatorKind(chain, creator, fetchImpl2 = fetch) {
   const origin = globalThis.location?.origin;
-  if (!origin) return "unknown";
+  if (!origin && !hasThreatApiContext()) return "unknown";
   try {
     const r = await fetchImpl2(`/api/bytecode?address=${encodeURIComponent(creator)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(12e3) });
     if (!r.ok) return "unknown";
@@ -1330,7 +1337,7 @@ async function screenDeployerRisk(address, fetchImpl2 = fetch) {
   if (!arkhamProviderEnabled()) return void 0;
   if (!address || address.length < 8) return void 0;
   const origin = globalThis.location?.origin;
-  if (!origin) return void 0;
+  if (!origin && !hasThreatApiContext()) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
   try {
     const r = await fetchImpl2(`/api/deployer-risk?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(18e3) });
@@ -1350,7 +1357,7 @@ async function screenDeployerRisk(address, fetchImpl2 = fetch) {
 var SIGNED_THE_CREATION = /* @__PURE__ */ new Set(["mint feePayer", "creation-tx fee payer"]);
 async function resolveDeployerViaRoute(mint, fetchImpl2 = fetch) {
   const origin = globalThis.location?.origin;
-  if (!origin) return null;
+  if (!origin && !hasThreatApiContext()) return null;
   try {
     const r = await fetchImpl2(`/api/resolve-deployer?mint=${encodeURIComponent(mint)}`, { signal: AbortSignal.timeout(2e4) });
     if (!r.ok) return null;
@@ -1375,7 +1382,7 @@ async function screenAddressSanctions(chain, addresses, fetchImpl2 = fetch) {
     };
   }
   const origin = globalThis.location?.origin;
-  if (!origin) return void 0;
+  if (!origin && !hasThreatApiContext()) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
   try {
     const r = await fetchImpl2(

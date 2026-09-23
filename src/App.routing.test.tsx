@@ -471,6 +471,16 @@ describe("App routing safety", () => {
     expect(harness.startPersonAudit).toHaveBeenCalledWith("existingfounder", false, "investment_due_diligence");
   });
 
+  it("reads server-completed metadata without creating another version or graph write", async () => {
+    await renderApp();
+    const d = { ...personResult({ state: "persisted", reportVersionId: "server-combined-version" }), tokenAssessment: { owner: "server", state: "complete", completedAt: "2026-09-23T00:00:00Z" } };
+    await act(async () => { await harness.personOnComplete?.(d); });
+    expect(harness.fetchReportVersion).toHaveBeenCalledWith("server-combined-version");
+    expect(harness.syncReport).not.toHaveBeenCalled();
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+  });
+
   it("keeps a failed person save session-only and out of shared audit surfaces", async () => {
     await renderApp();
     expect(harness.personOnComplete).not.toBeNull();

@@ -393,3 +393,21 @@ it("stops recovery at the original run deadline without substituting another rep
     expect(mocks.streamAudit).toHaveBeenCalledOnce();
   } finally { cancelRun("@AnyoneFDN"); vi.useRealTimers(); }
 });
+
+
+it.each(["complete", "unavailable", "unattributed"] as const)("does not duplicate a server-owned %s token leg", async state => {
+  vi.clearAllMocks(); cancelRun("@AnyoneFDN");
+  const d = { ...anyoneDossier(), tokenAssessment: { owner: "server" as const, state, completedAt: "2026-09-23T00:00:00Z" } };
+  const save = vi.fn(); setOnComplete(save);
+  mocks.streamAudit.mockImplementation((_handle, _private, handlers) => {
+    handlers.onStep({ phase: "ARGUS", label: "Server completion", detail: "", tokenExecution: "server" });
+    handlers.onStep({ phase: "Token", label: "Bound", detail: "", token: { address: d.projectToken!.address, via: "evm", source: "official domain" } });
+    handlers.onDone(d);
+    return vi.fn();
+  });
+  const run = startPersonAudit("@AnyoneFDN");
+  await vi.waitFor(() => expect(run.status).toBe("done"));
+  expect(mocks.streamAudit.mock.calls[0][6]).toBe(true);
+  expect(mocks.threatScan).not.toHaveBeenCalled();
+  expect(save).toHaveBeenCalledWith(d, false);
+});

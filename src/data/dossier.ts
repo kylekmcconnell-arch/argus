@@ -222,11 +222,13 @@ export interface Dossier {
   /** Model-only or otherwise unverified team candidates; never grounded evidence. */
   webTeamLeads?: WebTeamMember[];
   githubAssessment?: GithubAssessment; // subject's resolved GitHub: quality/claims/history
-  // The token threat leg of the FULL scan. Attached client-side by the runner
-  // (the threat scanner runs in the browser, in parallel with the server
-  // collection) and persisted with the report. Absent: no project token could
+  // The token threat leg of the FULL scan. New public scans complete and save
+  // it on the server; legacy/private runs retain browser completion.
+  // Absent: no project token could
   // be attributed to this subject. null: a token was found but the scan failed.
   threat?: import("../threat/types").ThreatScan | null;
+  /** Server-owned completion: browsers must not rerun this leg or resave it. */
+  tokenAssessment?: { owner: "server"; state: "complete" | "unavailable" | "unattributed"; completedAt: string };
   // Why the threat leg ran on that token (or why it was skipped) - one line,
   // rendered with the section so the attribution is auditable.
   threatNote?: string;

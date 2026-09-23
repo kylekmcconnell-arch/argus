@@ -995,13 +995,27 @@ export default function App() {
       return;
     }
 
+    const scanId = d.report.audit_id || persistedVersionId;
+    if (d.tokenAssessment?.owner === "server") {
+      // The server already saved the combined report and published its exact
+      // audit/graph binding. Read metadata only; do not create another version.
+      const saved = { ...d, persistence: { ...d.persistence!, scanId } };
+      cacheResult(resultCache.current, d.handle, { kind: "person", dossier: saved });
+      const stored = await fetchReportVersion(persistedVersionId);
+      const completed = stored?.kind === "person"
+        && normalizeSubjectRef(stored.ref) === normalizeSubjectRef(d.handle)
+        ? { ...saved, versionContext: stored.versionContext }
+        : saved;
+      settleCachedScan(resultCache.current, d.handle, scanId, { kind: "person", dossier: completed });
+      return;
+    }
+
     // The server first saves the project/person evidence so a background scan
     // survives a closed tab. The browser then finishes the linked-token safety
     // leg and adds `threat` to this dossier. Persist that final combined payload
     // as a second immutable version and, critically, move every live/cache link
     // to that final version. Otherwise the page shows the in-memory token score
     // but "Saved report" reopens the earlier pre-token snapshot as N/A.
-    const scanId = d.report.audit_id || persistedVersionId;
     const pending: Dossier = {
       ...d,
       persistence: {

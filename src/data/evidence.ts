@@ -235,6 +235,7 @@ export interface TraceStep {
   // runner sees it mid-stream and launches the browser-side token threat scan
   // IN PARALLEL with the rest of the collection, so the full audit carries the
   // threat report without extending the critical path.
+  tokenExecution?: "server";
   token?: { address: string; via: "evm" | "solana"; source: string; binding?: "canonical" | "bio" | "promotion" };
 }
 

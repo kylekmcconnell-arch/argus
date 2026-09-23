@@ -1,3 +1,4 @@
+import { apiFetch } from "./net";
 import { assetIdentity } from "../lib/assetIdentity";
 // The threat scan orchestrator: token ref in → mechanical audit (src/token) →
 // code review (AI read layer) → deployer memory → one risk call. Output model:
@@ -39,14 +40,14 @@ export async function threatScan(
   emit?: (s: TraceStep) => void,
   // `signal` lets the owning run cancel or time-box the leg; without it the
   // person-audit runner could not stop a threat leg it had already given up on.
-  options?: { force?: boolean; chain?: string; signal?: AbortSignal },
+  options?: { force?: boolean; chain?: string; signal?: AbortSignal; fetchImpl?: typeof fetch },
 ): Promise<ThreatScan | null> {
   // auditToken needs an already-resolved runnable token (main tightened
   // RunnableTokenInput.via to solana|evm|dexscreener). A bare ticker or
   // address-candidate isn't runnable - the caller resolves those first.
   if (!isRunnableTokenInput(input)) return null;
 
-  const dossier = await auditToken(input, emit, { force: options?.force, chain: options?.chain, ...(options?.signal ? { signal: options.signal } : {}) });
+  const dossier = await auditToken(input, emit, { force: options?.force, chain: options?.chain, fetchImpl: options?.fetchImpl ?? apiFetch, ...(options?.signal ? { signal: options.signal } : {}) });
   if (!dossier) return null;
   // The report must be about the token that was ASKED for. If the market
   // resolver ever falls back to a different base token (search fallback, stale
@@ -215,7 +216,7 @@ export async function threatScan(
     scannedAt: Date.now(),
   };
 
-  recordReceipt({
+  await recordReceipt({
     address: dossier.address, chain: dossier.chain, symbol: dossier.symbol,
     verdict: call.verdict, risk: call.risk, flaggedAt: scan.scannedAt,
     // Only a wallet goes into the ledger's deployer memory; a factory contract
