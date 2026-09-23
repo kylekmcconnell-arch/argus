@@ -1,3 +1,4 @@
+import { buildHolderIntelligence } from "../src/lib/holderIntelligence.js";
 // Holder / distribution forensics for a token. GET /api/holders?mint=&chain=
 //
 // The question a diligence tool exists to answer for a token: is the ownership a
@@ -15,7 +16,6 @@ const q = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const short = (a?: string) => (a ? a.slice(0, 4) + "…" + a.slice(-4) : "");
 // Addresses that are market infrastructure, not a concentrated holder: an AMM pool
 // or a CEX wallet holding 20% is liquidity/custody, not a rug setup.
-const MARKET = /amm|dex|pool|cex|exchange|program|vault|locker|market|raydium|meteora|orca|pump/i;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const mint = q(req.query.mint);
@@ -31,13 +31,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!Array.isArray(d.topHolders)) { res.status(200).json({ available: false, note: "Holder records unavailable from RugCheck." }); return; }
     const supply = Number(d.token?.supply ?? 0);
     const ka: Record<string, { name?: string; type?: string }> = d.knownAccounts ?? {};
-    const labelOf = (h: any) => ka[h.address] || ka[h.owner] || null;
-    const top = (d.topHolders ?? []).slice(0, 10).map((h: any) => {
-      const lab = labelOf(h);
-      return { addr: short(h.owner || h.address), owner: String(h.owner || h.address || ""), pct: Number(h.pct ?? 0), insider: !!h.insider, label: lab?.name ?? (h.insider ? "insider" : null), market: !!(lab?.type && MARKET.test(lab.type)) };
+
+    const holderIntelligence = buildHolderIntelligence({
+      chain, tokenAddress: mint, capturedAt: new Date().toISOString(),
+      source: "rugcheck", sourceUrl: `https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`,
+      ranked: false, aggregateOwners: true, knownAccounts: ka,
+      rows: d.topHolders.map((h: any) => ({ address: String(h.address ?? ""), owner: String(h.owner ?? ""), percent: Number(h.pct) })),
     });
+    const top = holderIntelligence.rows.map(h => ({ addr: short(h.address), owner: h.address, pct: h.percent,
+      insider: false, label: h.roleEvidence, market: ["pool", "exchange", "locker", "burn"].includes(h.role) }));
     const sumN = (n: number) => top.slice(0, n).reduce((a: number, x: any) => a + x.pct, 0);
-    const marketPct = top.filter((h: any) => h.market).reduce((a: number, h: any) => a + h.pct, 0);
+    const marketPct = top.slice(0, 10).filter((h: any) => h.market).reduce((a: number, h: any) => a + h.pct, 0);
     const top10 = sumN(10);
     const top10NonMarket = Math.max(0, top10 - marketPct);
 
@@ -63,21 +67,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // clusters + top-10 are the story. On a mega-holder token the transfer graph
     // balloons and the top-10 is exchanges, so we don't alarm on either.
     if (!large) {
-      if (insidersDetected >= 15 && insiderClusteredPct >= 30) { bump("bad"); bits.push(`${insidersDetected.toLocaleString()} wallets funded from a common source hold ${insiderClusteredPct.toFixed(0)}% of supply. This suggests one hidden hand`); }
+      if (insidersDetected >= 15 && insiderClusteredPct >= 30) { bump("bad"); bits.push(`${insidersDetected.toLocaleString()} wallets funded from a common source hold ${insiderClusteredPct.toFixed(0)}% of supply. RugCheck reports this relationship; common funding alone does not establish one controller`); }
       else if (insidersDetected >= 15 && insiderClusteredPct >= 12) { bump("warn"); bits.push(`${insidersDetected.toLocaleString()} connected wallets cluster ${insiderClusteredPct.toFixed(0)}% of supply`); }
-      if (top10 >= 60) { bump("bad"); bits.push(`top 10 wallets hold ${top10.toFixed(0)}% of a thin base of ${totalHolders.toLocaleString()} holders`); }
-      else if (top10 >= 40) { bump("warn"); bits.push(`top 10 hold ${top10.toFixed(0)}% (only ${totalHolders.toLocaleString()} holders)`); }
+      if (top10 >= 60) { bump("bad"); bits.push(`the first 10 observed owners hold ${top10.toFixed(0)}% of a thin base of ${totalHolders.toLocaleString()} holders`); }
+      else if (top10 >= 40) { bump("warn"); bits.push(`the first 10 observed owners hold ${top10.toFixed(0)}% (only ${totalHolders.toLocaleString()} holders)`); }
     }
     if (creatorPct != null && creatorPct >= 15) { bump("bad"); bits.push(`the creator or authority wallet still holds ${creatorPct.toFixed(0)}%`); }
     else if (creatorPct != null && creatorPct >= 7) { bump("warn"); bits.push(`the creator or authority wallet holds ${creatorPct.toFixed(0)}%`); }
-    const line = bits.length
-      ? bits.join("; ") + "."
-      : `Broadly held: ${totalHolders.toLocaleString()} holders, top 10 hold ${top10.toFixed(0)}%${insidersDetected >= 1000 ? " (a large linked transfer graph, expected for a liquid token)" : ""}.`;
+    const line = `RugCheck returned ${top.length} observed owners. This sample does not establish the global top 25 or common control. ${bits.length ? bits.join("; ") + "." : "No conclusion about ownership quality is established by missing labels."}`;
 
     res.status(200).json({
       available: true, source: "rugcheck", mint,
       totalHolders,
-      top,
+      top, holderIntelligence,
       concentration: { top1: sumN(1), top5: sumN(5), top10, top10NonMarket, marketPct },
       insiders: { detected: Number(d.graphInsidersDetected ?? 0), networks: nets.length, clusteredPct: insiderClusteredPct },
       creatorPct,

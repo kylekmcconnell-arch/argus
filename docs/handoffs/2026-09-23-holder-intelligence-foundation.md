@@ -1,0 +1,13 @@
+# Holder intelligence foundation — issue #525
+
+This change makes the requested 25-address investigation explicit in token, investigation and canonical-project reports. It stores the observed rows, source, capture time, optional block, collection coverage and the exact registry revision/matches with the immutable report. It does not silently enrich old reports against today's registry.
+
+GoPlus supplies only ten holder rows. Configured Blockscout explorers can supply 25; unavailable endpoints fall back to explicitly partial coverage. A live public Base request returned HTTP 403, so universal live coverage is not verified. Solana token-account samples are grouped only when their owner is explicitly reported; these samples do not establish the globally largest 25 owners. Unknown contract wallets remain visible; only positively classified infrastructure is separated from wallet concentration. Registry keys preserve Solana case and retain multiple memberships. A registry match does not establish present common control or misconduct.
+
+Workspace history uses a service-only view over existing immutable report versions. The authenticated read endpoint constrains organization, chain and token; failures are distinguished from empty history. Token/investigation owner views offer an explicit read action, absent from private/shared surfaces. Historical provider observations do not prove buys, sells or exits. The project report displays its frozen snapshot; its history control is not yet exposed.
+
+Validation: the existing full suite passed 5,254 tests plus one expected failure before three additional panel tests (also passed). Client/server/API type checks and production build passed. The database view has a CI test for permissions and payload projection; local Supabase CLI was unavailable. Browser verification of the new holder panel was interrupted by a disconnected debugger; the synthetic preview remains available at `?design-preview=argus-report&kind=holders` for final visual review. Production Catalyst's restored Decision design was visually verified earlier in this work.
+
+Still open: guaranteed ranked coverage across chains, budgeted Arkham/Fomo enrichment, full launch universes and backfill receipts, independently corroborated launchpad attribution, 24h/7d/30d rankings and exchange-listing history, behavioral deltas/alerts, outcome calibration, context recovery and remaining legacy contract-panel styling. No bulk paid enrichment ran. This foundation does not close issue #525 or constitute a completed launchpad study.
+
+Rollout: normal protected-main CI and deployment. The new view is additive and does not rewrite saved reports. Rollback can remove report presentation/API use while retaining immutable payload fields.

@@ -1,3 +1,5 @@
+import { classifyMarketAddress } from "../../src/lib/marketAddresses";
+import { buildHolderIntelligence, type HolderIntelligence } from "../../src/lib/holderIntelligence";
 // Float control and contract control for a PROJECT's verified canonical token:
 // who holds the supply, whether the DEX liquidity can walk away, and what the
 // contract's controller can still do to holders. The token-scan pipeline already
@@ -14,6 +16,7 @@ import {
   blockscoutHolderSourceUrl,
   blockscoutHolders,
   goplus,
+  rugcheckReport,
   type GoPlusSecurity,
 } from "../../src/token/sources";
 import { recordCall } from "../cost";
@@ -33,6 +36,7 @@ export interface ContractControlFlag {
 }
 
 export interface HolderProfile {
+  holderIntelligence?: HolderIntelligence;
   /** Exact canonical token identity passed into this collector. */
   binding: {
     canonicalAddress: string;
@@ -84,7 +88,7 @@ export type HolderProfileOutcome =
 
 const FETCH_TIMEOUT_MS = 8_000;
 
-const isBurnAddr = (a?: string) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
+const isBurnAddr = (a?: string) => !!a && (/^0x0{40}$/i.test(a) || /^0x0{36}dead$/i.test(a));
 const isBurnTag = (t?: string) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
 const t1 = (v?: string) => v === "1";
 
@@ -107,6 +111,24 @@ const OWNER_UNREPORTED_NOTE = " GoPlus reported no owner address for this contra
 export async function collectHolderProfile(chain: string, address: string): Promise<HolderProfileOutcome> {
   const chainKey = chain.trim().toLowerCase();
   const chainId = GOPLUS_CHAIN[chainKey];
+  if (chainKey === "solana" && address) {
+    const rug = await rugcheckReport(address);
+    const sourceCapturedAt = captureTimestamp();
+    recordCall("rugcheck", "holder-profile", 0, "Solana owner sample", rug ? "succeeded" : "partial");
+    if (!rug) return { available: false, note: "RugCheck returned no owner register." };
+    const sourceUrl = `https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(address)}/report`;
+    const holderIntelligence = buildHolderIntelligence({ chain: chainKey, tokenAddress: address, capturedAt: sourceCapturedAt,
+      source: "rugcheck", sourceUrl, rows: rug.topHolders ?? [], ranked: false, aggregateOwners: true,
+      knownAccounts: rug.knownAccounts,
+    });
+    return { available: true, value: {
+      binding: { canonicalAddress: address, chain: chainKey, method: "canonical_token_address_chain" },
+      holderIntelligence, topHolderPct: null, top10Pct: null, assessedWalletCount: null, top10PctIsFloor: true,
+      holderCount: null, lpLockedOrBurnedPct: rug.lpLockedPct, holdersAssessed: false, distributionSource: null,
+      distributionNote: "RugCheck owner observations are retained; the sample does not establish globally ranked owner concentration.",
+      contractFlags: [], creatorPct: rug.creatorPercent, sourceUrl, sourceCapturedAt,
+    } };
+  }
   if (!chainId || !address) {
     return { available: false, note: `No GoPlus holder register for chain "${chain}".` };
   }
@@ -120,11 +142,12 @@ export async function collectHolderProfile(chain: string, address: string): Prom
   // correct distribution source (same rule as the token lane). Runs in
   // parallel: no added latency, and it is keyless and free.
   const unordered = GOPLUS_UNSORTED_HOLDER_CHAINS.has(chainKey);
-  const [gp, explorerHolders] = await Promise.all([
+  const [gpResult, explorerHolders] = await Promise.all([
     boxed<GoPlusSecurity>(goplus(chainId, address)),
-    unordered ? boxed(blockscoutHolders(chainKey, address)) : Promise.resolve(null),
+    boxed(blockscoutHolders(chainKey, address)),
   ]);
   const sourceCapturedAt = captureTimestamp();
+  const gp: GoPlusSecurity | null = gpResult ?? (explorerHolders?.length ? {} : null);
   if (!gp) {
     recordCall("goplus", "holder-profile", 0, `${chain}:${address.slice(0, 10)} · no_data`, "partial");
     return { available: false, note: "GoPlus returned no token security record." };
@@ -145,12 +168,10 @@ export async function collectHolderProfile(chain: string, address: string): Prom
   // that "the largest holder" both misreads the float and puts a different
   // number in the project report than the token report shows for the same
   // token from the same provider (src/token/audit.ts measures over the same
-  // non-contract rows). The excluded rows are named in the note, so a reader
+  // positively classified infrastructure exclusions). The excluded rows are named in the note, so a reader
   // comparing against a block explorer can see what was left out and why.
-  const isMarketRow = (holder: { is_contract?: number; is_locked?: number; tag?: string }): boolean =>
-    holder.is_contract === 1
-    || holder.is_locked === 1
-    || /lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(holder.tag ?? "");
+  const isMarketRow = (holder: { address?: string }): boolean =>
+    Boolean(classifyMarketAddress(holder.address)) || isBurnAddr(holder.address);
   const goplusWallets = holders.filter((holder) => !isMarketRow(holder));
   const goplusExcluded = holders.length - goplusWallets.length;
   // GoPlus is not trusted to have ORDERED its own register, so the largest
@@ -159,8 +180,8 @@ export async function collectHolderProfile(chain: string, address: string): Prom
     .map((holder) => shareOfSupply(holder.percent))
     .filter((share): share is number => share !== null)
     .sort((a, b) => b - a);
-  // Blockscout returns no tag, so a contract flag is all it can be filtered on.
-  const explorerWallets = (explorerHolders ?? []).filter((holder) => holder.isContract !== true);
+  // An unknown contract may be a smart wallet. Only exact infrastructure matches are excluded.
+  const explorerWallets = (explorerHolders ?? []).filter((holder) => !isMarketRow(holder));
   const explorerExcluded = (explorerHolders?.length ?? 0) - explorerWallets.length;
   const explorerShares = explorerWallets
     .map((holder) => holder.percent)
@@ -169,18 +190,18 @@ export async function collectHolderProfile(chain: string, address: string): Prom
 
   const excludedNote = (count: number, register: string): string =>
     count
-      ? ` ${count} ${register} row${count === 1 ? " was" : "s were"} excluded as a pool, contract, or locked address, so this is wallet concentration and not every address holding supply.`
+      ? ` ${count} ${register} row${count === 1 ? " was" : "s were"} excluded by an exact infrastructure or burn-address match, so this is wallet concentration and not every address holding supply.`
       : "";
 
   let distributionSource: HolderProfile["distributionSource"] = null;
   let distributionNote: string | null;
   let shares: number[] = [];
-  if (unordered && explorerShares.length) {
+  if (explorerShares.length) {
     shares = explorerShares;
     distributionSource = "explorer";
     // The concentration figures now come from a different register than the
     // rest of this profile, so the note carries that attribution downstream.
-    distributionNote = `Holder concentration is the chain explorer's ordered register, since GoPlus does not order its holder rows on this chain.${excludedNote(explorerExcluded, "explorer")}`;
+    distributionNote = `Holder concentration is the chain explorer's ordered register, captured separately from the GoPlus security response.${excludedNote(explorerExcluded, "explorer")}`;
   } else if (unordered) {
     // Silence, not a fallback: the unordered sample understated the real top
     // holder by 12x on the chain this rule was written for.
@@ -195,7 +216,7 @@ export async function collectHolderProfile(chain: string, address: string): Prom
     // Every row was a pool, a contract or a locked address. That is not a low
     // concentration reading; it is no wallet reading at all.
     distributionNote = goplusExcluded
-      ? `Every holder row GoPlus returned was a pool, contract, or locked address, so no wallet concentration figure is reported.`
+      ? `Every holder row GoPlus returned matched infrastructure or a burn address, so no wallet concentration figure is reported.`
       : holders.length
         ? "The GoPlus holder rows carried no usable share of supply, so holder concentration is not reported."
         : "No holder register was returned for this token, so holder concentration is not reported.";
@@ -276,6 +297,13 @@ export async function collectHolderProfile(chain: string, address: string): Prom
   return {
     available: true,
     value: {
+      holderIntelligence: buildHolderIntelligence({
+        chain: chainKey, tokenAddress: address, capturedAt: sourceCapturedAt,
+        source: explorerHolders ? "blockscout" : "goplus",
+        sourceUrl: explorerHolders ? blockscoutHolderSourceUrl(chainKey, address) : `https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`,
+        rows: explorerHolders ?? holders.map(row => ({ address: row.address, percent: Number(row.percent) * 100, isContract: row.is_contract === 1, ...(row.tag ? { tag: row.tag } : {}) })),
+        ranked: Boolean(explorerHolders) || !unordered,
+      }),
       binding: {
         canonicalAddress: address,
         chain: chainKey,

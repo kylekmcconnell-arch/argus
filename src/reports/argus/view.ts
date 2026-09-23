@@ -128,6 +128,7 @@ export interface TokenIdentity {
 }
 
 export interface MarketView {
+  holderIntelligence?: import("../../lib/holderIntelligence").HolderIntelligence;
   capturedAt?: string | null;
   metrics: Metric[];
   holders: {

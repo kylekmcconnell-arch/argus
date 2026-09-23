@@ -492,6 +492,7 @@ export interface ContractControlFlagSnapshot {
 
 /** Frozen float-control profile (GoPlus holder register) for the verified canonical token. Disclosure data, never a verdict. */
 export interface HolderProfileSnapshot {
+  holderIntelligence?: import("../lib/holderIntelligence").HolderIntelligence;
   /** Exact canonical token identity this sidecar was collected for. */
   binding?: {
     canonicalAddress: string;

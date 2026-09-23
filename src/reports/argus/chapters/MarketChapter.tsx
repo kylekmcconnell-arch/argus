@@ -1,3 +1,4 @@
+import { HolderIntelligencePanel } from "../HolderIntelligencePanel";
 import { useEffect, useState, type ReactNode } from "react";
 import { DisclosureButton, InlinePanel } from "../disclosure";
 import { Badge, ChapterHead, ExtLink, Panel } from "../primitives";
@@ -167,6 +168,7 @@ export function MarketChapter({ view, active, reconciliation, legacy }: { view: 
       />
       <IdentityShortcuts view={view} />
       <VenueTable view={view} enabled={active} />
+      <HolderIntelligencePanel snapshot={market.holderIntelligence} />
       {market.metrics.length > 0 && (
         <div className="metric-strip" style={{ margin: "0 0 22px", "--metric-count": Math.min(4, market.metrics.length) } as React.CSSProperties}>
           {market.metrics.slice(0, 4).map((metric) => (
