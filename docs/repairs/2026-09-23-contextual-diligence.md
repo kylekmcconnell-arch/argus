@@ -41,3 +41,7 @@ Regression coverage includes homepage-only pseudonymous rosters after a long mar
 Deploy through the repository's normal reviewed PR and required CI. The database gate must pass before merging. Do not update existing report_versions or rescan merely to hide the defective historical result. Roll back through a code revert; old report versions remain available.
 
 Local verification: 484 test files passed; 5,210 tests passed plus one expected failure. Typecheck, production build, source-of-truth contract, seven offline canaries and 21 calibration cases passed. PostgreSQL CI remains a required pre-merge gate.
+
+## Close-out against current main
+
+Integrated the September 23 report-design, holder-index and launch-provenance fixes into this existing change. The two merge conflicts concerned only presentation-version markers; the approved `2026-09-23.4` marker was retained. Fresh verification passed 5,287 tests plus one expected failure, seven offline canaries, all 21 calibration cases, client/server/API type checks and the production build. The original worktree was preserved; integration was performed in an isolated checkout. No paid scan or historical report rewrite was performed. A new live report is still needed to establish provider recovery and subject-specific context quality.
