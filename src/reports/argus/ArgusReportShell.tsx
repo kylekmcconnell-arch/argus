@@ -291,6 +291,7 @@ function ShellBody(props: ArgusReportShellProps & {
               <><a href={props.savedHref} target="_blank" rel="noreferrer" title="Open the exact saved report. New checks shown later do not change its score.">SAVED REPORT</a>{" · "}</>
             )}
             {props.savedLine}
+            <span data-report-header-identity="true"> · Report {props.runtime.auditId}{props.runtime.caseLabel ? ` · Case ${props.runtime.caseLabel}` : ""}</span>
           </span>
           {issues.length > 0 && (
             <DisclosureButton id="audit" className="textbtn">
@@ -332,7 +333,7 @@ function ShellBody(props: ArgusReportShellProps & {
         ))}
         <footer className="rd-footer">
           <span>ARGUS · Evidence before conviction.</span>
-          <span data-report-identity="true">{props.footerNote} · Presentation 2026-09-23.1</span>
+          <span data-report-identity="true">{props.footerNote} · Presentation 2026-09-23.2</span>
           <DisclosureButton id="scope" className="textbtn">Scope &amp; limitations</DisclosureButton>
         </footer>
         <InlinePanel id="scope" label="Scope and limitations">{() => props.scope}</InlinePanel>

@@ -1,3 +1,4 @@
+import { deriveProjectDiligenceContext, projectQuestionContext } from "../lib/projectDiligenceContext";
 import type {
   BasicFact,
   BasicFactPredicate,
@@ -2111,7 +2112,7 @@ function questionState(
 
   const states = entry.providerRuns.map((run) => run.state);
   if (states.includes("partial")) {
-    return { state: "partial", basis: "At least one frozen collection pass completed only partially.", matchingFacts };
+    return { state: matchingFacts.length ? "reported" : "unresolved", basis: "Research was incomplete. This is a collection gap, not evidence of a missing disclosure or an adverse finding.", matchingFacts };
   }
   if (states.some((state) => state === "succeeded" || state === "completed_empty")) {
     return { state: "unresolved", basis: "A bounded collection pass completed without a source-backed answer.", matchingFacts };
@@ -2258,8 +2259,14 @@ function buildQuestions(
     [`fact:${fact.factId}`, fact] as const,
   ]));
 
+  const diligenceContext = evidence.projectDiligenceContext ?? deriveProjectDiligenceContext(evidence, evidence.profile.profile_captured_at ?? "unknown");
   for (const entry of evidence.basicFactQuestionLedger ?? []) {
     const assessment = questionState(entry, facts, evidence.profile.handle);
+    const applicabilityReason = !assessment.matchingFacts.length ? projectQuestionContext(entry.predicate, diligenceContext) : null;
+    const applicabilityRefs = applicabilityReason ? facts.filter((fact) =>
+      factTargetsAuditedSubject(fact, evidence.profile.handle)
+      && fact.sources.some((source) => diligenceContext.sourceUrls.includes(source.url)))
+      .flatMap((fact) => factSupportSourceRefs(fact)).filter((ref) => sourceIds.has(ref)) : [];
     const matchingFactIds = new Set(assessment.matchingFacts.map((fact) => fact.factId));
     const answerRefs = uniqueSorted(entry.answerRefs.filter((reference) => {
       const referencedFact = factByAnswerRef.get(reference);
@@ -2275,11 +2282,11 @@ function buildQuestions(
       id: entry.questionId,
       domain: domainForPredicate(entry.predicate),
       prompt: entry.question,
-      materiality: entry.critical ? "critical" : "important",
-      state: assessment.state,
-      basis: assessment.basis,
+      materiality: applicabilityReason ? "context" : entry.predicate === "audit" && diligenceContext.productStage === "prelaunch" ? "important" : entry.critical ? "critical" : "important",
+      state: applicabilityReason ? "not_applicable" : assessment.state,
+      basis: applicabilityReason || assessment.basis,
       answerRefs,
-      sourceRefs: uniqueSorted([...factRefs, ...contradictionRefs]),
+      sourceRefs: uniqueSorted([...factRefs, ...contradictionRefs, ...applicabilityRefs]),
     });
   }
 
@@ -2395,7 +2402,15 @@ function buildQuestions(
     existing.set(definition.id, questions.length - 1);
   }
 
-  return questions.sort((left, right) => left.id.localeCompare(right.id));
+  // The same rules cover fallback questions when no collector ledger exists.
+  return questions.map((question) => {
+    const reason = projectQuestionContext(question.id.split(".").at(-1) ?? "", diligenceContext);
+    if (!reason || question.answerRefs.length || question.sourceRefs.length) return question;
+    const sourceRefs = facts.filter((fact) => factTargetsAuditedSubject(fact, evidence.profile.handle)
+      && fact.sources.some((source) => diligenceContext.sourceUrls.includes(source.url)))
+      .flatMap((fact) => factSupportSourceRefs(fact)).filter((ref) => sourceIds.has(ref));
+    return { ...question, state: "not_applicable" as const, materiality: "context" as const, basis: reason, sourceRefs };
+  }).sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function coverageState(

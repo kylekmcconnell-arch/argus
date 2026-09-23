@@ -202,7 +202,7 @@ describe("verified project-token collection", () => {
     expect(captured.result).toMatchObject({
       state: "executed",
       detail: expect.stringContaining("exact contract explicitly declared"),
-      attempts: 2,
+      attempts: 3,
     });
     expect(evidence.projectToken).toMatchObject({
       verified: true,
@@ -253,8 +253,8 @@ describe("verified project-token collection", () => {
       expect.objectContaining({ provider: "dexscreener", op: "project-token-pairs", calls: 1, succeeded: 1 }),
       expect.objectContaining({ provider: "geckoterminal", op: "project-token-ohlcv-day", calls: 1, succeeded: 1 }),
     ]));
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("coingecko"))).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes(`/contract/${SSR_TOKEN}`))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("accepts an exact official X match and freezes market plus bounded pool history", async () => {
@@ -2467,4 +2467,39 @@ describe("the official-site declaration read is bounded (ID-9)", () => {
     const check = vi.mocked(ctx.recordCheck!).mock.calls.map(([row]) => row).find((row) => row.id === "project-token-identity");
     expect(check).toMatchObject({ status: "unavailable" });
   });
+});
+
+it("retains every valid registry deployment with attribution and rejects malformed contracts", async () => {
+  const { registryDeployments } = await import("./projectToken");
+  const deployments = registryDeployments({ platforms: {
+    solana: SSR_TOKEN, base: "0x0000000000000000000000000000000000000001",
+    robinhood: "0x0000000000000000000000000000000000000002", ethereum: "not-a-contract",
+  } }, "https://www.coingecko.com/en/coins/fixture", "2026-09-23T12:00:00Z");
+  expect(deployments.map((row) => row.chain)).toEqual(["solana", "base", "robinhood"]);
+  expect(deployments.every((row) => row.sourceUrl.endsWith("/fixture") && row.capturedAt)).toBe(true);
+});
+
+it.each([true, false])("enriches an exact bio contract only from its matching registry record (match=%s)", async (matches) => {
+  const { ctx, evidence } = context("@strategicsuperr", "Strategic Super Reserve", "");
+  evidence.profile.bio = `CA: ${SSR_TOKEN}`;
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("dexscreener.com/latest/dex/tokens/")) return json({ pairs: [{
+      chainId: "solana", pairAddress: SSR_POOL, url: `https://dexscreener.com/solana/${SSR_POOL}`,
+      baseToken: { address: SSR_TOKEN, name: "Strategic Super Reserve", symbol: "SSR" }, quoteToken: { address: OTHER_TOKEN, symbol: "SOL" },
+      priceUsd: "0.001", liquidity: { usd: 100000 },
+    }] });
+    if (url.includes(`/contract/${SSR_TOKEN}`)) return json({ id: "strategic-super-reserve", platforms: {
+      solana: matches ? SSR_TOKEN : OTHER_TOKEN, base: "0x0000000000000000000000000000000000000001",
+      robinhood: "0x0000000000000000000000000000000000000002",
+    }, links: { twitter_screen_name: "strategicsuperr", homepage: ["https://strategic-super-reserve.com/"] } });
+    if (url.includes("ohlcv")) return json({ data: { attributes: { ohlcv_list: [] } } });
+    return json({}, 404);
+  }));
+  await collectProjectTokenIdentity(ctx);
+  expect(evidence.projectToken?.address).toBe(SSR_TOKEN);
+  if (matches) {
+    expect(evidence.projectToken?.registryDeployments?.map((row) => row.chain)).toEqual(["solana", "base", "robinhood"]);
+    expect(evidence.projectToken?.homepage).toContain("strategic-super-reserve.com");
+  } else expect(evidence.projectToken?.registryDeployments).toBeUndefined();
 });

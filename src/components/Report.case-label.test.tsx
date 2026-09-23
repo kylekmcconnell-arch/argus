@@ -114,5 +114,5 @@ it("renders an access failure as a system problem while retaining the saved prod
   expect(container.textContent).toContain("administrator must restore provider access");
   expect(container.textContent).toContain("platform for AI models, agents and cloud computers");
   expect(container.textContent).not.toContain("Retry scoring investigation");
-  expect(container.textContent).toContain("Presentation 2026-09-23.1");
+  expect(container.textContent).toContain("Presentation 2026-09-23.2");
 });

@@ -712,6 +712,7 @@ var Audit = class {
   display_name;
   organizationSubject = false;
   tokenApplicability;
+  projectAxisTreatments = {};
   ventures = [];
   testimonials = [];
   advisedProjects = [];
@@ -944,8 +945,10 @@ var Audit = class {
         if (classForAxis(ax) === role) axes[ax] = a;
       }
       const omitTokenConduct = role === "PROJECT" /* PROJECT */ && (this.tokenApplicability?.axisTreatment === "not_applicable" || this.tokenApplicability?.axisTreatment === "deferred");
-      const expectedAxes = Object.keys(getProfile(role).axes).filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct"));
-      const axisApplicability = role === "PROJECT" /* PROJECT */ && this.tokenApplicability ? { P3_token_conduct: structuredClone(this.tokenApplicability) } : void 0;
+      const contextAxes = role === "PROJECT" /* PROJECT */ ? this.projectAxisTreatments : {};
+      for (const axis of Object.keys(contextAxes)) delete axes[axis];
+      const expectedAxes = Object.keys(getProfile(role).axes).filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct") && !contextAxes[axis]);
+      const axisApplicability = role === "PROJECT" /* PROJECT */ ? { ...structuredClone(contextAxes), ...this.tokenApplicability ? { P3_token_conduct: structuredClone(this.tokenApplicability) } : {} } : void 0;
       const applicableWeight = expectedAxes.reduce((sum, axis) => sum + (getProfile(role).axes[axis] ?? 0), 0);
       const caps = effectiveCaps(role);
       const triggered = [
@@ -1339,7 +1342,7 @@ var CABALS = [
     firstSeen: "2026-08-31",
     lastSeen: "2026-09-23",
     wallets: [
-      { chain: RH, address: "0x020ca66c30bec2c4fe3861a94e4db4a498a35872", role: "deployer", label: "machibigbrother.eth, the public wallet that launched $TAIWAN", evidence: "sent the launch tx 0xccbfd848a241472a46ae0a640eb0e59946e7580ac22393521a678ab79db7fd1d to factory 0x22e99278 at 2026-08-31 17:46 UTC, which minted 1,000,000,000 to hook 0xeb7c0347; ENS forward resolution of machibigbrother.eth returns this address; bought 10,435,660 tokens through the swap hub on 09-03 and 09-04, sold 435,660 on 09-07 08:40 and moved 1,000,000 to the fresh EOA 0x5fc7030f875851fd6fe4c8f199b009b1908b9ef4 (nonce 0, still holds them). On 09-19 07:18 it received 5,886,504 as creator fees from the shared launchpad fee contract 0x4e346895, contradicting the earlier read that there was no creator income, then bought 19,108,118 in six transactions through RobinHoodSettler 0x6aa80dbb between 07:36 and 07:45, taking the hourly candle from 0.00014663 to 0.00018609. On 09-23 00:00:34 UTC it sold all 33,994,623 in tx 0x3bbdc03e92a90858e5cfb4f929df8546f0e11e8ef30a46d3108c3e2a8a4ada84, receiving 27,125.467 STANDARD (0x88ad8ddf1e3898412146a534538d418c6f8a9062, about 5,350 USD); that single sale is 17.3 percent of all sell flow into the pool between 09-17 and 09-23. Holds 0 TAIWAN and 0.1308 ETH, down from 2.30, read 2026-09-23" },
+      { chain: RH, address: "0x020ca66c30bec2c4fe3861a94e4db4a498a35872", role: "deployer", label: "machibigbrother.eth, the public wallet that launched $TAIWAN", evidence: "sent the launch tx 0xccbfd848a241472a46ae0a640eb0e59946e7580ac22393521a678ab79db7fd1d to factory 0x22e99278 at 2026-08-31 17:46 UTC, which minted 1,000,000,000 to hook 0xeb7c0347; ENS forward resolution of machibigbrother.eth returns this address; bought 10,435,660 tokens through the swap hub on 09-03 and 09-04, sold 435,660 on 09-07 08:40 and moved 1,000,000 to the fresh EOA 0x5fc7030f875851fd6fe4c8f199b009b1908b9ef4 (nonce 0, still holds them). On 09-19 07:18 it received 5,886,504 as creator fees from Doppler's initializer 0x4e346895 (LONG's creator-fee path), contradicting the earlier read that there was no creator income, then bought 19,108,118 in six transactions through RobinHoodSettler 0x6aa80dbb between 07:36 and 07:45, taking the hourly candle from 0.00014663 to 0.00018609. On 09-23 00:00:34 UTC it sold all 33,994,623 in tx 0x3bbdc03e92a90858e5cfb4f929df8546f0e11e8ef30a46d3108c3e2a8a4ada84, receiving 27,125.467 STANDARD (0x88ad8ddf1e3898412146a534538d418c6f8a9062, about 5,350 USD); that single sale is 17.3 percent of all sell flow into the pool between 09-17 and 09-23. Holds 0 TAIWAN and 0.1308 ETH, down from 2.30, read 2026-09-23" },
       { chain: RH, address: "0x3205c07eb8d4f59fa709d64ca68c51d427094be4", role: "kol-wallet", label: "FomoScan-verified trading wallet of FOMO account machibigbrother", evidence: "FomoScan record for FOMO account machibigbrother, display name Machi Big Brother (read 2026-09-17; FOMO stores no X link, so the binding rests on the account name, and no direct transfer links this address to machibigbrother.eth). EIP-7702 account, Simple7702Account delegate 0xe6cae83b. Bought 14,479,681 $TAIWAN in 20 buys 09-01 to 09-07 for about 12,825 USD and sold 6,479,680 in six sales 09-09 13:51 to 09-17 11:18 for about 3,563 USD, each sale routed $TAIWAN into TSM and bridged to Solana as USDC (Relay requests, 1,206.42 USDC total). It then emptied the remaining 8,000,001 through the same Relay router in four transfers on 09-18 13:17, 09-18 16:29, 09-20 13:05 and 09-20 16:32. Total in and total out are both 14,479,681; holds 0 TAIWAN and 0 ETH, read 2026-09-23" },
       { chain: SOL, address: "CvmrvyKfkJQtGNVKzaJ6H337CN9F2vxrLsZZnmjP2omq", role: "kol-wallet", label: "FomoScan-verified Solana wallet, destination of the $TAIWAN sale proceeds", evidence: "FomoScan record for FOMO account machibigbrother (read 2026-09-17); holds all four Solana tokens he posted theses about on 09-13 and 09-14, of which HneTUS79 was first acquired 09-10 17:22 and AmPojoiS 09-12 22:04, both after the 09-09 and 09-10 $TAIWAN sales bridged in" }
     ],
@@ -1347,7 +1350,7 @@ var CABALS = [
       { handle: "machibigbrother", role: "kol", label: "Jeffrey Huang, 223.4k followers on X, creator and promoter of $TAIWAN", evidence: "X posts 2026-09-01 'Taiwan Coin paired with Taiwan Semiconductor Manufacturing' and 2026-09-03 'I am addicted to creating coins but I have now created my Mona Lisa. $TAIWAN'; FOMO theses on the token 09-06 16:57 'We are building the world's largest $TSM reserve. Long your longs.' and 09-07 04:03 'There is no ai without Taiwan', posted while buying and two days before he began selling; neither of his wallets holds any TSM, so the reserve being built sits in the pool, not with him; read 2026-09-17" }
     ],
     launches: [
-      { chain: RH, address: "0xaa0b48defde440b8445ba45db88cb076cf261e18", symbol: "TAIWAN", name: "Taiwan Coin", launchedAt: "2026-08-31", venue: "unknown factory 0x22e99278308b393ea1260859b181ad7e78f5eeed", outcome: "organic", note: "Paired against tokenized TSM rather than ETH. Peaked 20 hours after launch and is down 92 percent from that high, at about 104,000 USD of liquidity and a 146,000 USD valuation on 2026-09-23. No allocation at the mint and no self-snipe, but the launchpad did pay the creator 5,886,504 tokens in fees on 09-19. The 92 percent decline came from dispersed selling across 5,373 attributed wallets, top ten at 6.6 percent of flow, and the single worst day was 09-11, when the price fell from 0.00071 to 0.00019. The creator's own selling began 2026-09-09 and finished on 09-23; in the 09-17 to 09-23 window he is the largest single seller at 17.3 percent of sell flow, against 195,953,724 sold and 175,339,298 bought across about 69 and 65 wallets.", evidence: "156,948 transfers merged from Robinhood RPC logs over blocks 51,053,350 to 65,718,843, read 2026-09-17; sales attributed by walking router hops inside each tx; GeckoTerminal hourly candles for the price path" }
+      { chain: RH, address: "0xaa0b48defde440b8445ba45db88cb076cf261e18", symbol: "TAIWAN", name: "Taiwan Coin", launchedAt: "2026-08-31", venue: "LONG (app.long.xyz), LongLauncher 0x22e99278308b393ea1260859b181ad7e78f5eeed over the Doppler Airlock 0xeb7c0347; the creator fee is paid by Doppler's initializer 0x4e346895 in both pool tokens", outcome: "organic", note: "Paired against tokenized TSM rather than ETH. Peaked 20 hours after launch and is down 92 percent from that high, at about 104,000 USD of liquidity and a 146,000 USD valuation on 2026-09-23. No allocation at the mint and no self-snipe, but the launchpad did pay the creator 5,886,504 tokens in fees on 09-19. The 92 percent decline came from dispersed selling across 5,373 attributed wallets, top ten at 6.6 percent of flow, and the single worst day was 09-11, when the price fell from 0.00071 to 0.00019. The creator's own selling began 2026-09-09 and finished on 09-23; in the 09-17 to 09-23 window he is the largest single seller at 17.3 percent of sell flow, against 195,953,724 sold and 175,339,298 bought across about 69 and 65 wallets.", evidence: "156,948 transfers merged from Robinhood RPC logs over blocks 51,053,350 to 65,718,843, read 2026-09-17; sales attributed by walking router hops inside each tx; GeckoTerminal hourly candles for the price path" }
     ]
   },
   {
@@ -1359,7 +1362,7 @@ var CABALS = [
     firstSeen: "2026-09-03",
     lastSeen: "2026-09-21",
     wallets: [
-      { chain: RH, address: "0xa72a5b06927badb020d235f5f43ce56507ab2399", role: "deployer", label: "$MEME deployer and creator-fee recipient", evidence: "sent launch tx 0x75c36932619070f16f65bd7d252f689a4e6cf7d170a99ee72774d56f4315e41e (block 53,697,172, 2026-09-03 20:30 UTC) to factory 0x22e99278, which minted 1,000,000,000 to hook 0xeb7c0347; bought 11,816,778 at block +371 in tx 0xc72f60f08d9133d698b396381e56c04cb2a8afe6dbf04d083bdedc9cc81e478d, 0.1 ETH through RelayRouterV3 0xb92fe925; received 5,010,685 in 28 creator-fee claims (selector 0x817db73b) from the shared DopplerHookInitializer 0x4e346895 between 2026-09-04 and 2026-09-21; 17,940,485 in, 17,621,349 out, zero sent to the pool; holds 319,135 and 0.11 ETH, nonce 100, read 2026-09-21. Also holds 1.08B NEB, 430M SIGNAL, 273M SCOUT, 249M TERRA and 98M SZN, none with any market." },
+      { chain: RH, address: "0xa72a5b06927badb020d235f5f43ce56507ab2399", role: "deployer", label: "$MEME deployer and creator-fee recipient", evidence: "sent launch tx 0x75c36932619070f16f65bd7d252f689a4e6cf7d170a99ee72774d56f4315e41e (block 53,697,172, 2026-09-03 20:30 UTC) to factory 0x22e99278, which minted 1,000,000,000 to hook 0xeb7c0347; bought 11,816,778 at block +371 in tx 0xc72f60f08d9133d698b396381e56c04cb2a8afe6dbf04d083bdedc9cc81e478d, 0.1 ETH through RelayRouterV3 0xb92fe925; received 5,010,685 in 28 creator-fee claims (selector 0x817db73b) from Doppler's initializer 0x4e346895, LONG's creator-fee path, between 2026-09-04 and 2026-09-21; 17,940,485 in, 17,621,349 out, zero sent to the pool; holds 319,135 and 0.11 ETH, nonce 100, read 2026-09-21. Also holds 1.08B NEB, 430M SIGNAL, 273M SCOUT, 249M TERRA and 98M SZN, none with any market." },
       { chain: RH, address: "0x8e74a2b037d29934d12c04becccb627a7883acb7", role: "farm", label: "$MEME forwarding wallet A, sold into the pool", evidence: "received 12,029,478 from the deployer 2026-09-04 04:34 to 16:25; sent 5,000,000 to PoolManager 0x8366a39c in 15 transfers, 4,683,059 through proxy 0xdeadc0de, 1,846,419 through RelayRouterV3 and 500,000 to swap router 0xbdbae060, last transfer 2026-09-05 00:24; holds zero, read 2026-09-21" },
       { chain: RH, address: "0x8bc35bf8844123c93d8399f3c35f232ce201b328", role: "off-ramp", label: "$MEME forwarding wallet B, bridged out", evidence: "received 4,700,053, of which 3,296,638 from the deployer on 2026-09-04 and 09-05; sent 4,232,318 through RelayRouterV3 0xb92fe925 in 11 transfers and sold 467,735 through RobinHoodSettler 0x39b38686, last transfer 2026-09-05 03:49; holds zero, read 2026-09-21" }
     ],
@@ -1367,7 +1370,42 @@ var CABALS = [
       { handle: "amemecoinrh", role: "project", label: "A Meme Coin project account, 12.3k followers, follows three", evidence: "listed on every DexScreener pair for 0x385f4f8a; pinned post 2026-09-19 'Today, A $MEME Coin gets a new mission. Fix @AMCTheatres.' quoting Vlad Tenev's 2026-09-14 post on voting for Robinhood Stock Tokens; 2026-09-20 post lists the 2026-09-24 AMC annual meeting; read 2026-09-21" }
     ],
     launches: [
-      { chain: RH, address: "0x385f4f8ae47651ce5f58f5265395a669f8281e18", symbol: "MEME", name: "A Meme Coin", launchedAt: "2026-09-03", venue: "unknown factory 0x22e99278308b393ea1260859b181ad7e78f5eeed", outcome: "unestablished", note: "EIP-1167 clone of implementation 0x3be8b97f; one mint, no burns, no mint or rename function. Peaked at 0.063651 USD on 2026-09-13 and set a new low of 0.025312 on 2026-09-21, down 59 percent, with daily volume falling from 11.7M to 2.4M USD. About 2.0M USD of its 4.22M headline liquidity is the AMC/MEME pool, where MEME is the quote asset. Blockscout indexes the symbol as AMC while the contract returns MEME, so explorer balance views list it beside the real tokenized AMC 0x05a3d1cd.", evidence: "Blockscout holders, counters and per-address token transfers, and Robinhood RPC reads of name, symbol, supply and the mint log, all read 2026-09-21; GeckoTerminal hourly candles for pool 0x46525dc1 from 2026-09-13" }
+      { chain: RH, address: "0x385f4f8ae47651ce5f58f5265395a669f8281e18", symbol: "MEME", name: "A Meme Coin", launchedAt: "2026-09-03", venue: "LONG (app.long.xyz), LongLauncher 0x22e99278308b393ea1260859b181ad7e78f5eeed over the Doppler Airlock 0xeb7c0347; LONG tokens carry the vanity suffix 1e18", outcome: "unestablished", note: "EIP-1167 clone of implementation 0x3be8b97f; one mint, no burns, no mint or rename function. Peaked at 0.063651 USD on 2026-09-13 and set a new low of 0.025312 on 2026-09-21, down 59 percent, with daily volume falling from 11.7M to 2.4M USD. About 2.0M USD of its 4.22M headline liquidity is the AMC/MEME pool, where MEME is the quote asset. Blockscout indexes the symbol as AMC while the contract returns MEME, so explorer balance views list it beside the real tokenized AMC 0x05a3d1cd.", evidence: "Blockscout holders, counters and per-address token transfers, and Robinhood RPC reads of name, symbol, supply and the mint log, all read 2026-09-21; GeckoTerminal hourly candles for pool 0x46525dc1 from 2026-09-13" }
+    ]
+  },
+  {
+    id: "rh-volume-ring-2026-09-22",
+    name: "Robinhood Chain wash-volume ring of 2026-09-22",
+    kind: "launch-farm",
+    intent: "nefarious",
+    summary: "Thirty-one tokens deployed directly from thirty-two fresh wallets on 2026-09-21 to 23, no launchpad, that report 1.9M to 23M USD of daily volume on zero to 300,000 USD of liquidity: volume-to-liquidity ratios of 100 to 5,000 times, and four (a fake BTC, GREEN, FCAT, SHIB) showing millions of volume on no liquidity at all. Three bytecode templates cover 21 of them, several are name-clones of real tokens (musebook, Agrippa, HOOD6900, BTC, SHIB), the deployers have nonces of 5 to 18 and most are drained to zero after use, and template B is chain-funded from one pot: JEV's deployer sent RIG's 16.09 ETH and NODIUM's received 12.85 ETH. The tokens have no product, no socials and no organic holders; the volume exists to game the chain's top-by-volume rankings on GeckoTerminal and DexScreener. Any scan of one of these tokens should warn, and any volume ranking on this chain must exclude them.",
+    firstSeen: "2026-09-21",
+    lastSeen: "2026-09-23",
+    wallets: [
+      { chain: RH, address: "0x361bcf4b707695494db2b71f541af33776280876", role: "hub", label: "funder of two template-A deployers", evidence: "first-funder of CRAIL's deployer 0x5b93b427 (0.2 ETH, 2026-09-22 12:29) and PROUTE's deployer 0xb016fc9c (0.2 ETH, 2026-09-22 18:38), read on Blockscout 2026-09-23" },
+      { chain: RH, address: "0xc96aa6ad793bc744beb11a9afd1813470ca194dc", role: "hub", label: "JEV's deployer, which also funds the template-B set", evidence: "deployed JEV 0x1df7abb9 on 2026-09-22 and sent 16.0916 ETH to RIG's deployer 0xef7659ed at 2026-09-22 17:11; NODIUM's deployer 0x2f10b576 was funded 12.8454 ETH the same evening; read on Blockscout 2026-09-23" },
+      { chain: RH, address: "0x37aafcf68fbb35ad01c4bd2e92feced835f62525", role: "deployer", label: "PGREM deployer, template A", evidence: "direct CREATE of 0xb57ed3c7 on 2026-09-22; funded 0.4 ETH by 0xB3352958 at 08:52; nonce 17, 0 ETH left; PGREM shows 23.17M USD of 24h volume on 170,098 USD of liquidity, read 2026-09-23" },
+      { chain: RH, address: "0x5b93b4270f7144c49e38aaa41e0accfd1b242a10", role: "deployer", label: "CRAIL deployer, template A", evidence: "direct CREATE of 0xc8d8d13e on 2026-09-22; funded by 0x361bcf4b; nonce 18, 0 ETH left; 18.60M USD volume on 171,481 USD liquidity, read 2026-09-23" },
+      { chain: RH, address: "0xb016fc9c2df06e4554cec3b2c326786c8fb90419", role: "deployer", label: "PROUTE deployer, template A", evidence: "direct CREATE of 0x7af49cb4 on 2026-09-22; funded by 0x361bcf4b; nonce 16, 0 ETH left; 9.64M USD volume on 65,781 USD liquidity, read 2026-09-23" },
+      { chain: RH, address: "0xef7659ede76d13dd82ececfe2d07a40e63b015dd", role: "deployer", label: "RIG deployer, template B", evidence: "direct CREATE of 0x4c7c1f29 on 2026-09-22; funded 16.09 ETH by JEV's deployer 0xc96aa6ad; 2.40M USD volume on 832 USD liquidity, read 2026-09-23" },
+      { chain: RH, address: "0x2f10b57688f4a2b008ac91386cc6db0d1b0d635b", role: "deployer", label: "NODIUM deployer, template B", evidence: "direct CREATE of 0x753bd40e on 2026-09-22; funded 12.85 ETH by 0xb12B8dab at 19:36; 2.55M USD volume on 691 USD liquidity, read 2026-09-23" },
+      { chain: RH, address: "0xfa1aa1a5f7055043004e1ffb3f1c783a0951cc5d", role: "deployer", label: "deployer of the musebook name-clone", evidence: "direct CREATE of 0x17e900c2 named musebook on 2026-09-22, cloning Bankr's musebook 0x91a2dae9; 15.17M USD volume on 2,806 USD liquidity, read 2026-09-23" }
+    ],
+    accounts: [],
+    launches: [
+      { chain: RH, address: "0xb57ed3c7ffeaa75ceb6c772cb7a3be422782e250", symbol: "PGREM", name: "PGREM", launchedAt: "2026-09-22", venue: "direct deploy, template A (1,764 bytes)", outcome: "unestablished", note: "23.17M USD reported 24h volume on 170,098 USD liquidity, 136 times its depth.", evidence: "GeckoTerminal top-pools sweep and RPC bytecode hash, read 2026-09-23" },
+      { chain: RH, address: "0xc8d8d13eea8a47bc265f4f26c8b5b72425b611c2", symbol: "CRAIL", name: "CRAIL", launchedAt: "2026-09-22", venue: "direct deploy, template A", outcome: "unestablished", note: "18.60M USD on 171,481 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x4d8a95531f6e05cc2a6300485f5048ea5379d14d", symbol: "HITBUY", name: "HITBUY", launchedAt: "2026-09-23", venue: "direct deploy, template A", outcome: "unestablished", note: "17.21M USD on 283,078 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x6a603bcd27c2913dc76802bd0f4f136ca7253cf0", symbol: "PKRT", name: "PKRT", launchedAt: "2026-09-22", venue: "direct deploy, template A", outcome: "unestablished", note: "15.68M USD on 73,936 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x7af49cb48abbf70d11d786d99242173698119892", symbol: "PROUTE", name: "PROUTE", launchedAt: "2026-09-22", venue: "direct deploy, template A", outcome: "unestablished", note: "9.64M USD on 65,781 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x17e900c2a7a16695431469a40ea060d508edd6d2", symbol: "musebook", name: "musebook (clone)", launchedAt: "2026-09-22", venue: "direct deploy", outcome: "unestablished", note: "Name-clone of Bankr's musebook 0x91a2dae9; 15.17M USD on 2,806 USD liquidity, 5,407 times its depth.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x10f5ba270b0b5da5a4d21369f2c74a300bb16a8b", symbol: "Agrippa", name: "Agrippa (clone)", launchedAt: "2026-09-22", venue: "direct deploy", outcome: "unestablished", note: "Name-clone of Bankr's Agrippa 0x83a49b80; 9.28M USD on 3,274 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x8d5c42c096344e3ad4d5fcac8fe7a4b4ffca0150", symbol: "HOOD6900", name: "HOOD6900 (clone)", launchedAt: "2026-09-22", venue: "direct deploy, template C (3,554 bytes)", outcome: "unestablished", note: "8.46M USD on 3,523 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0xa2508b15ab16826c720631b9afa0a90c453ae8a4", symbol: "Euler", name: "Euler (clone)", launchedAt: "2026-09-23", venue: "direct deploy, template C", outcome: "unestablished", note: "12.49M USD on 172,950 USD liquidity; name-clones Bankr's Euler 0x434d49b8.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0xabe99cf268cdc8bd70a71a5283fdacbcb36714fd", symbol: "NOSH", name: "NOSH (clone)", launchedAt: "2026-09-23", venue: "direct deploy, template C", outcome: "unestablished", note: "9.96M USD on 24,026 USD liquidity; name-clones the Pons launch NOSH 0xe02c53d4.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x4c7c1f29bc6be6c51d372f4edb3f68e77e34ab40", symbol: "RIG", name: "RIG", launchedAt: "2026-09-22", venue: "direct deploy, template B (4,655 bytes)", outcome: "unestablished", note: "2.40M USD on 832 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x753bd40e11921abf2a1a01a05ddc836c61753bc1", symbol: "NODIUM", name: "NODIUM", launchedAt: "2026-09-22", venue: "direct deploy, template B", outcome: "unestablished", note: "2.55M USD on 691 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x1df7abb9d130e373f00bb1edec798cd4194a3845", symbol: "JEV", name: "JEV", launchedAt: "2026-09-22", venue: "direct deploy, template B", outcome: "unestablished", note: "2.11M USD on 1,085 USD liquidity; its deployer funds the rest of template B.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" }
     ]
   },
   {
@@ -2366,6 +2404,253 @@ function portfolioRelationshipBinding(artifact, evidence) {
   return null;
 }
 
+// src/intelligence/archetypes.ts
+function factSourceHasEligibleArtifact(source2) {
+  if (source2.artifactVerified !== true) return false;
+  const hasPublicUrl = /^https?:\/\/[^\s]+$/i.test(source2.url ?? "");
+  const hasFrozenHash = /^[a-f0-9]{64}$/i.test(source2.contentHash ?? "");
+  return hasPublicUrl || hasFrozenHash;
+}
+function supportingFactSources(fact) {
+  return fact.sources.map((source2, originalIndex) => ({ source: source2, originalIndex })).filter(({ source: source2 }) => source2.relation === "supports").sort(
+    (left, right) => left.source.url.localeCompare(right.source.url) || (left.source.capturedAt ?? "").localeCompare(right.source.capturedAt ?? "") || left.source.provider.localeCompare(right.source.provider) || left.source.contentHash.localeCompare(right.source.contentHash) || left.originalIndex - right.originalIndex
+  );
+}
+function factSupportSourceId(factId3, sortedIndex) {
+  return `fact:${factId3}:support:${String(sortedIndex + 1).padStart(2, "0")}`;
+}
+function factSupportSourceRefs(fact, verifiedOnly = false) {
+  return supportingFactSources(fact).map(({ source: source2 }, sortedIndex) => ({ source: source2, id: factSupportSourceId(fact.factId, sortedIndex) })).filter(({ source: source2 }) => !verifiedOnly || factSourceHasEligibleArtifact(source2)).map(({ id }) => id);
+}
+function contradictingFactSources(fact) {
+  return fact.sources.map((source2, originalIndex) => ({ source: source2, originalIndex })).filter(({ source: source2 }) => source2.relation === "contradicts").sort(
+    (left, right) => left.source.url.localeCompare(right.source.url) || (left.source.capturedAt ?? "").localeCompare(right.source.capturedAt ?? "") || left.source.provider.localeCompare(right.source.provider) || left.source.contentHash.localeCompare(right.source.contentHash) || left.originalIndex - right.originalIndex
+  );
+}
+function factContradictionSourceId(factId3, sortedIndex) {
+  return `fact:${factId3}:contradiction:${String(sortedIndex + 1).padStart(2, "0")}`;
+}
+function factContradictionSourceRefs(fact, verifiedOnly = false) {
+  return contradictingFactSources(fact).map(({ source: source2 }, sortedIndex) => ({ source: source2, id: factContradictionSourceId(fact.factId, sortedIndex) })).filter(({ source: source2 }) => !verifiedOnly || factSourceHasEligibleArtifact(source2)).map(({ id }) => id);
+}
+var ARCHETYPE_RULES = [
+  {
+    archetype: "dex",
+    patterns: [/\bdecentralized exchange\b/i, /\bdex\b/i, /\bautomated market maker\b/i, /\bamm\b/i]
+  },
+  {
+    archetype: "lending",
+    patterns: [/\blending protocol\b/i, /\bborrowing protocol\b/i, /\bmoney market\b/i]
+  },
+  {
+    archetype: "stablecoin",
+    patterns: [
+      /^\s*(?:an?\s+)?(?:[a-z0-9-]+\s+){0,3}stablecoin\b(?!\s+(?:lending|exchange|trading|payments?|bridge|dex)\b)/i,
+      /\b(?:is|issues?|mints?)\s+(?:an?\s+)?(?:[a-z0-9-]+\s+){0,4}stablecoin\b/i,
+      /\bstablecoin\s+(?:issuer|asset|token|protocol)\b/i
+    ]
+  },
+  {
+    archetype: "bridge",
+    patterns: [/\bcross[ -]chain bridge\b/i, /\btoken bridge\b/i, /\bbridge protocol\b/i]
+  },
+  { archetype: "layer_1", patterns: [/\blayer[ -]?1\b/i, /\bl1 blockchain\b/i] },
+  { archetype: "layer_2", patterns: [/\blayer[ -]?2\b/i, /\bl2 network\b/i, /\brollup\b/i] },
+  { archetype: "staking", patterns: [/\brestaking\b/i, /\bliquid staking\b/i, /\bstaking protocol\b/i] },
+  {
+    archetype: "derivatives",
+    patterns: [/\bderivatives?\b/i, /\bperpetuals?\b/i, /\boptions protocol\b/i, /\bfutures exchange\b/i]
+  },
+  {
+    archetype: "exchange_or_custody",
+    patterns: [
+      /\bcentralized exchange\b/i,
+      /\bdigital asset exchange\b/i,
+      /\bcrypto(?:currency)? exchange\b/i,
+      /\bcustod(?:y|ian)\b/i
+    ]
+  },
+  {
+    archetype: "oracle_or_data",
+    patterns: [/\boracle network\b/i, /\bdata availability\b/i, /\bblockchain indexer\b/i, /\brpc provider\b/i]
+  },
+  { archetype: "payments", patterns: [/\bpayments? protocol\b/i, /\bpayments? network\b/i, /\bpayment processor\b/i] },
+  { archetype: "launchpad", patterns: [/\blaunchpad\b/i, /\btoken launch platform\b/i] },
+  { archetype: "gaming_or_nft", patterns: [/\bweb3 gaming\b/i, /\bblockchain game\b/i, /\bnft marketplace\b/i] }
+];
+function isDirectSubjectFact(fact) {
+  return fact.attributionScope === void 0 || fact.attributionScope === "direct_subject";
+}
+function factTargetsAuditedSubject(fact, auditedHandle) {
+  if (!isDirectSubjectFact(fact)) return false;
+  try {
+    return normalizeHandle(fact.subjectKey) === normalizeHandle(auditedHandle);
+  } catch {
+    return false;
+  }
+}
+function isStrictSourceBackedFact(fact) {
+  return (fact.status === "verified" || fact.status === "corroborated") && isDirectSubjectFact(fact) && fact.evidence_origin === "deterministic" && fact.artifact_verified === true && fact.floorEligible !== false && fact.providerProjection !== true && !fact.sources.some((source2) => source2.relation === "contradicts") && fact.sources.some((source2) => source2.relation === "supports" && factSourceHasEligibleArtifact(source2));
+}
+var RELATIONAL_CONTEXT = /\b(?:for|with|using|via|through|integrates?|supports?|depends\s+on|secured\s+by|powered\s+by)\b/i;
+var IDENTITY_VERB = /\b(?:is|are|operates?|runs?|provides?|offers?|builds?|issues?|serves\s+as)\b/gi;
+var IDENTITY_CLAUSE_BOUNDARY = /^(?:\s*$|\s*[,.;:()]|\s+\b(?:and|for|with|using|via|through|that|which|where|built|deployed|operating|running|serving|supporting|secured|powered)\b)/i;
+var PRODUCT_HEAD_CONTINUATION = /^\s+(?:(?:protocol|network|platform|exchange|marketplace|asset|token|coin|blockchain|application|app|system|scaling\s+solution|trading\s+venue)\b\s*){1,2}/i;
+function hasProductHeadBoundary(suffix) {
+  if (IDENTITY_CLAUSE_BOUNDARY.test(suffix)) return true;
+  const continuation = suffix.match(PRODUCT_HEAD_CONTINUATION);
+  return continuation ? IDENTITY_CLAUSE_BOUNDARY.test(suffix.slice(continuation[0].length)) : false;
+}
+function matchesSubjectIdentity(value, pattern) {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  const matcher = new RegExp(pattern.source, flags);
+  for (const match of value.matchAll(matcher)) {
+    const index = match.index ?? -1;
+    if (index < 0) continue;
+    const suffix = value.slice(index + match[0].length);
+    if (!hasProductHeadBoundary(suffix)) continue;
+    const prefix = value.slice(0, index);
+    if (index <= 24 && !RELATIONAL_CONTEXT.test(prefix)) return true;
+    const verbs = [...prefix.matchAll(IDENTITY_VERB)];
+    const verb = verbs.at(-1);
+    if (!verb || verb.index == null) continue;
+    const between = prefix.slice(verb.index + verb[0].length);
+    if (between.length <= 80 && !RELATIONAL_CONTEXT.test(between)) return true;
+  }
+  return false;
+}
+function uniqueSorted(values) {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+function classifyProductFacts(facts, auditedHandle) {
+  const matches = /* @__PURE__ */ new Map();
+  for (const fact of facts) {
+    if (fact.predicate !== "product" || !factTargetsAuditedSubject(fact, auditedHandle) || !isStrictSourceBackedFact(fact)) continue;
+    for (const rule of ARCHETYPE_RULES) {
+      if (!rule.patterns.some((pattern) => matchesSubjectIdentity(fact.value, pattern))) continue;
+      const sourceRefs = factSupportSourceRefs(fact, true);
+      const existing = matches.get(rule.archetype);
+      if (existing) {
+        existing.sourceRefs = uniqueSorted([...existing.sourceRefs, ...sourceRefs]);
+      } else {
+        matches.set(rule.archetype, {
+          archetype: rule.archetype,
+          confidence: "strict_source_backed",
+          sourceRefs,
+          matchedText: fact.value
+        });
+      }
+    }
+  }
+  return [...matches.values()].sort((left, right) => left.archetype.localeCompare(right.archetype));
+}
+function classifyProjectArchetypes(evidence) {
+  const forms = [];
+  if (evidence.projectToken) {
+    forms.push({
+      form: "token",
+      evidenceState: "verified",
+      sourceRefs: ["snapshot:project-token"]
+    });
+  }
+  if (evidence.protocolTvl) {
+    forms.push({
+      form: "protocol",
+      evidenceState: "measured",
+      sourceRefs: ["snapshot:protocol-tvl"]
+    });
+  }
+  const strictLegalFacts = (evidence.basicFacts ?? []).filter(
+    (fact) => fact.predicate === "legal_entity" && factTargetsAuditedSubject(fact, evidence.profile.handle) && isStrictSourceBackedFact(fact)
+  );
+  if (evidence.companyEnrichment?.identityMatch === "official_domain" || strictLegalFacts.length > 0) {
+    forms.push({
+      form: "company",
+      evidenceState: strictLegalFacts.length > 0 ? "verified" : "reported_context",
+      sourceRefs: uniqueSorted([
+        ...evidence.companyEnrichment?.identityMatch === "official_domain" ? ["snapshot:company-enrichment"] : [],
+        ...strictLegalFacts.flatMap((fact) => factSupportSourceRefs(fact, true))
+      ])
+    });
+  }
+  forms.sort((left, right) => left.form.localeCompare(right.form));
+  const matches = classifyProductFacts(evidence.basicFacts ?? [], evidence.profile.handle);
+  if (matches.length === 1) {
+    return { forms, archetypes: { state: "resolved", primary: matches[0].archetype, matches } };
+  }
+  if (matches.length > 1) {
+    return { forms, archetypes: { state: "hybrid", primary: null, matches } };
+  }
+  if (evidence.protocolTvl) {
+    return {
+      forms,
+      archetypes: {
+        state: "generic",
+        primary: "generic_protocol",
+        matches: [{
+          archetype: "generic_protocol",
+          confidence: "structural_generic",
+          sourceRefs: ["snapshot:protocol-tvl"]
+        }]
+      }
+    };
+  }
+  return { forms, archetypes: { state: "insufficient", primary: null, matches: [] } };
+}
+
+// src/lib/projectDiligenceContext.ts
+function deriveProjectDiligenceContext(evidence, determinedAt) {
+  const boundFacts = (evidence.basicFacts ?? []).filter((fact) => factTargetsAuditedSubject(fact, evidence.profile.handle));
+  const facts = boundFacts.filter((fact) => (fact.status === "verified" || fact.status === "corroborated") && fact.artifact_verified === true && fact.evidence_origin === "deterministic" && !fact.sources.some((source2) => source2.relation === "contradicts"));
+  const official = (fact) => fact.sources.filter((source2) => source2.artifactVerified && source2.relation === "supports" && source2.sourceClass === "official_subject" && /^https?:\/\//.test(source2.url));
+  const fair = facts.filter((fact) => ["tokenomics", "official_token", "funding", "launched"].includes(fact.predicate)).flatMap(official).filter((source2) => /\b(?:fair[- ]launch(?:ed)?|launched (?:on|via) pump\.fun)\b/i.test(source2.excerpt) && !/\b(?:not|never|no longer)\b.{0,25}\b(?:fair[- ]launch|launched)\b/i.test(source2.excerpt));
+  const product = facts.filter((fact) => ["product", "launched"].includes(fact.predicate));
+  const prelaunch = product.flatMap(official).filter((source2) => /\b(?:product|platform|protocol|app|mainnet)\b.{0,65}\b(?:coming soon|not yet live|not launched|pre[- ]launch|in development)\b/i.test(source2.excerpt));
+  const live = product.some((fact) => /\b(?:is live|now live|live on mainnet|accepts deposits|holds user funds)\b/i.test([fact.value, ...official(fact).map((s) => s.excerpt)].join(" ")));
+  const context2 = {
+    version: "2026-09-23.1",
+    launch: fair.length ? "fair_launch" : "unknown",
+    productStage: prelaunch.length && !live ? "prelaunch" : "unknown",
+    sourceUrls: [...new Set([...fair, ...prelaunch].map((source2) => source2.url))],
+    axes: {},
+    optionalQuestions: []
+  };
+  const has = (...predicates) => boundFacts.some((fact) => predicates.includes(fact.predicate));
+  const adverse = evidence.findings.some((finding) => finding.polarity === -1 && finding.evidence_origin !== "model_lead" && finding.artifact_verified === true);
+  if (context2.launch === "fair_launch") {
+    for (const predicate of ["funding", "investor", "governance", "treasury", "vesting", "legal_entity", "public_security", "conflict_of_interest"]) {
+      if (!has(predicate)) context2.optionalQuestions.push(predicate);
+    }
+    if (!has("funding", "investor", "partnership") && !evidence.siteBackers?.names.length && !evidence.webTeam?.some((member) => member.kind === "org" || /\b(?:advisor|backer|investor|partner)\b/i.test(member.role)) && !evidence.protocolFunding?.rounds.length && !evidence.companyEnrichment?.funding?.rounds.length && !adverse) {
+      context2.axes.P4_backing_and_partners = {
+        state: "contextual_project",
+        axisTreatment: "not_applicable",
+        reason: "A source-disclosed fair launch does not require venture funding or named backers. No financing or operating relationship is established to assess on this axis.",
+        evidence: fair.map((source2) => source2.url),
+        determinedAt
+      };
+    }
+  }
+  if (context2.productStage === "prelaunch") {
+    if (!has("traction", "security_incident") && !evidence.protocolTvl && !adverse) {
+      context2.axes.P5_traction_and_liveness = {
+        state: "contextual_project",
+        axisTreatment: "deferred",
+        reason: "The official source describes the product as not yet launched. Production usage is deferred; live token and security checks remain applicable.",
+        evidence: prelaunch.map((source2) => source2.url),
+        determinedAt
+      };
+    }
+    for (const predicate of ["launched", "traction"]) if (!has(predicate)) context2.optionalQuestions.push(predicate);
+  }
+  return context2;
+}
+function projectQuestionContext(predicate, context2) {
+  if (!context2.optionalQuestions.includes(predicate)) return null;
+  if (predicate === "traction" || predicate === "launched") return "The product is described as prelaunch. A production launch date or usage history is not required yet; this does not describe the live token's age.";
+  return "Optional disclosure for a source-disclosed fair launch. Its absence is not an adverse finding or a requirement to obtain venture funding, adopt corporate governance, or publish private treasury accounts. Any specific disclosed commitments remain assessable.";
+}
+
 // src/graph/network.ts
 var EVM_ADDRESS = /^0x[0-9a-f]+$/i;
 var SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -2588,200 +2873,6 @@ var AXIS_LABELS = {
 };
 function axisLabel(k) {
   return AXIS_LABELS[k] ?? k.replace(/^[A-Z]{1,3}\d+_/, "").replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
-}
-
-// src/intelligence/archetypes.ts
-function factSourceHasEligibleArtifact(source2) {
-  if (source2.artifactVerified !== true) return false;
-  const hasPublicUrl = /^https?:\/\/[^\s]+$/i.test(source2.url ?? "");
-  const hasFrozenHash = /^[a-f0-9]{64}$/i.test(source2.contentHash ?? "");
-  return hasPublicUrl || hasFrozenHash;
-}
-function supportingFactSources(fact) {
-  return fact.sources.map((source2, originalIndex) => ({ source: source2, originalIndex })).filter(({ source: source2 }) => source2.relation === "supports").sort(
-    (left, right) => left.source.url.localeCompare(right.source.url) || (left.source.capturedAt ?? "").localeCompare(right.source.capturedAt ?? "") || left.source.provider.localeCompare(right.source.provider) || left.source.contentHash.localeCompare(right.source.contentHash) || left.originalIndex - right.originalIndex
-  );
-}
-function factSupportSourceId(factId3, sortedIndex) {
-  return `fact:${factId3}:support:${String(sortedIndex + 1).padStart(2, "0")}`;
-}
-function factSupportSourceRefs(fact, verifiedOnly = false) {
-  return supportingFactSources(fact).map(({ source: source2 }, sortedIndex) => ({ source: source2, id: factSupportSourceId(fact.factId, sortedIndex) })).filter(({ source: source2 }) => !verifiedOnly || factSourceHasEligibleArtifact(source2)).map(({ id }) => id);
-}
-function contradictingFactSources(fact) {
-  return fact.sources.map((source2, originalIndex) => ({ source: source2, originalIndex })).filter(({ source: source2 }) => source2.relation === "contradicts").sort(
-    (left, right) => left.source.url.localeCompare(right.source.url) || (left.source.capturedAt ?? "").localeCompare(right.source.capturedAt ?? "") || left.source.provider.localeCompare(right.source.provider) || left.source.contentHash.localeCompare(right.source.contentHash) || left.originalIndex - right.originalIndex
-  );
-}
-function factContradictionSourceId(factId3, sortedIndex) {
-  return `fact:${factId3}:contradiction:${String(sortedIndex + 1).padStart(2, "0")}`;
-}
-function factContradictionSourceRefs(fact, verifiedOnly = false) {
-  return contradictingFactSources(fact).map(({ source: source2 }, sortedIndex) => ({ source: source2, id: factContradictionSourceId(fact.factId, sortedIndex) })).filter(({ source: source2 }) => !verifiedOnly || factSourceHasEligibleArtifact(source2)).map(({ id }) => id);
-}
-var ARCHETYPE_RULES = [
-  {
-    archetype: "dex",
-    patterns: [/\bdecentralized exchange\b/i, /\bdex\b/i, /\bautomated market maker\b/i, /\bamm\b/i]
-  },
-  {
-    archetype: "lending",
-    patterns: [/\blending protocol\b/i, /\bborrowing protocol\b/i, /\bmoney market\b/i]
-  },
-  {
-    archetype: "stablecoin",
-    patterns: [
-      /^\s*(?:an?\s+)?(?:[a-z0-9-]+\s+){0,3}stablecoin\b(?!\s+(?:lending|exchange|trading|payments?|bridge|dex)\b)/i,
-      /\b(?:is|issues?|mints?)\s+(?:an?\s+)?(?:[a-z0-9-]+\s+){0,4}stablecoin\b/i,
-      /\bstablecoin\s+(?:issuer|asset|token|protocol)\b/i
-    ]
-  },
-  {
-    archetype: "bridge",
-    patterns: [/\bcross[ -]chain bridge\b/i, /\btoken bridge\b/i, /\bbridge protocol\b/i]
-  },
-  { archetype: "layer_1", patterns: [/\blayer[ -]?1\b/i, /\bl1 blockchain\b/i] },
-  { archetype: "layer_2", patterns: [/\blayer[ -]?2\b/i, /\bl2 network\b/i, /\brollup\b/i] },
-  { archetype: "staking", patterns: [/\brestaking\b/i, /\bliquid staking\b/i, /\bstaking protocol\b/i] },
-  {
-    archetype: "derivatives",
-    patterns: [/\bderivatives?\b/i, /\bperpetuals?\b/i, /\boptions protocol\b/i, /\bfutures exchange\b/i]
-  },
-  {
-    archetype: "exchange_or_custody",
-    patterns: [
-      /\bcentralized exchange\b/i,
-      /\bdigital asset exchange\b/i,
-      /\bcrypto(?:currency)? exchange\b/i,
-      /\bcustod(?:y|ian)\b/i
-    ]
-  },
-  {
-    archetype: "oracle_or_data",
-    patterns: [/\boracle network\b/i, /\bdata availability\b/i, /\bblockchain indexer\b/i, /\brpc provider\b/i]
-  },
-  { archetype: "payments", patterns: [/\bpayments? protocol\b/i, /\bpayments? network\b/i, /\bpayment processor\b/i] },
-  { archetype: "launchpad", patterns: [/\blaunchpad\b/i, /\btoken launch platform\b/i] },
-  { archetype: "gaming_or_nft", patterns: [/\bweb3 gaming\b/i, /\bblockchain game\b/i, /\bnft marketplace\b/i] }
-];
-function isDirectSubjectFact(fact) {
-  return fact.attributionScope === void 0 || fact.attributionScope === "direct_subject";
-}
-function factTargetsAuditedSubject(fact, auditedHandle) {
-  if (!isDirectSubjectFact(fact)) return false;
-  try {
-    return normalizeHandle(fact.subjectKey) === normalizeHandle(auditedHandle);
-  } catch {
-    return false;
-  }
-}
-function isStrictSourceBackedFact(fact) {
-  return (fact.status === "verified" || fact.status === "corroborated") && isDirectSubjectFact(fact) && fact.evidence_origin === "deterministic" && fact.artifact_verified === true && fact.floorEligible !== false && fact.providerProjection !== true && !fact.sources.some((source2) => source2.relation === "contradicts") && fact.sources.some((source2) => source2.relation === "supports" && factSourceHasEligibleArtifact(source2));
-}
-var RELATIONAL_CONTEXT = /\b(?:for|with|using|via|through|integrates?|supports?|depends\s+on|secured\s+by|powered\s+by)\b/i;
-var IDENTITY_VERB = /\b(?:is|are|operates?|runs?|provides?|offers?|builds?|issues?|serves\s+as)\b/gi;
-var IDENTITY_CLAUSE_BOUNDARY = /^(?:\s*$|\s*[,.;:()]|\s+\b(?:and|for|with|using|via|through|that|which|where|built|deployed|operating|running|serving|supporting|secured|powered)\b)/i;
-var PRODUCT_HEAD_CONTINUATION = /^\s+(?:(?:protocol|network|platform|exchange|marketplace|asset|token|coin|blockchain|application|app|system|scaling\s+solution|trading\s+venue)\b\s*){1,2}/i;
-function hasProductHeadBoundary(suffix) {
-  if (IDENTITY_CLAUSE_BOUNDARY.test(suffix)) return true;
-  const continuation = suffix.match(PRODUCT_HEAD_CONTINUATION);
-  return continuation ? IDENTITY_CLAUSE_BOUNDARY.test(suffix.slice(continuation[0].length)) : false;
-}
-function matchesSubjectIdentity(value, pattern) {
-  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
-  const matcher = new RegExp(pattern.source, flags);
-  for (const match of value.matchAll(matcher)) {
-    const index = match.index ?? -1;
-    if (index < 0) continue;
-    const suffix = value.slice(index + match[0].length);
-    if (!hasProductHeadBoundary(suffix)) continue;
-    const prefix = value.slice(0, index);
-    if (index <= 24 && !RELATIONAL_CONTEXT.test(prefix)) return true;
-    const verbs = [...prefix.matchAll(IDENTITY_VERB)];
-    const verb = verbs.at(-1);
-    if (!verb || verb.index == null) continue;
-    const between = prefix.slice(verb.index + verb[0].length);
-    if (between.length <= 80 && !RELATIONAL_CONTEXT.test(between)) return true;
-  }
-  return false;
-}
-function uniqueSorted(values) {
-  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
-}
-function classifyProductFacts(facts, auditedHandle) {
-  const matches = /* @__PURE__ */ new Map();
-  for (const fact of facts) {
-    if (fact.predicate !== "product" || !factTargetsAuditedSubject(fact, auditedHandle) || !isStrictSourceBackedFact(fact)) continue;
-    for (const rule of ARCHETYPE_RULES) {
-      if (!rule.patterns.some((pattern) => matchesSubjectIdentity(fact.value, pattern))) continue;
-      const sourceRefs = factSupportSourceRefs(fact, true);
-      const existing = matches.get(rule.archetype);
-      if (existing) {
-        existing.sourceRefs = uniqueSorted([...existing.sourceRefs, ...sourceRefs]);
-      } else {
-        matches.set(rule.archetype, {
-          archetype: rule.archetype,
-          confidence: "strict_source_backed",
-          sourceRefs,
-          matchedText: fact.value
-        });
-      }
-    }
-  }
-  return [...matches.values()].sort((left, right) => left.archetype.localeCompare(right.archetype));
-}
-function classifyProjectArchetypes(evidence) {
-  const forms = [];
-  if (evidence.projectToken) {
-    forms.push({
-      form: "token",
-      evidenceState: "verified",
-      sourceRefs: ["snapshot:project-token"]
-    });
-  }
-  if (evidence.protocolTvl) {
-    forms.push({
-      form: "protocol",
-      evidenceState: "measured",
-      sourceRefs: ["snapshot:protocol-tvl"]
-    });
-  }
-  const strictLegalFacts = (evidence.basicFacts ?? []).filter(
-    (fact) => fact.predicate === "legal_entity" && factTargetsAuditedSubject(fact, evidence.profile.handle) && isStrictSourceBackedFact(fact)
-  );
-  if (evidence.companyEnrichment?.identityMatch === "official_domain" || strictLegalFacts.length > 0) {
-    forms.push({
-      form: "company",
-      evidenceState: strictLegalFacts.length > 0 ? "verified" : "reported_context",
-      sourceRefs: uniqueSorted([
-        ...evidence.companyEnrichment?.identityMatch === "official_domain" ? ["snapshot:company-enrichment"] : [],
-        ...strictLegalFacts.flatMap((fact) => factSupportSourceRefs(fact, true))
-      ])
-    });
-  }
-  forms.sort((left, right) => left.form.localeCompare(right.form));
-  const matches = classifyProductFacts(evidence.basicFacts ?? [], evidence.profile.handle);
-  if (matches.length === 1) {
-    return { forms, archetypes: { state: "resolved", primary: matches[0].archetype, matches } };
-  }
-  if (matches.length > 1) {
-    return { forms, archetypes: { state: "hybrid", primary: null, matches } };
-  }
-  if (evidence.protocolTvl) {
-    return {
-      forms,
-      archetypes: {
-        state: "generic",
-        primary: "generic_protocol",
-        matches: [{
-          archetype: "generic_protocol",
-          confidence: "structural_generic",
-          sourceRefs: ["snapshot:protocol-tvl"]
-        }]
-      }
-    };
-  }
-  return { forms, archetypes: { state: "insufficient", primary: null, matches: [] } };
 }
 
 // src/intelligence/buildPointInTimeIntelligence.ts
@@ -4310,7 +4401,7 @@ function questionState(entry, facts, auditedHandle) {
   }
   const states = entry.providerRuns.map((run) => run.state);
   if (states.includes("partial")) {
-    return { state: "partial", basis: "At least one frozen collection pass completed only partially.", matchingFacts };
+    return { state: matchingFacts.length ? "reported" : "unresolved", basis: "Research was incomplete. This is a collection gap, not evidence of a missing disclosure or an adverse finding.", matchingFacts };
   }
   if (states.some((state) => state === "succeeded" || state === "completed_empty")) {
     return { state: "unresolved", basis: "A bounded collection pass completed without a source-backed answer.", matchingFacts };
@@ -4435,8 +4526,11 @@ function buildQuestions(evidence, measurements, archetypes, forms) {
     [fact.factId, fact],
     [`fact:${fact.factId}`, fact]
   ]));
+  const diligenceContext = evidence.projectDiligenceContext ?? deriveProjectDiligenceContext(evidence, evidence.profile.profile_captured_at ?? "unknown");
   for (const entry of evidence.basicFactQuestionLedger ?? []) {
     const assessment = questionState(entry, facts, evidence.profile.handle);
+    const applicabilityReason = !assessment.matchingFacts.length ? projectQuestionContext(entry.predicate, diligenceContext) : null;
+    const applicabilityRefs = applicabilityReason ? facts.filter((fact) => factTargetsAuditedSubject(fact, evidence.profile.handle) && fact.sources.some((source2) => diligenceContext.sourceUrls.includes(source2.url))).flatMap((fact) => factSupportSourceRefs(fact)).filter((ref) => sourceIds.has(ref)) : [];
     const matchingFactIds = new Set(assessment.matchingFacts.map((fact) => fact.factId));
     const answerRefs = uniqueSorted2(entry.answerRefs.filter((reference) => {
       const referencedFact = factByAnswerRef.get(reference);
@@ -4448,11 +4542,11 @@ function buildQuestions(evidence, measurements, archetypes, forms) {
       id: entry.questionId,
       domain: domainForPredicate(entry.predicate),
       prompt: entry.question,
-      materiality: entry.critical ? "critical" : "important",
-      state: assessment.state,
-      basis: assessment.basis,
+      materiality: applicabilityReason ? "context" : entry.predicate === "audit" && diligenceContext.productStage === "prelaunch" ? "important" : entry.critical ? "critical" : "important",
+      state: applicabilityReason ? "not_applicable" : assessment.state,
+      basis: applicabilityReason || assessment.basis,
       answerRefs,
-      sourceRefs: uniqueSorted2([...factRefs, ...contradictionRefs])
+      sourceRefs: uniqueSorted2([...factRefs, ...contradictionRefs, ...applicabilityRefs])
     });
   }
   const existing = new Map(questions.map((question, index) => [question.id, index]));
@@ -4523,7 +4617,12 @@ function buildQuestions(evidence, measurements, archetypes, forms) {
     });
     existing.set(definition.id, questions.length - 1);
   }
-  return questions.sort((left, right) => left.id.localeCompare(right.id));
+  return questions.map((question) => {
+    const reason = projectQuestionContext(question.id.split(".").at(-1) ?? "", diligenceContext);
+    if (!reason || question.answerRefs.length || question.sourceRefs.length) return question;
+    const sourceRefs = facts.filter((fact) => factTargetsAuditedSubject(fact, evidence.profile.handle) && fact.sources.some((source2) => diligenceContext.sourceUrls.includes(source2.url))).flatMap((fact) => factSupportSourceRefs(fact)).filter((ref) => sourceIds.has(ref));
+    return { ...question, state: "not_applicable", materiality: "context", basis: reason, sourceRefs };
+  }).sort((left, right) => left.id.localeCompare(right.id));
 }
 function coverageState(questions, measurements) {
   const openQuestions = questions.filter(
@@ -7661,6 +7760,7 @@ function assembleDossier(ev, live) {
   const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name, organizationSubject: isOrganizationAccount(ev) });
   a.setIdentity(ev.profile.identity_confidence);
   a.setTokenApplicability(ev.tokenApplicability);
+  a.projectAxisTreatments = structuredClone(ev.projectDiligenceContext?.axes ?? {});
   graphAudit.setIdentity(ev.profile.identity_confidence);
   const governingEligible = (row) => row.evidence_origin !== "model_lead" && row.artifact_verified !== false;
   const meaningfulTeamValue = (value) => Boolean(value.trim()) && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(value.trim());
@@ -7973,6 +8073,7 @@ function assembleDossier(ev, live) {
     ...ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {},
     ...ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {},
     ...ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {},
+    ...ev.projectDiligenceContext ? { projectDiligenceContext: structuredClone(ev.projectDiligenceContext) } : {},
     ...ev.launchVenueSubject ? { launchVenueSubject: structuredClone(ev.launchVenueSubject) } : {},
     ...ev.stockHealth ? { stockHealth: structuredClone(ev.stockHealth) } : {},
     ...ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {},
@@ -8949,7 +9050,8 @@ var PROJECT_SCORING_POLICY = [
   "Anchor WITHIN each band by evidence density and independence: verification from several independent sources at demonstrated scale belongs at the top of its band, single-source or partial verification belongs low in it. A subject with top-tier verified scale, institutional corroboration, and a multi-year verified operating record should score at the top of whatever band its evidence justifies; do not park overwhelming verification at the band midpoint.",
   "If an axis has neither affirmative evidence nor verified adverse evidence, do not score it at zero. Mark it unscored and publish the investigation as INCOMPLETE. A zero is a severe assessment, not a synonym for missing data.",
   "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
-  "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
+  "Assess each project against its disclosed launch model and product stage. Fair launches do not require venture funding, corporate boards, public treasury accounts or bespoke allocation schedules. Optional disclosures can add evidence; their absence is not misconduct. A prelaunch or alpha/beta label does not prove safety: assess deployed custom code, bridges, admin keys and user funds in scope. A launchpad audit covers only its documented program/version, not every product launched through it. Equal reported FDV and market cap do not prove unlocked ownership, no future minting, or no vesting. Separate historical products from current products and token launch dates from company founding dates.",
+  "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing optional whitepaper or a standalone audit for a standard launchpad token is not a weakness. Assess audits against deployed custom code and live user-fund exposure, and assess a prelaunch product against its disclosed development stage.",
   "P3 token conduct is governed by the frozen tokenApplicability state established before scoring. verified_live_token and historical_token_lineage are assessed; lineage means the analyst must consider predecessor names, contracts, migrations, and current status together. confirmed_tokenless removes P3 as not applicable and normalizes the project score over the remaining 80 weighted points. prelaunch_token_deferred also removes P3 without penalty until a token is live. unresolved_token_identity keeps P3 unresolved and the overall project verdict provisional. Never infer applicability from biography wording, never award clean-conduct points for lacking a token, and never penalize a tokenless business for having no token history.",
   "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
   "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end because no positive backing signal was verified on that axis only, never as counter-evidence against any other axis.",
@@ -11421,6 +11523,7 @@ function serializeAnalystEvidencePacket(input, options) {
     profileAuthenticity: compactProfileAuthenticity(input.profileAuthenticity),
     trustGraphScreen: compactTrustGraphScreen(input.trustGraphScreen),
     projectToken: input.projectToken && typeof input.projectToken === "object" && !Array.isArray(input.projectToken) ? compactProjectToken(input.projectToken) : void 0,
+    projectDiligenceContext: input.projectDiligenceContext && typeof input.projectDiligenceContext === "object" ? compactObject(input.projectDiligenceContext, 4) : void 0,
     tokenApplicability: input.tokenApplicability && typeof input.tokenApplicability === "object" && !Array.isArray(input.tokenApplicability) ? compactObject(input.tokenApplicability, 2) : void 0,
     // Findings stay ahead of descriptive context in the budget. This prevents a
     // long social corpus from hiding the material facts that govern a verdict.
@@ -16536,6 +16639,8 @@ async function fetchPage(url, expectedApex, purpose = "roster", recoverOfficialT
 }
 var roleEvidencePattern = (role) => {
   if (/founder/i.test(role)) return /\b(?:co-?founders?|founders?|started|founded)\b/i;
+  if (/\bcoo\b/i.test(role)) return /\b(?:coo|chief operating officer)\b/i;
+  if (/\bcbo\b/i.test(role)) return /\b(?:cbo|chief business officer)\b/i;
   if (/\bcto\b|technology/i.test(role)) return /\b(?:cto|chief technology officer)\b/i;
   if (/\bceo\b|executive/i.test(role)) return /\b(?:ceo|chief executive officer)\b/i;
   if (/advisor|adviser/i.test(role)) return /\b(?:advisor|adviser)\b/i;
@@ -16578,6 +16683,17 @@ var canonicalSourceUrl = (value) => {
   }
 };
 var pageScore = (page) => (/\/(?:team|leadership|founders?|people)(?:[/.?#-]|$)/i.test(page.url) ? 100 : 0) + (/\b(?:co-?founders?|founders?)\b/i.test(page.text) ? 70 : 0) + (/\/(?:tokenomics|governance|transparency)(?:[/.?#-]|$)/i.test(page.url) ? 35 : 0) + Math.min(20, page.text.length / 1e3);
+function teamExtractionText(text2) {
+  if (text2.length <= 1e4) return text2;
+  const windows = [...text2.matchAll(/\b(?:co[- ]?founder|ceo|coo|cto|cbo|our team|the team|leadership)\b/gi)].map((match) => ({ start: Math.max(0, match.index - 350), end: Math.min(text2.length, match.index + 900) }));
+  const merged = [];
+  for (const window of windows) {
+    const last = merged.at(-1);
+    if (last && window.start <= last.end) last.end = Math.max(last.end, window.end);
+    else merged.push(window);
+  }
+  return [text2.slice(0, 1e3), ...merged.map(({ start, end }) => text2.slice(start, end))].join("\n[section]\n").slice(0, 15e3);
+}
 var TEAM_EXTRACTION_SYSTEM = "You extract a crypto/tech project's team roster from fetched first-party project text. List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. Use the person's role in THIS project, preserving the FULL title exactly as the page states it: a person listed as Co-Founder & CEO is recorded as Co-Founder & CEO, never shortened to just Co-Founder or just CEO. When the page includes descriptive credentials or biography copy next to the person, preserve that entire phrase verbatim in biography; never split biography text into additional people. Capture any X/Twitter handle and LinkedIn URL shown next to a person. For every person copy the exact PAGE URL that directly states that person's role. Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
 var TEAM_EXTRACTION_TOOL = {
   name: "record_team",
@@ -16608,7 +16724,7 @@ async function extractTeamFromPages(pages, projectName2, requireProjectInPassage
   if (!pages.length) return [];
   const selectedPages = [...pages].sort((a, b) => pageScore(b) - pageScore(a) || b.text.length - a.text.length).slice(0, 3);
   const corpus = selectedPages.map((page) => `PAGE ${page.url}:
-${page.text.slice(0, 5e3)}`).join("\n\n");
+${teamExtractionText(page.text)}`).join("\n\n");
   const out = await structured(
     TEAM_EXTRACTION_SYSTEM,
     `Project${projectName2 ? ` ${projectName2}` : ""} first-party team evidence:
@@ -16705,6 +16821,7 @@ async function fetchTeamPage(domain, projectName2, dependencies = {}) {
     pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex, "roster", recoverOfficialText)))).filter(Boolean);
   }
   const homePage = await fetchPage(`https://${apex}/`, apex, "credits", recoverOfficialText, true) ?? await fetchPage(`https://www.${apex}/`, apex, "credits", recoverOfficialText, true);
+  if (homePage && /\b(?:founder|cofounder|ceo|coo|cbo|cto|our team|the team)\b/i.test(homePage.text) && !pages.some((page) => canonicalSourceUrl(page.url) === canonicalSourceUrl(homePage.url))) pages.push(homePage);
   const apexLabel = apex.split(".")[0];
   const creditSeen = /* @__PURE__ */ new Set();
   const creditTeam = [...pages, ...homePage ? [homePage] : []].flatMap((page) => scanPageTextForCredits(page.text, page.url, projectName2, page.anchors)).filter((person) => {
@@ -22991,12 +23108,12 @@ var PROJECT_QUESTIONS2 = [
   { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events are publicly documented, who are they attributed to, and what is each event's current stated status?" },
   { batch: "structure_risk", predicate: "security_incident", question: "What material hacks, exploits, breaches, thefts, user losses, emergency pauses, or recovery outcomes are publicly documented? Return each event with an exact date, amount, attribution, current status, and direct source.", critical: true },
   { batch: "structure_risk", predicate: "governance", question: "What formal governance process is documented?", critical: true },
-  { batch: "structure_risk", predicate: "control", question: "Who has practical control through ownership, boards, voting power, admin keys, multisigs, or treasury authority?" },
-  { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit related-party arrangements or conflicts of interest are disclosed?" },
+  { batch: "structure_risk", predicate: "control", question: "Who can mint, freeze, upgrade, move pooled user funds or change contract permissions? Include boards or voting control only where that structure actually exists." },
+  { batch: "structure_risk", predicate: "conflict_of_interest", question: "Are there documented transactions with insider-controlled counterparties or overlapping financial interests that affect users? Name the arrangement and its source; do not infer a conflict from team membership alone." },
   { batch: "structure_risk", predicate: "tokenomics", question: "What token allocation or supply disclosures are published?" },
   { batch: "structure_risk", predicate: "vesting", question: "What vesting, lockup, or unlock schedule is published?" },
   { batch: "structure_risk", predicate: "treasury", question: "What treasury assets, reports, wallets, or controls are disclosed?" },
-  { batch: "structure_risk", predicate: "audit", question: "Which independent security audits or reviews are published?", critical: true }
+  { batch: "structure_risk", predicate: "audit", question: "Which audits cover deployed custom contracts, bridges or live products? Distinguish launchpad program audits from project-specific reviews; a standard token alone does not require a separate audit.", critical: true }
 ];
 var PERSON_QUESTIONS3 = [
   { batch: "identity", predicate: "official_identity", question: "What is this person's source-backed public identity?", critical: true },
@@ -23824,6 +23941,9 @@ function discoveryPrompt(ctx, questions, phase = "primary") {
     targetedIdentityInstruction,
     projectLeadershipInstruction,
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
+    "Read the official homepage, About/story page, docs and footer for all named operators, including pseudonyms. Preserve the stated role and source; do not require LinkedIn or invent a legal name. Separate project founding, original token launch, migrations, historical products and future product launches. A replacement contract creation date is not the project founding date.",
+    "Record explicit fair-launch/launchpad origin, product stage, and any later funding independently. A venture affiliation or backer statement is not a funding round or a raised amount. Optional treasury, governance, allocation and vesting disclosures are not mandatory for a fair launch. Published supply and FDV ratios do not prove absence of locks or minting rights.",
+    "Security audit scope must distinguish a standard launchpad program from bespoke token code, bridges and products. Prelaunch products have no production audit expectation yet; alpha/beta products with live funds still require security assessment. Legal events require a named, attributed event and procedural status; no event found is not an allegation. Related-party conflicts mean documented overlapping financial interests or counterparties controlled by insiders, not merely founders working together.",
     "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, partners, integrations, tokens, networks, or products in one value.",
     // ARGUS locates the value verbatim in the fetched page, so a composed phrase
@@ -31158,6 +31278,13 @@ var validContract = (platform, value) => {
   if (platform === "solana") return SOLANA_ADDRESS4.test(address) ? address : null;
   return PLATFORM_CHAIN[platform] && EVM_ADDRESS3.test(address) ? address : null;
 };
+function registryDeployments(details, sourceUrl2, capturedAt) {
+  const platforms = isRecord4(details.platforms) ? details.platforms : {};
+  return Object.entries(platforms).flatMap(([platform, value]) => {
+    const address = validContract(platform, value);
+    return address ? [{ chain: PLATFORM_CHAIN[platform], address, sourceUrl: sourceUrl2, capturedAt }] : [];
+  });
+}
 function canonicalContract(details) {
   const platforms = isRecord4(details.platforms) ? details.platforms : {};
   const native = cleanText2(details.asset_platform_id);
@@ -32224,6 +32351,17 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     const declared = await collectProfileDeclaredToken(ctx, profileDeclaredToken);
     if (declared.state === "matched" && declared.snapshot) {
       const snapshot2 = declared.snapshot;
+      const platform = CHAIN_PLATFORM[snapshot2.chain];
+      const registry = platform ? await coinByContract(platform, snapshot2.address) : null;
+      if (registry?.state === "ok" && registryContractMatchingDeclared(registry.details, profileDeclaredToken)?.chain === snapshot2.chain) {
+        const id2 = cleanText2(registry.details.id);
+        if (id2) {
+          snapshot2.coingeckoId = id2;
+          const registryIdentity = verifyIdentity(ctx, registry.details);
+          if (registryIdentity?.homepage) snapshot2.homepage = registryIdentity.homepage;
+          snapshot2.registryDeployments = registryDeployments(registry.details, `https://www.coingecko.com/en/coins/${encodeURIComponent(id2)}`, captureTimestamp());
+        }
+      }
       ctx.evidence.projectToken = snapshot2;
       ctx.recordCheck?.({
         id: "project-token-identity",
@@ -32255,7 +32393,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
         source: "twitterapi / dexscreener",
         tone: "good"
       });
-      return { state: "executed", detail: declared.detail, attempts: declared.attempts };
+      return { state: "executed", detail: declared.detail, attempts: declared.attempts + (platform ? 1 : 0) };
     }
     declaredOutcome = { candidate: profileDeclaredToken, result: declared };
     ctx.emit({
@@ -32604,6 +32742,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     ...identity.officialX ? { officialX: identity.officialX } : {},
     sourceUrl: coinSourceUrl,
     capturedAt: collectedAt,
+    registryDeployments: registryDeployments(details, coinSourceUrl, collectedAt),
     producerSources: {
       identity: { provider: "coingecko", sourceUrl: coinSourceUrl, capturedAt: collectedAt },
       ...hasMarketRead ? {
@@ -33280,7 +33419,7 @@ function projectProviderBackedBasicFacts(evidence) {
     if (member.artifact_verified !== true || member.evidence_origin !== "deterministic" || member.provider !== "team-page" && member.provider !== "twitterapi" && member.provider !== "monid" || !member.sourceUrl || !member.name.trim()) continue;
     const predicates = [];
     if (/\b(?:co[- ]?founder|founder|creator)\b/i.test(member.role)) predicates.push("founder");
-    if (/\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(member.role)) predicates.push("executive");
+    if (/\b(?:ceo|cto|coo|cfo|cbo|chief|president|director|head|lead|operator|core team)\b/i.test(member.role)) predicates.push("executive");
     if (!predicates.length) continue;
     const identityKey = member.handle?.replace(/^@/, "").toLowerCase() || normalizeValue(member.name);
     const excerpt = member.provider === "monid" ? `${member.name} is listed as ${member.role} in a professional record for the company matched to the project's official website.${member.evidence ? ` ${member.evidence}` : ""}` : member.evidence?.trim() || `${member.name} is listed as ${member.role} by the project's fetched ${member.source}.`;
@@ -33325,7 +33464,8 @@ function projectProviderBackedBasicFacts(evidence) {
     });
     projected.push(makeFact(evidence, "official_token", `$${token.symbol.toUpperCase()}`, [tokenSource], token.name));
     const protocolFootprint = token.deployedChains?.length && evidence.protocolTvl?.sourceUrl && indexedProtocolRecordMatch(evidence, evidence.protocolTvl) ? evidence.protocolTvl : void 0;
-    const chainFootprint = protocolFootprint ? `${protocolFootprint.chains.length} chains incl. ${protocolFootprint.chains.slice(0, 4).join(", ")}` : token.chain;
+    const deployments = token.registryDeployments ?? [];
+    const chainFootprint = protocolFootprint ? `${protocolFootprint.chains.length} chains incl. ${protocolFootprint.chains.slice(0, 4).join(", ")}` : [.../* @__PURE__ */ new Set([token.chain, ...deployments.map((row) => row.chain)])].join(", ");
     const networkSources = protocolFootprint ? [source({
       url: protocolFootprint.sourceUrl,
       title: "DeFiLlama protocol chain footprint",
@@ -33333,7 +33473,14 @@ function projectProviderBackedBasicFacts(evidence) {
       capturedAt: protocolFootprint.capturedAt,
       provider: "defillama",
       sourceClass: "regulatory_or_onchain"
-    })] : [tokenSource];
+    })] : [tokenSource, ...deployments.map((row) => source({
+      url: row.sourceUrl,
+      title: "CoinGecko token deployment",
+      provider: "coingecko",
+      excerpt: `CoinGecko lists ${row.address} on ${row.chain} for this exact-contract-bound token. This does not establish product deployment or bridge security.`,
+      capturedAt: row.capturedAt,
+      sourceClass: "regulatory_or_onchain"
+    }))];
     projected.push(makeFact(
       evidence,
       "network",
@@ -37223,6 +37370,17 @@ function applySiteSubstanceOutcome(ctx, domain, site) {
     });
     return;
   }
+  if (site.status === "coming_soon" && site.reason === "coming_soon") {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "reported",
+      note: `${domain}: the official page discloses a prelaunch surface. Production availability is not established; this is not adverse evidence.`,
+      provider: "site-fetch",
+      sourceCount: 1
+    });
+    ctx.emit({ phase: "P2 \xB7 Substance", label: "Product stage disclosed", detail: site.detail, source: "site-fetch", tone: "neutral" });
+    return;
+  }
   if (verifiedNotLive) {
     ctx.recordCheck?.({
       id: "project-product-substance",
@@ -37377,7 +37535,7 @@ function uniqueIdConfirmedForFounderFollowup(member, subjectHandle) {
 }
 async function coldIntake(ctx, profileAlreadyResolved = false) {
   if (!profileAlreadyResolved) await resolveProfile(ctx);
-  const siteUrl = canonicalPublicProfileWebsite(ctx.evidence.profile.website) ?? void 0;
+  const siteUrl = canonicalPublicProfileWebsite(ctx.evidence.profile.website) ?? canonicalPublicProfileWebsite(ctx.evidence.projectToken?.homepage) ?? void 0;
   const bioDomain = bioWebsiteDomain(ctx.evidence.profile.bio);
   const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   const [hist, { corpus, foundWallets }, registration, siteSubstance] = await Promise.all([
@@ -40769,6 +40927,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     organizationSubject: isOrganizationAccount(evidence)
   });
   evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
+  if (evidence.roles.includes("PROJECT" /* PROJECT */)) evidence.projectDiligenceContext = deriveProjectDiligenceContext(evidence, (/* @__PURE__ */ new Date()).toISOString());
   evidence.subjectCategory = deriveSubjectCategory(evidence);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
@@ -40811,6 +40970,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     projectToken: evidence.projectToken,
     entityContinuity: evidence.entityContinuity ? [evidence.entityContinuity] : [],
     tokenApplicability: evidence.tokenApplicability,
+    projectDiligenceContext: evidence.projectDiligenceContext,
     // The scale of the venture a founder verifiably founded is scoreable
     // evidence about them (F2/F4). It was collected and then dropped before.
     ventureToken: evidence.ventureToken,
@@ -40824,7 +40984,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
   });
   const analystStartedAt = startRuntimeStage("analyst");
   if (analystAvailable()) {
-    const requestedAxes = axisCatalog(evidence.roles).filter(({ axis, role }) => !(role === "PROJECT" /* PROJECT */ && axis === "P3_token_conduct" && (evidence.tokenApplicability?.axisTreatment === "not_applicable" || evidence.tokenApplicability?.axisTreatment === "deferred")));
+    const requestedAxes = axisCatalog(evidence.roles).filter(({ axis, role }) => !(role === "PROJECT" /* PROJECT */ && evidence.projectDiligenceContext?.axes[axis])).filter(({ axis, role }) => !(role === "PROJECT" /* PROJECT */ && axis === "P3_token_conduct" && (evidence.tokenApplicability?.axisTreatment === "not_applicable" || evidence.tokenApplicability?.axisTreatment === "deferred")));
     const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
     const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson, requestedAxes);
     const projectStrengthBands = deriveProjectStrengthBands(evidenceJson, requestedAxes);
@@ -41819,23 +41979,25 @@ function handleFromUrl(url) {
 }
 var isBurnAddr2 = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
 var isBurnTag2 = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
-function evmSafety(gp, sim) {
+function evmSafety(gp, sim, tokenAddress) {
   const s = sim;
   const goplusTradeabilityAssessed = hasCompleteGoplusTradeability(gp);
   const simulationCompleted = s?.simSuccess === true;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
   let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
-  let lpRowsSeen = 0;
+  let lpRowsSeen = 0, lpSelfPct = 0;
+  const selfAddress = (tokenAddress ?? "").trim().toLowerCase();
   for (const h of gp?.lp_holders ?? []) {
     const pct2 = Number(h.percent) * 100;
     if (!Number.isFinite(pct2) || pct2 < 0 || pct2 > 100) continue;
     lpRowsSeen += 1;
-    if (!Number.isFinite(pct2)) continue;
+    if (selfAddress && (h.address ?? "").trim().toLowerCase() === selfAddress) lpSelfPct += pct2;
     if (isBurnAddr2(h.address) || isBurnTag2(h.tag)) lpBurnedPct += pct2;
     else if (h.is_locked === 1) lpLockedPct += pct2;
     else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct2);
   }
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
+  const lpRowsAreSelfReferential = lpRowsSeen > 0 && lpSelfPct >= 50 && lpBurnedPct + lpLockedPct === 0;
   const creatorShare = num4(gp?.creator_percent);
   const ownerAddressReported = typeof gp?.owner_address === "string";
   const ownerAddress = (gp?.owner_address ?? "").trim();
@@ -41889,7 +42051,7 @@ function evmSafety(gp, sim) {
     ownerChangeBalance: t12(gp?.owner_change_balance),
     creatorPercent: (creatorShare ?? 0) * 100,
     creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
-    lpAssessed: lpRowsSeen > 0
+    lpAssessed: lpRowsSeen > 0 && !lpRowsAreSelfReferential
   };
 }
 function recordObservedTradeability(safety, market) {
@@ -42143,7 +42305,7 @@ async function runTokenAudit(input, emit, opts) {
     gpEvm = gp;
     explorerHolders = explorer;
     contractSource = source2;
-    safety = evmSafety(gp, sim);
+    safety = evmSafety(gp, sim, address);
     safety = recordObservedTradeability(safety, { buys24h: buys, sells24h: sells, liquidityUsd });
     const evmCreator = gp?.creator_address?.trim();
     const evmOwner = gp?.owner_address?.trim();

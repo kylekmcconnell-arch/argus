@@ -270,6 +270,7 @@ export interface Dossier {
   entityContinuity?: CollectedEvidence["entityContinuity"];
   /** Frozen pre-scoring token applicability decision. */
   tokenApplicability?: CollectedEvidence["tokenApplicability"];
+  projectDiligenceContext?: CollectedEvidence["projectDiligenceContext"];
   /** The audited subject recognized as a launch venue, with its registered launch mechanics. */
   launchVenueSubject?: CollectedEvidence["launchVenueSubject"];
   /** Frozen point-in-time health of the verified listed security (score-neutral). */
@@ -323,6 +324,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name, organizationSubject: isOrganizationAccount(ev) });
   a.setIdentity(ev.profile.identity_confidence);
   a.setTokenApplicability(ev.tokenApplicability);
+  a.projectAxisTreatments = structuredClone(ev.projectDiligenceContext?.axes ?? {});
   graphAudit.setIdentity(ev.profile.identity_confidence);
 
   const governingEligible = (row: { evidence_origin?: string; artifact_verified?: boolean }) =>
@@ -702,6 +704,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {}),
     ...(ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {}),
     ...(ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {}),
+    ...(ev.projectDiligenceContext ? { projectDiligenceContext: structuredClone(ev.projectDiligenceContext) } : {}),
     ...(ev.launchVenueSubject ? { launchVenueSubject: structuredClone(ev.launchVenueSubject) } : {}),
     ...(ev.stockHealth ? { stockHealth: structuredClone(ev.stockHealth) } : {}),
     ...(ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {}),

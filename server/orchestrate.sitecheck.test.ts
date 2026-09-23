@@ -269,7 +269,6 @@ describe("site-liveness evidence attribution", () => {
   });
 
   it.each([
-    ["coming_soon", "the served homepage explicitly presents a coming-soon surface"],
     ["parked", "the served homepage is a registrar parking page"],
   ] as const)("creates SiteNotLive only for verified %s served-page evidence", (reason, detail) => {
     const { ctx, evidence, checks, emit } = context();
@@ -336,7 +335,7 @@ describe("site-liveness evidence attribution", () => {
     applySiteSubstanceOutcome(ctx, "project.example", {
       url: "https://project.example",
       status: "coming_soon",
-      reason: "coming_soon",
+      reason: "parked",
       detail: "the served homepage explicitly says coming soon",
     });
 
@@ -463,4 +462,11 @@ it("preserves website description separately from the scoring packet", () => {
   expect(evidence.officialProductDescription).toMatchObject({ text: productDescription, sourceUrl: site.url });
   expect(JSON.stringify(buildScoringEvidencePacket({ ...evidence }, axes))).not.toContain(productDescription);
   expect(JSON.stringify(buildScoringEvidencePacket({ ...evidence }, axes))).toBe(before);
+});
+
+it("records an openly prelaunch site as stage context without adverse evidence", () => {
+  const { ctx, evidence, checks } = context();
+  applySiteSubstanceOutcome(ctx, "project.example", { url: "https://project.example", status: "coming_soon", reason: "coming_soon", detail: "Coming soon" });
+  expect(evidence.findings).toEqual([]);
+  expect(checks).toEqual([expect.objectContaining({ status: "reported", id: "project-product-substance" })]);
 });

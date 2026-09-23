@@ -856,7 +856,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     ) continue;
     const predicates: BasicFactPredicate[] = [];
     if (/\b(?:co[- ]?founder|founder|creator)\b/i.test(member.role)) predicates.push("founder");
-    if (/\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(member.role)) predicates.push("executive");
+    if (/\b(?:ceo|cto|coo|cfo|cbo|chief|president|director|head|lead|operator|core team)\b/i.test(member.role)) predicates.push("executive");
     if (!predicates.length) continue;
     const identityKey = member.handle?.replace(/^@/, "").toLowerCase() || normalizeValue(member.name);
     const excerpt = member.provider === "monid"
@@ -916,9 +916,10 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       && indexedProtocolRecordMatch(evidence, evidence.protocolTvl)
       ? evidence.protocolTvl
       : undefined;
+    const deployments = token.registryDeployments ?? [];
     const chainFootprint = protocolFootprint
       ? `${protocolFootprint.chains.length} chains incl. ${protocolFootprint.chains.slice(0, 4).join(", ")}`
-      : token.chain;
+      : [...new Set([token.chain, ...deployments.map((row) => row.chain)])].join(", ");
     const networkSources = protocolFootprint
       ? [source({
           url: protocolFootprint.sourceUrl,
@@ -928,7 +929,11 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
           provider: "defillama",
           sourceClass: "regulatory_or_onchain",
         })]
-      : [tokenSource];
+      : [tokenSource, ...deployments.map((row) => source({
+          url: row.sourceUrl, title: "CoinGecko token deployment", provider: "coingecko",
+          excerpt: `CoinGecko lists ${row.address} on ${row.chain} for this exact-contract-bound token. This does not establish product deployment or bridge security.`,
+          capturedAt: row.capturedAt, sourceClass: "regulatory_or_onchain",
+        }))];
     projected.push(makeFact(evidence, "network", chainFootprint, networkSources,
       protocolFootprint ? "protocol footprint per DeFiLlama TVL" : undefined));
 

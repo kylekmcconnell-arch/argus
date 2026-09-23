@@ -517,6 +517,11 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
     prompt: plainLanguageSummary(question.prompt),
     state: question.state,
     materiality: question.materiality,
+    basis: question.basis,
+    sources: question.sourceRefs.flatMap((id) => {
+      const index = intelligence?.sources.findIndex((source) => source.id === id) ?? -1;
+      return index >= 0 && intelligence ? [sourceCardFromRef(intelligence.sources[index], index)] : [];
+    }),
   }));
   const openQuestionCount = questions.filter((question) => questionIsOpen(question.state)).length;
 
@@ -600,7 +605,7 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
     const at = what.toLowerCase().indexOf(label.toLowerCase());
     const remainder = at >= 0 ? what.slice(at + label.length).replace(/^[\s,;:-]*(?:that|which)?\s*/i, "") : "";
     const verb = remainder.match(/^([a-z]+?)(es|s)\b\s+(.*)$/i);
-    const base = verb ? (/(?:sh|ch|x|ss|z)$/i.test(verb[1]) && verb[2] === "es" ? verb[1] : verb[2] === "es" ? `${verb[1]}e` : verb[1]) : null;
+    const base = verb ? (/ies$/i.test(verb[1] + verb[2]) && (verb[1] + verb[2]).length > 4 ? `${(verb[1] + verb[2]).slice(0, -3)}y` : /(?:sh|ch|x|ss|z)$/i.test(verb[1]) && verb[2] === "es" ? verb[1] : verb[2] === "es" ? `${verb[1]}e` : verb[1]) : null;
     const claim = verb && base && base.length >= 3 ? sentence(`Claims to ${base.toLowerCase()} ${verb[3]}`) : "";
     summary = claim
       ? [claim, input.isProject && !tractionVerified ? "Product availability and operating traction need corroboration." : ""].filter(Boolean).join(" ")
@@ -1250,7 +1255,7 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
     subjectKind: input.isProject ? "project" : "person",
     handle: f.handle,
     avatarUrl: f.avatar_url ?? null,
-    eyebrow,
+    eyebrow: [eyebrow, f.projectDiligenceContext?.launch === "fair_launch" ? "Fair launch" : null, f.projectDiligenceContext?.productStage === "prelaunch" ? "Prelaunch product" : null].filter(Boolean).join(" · "),
     productLabel: label,
     summary,
     website: safeHttpUrl(f.website),
