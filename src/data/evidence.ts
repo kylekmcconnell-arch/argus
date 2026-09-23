@@ -1327,6 +1327,8 @@ export interface CollectedEvidence {
   roles: SubjectClass[];
   /** Bound-artifact orientation; never a display-name guess. */
   subjectOrientation?: SubjectOrientation;
+  /** Official page text for description only; excluded from scoring packets. */
+  officialProductDescription?: { text: string; sourceUrl: string; capturedAt: string };
   ventures: Venture[];
   testimonials: Testimonial[];
   advised: AdvisedProject[];
@@ -1457,6 +1459,9 @@ export interface CollectedEvidence {
    */
   scoringOutcome?: {
     state: "executed" | "partial" | "skipped" | "failed";
+    failure?: { kind: "provider_access"; provider: "grok"; httpStatus: 401 | 403; diagnostic: string; requestId?: string };
+    missingAxes?: string[];
+    attemptedAxes?: string[];
     /** The scan's own sentence about this outcome, verbatim. */
     detail: string;
     capturedAt: string;

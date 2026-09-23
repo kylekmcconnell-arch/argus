@@ -10,6 +10,7 @@ export interface DecisionBasisProps {
   catalog?: AxisEvidenceRecord[];
   lineageVersion?: number;
   unavailableReason?: "routing" | "scoring";
+  operationalFailure?: string;
   onRescan?: () => void;
 }
 
@@ -154,7 +155,7 @@ function EvidenceRecord({ record, relation }: { record: AxisEvidenceRecord; rela
   );
 }
 
-export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailableReason, onRescan }: DecisionBasisProps) {
+export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailableReason, operationalFailure, onRescan }: DecisionBasisProps) {
   const model = useMemo(
     () => buildDecisionBasis(roleReport, catalog, lineageVersion),
     [catalog, lineageVersion, roleReport],
@@ -180,11 +181,11 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
       : unavailableReason === "scoring"
         ? "Score did not finish"
         : "Source links unavailable";
-    const explanation = unavailableReason === "routing"
+    const explanation = operationalFailure ?? (unavailableReason === "routing"
       ? "ARGUS could not confirm what kind of subject this is, so it did not produce a score. The facts and sources it found are still shown below."
       : unavailableReason === "scoring"
         ? "ARGUS identified the subject, but the scoring step did not finish. You can still review the facts and sources below."
-        : "This saved report does not link each part of the score to its sources. ARGUS will not guess which source was used.";
+        : "This saved report does not link each part of the score to its sources. ARGUS will not guess which source was used.");
     const rescanLabel = unavailableReason === "routing"
       ? "Run corrected investigation"
       : unavailableReason === "scoring"
@@ -200,7 +201,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
           <p className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-ink-dim">
             {explanation}
           </p>
-          {onRescan && (
+          {onRescan && !operationalFailure && (
             <button
               type="button"
               onClick={onRescan}

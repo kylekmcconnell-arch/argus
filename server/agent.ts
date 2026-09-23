@@ -1,3 +1,4 @@
+import { grokAccessFailure, recordGrokAccessFailure } from "./providerAccess";
 import { deadlineFetch } from "./providerDeadline.js";
 // AI analyst agent. The engine needs axis scores with rationales, venture
 // outcome classifications, and a one-line headline. Raw provider data is messy;
@@ -227,6 +228,8 @@ async function structuredGrok<T>(
 ): Promise<T | null> {
   const key = env("XAI_API_KEY");
   if (!key) return null;
+  const blocked = grokAccessFailure(GROK_ANALYST_MODEL);
+  if (blocked) { onFailure?.(`http_${blocked.httpStatus}`); return null; }
   const startedAt = Date.now();
   const requestBody = JSON.stringify({
     model: GROK_ANALYST_MODEL,
@@ -277,6 +280,7 @@ async function structuredGrok<T>(
   }
   const requestId = response.headers.get("x-request-id") || response.headers.get("request-id");
   if (!response.ok) {
+    await recordGrokAccessFailure(response, GROK_ANALYST_MODEL);
     addGrokUsage(undefined, 0, tool.name, "failed", `http_${response.status}`);
     console.info("[agent-call]", JSON.stringify({
       ...requestMetrics,

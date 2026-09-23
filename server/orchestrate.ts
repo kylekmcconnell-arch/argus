@@ -1,3 +1,4 @@
+import { withProviderAccessScope, grokAccessFailure } from "./providerAccess";
 import { scoreComparisonNote } from "../src/lib/scoreComparison";
 import { withProviderDeadline } from "./providerDeadline.js";
 import { withWallClockBox } from "./boundedProvider";
@@ -14,7 +15,7 @@ import { withWallClockBox } from "./boundedProvider";
 // The engine always owns caps, banding and the composite verdict.
 
 import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEntityKey, repeatBackingSignal, type Finding, type Venture } from "../src/engine";
-import { env, providerFallbacksEnabled } from "./config";
+import { env, providerFallbacksEnabled, GROK_ANALYST_MODEL } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence, type AxisEvidenceRecord, type BasicFact, type ProjectStrengthBandRecord, type WebTeamMember } from "../src/data/evidence";
@@ -775,6 +776,13 @@ export function applySiteSubstanceOutcome(
   ctx.evidence.profile.website = site.url;
   ctx.evidence.profile.site_substance_status = site.status;
   const isProject = ctx.evidence.roles.includes(SubjectClass.PROJECT);
+  if (isProject && site.status === "live" && site.productDescription?.trim()) {
+    ctx.evidence.officialProductDescription = {
+      text: site.productDescription.trim().slice(0, 1200),
+      sourceUrl: site.url,
+      capturedAt: new Date().toISOString(),
+    };
+  }
   const verifiedProjectToken = ctx.evidence.projectToken?.verified === true
     ? ctx.evidence.projectToken
     : undefined;
@@ -6063,6 +6071,10 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     );
     const contradictionObserved = contradictionAttempts.total > 0;
     const scorerObserved = scorerAttempts.total > 0;
+    const accessFailure = !verdict && scorerCanRun && !providerFallbacksEnabled() ? grokAccessFailure(GROK_ANALYST_MODEL) : undefined;
+    const accessFailureDetail = accessFailure
+      ? `Scoring is unavailable because Grok rejected access (HTTP ${accessFailure.httpStatus}). An administrator must restore provider access before retrying. Collected evidence remains available; this is not a finding about the subject.`
+      : undefined;
     if (!decisionPacketUsable) {
       const detail = scoringPreflight.state === "packet_oversize"
         ? "Contradiction analysis was skipped because the bounded evidence packet could not preserve required coverage."
@@ -6101,6 +6113,9 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
         source: "AI analyst",
         tone: partialAxisScoring ? "warn" : "good",
       });
+    } else if (accessFailureDetail) {
+      evidence.headline = accessFailureDetail;
+      emit({ phase: "Analyst", label: "Provider access rejected", detail: accessFailureDetail, tone: "warn" });
     } else if (scoringPreflight.state === "packet_oversize") {
       evidence.headline = `Investigation incomplete: the analyst evidence packet could not preserve required coverage within ${ANALYST_EVIDENCE_MAX_CHARS.toLocaleString("en-US")} characters. No axis scores were inferred.`;
       emit({
@@ -6132,7 +6147,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
       emit({
         phase: "Analyst",
         label: "Coverage abstention",
-        detail: `Scoring did not run because these axes lack substantive eligible evidence: ${missingAxes}. Coverage-only gaps were preserved; no zero scores were inferred.`,
+        detail: `${scorerObserved ? "Scoring of the supported axes was attempted but did not return a valid result." : "No scoring request completed."} These additional axes lack substantive eligible evidence: ${missingAxes}. No zero scores were inferred.`,
         tone: "warn",
       });
     } else if (scoringPreflight.state === "invalid_catalog") {
@@ -6155,7 +6170,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
       evidence.headline = "Investigation incomplete: the analyst did not return one valid score for every required axis.";
       emit({ phase: "Analyst", label: "Invalid response", detail: "The scorer response was unavailable, partial, duplicated an axis, or contained an invalid score. No verdict score will be published.", tone: "warn" });
     }
-    const analystState: ProviderRunState = scoringPreflight.state === "packet_oversize"
+    const analystState: ProviderRunState = accessFailure ? "failed" : scoringPreflight.state === "packet_oversize"
       || scoringPreflight.state === "unsupported_axes"
       || scoringPreflight.state === "invalid_catalog"
       ? "failed"
@@ -6166,7 +6181,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
           : observedRunState(scorerAttempts) === "failed"
             ? "failed"
             : "partial";
-    const analystDetail = scoringPreflight.state === "packet_oversize"
+    const analystDetail = accessFailureDetail ?? (scoringPreflight.state === "packet_oversize"
       ? `scoring packet exceeded the ${ANALYST_EVIDENCE_MAX_CHARS}-character structural budget while preserving required axis coverage; no scorer call made`
       : scoringPreflight.state === "no_axes"
         ? "no provider-backed methodology axes were requested; no scorer call made"
@@ -6180,7 +6195,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
               ? "scoring preflight rejected the frozen evidence or axis catalog; no scorer call made"
               : !scorerObserved
                 ? "evidence preflight passed; no scorer provider attempt was observed"
-                : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`;
+                : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`);
     checkTracker.provider(
       "ai-analyst",
       "AI analyst",
@@ -6195,6 +6210,9 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
         ? analystState
         : "skipped",
       detail: analystDetail,
+      missingAxes: [...scoringPreflight.missingSubstantiveAxes],
+      attemptedAxes: scorerObserved ? scoringAxes.map((row) => row.axis) : [],
+      ...(accessFailure ? { failure: { kind: "provider_access" as const, ...accessFailure } } : {}),
       capturedAt: captureTimestamp(),
     };
   } else {
@@ -6427,5 +6445,5 @@ export function writeVerifiedEntityFacts(evidence: CollectedEvidence, options: R
 }
 
 export function runAudit(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
-  return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
+  return withProviderAccessScope(() => withCostLedger(() => runAuditWithLedger(rawHandle, emit, options)));
 }

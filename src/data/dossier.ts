@@ -128,6 +128,7 @@ export interface Dossier {
   website?: string;
   /** Grok's bound-source explanation of what this exact subject is and does. */
   subjectOrientation?: CollectedEvidence["subjectOrientation"];
+  officialProductDescription?: CollectedEvidence["officialProductDescription"];
   profile_collection_state?: CollectedEvidence["profile"]["profile_collection_state"];
   profile_provider?: string;
   profile_captured_at?: string;
@@ -582,6 +583,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     bio: ev.profile.bio,
     website: ev.profile.website,
     ...(ev.subjectOrientation ? { subjectOrientation: structuredClone(ev.subjectOrientation) } : {}),
+    ...(ev.officialProductDescription ? { officialProductDescription: { ...ev.officialProductDescription } } : {}),
     profile_collection_state: ev.profile.profile_collection_state,
     profile_provider: ev.profile.profile_provider,
     profile_captured_at: ev.profile.profile_captured_at,
@@ -709,7 +711,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),
     ...(intelligence ? { intelligence } : {}),
-    ...(ev.scoringOutcome ? { scoringOutcome: { ...ev.scoringOutcome } } : {}),
+    ...(ev.scoringOutcome ? { scoringOutcome: structuredClone(ev.scoringOutcome) } : {}),
     ...(ev.researchPlan ? {
       researchPlan: {
         ...ev.researchPlan,
