@@ -1075,3 +1075,51 @@ are UniversalRouter 0x88767899 at 21.7 percent and RelayRouterV3 0xb92fe925 at
 14.6 percent. Both are infrastructure carrying other people's trades, and the
 Relay line contains his own FomoScan wallet's 8,000,001. Attribute through the
 hops before ranking sellers, or the routers take the top of every table.
+
+## Launchpad fingerprints on Robinhood Chain, and a wash-volume ring (read 2026-09-23)
+
+The launchpad study (docs/launchpads/) resolved the venues behind every
+factory this file had been calling unknown. The short version, because the
+venue predicts the fee model and the fee model predicts creator dumping.
+
+**Who launched what.** Factory 0x22e99278308b393ea1260859b181ad7e78f5eeed is
+the verified `LongLauncher` (paused 2026-09-10, replaced by v2 at
+0x1eEF016F22a943Abc7DD11422edee9d235942104). LONG is an integrator on
+Whetstone's Doppler protocol: Airlock 0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862,
+initializer 0x4e3468951D49f2EEa976eD0D6e75fFCb44a9a544, Rehype hook
+0x6f02324d20cc679d0e585290caa6b16bacbc0f77. Bankr uses the same Airlock and
+initializer with hook 0x9982538f41f2ae29ddb9d3d9307010052984fdbb and integrator
+0xF60633D02690e2A15A54AB919925F3d038Df163e. Tell them apart by the vanity
+suffix the token factory mines into the address: **`…1e18` is LONG, `…ba3` is
+Bankr** (AI, MEME, TAIWAN, MONITOR are LONG; musebook, Agrippa, museic are
+Bankr). Pons v1 factories 0x0c37a24f… and 0xa5aab3f0… take selector
+0x686399cb and are now closed to new launches; Pons v2 launches go through
+0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e or the LaunchAndBuy router
+0xe33E9E479dF8802cb0866d5d05258bEc4cF62948. Factory 0xD9eC2db5… (CASHCAT,
+JUGGERNAUT, FIH, POOCH) is the noxa.fun launch factory that Pons v1 derives
+from. StonkBrokers launches through per-quote pads (WETH pad
+0xFCd61B25BbF3AbD6cf0070D6328E351cc30EEC9f, GME pad 0x4B9Dcd6C…).
+
+**Which venues pay creators in the token.** LONG pays 95 percent of a 0.1 to
+0.2 percent LP fee in both pool tokens and keeps the 1.12 percent hook fee
+for its own EOA 0x92d435c96e63c43e12d6d0ab28f6b0b04072f765, which has
+liquidated 13.2M USDG of fee inventory since July. Bankr pays 0.665 percent
+in a mix of token and quote unless the creator opts into quote-only. Pons v1
+paid half in-token; Pons v2 pays quote only. Every in-token fee farm in this
+file (wire, LEMON, MOTION, MEME, TAIWAN) sits on one of those three. The
+`rh-machi-taiwan` and `rh-meme-amc` entries now name LONG as the venue.
+
+**Wash ring.** Indexed as `rh-volume-ring-2026-09-22`. Thirty-one direct
+deploys from thirty-two fresh wallets in three days, three bytecode
+templates, name-clones of musebook, Agrippa, HOOD6900, BTC and SHIB, reporting
+1.9M to 23M USD of daily volume on liquidity between zero and 300,000 USD.
+Two funding links found at hop one. GeckoTerminal's top-by-volume list for
+this chain was entirely these tokens plus the stock tokens; PumpSwap's is the
+same story on Solana. **Filter any volume ranking by volume-to-liquidity
+before reading it, and treat a ratio above 100 as fake until shown otherwise.**
+
+**Corrections.** The "5 percent sell tax, 100 percent on launch-block buyers"
+this file attributed to the Pons hook is not in Pons's docs or hook getters;
+the documented guard is a 99 percent buy-side tax decaying over five seconds.
+STONKBROKER's supply was minted as 4,444 × 666,666 and the 1,314 payments of
+666,666 to its treasury were NFT seat purchases, not a hidden mint.
