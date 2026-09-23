@@ -1,3 +1,5 @@
+import { compareHolderObservations } from "./holderChanges.js";
+import type { HolderIntelligence } from "./holderIntelligence";
 import { payloadTokenIdentity } from "./tokenIdentity.js";
 import type { BasicFact } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
@@ -9,6 +11,7 @@ import type { ShippingSummary } from "../threat/shipping";
 export type MaterialDeltaCategory =
   | "contract_control"
   | "liquidity_protection"
+  | "holder_observation"
   | "holder_concentration"
   | "development"
   | "verified_fact";
@@ -177,6 +180,12 @@ function holderDelta(
   const previous = tokenPayload(kind, previousPayload);
   const current = tokenPayload(kind, currentPayload);
   if (!previous || !current || previous.holdersAssessed !== true || current.holdersAssessed !== true) return null;
+  if (previous.holderIntelligence || current.holderIntelligence) {
+    const beforeCheck = previous.holderIntelligence, afterCheck = current.holderIntelligence;
+    if (!beforeCheck || !afterCheck || beforeCheck.status !== "complete" || afterCheck.status !== "complete"
+      || beforeCheck.ranking !== "ranked-addresses" || afterCheck.ranking !== "ranked-addresses" || beforeCheck.source !== afterCheck.source
+      || beforeCheck.supplyCoveredPct == null || afterCheck.supplyCoveredPct == null) return null;
+  }
   const before = finite(previous.safety.topHolderPct);
   const after = finite(current.safety.topHolderPct);
   if (before === null || after === null || Math.abs(after - before) < 10) return null;
@@ -188,6 +197,26 @@ function holderDelta(
     reversalCondition: "Comparable holder receipts showing the same wallet share in both scans would reverse this change.",
     evidenceHref: kind === "investigation" ? "#investigation-evidence" : "#composition",
   }, `${before.toFixed(2)}%`, `${after.toFixed(2)}%`);
+}
+
+function holderObservationDelta(kind: "person" | "token" | "investigation", previousPayload: unknown, currentPayload: unknown, prior: PriorReportSnapshot): MaterialReportDelta | null {
+  const snapshot = (payload: unknown): HolderIntelligence | undefined => {
+    const root = record(payload);
+    return (kind === "person" ? record(root.holderProfile).holderIntelligence : kind === "investigation" ? record(root.token).holderIntelligence : root.holderIntelligence) as HolderIntelligence | undefined;
+  };
+  const changes = compareHolderObservations(snapshot(previousPayload), snapshot(currentPayload));
+  const change = changes.find(item => item.kind === "newly-observed-indexed-wallet") ?? changes[0];
+  if (!change) return null;
+  const format = (value: number | null) => value == null ? "Outside the captured ranks" : `${value.toFixed(2)}% of supply`;
+  const headline = change.kind === "newly-observed-indexed-wallet" ? "An indexed wallet is newly visible among the top 25"
+    : change.kind === "no-longer-observed-indexed-wallet" ? "An indexed wallet is no longer visible among the top 25"
+    : "A holder's observed supply share changed by at least 2 percentage points";
+  return makeDelta(prior, {
+    id: `delta-holder-observation-${change.address}`, category: "holder_observation", headline,
+    consequence: `${change.address}: ${format(change.before)} → ${format(change.after)}.${change.registryNames.length ? ` Curated records: ${change.registryNames.join(", ")}.` : ""} This compares complete ranked samples from the same provider. It does not establish a buy, sale, exit, beneficial owner or common control. Supply changes and movement below rank 25 can change the observation.`,
+    reversalCondition: "Reconcile both dated holder registers, token supply and intervening transfers. A corrected register or changed provider scope can invalidate this comparison.",
+    evidenceHref: "#holder-intelligence",
+  }, format(change.before), format(change.after));
 }
 
 function shippingSummary(kind: "token" | "investigation", payload: unknown): ShippingSummary | null {
@@ -277,11 +306,13 @@ export function buildMaterialReportDelta(
     if (before && after && before.ref !== after.ref) return null;
     return contractDelta(kind, prior.payload, currentPayload, prior)
       ?? liquidityDelta(kind, prior.payload, currentPayload, prior)
+      ?? holderObservationDelta(kind, prior.payload, currentPayload, prior)
       ?? holderDelta(kind, prior.payload, currentPayload, prior)
       ?? developmentDelta(kind, prior.payload, currentPayload, prior)
       ?? verifiedFactDelta(kind, prior.payload, currentPayload, prior);
   }
-  return verifiedFactDelta(kind, prior.payload, currentPayload, prior);
+  return holderObservationDelta(kind, prior.payload, currentPayload, prior)
+    ?? verifiedFactDelta(kind, prior.payload, currentPayload, prior);
 }
 
 export function materialDeltaDiscovery(

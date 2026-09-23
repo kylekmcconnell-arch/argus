@@ -19,7 +19,7 @@ export function HolderIntelligencePanel({ snapshot, allowHistory = false }: { sn
       setHistory({ key, note: typeof body.note === "string" ? body.note : "History unavailable.", ...(body.available && Array.isArray(body.rows) ? { rows: body.rows } : {}) });
     } catch { setHistory({ key, note: "Workspace history could not be read. This does not mean there are no earlier observations." }); }
   };
-  return <section className="panel space-top" aria-label="Top 25 holder intelligence">
+  return <section id="holder-intelligence" className="panel space-top" aria-label="Top 25 holder intelligence">
     <div className="section-top"><h2>Top 25 holder intelligence</h2></div>
     {!snapshot ? <p className="subtle-note">This saved report did not record the top-25 index check. Earlier holder rows are not evidence that all 25 were examined.</p> : <>
       <p><strong>{snapshot.examined}/25 examined · collection {snapshot.status}</strong>. {snapshot.matched} addresses matched a curated registry record.</p>
