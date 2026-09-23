@@ -1,3 +1,4 @@
+import { buildHolderIntelligence, HOLDER_TARGET, type HolderIntelligence } from "../lib/holderIntelligence";
 import { hasThreatApiContext } from "../threat/net";
 import { officialXProfileHandle } from "../lib/officialXProfile";
 // Token audit: contract / DexScreener URL -> a forensic rug verdict, computed
@@ -22,7 +23,7 @@ import { classifyMarketAddress } from "../lib/marketAddresses";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
 import {
   dexByPairResult, dexByTokenResult, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
-  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource, rugcheckReport,
+  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutHolderSourceUrl, blockscoutContractSource, rugcheckReport,
   largestInsiderClusterPercent, hasCompleteGoplusTradeability,
   type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo, type ExplorerHolder,
   type ExplorerContractSource, type RugcheckReport,
@@ -178,6 +179,7 @@ export interface TokenDossier {
   /** Which source named the deployer, and whether it proved the creation. */
   deployerAttribution?: DeployerAttribution;
   topHolders: Holder[];
+  holderIntelligence?: HolderIntelligence;
   insiderPct: number;
   bundleCount: number;
   bundleRisk: "low" | "elevated" | "high";
@@ -881,7 +883,7 @@ async function runTokenAudit(
       opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address, fetcher),
       // Where GoPlus cannot order holders, the chain's own explorer is the
       // only correct distribution source. Runs in parallel: no added latency.
-      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address, fetcher) : Promise.resolve(null),
+      blockscoutHolders(chain, address, fetcher),
       // What the deployer wrote about their own contract. Free, and the only
       // place an intent to defeat safety scanners is ever stated outright.
       blockscoutContractSource(chain, address, fetcher),
@@ -1192,21 +1194,21 @@ async function runTokenAudit(
     });
     return false;
   });
-  const eoaHolders = walletRows.filter(
-    (h) => !(h.is_contract === 1 || h.is_contract === "1") && h.is_locked !== 1 && !/lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(h.tag || ""),
-  );
+  // Smart accounts and team multisigs remain holders. Contract status and a
+  // provider tag alone cannot establish independent custody or a lock.
+  const eoaHolders = walletRows.filter(h => !/^0x(?:0{40}|0{36}dead)$/i.test(h.address ?? h.account ?? ""));
   // Free-tier GoPlus sometimes returns a short, self-inconsistent holder list
   // whose percentages sum past 100%. When that happens the distribution data is
   // untrustworthy, so we suppress the concentration signal rather than report a
   // nonsensical figure.
-  const topSum = eoaHolders.slice(0, 15).reduce((a, h) => a + Number(h.percent) * 100, 0);
-  const holdersReliable = rawHolders.length > 0 && topSum <= 101;
+  const topSum = eoaHolders.slice(0, 25).reduce((a, h) => a + Number(h.percent) * 100, 0);
+  const holdersReliable = rawHolders.length > 0 && rawHolders.every(h => Number.isFinite(Number(h.percent)) && Number(h.percent) >= 0) && rawHolders.reduce((sum, h) => sum + Number(h.percent) * 100, 0) <= 101;
   // Top-holder concentration must also read the wallet list, not the pool.
   // When every returned row is infrastructure (the pool, a staking contract)
   // the top WALLET is unmeasured (null): the provider's raw row 0 is exactly the
   // pool the exclusion above just set aside, and republishing it as "top
   // holder 60%" beside the finding that excluded it contradicted the report.
-  const topWalletPct = eoaHolders.length ? Number(eoaHolders[0].percent) * 100 : null;
+  const topWalletPct = eoaHolders.length ? Math.max(...eoaHolders.map(h => Number(h.percent) * 100)) : null;
   const concentrationTopPct = topWalletPct;
   const insiderPct = holdersReliable ? Math.round(topSum) : 0;
   // Material wallets, largest first. The register's own order is not trusted
@@ -1442,13 +1444,29 @@ async function runTokenAudit(
   // creation signed earns the word "deployer"; everything else is an address a
   // source attributes, which can be a program holding an authority.
   const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
-  const topHolders: Holder[] = rawHolders.slice(0, 10).map((h) => ({
+  let topHolders: Holder[] = rawHolders.slice(0, HOLDER_TARGET).map((h) => ({
     address: h.address ?? h.account ?? "",
     percent: Number(h.percent) * 100,
     tag: h.tag || undefined,
     isContract: h.is_contract === 1 || h.is_contract === "1",
     marketKind: classifyMarketAddress(h.address ?? h.account ?? "", { poolAddresses, knownAccounts })?.kind,
   })).filter((h) => h.address);
+
+  const holderIntelligence = buildHolderIntelligence({
+    chain, tokenAddress: address, capturedAt: new Date().toISOString(),
+    source: explorerHolders ? "blockscout" : chain === "solana" && rugcheck?.topHolders?.length ? "rugcheck" : "goplus",
+    sourceUrl: explorerHolders ? blockscoutHolderSourceUrl(chain, address) : chain === "solana" && rugcheck?.topHolders?.length
+      ? `https://api.rugcheck.xyz/v1/tokens/${address}/report`
+      : `https://api.gopluslabs.io/api/v1/${chain === "solana" ? "solana/token_security" : `token_security/${gpChain}`}?contract_addresses=${address}`,
+    rows: chain === "solana" && rugcheck?.topHolders?.length ? rugcheck.topHolders : topHolders,
+    ranked: chain !== "solana" && !GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) || Boolean(explorerHolders),
+    aggregateOwners: chain === "solana" && Boolean(rugcheck?.topHolders?.length),
+    poolAddresses, ...(knownAccounts ? { knownAccounts } : {}),
+  });
+
+  if (chain === "solana" && rugcheck?.topHolders?.length) {
+    topHolders = holderIntelligence.rows.map(row => ({ address: row.address, percent: row.percent }));
+  }
 
   // ---- Deployer forensics: OFAC is required; provider funding risk is optional.
   const screenFn = opts?.screenSanctions ?? ((chain, addresses) => screenAddressSanctions(chain, addresses, fetcher));
@@ -1576,7 +1594,7 @@ async function runTokenAudit(
     verdict, score, assessment, capApplied, headline, axes, ...(decisionBoundary ? { decisionBoundary } : {}), safety: { ...s, topHolderPct: concentrationTopPct }, socials,
     holdersAssessed: holdersReliable,
     projectX, ...(socialActivity ? { socialActivity } : {}), ...(shipping ? { shipping } : {}), deployer, ...(deployerAttribution ? { deployerAttribution } : {}),
-    topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
+    topHolders, holderIntelligence, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
     sanctionsScreen,
     deployerRisk,
     ...(cloneCheck ? { cloneCheck } : {}),
@@ -1627,7 +1645,7 @@ function buildGraph(chain: string, address: string, symbol: string, verdict: str
         : {}),
     });
   }
-  holders.slice(0, 4).forEach((h) => {
+  holders.slice(0, HOLDER_TARGET).forEach((h) => {
     // Roles and short labels are display metadata; the identity is always the
     // chain plus the complete address. The same wallet therefore stays the same
     // node whether it later appears as a holder, deployer or funder.

@@ -17,7 +17,7 @@ interface Holders {
   top: RcTop[];
   concentration: { top1: number; top5: number; top10: number; top10NonMarket: number; marketPct: number };
   insiders: { detected: number; networks: number; clusteredPct: number };
-  creatorPct: number;
+  creatorPct: number | null;
   lpLockedPct: number;
   rugged: boolean;
   verdict: { tone: "good" | "warn" | "bad"; line: string };
@@ -106,7 +106,7 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
           <Metric label="holders" value={d.totalHolders ? money(d.totalHolders) : "N/A"} />
           <Metric label="top-10 hold" value={`${c.top10.toFixed(0)}%`} tone={c.top10NonMarket >= 40 ? TONE.bad : c.top10NonMarket >= 20 ? TONE.warn : undefined} />
           <Metric label="insider-clustered" value={`${d.insiders.clusteredPct.toFixed(0)}%`} tone={d.insiders.clusteredPct >= 15 ? TONE.warn : undefined} />
-          <Metric label="creator holds" value={`${d.creatorPct.toFixed(d.creatorPct < 1 ? 1 : 0)}%`} tone={d.creatorPct >= 10 ? TONE.warn : undefined} />
+          <Metric label="creator holds" value={d.creatorPct == null ? "Unmeasured" : `${d.creatorPct.toFixed(d.creatorPct < 1 ? 1 : 0)}%`} tone={d.creatorPct != null && d.creatorPct >= 10 ? TONE.warn : undefined} />
         </div>
 
         {/* concentration bar: market/exchange liquidity vs private-wallet concentration */}

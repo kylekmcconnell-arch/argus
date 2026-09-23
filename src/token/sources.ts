@@ -3,6 +3,7 @@
 //   - DexScreener: market, liquidity, volume, txns, age, socials.
 //   - GoPlus: contract safety (honeypot, mint authority, ownership, tax, holders).
 
+import { HOLDER_TARGET } from "../lib/holderIntelligence";
 import { retryFetch, retryFetchWithFreshTimeout } from "../lib/retry";
 
 export interface DexPair {
@@ -61,9 +62,15 @@ const BLOCKSCOUT_API: Record<string, string> = {
   robinhood: "https://robinhoodchain.blockscout.com",
 };
 
+const BLOCKSCOUT_HOLDER_API: Record<string, string> = {
+  ...BLOCKSCOUT_API,
+  base: "https://base.blockscout.com",
+  ethereum: "https://eth.blockscout.com",
+};
+
 /** Exact public endpoint that produces the ordered holder register. */
 export function blockscoutHolderSourceUrl(chain: string, address: string): string | null {
-  const base = BLOCKSCOUT_API[chain.trim().toLowerCase()];
+  const base = BLOCKSCOUT_HOLDER_API[chain.trim().toLowerCase()];
   return base ? `${base}/api/v2/tokens/${encodeURIComponent(address)}/holders` : null;
 }
 
@@ -104,7 +111,8 @@ export async function blockscoutContractSource(
 }
 
 /**
- * Top token holders from a public Blockscout instance (keyless, CORS-open).
+ * Top token holders from a configured public Blockscout instance. Access may
+ * be restricted; an unavailable endpoint returns null rather than empty holders.
  * Blockscout returns holders correctly ordered by balance, so this is the
  * authoritative distribution on chains GoPlus cannot order.
  */
@@ -114,7 +122,7 @@ export async function blockscoutHolders(
   fetchImpl: typeof fetch = fetch,
 ): Promise<ExplorerHolder[] | null> {
   const chainKey = chain.trim().toLowerCase();
-  const base = BLOCKSCOUT_API[chainKey];
+  const base = BLOCKSCOUT_HOLDER_API[chainKey];
   if (!base) return null;
   const holderSourceUrl = blockscoutHolderSourceUrl(chainKey, address);
   if (!holderSourceUrl) return null;
@@ -135,7 +143,7 @@ export async function blockscoutHolders(
       const hash = item?.address?.hash;
       if (!hash || !Number.isFinite(value) || value <= 0) continue;
       rows.push({ address: hash, percent: (value / supply) * 100, isContract: item.address?.is_contract === true });
-      if (rows.length >= 10) break;
+      if (rows.length >= HOLDER_TARGET) break;
     }
     return rows;
   } catch {
@@ -504,6 +512,7 @@ export interface RugcheckInsiderNetwork {
  * program rather than a person. Callers must name the source on every claim.
  */
 export interface RugcheckReport {
+  topHolders?: Array<{ address: string; owner: string; percent: number }>;
   creator: string | null;
   /** Creator holdings as a percent of supply, or null when either side is missing. */
   creatorPercent: number | null;
@@ -647,12 +656,18 @@ export async function rugcheckReport(mint: string, fetchImpl: typeof fetch = fet
       knownAccounts?: unknown;
       insiderNetworks?: unknown;
       graphInsidersDetected?: unknown;
+      topHolders?: Array<{ address?: unknown; owner?: unknown; pct?: unknown }>;
     };
     const creator = typeof d?.creator === "string" && SOLANA_ADDRESS.test(d.creator.trim()) ? d.creator.trim() : null;
     const supply = d?.token?.supply;
     const networks = Array.isArray(d?.insiderNetworks) ? d.insiderNetworks : [];
     return {
       creator,
+      topHolders: (Array.isArray(d.topHolders) ? d.topHolders : []).flatMap(row => {
+        const pct = boundedPercent(row.pct);
+        return typeof row.address === "string" && typeof row.owner === "string" && pct != null
+          ? [{ address: row.address, owner: row.owner, percent: pct }] : [];
+      }),
       // With no creator there is nobody for a balance to belong to, and a bare
       // zero would read as "the creator sold out" rather than "not measured".
       creatorPercent: creator ? supplySharePercent(d?.creatorBalance, supply) : null,

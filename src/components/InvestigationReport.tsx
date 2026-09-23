@@ -1,3 +1,4 @@
+import { HolderIntelligencePanel } from "../reports/argus/HolderIntelligencePanel";
 import { tokenSubjectIdentity } from "../lib/tokenIdentity";
 import { tokenCompositionRow, tokenMarketPresentation } from "../lib/tokenPresentation";
 import { investigationFacets } from "../lib/investigationFacets";
@@ -2360,6 +2361,7 @@ export function InvestigationReport({
         ),
         market: () => (
           <LegacySection title="What the market tells us" note="Funding and the token are separate. Then price, liquidity, ownership and usage, as the scan captured them.">
+            <HolderIntelligencePanel snapshot={token.holderIntelligence} allowHistory={!shareView && !privateSession} />
             <div className="investigation-story">
         <div id="investigation-visuals" className="story-chapter report-section scroll-mt-28 mt-7">
           <ReportSectionHeading

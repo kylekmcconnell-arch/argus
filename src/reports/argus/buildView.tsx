@@ -1077,6 +1077,7 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
     limitation: evm.limitations?.[1] ?? evm.limitations?.[0] ?? null,
   } : null;
   const market = pt ? {
+    ...(holder?.holderIntelligence ? { holderIntelligence: holder.holderIntelligence } : {}),
     capturedAt: pt.capturedAt,
     metrics: marketMetrics,
     holders: addresses.length || wallets.length ? {

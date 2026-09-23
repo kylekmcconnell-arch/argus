@@ -1,3 +1,4 @@
+import { HolderIntelligencePanel } from "../reports/argus/HolderIntelligencePanel";
 import { tokenSubjectIdentity } from "../lib/tokenIdentity";
 import { DeepLaunchPanel } from "./DeepLaunchPanel";
 import { ShippingScorecard } from "./ShippingScorecard";
@@ -544,6 +545,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         ),
         market: () => (
           <LegacySection title="Market, mechanics and holders" note="The saved market snapshot, the contract's own rules, liquidity, concentration and the on-chain forensic panels.">
+            <HolderIntelligencePanel snapshot={d.holderIntelligence} allowHistory={!shareView && !privateSession} />
             <TokenStory dossier={d} />
             <div id="token-market" className="mt-4 scroll-mt-28">
               <ReportChallengeButton context="Market data: price, trading volume and liquidity" anchorId={shareView ? null : "token-challenge"} />

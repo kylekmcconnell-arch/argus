@@ -724,8 +724,9 @@ function frozenPacket(stored: JsonRecord, requestedVersionId: string) {
       bundleRisk: text(token.bundleRisk, 40),
       topHolders: (Array.isArray(token.topHolders) ? token.topHolders : []).slice(0, 30).map((value) => {
         const holder = record(value);
-        return { address: text(holder.address, 160), percent: holder.pct, label: text(holder.tag, 160) };
+        return { address: text(holder.address, 160), percent: holder.percent ?? holder.pct, label: text(holder.tag, 160) };
       }),
+      holderIntelligence: record(token.holderIntelligence),
       safety: record(token.safety),
       market: record(token.cg),
     },

@@ -45,11 +45,11 @@ describe("lookups", () => {
     expect(findCabalWallet("base", "0x1dd6e1f6e2d1696a88998cff9fc150cab4c3601a")).toBeNull();
   });
 
-  it("resolves a Solana mint and its factory wallets case-insensitively", () => {
+  it("preserves case when resolving Solana mints and factory wallets", () => {
     const hit = findCabalLaunch("solana", "7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5");
     expect(hit?.cabal.id).toBe("sol-park-pumpswap-pool-factory");
     expect(hit?.launch.outcome).toBe("curve-scalped");
-    expect(findCabalWallet("solana", "cbbrs6xr6ksjyzpgh7pqnvvy42gxbhwk1z2wmejja99x")?.wallet.role).toBe("deployer");
+    expect(findCabalWallet("solana", "cbbrs6xr6ksjyzpgh7pqnvvy42gxbhwk1z2wmejja99x")).toBeNull();
     expect(findCabalWallet("robinhood", "CBbRS6xr6KSjYzPgH7pQnVvy42GXbhWk1Z2WMejJa99X")).toBeNull();
   });
 

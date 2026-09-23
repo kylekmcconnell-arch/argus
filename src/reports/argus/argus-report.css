@@ -572,3 +572,7 @@
 .launch-fact dd { margin: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }
 .argus-rd .launch-fact .mono { font-family: "DM Sans", sans-serif; }
 @media (max-width: 560px) { .launch-fact { grid-template-columns: 1fr; gap: 5px; } .argus-rd .threat-record .panel { padding: 18px; } }
+
+.argus-rd .holder-intelligence-row { padding: 14px 0; border-top: 1px solid var(--rd-line); overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }
+.argus-rd .holder-intelligence-row p { margin: 6px 0; }
+.argus-rd .holder-intelligence-row summary { cursor: pointer; color: var(--rd-ink); }

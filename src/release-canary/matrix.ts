@@ -270,6 +270,10 @@ function fixtureFetch(state: FixtureFetchState): typeof fetch {
       if (ticker === "SAFE") return json({ pairs: [fixturePair(CLEAN_TOKEN_ADDRESS)] });
     }
 
+    if (url.hostname === "eth.blockscout.com" && /^\/api\/v2\/tokens\/0x[0-9a-f]+(?:\/holders)?$/.test(url.pathname)) {
+      return new Response("Explorer unavailable in this fixture", { status: 503 });
+    }
+
     if (url.hostname === "api.gopluslabs.io" && url.pathname === "/api/v1/token_security/1") {
       const address = (url.searchParams.get("contract_addresses") ?? "").toLowerCase();
       if (address === CLEAN_TOKEN_ADDRESS || address === HONEYPOT_TOKEN_ADDRESS) {

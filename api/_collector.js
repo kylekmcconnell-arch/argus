@@ -1339,7 +1339,7 @@ var CABALS = [
     firstSeen: "2026-08-31",
     lastSeen: "2026-09-23",
     wallets: [
-      { chain: RH, address: "0x020ca66c30bec2c4fe3861a94e4db4a498a35872", role: "deployer", label: "machibigbrother.eth, the public wallet that launched $TAIWAN", evidence: "sent the launch tx 0xccbfd848a241472a46ae0a640eb0e59946e7580ac22393521a678ab79db7fd1d to factory 0x22e99278 at 2026-08-31 17:46 UTC, which minted 1,000,000,000 to hook 0xeb7c0347; ENS forward resolution of machibigbrother.eth returns this address; bought 10,435,660 tokens through the swap hub on 09-03 and 09-04, sold 435,660 on 09-07 08:40 and moved 1,000,000 to the fresh EOA 0x5fc7030f875851fd6fe4c8f199b009b1908b9ef4 (nonce 0, still holds them). On 09-19 07:18 it received 5,886,504 as creator fees from the shared launchpad fee contract 0x4e346895, contradicting the earlier read that there was no creator income, then bought 19,108,118 in six transactions through RobinHoodSettler 0x6aa80dbb between 07:36 and 07:45, taking the hourly candle from 0.00014663 to 0.00018609. On 09-23 00:00:34 UTC it sold all 33,994,623 in tx 0x3bbdc03e92a90858e5cfb4f929df8546f0e11e8ef30a46d3108c3e2a8a4ada84, receiving 27,125.467 STANDARD (0x88ad8ddf1e3898412146a534538d418c6f8a9062, about 5,350 USD); that single sale is 17.3 percent of all sell flow into the pool between 09-17 and 09-23. Holds 0 TAIWAN and 0.1308 ETH, down from 2.30, read 2026-09-23" },
+      { chain: RH, address: "0x020ca66c30bec2c4fe3861a94e4db4a498a35872", role: "deployer", label: "machibigbrother.eth, the public wallet that launched $TAIWAN", evidence: "sent the launch tx 0xccbfd848a241472a46ae0a640eb0e59946e7580ac22393521a678ab79db7fd1d to factory 0x22e99278 at 2026-08-31 17:46 UTC, which minted 1,000,000,000 to hook 0xeb7c0347; ENS forward resolution of machibigbrother.eth returns this address; bought 10,435,660 tokens through the swap hub on 09-03 and 09-04, sold 435,660 on 09-07 08:40 and moved 1,000,000 to the fresh EOA 0x5fc7030f875851fd6fe4c8f199b009b1908b9ef4 (nonce 0, still holds them). On 09-19 07:18 it received 5,886,504 as creator fees from Doppler's initializer 0x4e346895 (LONG's creator-fee path), contradicting the earlier read that there was no creator income, then bought 19,108,118 in six transactions through RobinHoodSettler 0x6aa80dbb between 07:36 and 07:45, taking the hourly candle from 0.00014663 to 0.00018609. On 09-23 00:00:34 UTC it sold all 33,994,623 in tx 0x3bbdc03e92a90858e5cfb4f929df8546f0e11e8ef30a46d3108c3e2a8a4ada84, receiving 27,125.467 STANDARD (0x88ad8ddf1e3898412146a534538d418c6f8a9062, about 5,350 USD); that single sale is 17.3 percent of all sell flow into the pool between 09-17 and 09-23. Holds 0 TAIWAN and 0.1308 ETH, down from 2.30, read 2026-09-23" },
       { chain: RH, address: "0x3205c07eb8d4f59fa709d64ca68c51d427094be4", role: "kol-wallet", label: "FomoScan-verified trading wallet of FOMO account machibigbrother", evidence: "FomoScan record for FOMO account machibigbrother, display name Machi Big Brother (read 2026-09-17; FOMO stores no X link, so the binding rests on the account name, and no direct transfer links this address to machibigbrother.eth). EIP-7702 account, Simple7702Account delegate 0xe6cae83b. Bought 14,479,681 $TAIWAN in 20 buys 09-01 to 09-07 for about 12,825 USD and sold 6,479,680 in six sales 09-09 13:51 to 09-17 11:18 for about 3,563 USD, each sale routed $TAIWAN into TSM and bridged to Solana as USDC (Relay requests, 1,206.42 USDC total). It then emptied the remaining 8,000,001 through the same Relay router in four transfers on 09-18 13:17, 09-18 16:29, 09-20 13:05 and 09-20 16:32. Total in and total out are both 14,479,681; holds 0 TAIWAN and 0 ETH, read 2026-09-23" },
       { chain: SOL, address: "CvmrvyKfkJQtGNVKzaJ6H337CN9F2vxrLsZZnmjP2omq", role: "kol-wallet", label: "FomoScan-verified Solana wallet, destination of the $TAIWAN sale proceeds", evidence: "FomoScan record for FOMO account machibigbrother (read 2026-09-17); holds all four Solana tokens he posted theses about on 09-13 and 09-14, of which HneTUS79 was first acquired 09-10 17:22 and AmPojoiS 09-12 22:04, both after the 09-09 and 09-10 $TAIWAN sales bridged in" }
     ],
@@ -1347,7 +1347,7 @@ var CABALS = [
       { handle: "machibigbrother", role: "kol", label: "Jeffrey Huang, 223.4k followers on X, creator and promoter of $TAIWAN", evidence: "X posts 2026-09-01 'Taiwan Coin paired with Taiwan Semiconductor Manufacturing' and 2026-09-03 'I am addicted to creating coins but I have now created my Mona Lisa. $TAIWAN'; FOMO theses on the token 09-06 16:57 'We are building the world's largest $TSM reserve. Long your longs.' and 09-07 04:03 'There is no ai without Taiwan', posted while buying and two days before he began selling; neither of his wallets holds any TSM, so the reserve being built sits in the pool, not with him; read 2026-09-17" }
     ],
     launches: [
-      { chain: RH, address: "0xaa0b48defde440b8445ba45db88cb076cf261e18", symbol: "TAIWAN", name: "Taiwan Coin", launchedAt: "2026-08-31", venue: "unknown factory 0x22e99278308b393ea1260859b181ad7e78f5eeed", outcome: "organic", note: "Paired against tokenized TSM rather than ETH. Peaked 20 hours after launch and is down 92 percent from that high, at about 104,000 USD of liquidity and a 146,000 USD valuation on 2026-09-23. No allocation at the mint and no self-snipe, but the launchpad did pay the creator 5,886,504 tokens in fees on 09-19. The 92 percent decline came from dispersed selling across 5,373 attributed wallets, top ten at 6.6 percent of flow, and the single worst day was 09-11, when the price fell from 0.00071 to 0.00019. The creator's own selling began 2026-09-09 and finished on 09-23; in the 09-17 to 09-23 window he is the largest single seller at 17.3 percent of sell flow, against 195,953,724 sold and 175,339,298 bought across about 69 and 65 wallets.", evidence: "156,948 transfers merged from Robinhood RPC logs over blocks 51,053,350 to 65,718,843, read 2026-09-17; sales attributed by walking router hops inside each tx; GeckoTerminal hourly candles for the price path" }
+      { chain: RH, address: "0xaa0b48defde440b8445ba45db88cb076cf261e18", symbol: "TAIWAN", name: "Taiwan Coin", launchedAt: "2026-08-31", venue: "LONG (app.long.xyz), LongLauncher 0x22e99278308b393ea1260859b181ad7e78f5eeed over the Doppler Airlock 0xeb7c0347; the creator fee is paid by Doppler's initializer 0x4e346895 in both pool tokens", outcome: "organic", note: "Paired against tokenized TSM rather than ETH. Peaked 20 hours after launch and is down 92 percent from that high, at about 104,000 USD of liquidity and a 146,000 USD valuation on 2026-09-23. No allocation at the mint and no self-snipe, but the launchpad did pay the creator 5,886,504 tokens in fees on 09-19. The 92 percent decline came from dispersed selling across 5,373 attributed wallets, top ten at 6.6 percent of flow, and the single worst day was 09-11, when the price fell from 0.00071 to 0.00019. The creator's own selling began 2026-09-09 and finished on 09-23; in the 09-17 to 09-23 window he is the largest single seller at 17.3 percent of sell flow, against 195,953,724 sold and 175,339,298 bought across about 69 and 65 wallets.", evidence: "156,948 transfers merged from Robinhood RPC logs over blocks 51,053,350 to 65,718,843, read 2026-09-17; sales attributed by walking router hops inside each tx; GeckoTerminal hourly candles for the price path" }
     ]
   },
   {
@@ -1359,7 +1359,7 @@ var CABALS = [
     firstSeen: "2026-09-03",
     lastSeen: "2026-09-21",
     wallets: [
-      { chain: RH, address: "0xa72a5b06927badb020d235f5f43ce56507ab2399", role: "deployer", label: "$MEME deployer and creator-fee recipient", evidence: "sent launch tx 0x75c36932619070f16f65bd7d252f689a4e6cf7d170a99ee72774d56f4315e41e (block 53,697,172, 2026-09-03 20:30 UTC) to factory 0x22e99278, which minted 1,000,000,000 to hook 0xeb7c0347; bought 11,816,778 at block +371 in tx 0xc72f60f08d9133d698b396381e56c04cb2a8afe6dbf04d083bdedc9cc81e478d, 0.1 ETH through RelayRouterV3 0xb92fe925; received 5,010,685 in 28 creator-fee claims (selector 0x817db73b) from the shared DopplerHookInitializer 0x4e346895 between 2026-09-04 and 2026-09-21; 17,940,485 in, 17,621,349 out, zero sent to the pool; holds 319,135 and 0.11 ETH, nonce 100, read 2026-09-21. Also holds 1.08B NEB, 430M SIGNAL, 273M SCOUT, 249M TERRA and 98M SZN, none with any market." },
+      { chain: RH, address: "0xa72a5b06927badb020d235f5f43ce56507ab2399", role: "deployer", label: "$MEME deployer and creator-fee recipient", evidence: "sent launch tx 0x75c36932619070f16f65bd7d252f689a4e6cf7d170a99ee72774d56f4315e41e (block 53,697,172, 2026-09-03 20:30 UTC) to factory 0x22e99278, which minted 1,000,000,000 to hook 0xeb7c0347; bought 11,816,778 at block +371 in tx 0xc72f60f08d9133d698b396381e56c04cb2a8afe6dbf04d083bdedc9cc81e478d, 0.1 ETH through RelayRouterV3 0xb92fe925; received 5,010,685 in 28 creator-fee claims (selector 0x817db73b) from Doppler's initializer 0x4e346895, LONG's creator-fee path, between 2026-09-04 and 2026-09-21; 17,940,485 in, 17,621,349 out, zero sent to the pool; holds 319,135 and 0.11 ETH, nonce 100, read 2026-09-21. Also holds 1.08B NEB, 430M SIGNAL, 273M SCOUT, 249M TERRA and 98M SZN, none with any market." },
       { chain: RH, address: "0x8e74a2b037d29934d12c04becccb627a7883acb7", role: "farm", label: "$MEME forwarding wallet A, sold into the pool", evidence: "received 12,029,478 from the deployer 2026-09-04 04:34 to 16:25; sent 5,000,000 to PoolManager 0x8366a39c in 15 transfers, 4,683,059 through proxy 0xdeadc0de, 1,846,419 through RelayRouterV3 and 500,000 to swap router 0xbdbae060, last transfer 2026-09-05 00:24; holds zero, read 2026-09-21" },
       { chain: RH, address: "0x8bc35bf8844123c93d8399f3c35f232ce201b328", role: "off-ramp", label: "$MEME forwarding wallet B, bridged out", evidence: "received 4,700,053, of which 3,296,638 from the deployer on 2026-09-04 and 09-05; sent 4,232,318 through RelayRouterV3 0xb92fe925 in 11 transfers and sold 467,735 through RobinHoodSettler 0x39b38686, last transfer 2026-09-05 03:49; holds zero, read 2026-09-21" }
     ],
@@ -1367,7 +1367,42 @@ var CABALS = [
       { handle: "amemecoinrh", role: "project", label: "A Meme Coin project account, 12.3k followers, follows three", evidence: "listed on every DexScreener pair for 0x385f4f8a; pinned post 2026-09-19 'Today, A $MEME Coin gets a new mission. Fix @AMCTheatres.' quoting Vlad Tenev's 2026-09-14 post on voting for Robinhood Stock Tokens; 2026-09-20 post lists the 2026-09-24 AMC annual meeting; read 2026-09-21" }
     ],
     launches: [
-      { chain: RH, address: "0x385f4f8ae47651ce5f58f5265395a669f8281e18", symbol: "MEME", name: "A Meme Coin", launchedAt: "2026-09-03", venue: "unknown factory 0x22e99278308b393ea1260859b181ad7e78f5eeed", outcome: "unestablished", note: "EIP-1167 clone of implementation 0x3be8b97f; one mint, no burns, no mint or rename function. Peaked at 0.063651 USD on 2026-09-13 and set a new low of 0.025312 on 2026-09-21, down 59 percent, with daily volume falling from 11.7M to 2.4M USD. About 2.0M USD of its 4.22M headline liquidity is the AMC/MEME pool, where MEME is the quote asset. Blockscout indexes the symbol as AMC while the contract returns MEME, so explorer balance views list it beside the real tokenized AMC 0x05a3d1cd.", evidence: "Blockscout holders, counters and per-address token transfers, and Robinhood RPC reads of name, symbol, supply and the mint log, all read 2026-09-21; GeckoTerminal hourly candles for pool 0x46525dc1 from 2026-09-13" }
+      { chain: RH, address: "0x385f4f8ae47651ce5f58f5265395a669f8281e18", symbol: "MEME", name: "A Meme Coin", launchedAt: "2026-09-03", venue: "LONG (app.long.xyz), LongLauncher 0x22e99278308b393ea1260859b181ad7e78f5eeed over the Doppler Airlock 0xeb7c0347; LONG tokens carry the vanity suffix 1e18", outcome: "unestablished", note: "EIP-1167 clone of implementation 0x3be8b97f; one mint, no burns, no mint or rename function. Peaked at 0.063651 USD on 2026-09-13 and set a new low of 0.025312 on 2026-09-21, down 59 percent, with daily volume falling from 11.7M to 2.4M USD. About 2.0M USD of its 4.22M headline liquidity is the AMC/MEME pool, where MEME is the quote asset. Blockscout indexes the symbol as AMC while the contract returns MEME, so explorer balance views list it beside the real tokenized AMC 0x05a3d1cd.", evidence: "Blockscout holders, counters and per-address token transfers, and Robinhood RPC reads of name, symbol, supply and the mint log, all read 2026-09-21; GeckoTerminal hourly candles for pool 0x46525dc1 from 2026-09-13" }
+    ]
+  },
+  {
+    id: "rh-volume-ring-2026-09-22",
+    name: "Robinhood Chain wash-volume ring of 2026-09-22",
+    kind: "launch-farm",
+    intent: "nefarious",
+    summary: "Thirty-one tokens deployed directly from thirty-two fresh wallets on 2026-09-21 to 23, no launchpad, that report 1.9M to 23M USD of daily volume on zero to 300,000 USD of liquidity: volume-to-liquidity ratios of 100 to 5,000 times, and four (a fake BTC, GREEN, FCAT, SHIB) showing millions of volume on no liquidity at all. Three bytecode templates cover 21 of them, several are name-clones of real tokens (musebook, Agrippa, HOOD6900, BTC, SHIB), the deployers have nonces of 5 to 18 and most are drained to zero after use, and template B is chain-funded from one pot: JEV's deployer sent RIG's 16.09 ETH and NODIUM's received 12.85 ETH. The tokens have no product, no socials and no organic holders; the volume exists to game the chain's top-by-volume rankings on GeckoTerminal and DexScreener. Any scan of one of these tokens should warn, and any volume ranking on this chain must exclude them.",
+    firstSeen: "2026-09-21",
+    lastSeen: "2026-09-23",
+    wallets: [
+      { chain: RH, address: "0x361bcf4b707695494db2b71f541af33776280876", role: "hub", label: "funder of two template-A deployers", evidence: "first-funder of CRAIL's deployer 0x5b93b427 (0.2 ETH, 2026-09-22 12:29) and PROUTE's deployer 0xb016fc9c (0.2 ETH, 2026-09-22 18:38), read on Blockscout 2026-09-23" },
+      { chain: RH, address: "0xc96aa6ad793bc744beb11a9afd1813470ca194dc", role: "hub", label: "JEV's deployer, which also funds the template-B set", evidence: "deployed JEV 0x1df7abb9 on 2026-09-22 and sent 16.0916 ETH to RIG's deployer 0xef7659ed at 2026-09-22 17:11; NODIUM's deployer 0x2f10b576 was funded 12.8454 ETH the same evening; read on Blockscout 2026-09-23" },
+      { chain: RH, address: "0x37aafcf68fbb35ad01c4bd2e92feced835f62525", role: "deployer", label: "PGREM deployer, template A", evidence: "direct CREATE of 0xb57ed3c7 on 2026-09-22; funded 0.4 ETH by 0xB3352958 at 08:52; nonce 17, 0 ETH left; PGREM shows 23.17M USD of 24h volume on 170,098 USD of liquidity, read 2026-09-23" },
+      { chain: RH, address: "0x5b93b4270f7144c49e38aaa41e0accfd1b242a10", role: "deployer", label: "CRAIL deployer, template A", evidence: "direct CREATE of 0xc8d8d13e on 2026-09-22; funded by 0x361bcf4b; nonce 18, 0 ETH left; 18.60M USD volume on 171,481 USD liquidity, read 2026-09-23" },
+      { chain: RH, address: "0xb016fc9c2df06e4554cec3b2c326786c8fb90419", role: "deployer", label: "PROUTE deployer, template A", evidence: "direct CREATE of 0x7af49cb4 on 2026-09-22; funded by 0x361bcf4b; nonce 16, 0 ETH left; 9.64M USD volume on 65,781 USD liquidity, read 2026-09-23" },
+      { chain: RH, address: "0xef7659ede76d13dd82ececfe2d07a40e63b015dd", role: "deployer", label: "RIG deployer, template B", evidence: "direct CREATE of 0x4c7c1f29 on 2026-09-22; funded 16.09 ETH by JEV's deployer 0xc96aa6ad; 2.40M USD volume on 832 USD liquidity, read 2026-09-23" },
+      { chain: RH, address: "0x2f10b57688f4a2b008ac91386cc6db0d1b0d635b", role: "deployer", label: "NODIUM deployer, template B", evidence: "direct CREATE of 0x753bd40e on 2026-09-22; funded 12.85 ETH by 0xb12B8dab at 19:36; 2.55M USD volume on 691 USD liquidity, read 2026-09-23" },
+      { chain: RH, address: "0xfa1aa1a5f7055043004e1ffb3f1c783a0951cc5d", role: "deployer", label: "deployer of the musebook name-clone", evidence: "direct CREATE of 0x17e900c2 named musebook on 2026-09-22, cloning Bankr's musebook 0x91a2dae9; 15.17M USD volume on 2,806 USD liquidity, read 2026-09-23" }
+    ],
+    accounts: [],
+    launches: [
+      { chain: RH, address: "0xb57ed3c7ffeaa75ceb6c772cb7a3be422782e250", symbol: "PGREM", name: "PGREM", launchedAt: "2026-09-22", venue: "direct deploy, template A (1,764 bytes)", outcome: "unestablished", note: "23.17M USD reported 24h volume on 170,098 USD liquidity, 136 times its depth.", evidence: "GeckoTerminal top-pools sweep and RPC bytecode hash, read 2026-09-23" },
+      { chain: RH, address: "0xc8d8d13eea8a47bc265f4f26c8b5b72425b611c2", symbol: "CRAIL", name: "CRAIL", launchedAt: "2026-09-22", venue: "direct deploy, template A", outcome: "unestablished", note: "18.60M USD on 171,481 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x4d8a95531f6e05cc2a6300485f5048ea5379d14d", symbol: "HITBUY", name: "HITBUY", launchedAt: "2026-09-23", venue: "direct deploy, template A", outcome: "unestablished", note: "17.21M USD on 283,078 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x6a603bcd27c2913dc76802bd0f4f136ca7253cf0", symbol: "PKRT", name: "PKRT", launchedAt: "2026-09-22", venue: "direct deploy, template A", outcome: "unestablished", note: "15.68M USD on 73,936 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x7af49cb48abbf70d11d786d99242173698119892", symbol: "PROUTE", name: "PROUTE", launchedAt: "2026-09-22", venue: "direct deploy, template A", outcome: "unestablished", note: "9.64M USD on 65,781 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x17e900c2a7a16695431469a40ea060d508edd6d2", symbol: "musebook", name: "musebook (clone)", launchedAt: "2026-09-22", venue: "direct deploy", outcome: "unestablished", note: "Name-clone of Bankr's musebook 0x91a2dae9; 15.17M USD on 2,806 USD liquidity, 5,407 times its depth.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x10f5ba270b0b5da5a4d21369f2c74a300bb16a8b", symbol: "Agrippa", name: "Agrippa (clone)", launchedAt: "2026-09-22", venue: "direct deploy", outcome: "unestablished", note: "Name-clone of Bankr's Agrippa 0x83a49b80; 9.28M USD on 3,274 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x8d5c42c096344e3ad4d5fcac8fe7a4b4ffca0150", symbol: "HOOD6900", name: "HOOD6900 (clone)", launchedAt: "2026-09-22", venue: "direct deploy, template C (3,554 bytes)", outcome: "unestablished", note: "8.46M USD on 3,523 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0xa2508b15ab16826c720631b9afa0a90c453ae8a4", symbol: "Euler", name: "Euler (clone)", launchedAt: "2026-09-23", venue: "direct deploy, template C", outcome: "unestablished", note: "12.49M USD on 172,950 USD liquidity; name-clones Bankr's Euler 0x434d49b8.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0xabe99cf268cdc8bd70a71a5283fdacbcb36714fd", symbol: "NOSH", name: "NOSH (clone)", launchedAt: "2026-09-23", venue: "direct deploy, template C", outcome: "unestablished", note: "9.96M USD on 24,026 USD liquidity; name-clones the Pons launch NOSH 0xe02c53d4.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x4c7c1f29bc6be6c51d372f4edb3f68e77e34ab40", symbol: "RIG", name: "RIG", launchedAt: "2026-09-22", venue: "direct deploy, template B (4,655 bytes)", outcome: "unestablished", note: "2.40M USD on 832 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x753bd40e11921abf2a1a01a05ddc836c61753bc1", symbol: "NODIUM", name: "NODIUM", launchedAt: "2026-09-22", venue: "direct deploy, template B", outcome: "unestablished", note: "2.55M USD on 691 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
+      { chain: RH, address: "0x1df7abb9d130e373f00bb1edec798cd4194a3845", symbol: "JEV", name: "JEV", launchedAt: "2026-09-22", venue: "direct deploy, template B", outcome: "unestablished", note: "2.11M USD on 1,085 USD liquidity; its deployer funds the rest of template B.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" }
     ]
   },
   {
@@ -1638,7 +1673,7 @@ var CABALS = [
     ]
   }
 ];
-var walletKey = (chain, address) => `${chain.trim().toLowerCase()}:${address.trim().toLowerCase()}`;
+var walletKey = (chain, address) => `${chain.trim().toLowerCase()}:${chain.trim().toLowerCase() === "solana" ? address.trim() : address.trim().toLowerCase()}`;
 var walletIndex = null;
 var launchIndex = null;
 var handleIndex = null;
@@ -1650,7 +1685,9 @@ function buildIndexes() {
     for (const wallet of cabal.wallets) {
       if (!/^0x[0-9a-f]{40}$/i.test(wallet.address) && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet.address)) continue;
       const k = walletKey(wallet.chain, wallet.address);
-      if (!walletIndex.has(k)) walletIndex.set(k, { cabal, wallet });
+      const matches = walletIndex.get(k) ?? [];
+      matches.push({ cabal, wallet });
+      walletIndex.set(k, matches);
     }
     for (const launch of cabal.launches) {
       launchIndex.set(walletKey(launch.chain, launch.address), { cabal, launch });
@@ -1663,6 +1700,16 @@ function buildIndexes() {
     }
   }
 }
+function findCabalWallets(chain, address) {
+  if (!chain || !address) return [];
+  if (!walletIndex) buildIndexes();
+  return [...walletIndex.get(walletKey(chain, address)) ?? []];
+}
+var CABAL_REGISTRY_VERSION = (() => {
+  let hash3 = 2166136261;
+  for (const char of JSON.stringify(CABALS)) hash3 = Math.imul(hash3 ^ char.charCodeAt(0), 16777619);
+  return `curated-${(hash3 >>> 0).toString(16)}`;
+})();
 function findCabalHandle(handle) {
   if (!handle) return [];
   if (!handleIndex) buildIndexes();
@@ -12599,6 +12646,201 @@ function deriveTokenApplicability(evidence, checks, determinedAt = (/* @__PURE__
   };
 }
 
+// src/lib/marketAddresses.ts
+var SOLANA_CEX_WALLETS = {
+  "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9": "Binance",
+  "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S": "Binance",
+  "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM": "Binance",
+  GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE: "Coinbase",
+  H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS: "Coinbase",
+  "2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm": "Coinbase",
+  FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5: "Kraken",
+  AobVSwdW9BbpMdJvTqeCN4hPAmh4rHm7vwLnQ5ATSyrS: "OKX",
+  "5VVBHtk2QQBy5rZ2pBdgcb4yj9DBYy8tDksBs2pWnUKr": "Bybit",
+  "9un5wqE3q4oCjyrDkwsdD48KteCJitQX5978Vh7KKxHo": "Gate.io",
+  "6gnCPhXtLnUD76HjQuSYPENLSZdG8RvDB1pTLM5aLSss": "MEXC"
+};
+var EVM_CEX_WALLETS = {
+  "0x28c6c06298d514db089934071355e5743bf21d60": "Binance",
+  "0x21a31ee1afc51d94c2efccaa2092ad1028285549": "Binance",
+  "0xdfd5293d8e347dfe59e90efd55b2956a1343963d": "Binance",
+  "0x56eddb7aa87536c09ccc2793473599fd21a8b17f": "Binance",
+  "0xf977814e90da44bfa03b6295a0616a897441acec": "Binance",
+  "0x71660c4005ba85c37ccec55d0c4493e66fe775d3": "Coinbase",
+  "0x503828976d22510aad0201ac7ec88293211d23da": "Coinbase",
+  "0xddfabcdc4d8ffc6d5beaf154f18b778f892a0740": "Coinbase",
+  "0x3cc936b795a188f0e246cbb2d74c5bd190aecf18": "OKX",
+  "0x2b5634c42055806a59e9107ed44d43c426e58258": "Kucoin",
+  "0x0d0707963952f2fba59dd06f2b425ace40b492fe": "Gate.io",
+  "0xf89d7b9c864f589bbF53a82105107622B35EaA40": "Bybit",
+  // Merged from the EVM deployer route, which had been carrying a longer list of
+  // its own. Every one of these is exchange custody, so holder concentration was
+  // counting them as insider wallets on any token they hold float in.
+  "0x9696f59e4d72e237be84ffd425dcad154bf96976": "Binance",
+  "0x4976a4a02f38326660d17bf34b431dc6e2eb2327": "Binance",
+  "0x0681d8db095565fe8a346fa0277bffde9c0edbbf": "Binance",
+  "0xddb1b4c4fb1e19bd353bc07d1d46c87d67b8e1e0": "Coinbase",
+  "0x3cd751e6b0078be393132286c442345e5dc49699": "Coinbase",
+  "0xeb2629a2734e272bcc07bda959863f316f4bd4cf": "Coinbase",
+  "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43": "Coinbase",
+  "0x2910543af39aba0cd09dbb2d50200b3e800a63d2": "Kraken",
+  "0x0a869d79a7052c7f1b55a8ebabbea3420f0d1e13": "Kraken",
+  "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b": "OKX",
+  "0x236f9f97e0e62388479bf9e5ba4889e46b0273c3": "OKX",
+  "0x1522900b6dafac587d499a862861c0869be6e428": "Bitfinex"
+};
+var normalize = (address) => {
+  const value = String(address ?? "").trim();
+  return /^0x[0-9a-fA-F]{40}$/.test(value) ? value.toLowerCase() : value;
+};
+var lookup = (map, address) => {
+  const direct = map[address];
+  if (direct) return direct;
+  const lowered = normalize(address);
+  for (const [candidate, name] of Object.entries(map)) {
+    if (normalize(candidate) === lowered) return name;
+  }
+  return void 0;
+};
+function classifyMarketAddress(address, context2 = {}) {
+  const value = String(address ?? "").trim();
+  if (!value) return null;
+  const pool = (context2.poolAddresses ?? []).some((candidate) => normalize(candidate) === normalize(value));
+  if (pool) return { label: "liquidity pool", kind: "pool" };
+  const exchange = lookup(SOLANA_CEX_WALLETS, value) ?? lookup(EVM_CEX_WALLETS, value);
+  if (exchange) return { label: exchange, kind: "exchange" };
+  const known = context2.knownAccounts?.[value];
+  const type = String(known?.type ?? "").toUpperCase();
+  if (type === "AMM" || type === "MARKET" || type === "POOL") {
+    return { label: known?.name?.trim() || "liquidity pool", kind: "pool" };
+  }
+  if (type === "LOCKER" || type === "VAULT") {
+    return { label: known?.name?.trim() || "locked vault", kind: "locker" };
+  }
+  if (type === "EXCHANGE" || type === "CEX") {
+    return { label: known?.name?.trim() || "exchange", kind: "exchange" };
+  }
+  return null;
+}
+
+// src/lib/subjectRef.ts
+var EVM_ADDRESS2 = /^0x[0-9a-f]{40}$/i;
+var SOLANA_ADDRESS2 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function normalizeSubjectRef(value) {
+  const clean4 = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
+  const qualified = clean4.match(/^([a-z0-9_-]+):(.+)$/i);
+  if (qualified && (EVM_ADDRESS2.test(qualified[2]) || SOLANA_ADDRESS2.test(qualified[2]) || !/^https?$/i.test(qualified[1]) && /^[A-Za-z0-9._-]{10,128}$/.test(qualified[2]))) {
+    return `${qualified[1].toLowerCase()}:${EVM_ADDRESS2.test(qualified[2]) ? qualified[2].toLowerCase() : qualified[2]}`;
+  }
+  if (SOLANA_ADDRESS2.test(clean4)) return clean4;
+  if (EVM_ADDRESS2.test(clean4)) return clean4.toLowerCase();
+  return clean4.toLowerCase();
+}
+
+// src/lib/tokenIdentity.ts
+var aliases = { eth: "ethereum", "1": "ethereum", "8453": "base", "42161": "arbitrum", "10": "optimism", "137": "polygon", "56": "bsc", "43114": "avalanche" };
+function tokenSubjectIdentity(chain, address) {
+  if (typeof chain !== "string" || typeof address !== "string") return null;
+  const rawChain = chain.trim().toLowerCase();
+  const network = aliases[rawChain] ?? rawChain;
+  const clean4 = address.trim();
+  if (!/^[a-z0-9_-]{1,40}$/.test(network)) return null;
+  const evm = /^0x[0-9a-f]{40}$/i.test(clean4);
+  const evmNetwork = /^(ethereum|base|arbitrum|optimism|polygon|bsc|avalanche|fantom|cronos|linea|scroll|mantle|zksync|blast|celo|gnosis|sonic|abstract|pulsechain|berachain|unichain|opbnb|polygonzkevm)$/.test(network);
+  if (network === "solana" ? !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(clean4) : evmNetwork ? !evm : !/^[A-Za-z0-9._-]{10,128}$/.test(clean4)) return null;
+  const normalized4 = evm ? normalizeSubjectRef(clean4) : clean4;
+  return { chain: network, address: normalized4, ref: `${network}:${normalized4}` };
+}
+function payloadTokenIdentity(kind, payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload;
+  const token = kind === "investigation" ? root.token : kind === "token" ? root : null;
+  if (!token || typeof token !== "object") return null;
+  const row = token;
+  return tokenSubjectIdentity(row.chain, row.address);
+}
+
+// src/lib/holderIntelligence.ts
+var HOLDER_TARGET = 25;
+function buildHolderIntelligence(input) {
+  const identity = tokenSubjectIdentity(input.chain, input.tokenAddress);
+  const chain = identity?.chain ?? input.chain;
+  const notes = [];
+  let invalidRows = 0;
+  const unique2 = /* @__PURE__ */ new Map();
+  const accounts = /* @__PURE__ */ new Set();
+  for (const row of input.rows) {
+    const address = input.aggregateOwners ? row.owner : row.address;
+    const key = tokenSubjectIdentity(chain, address);
+    if (!key || !identity || !Number.isFinite(row.percent) || row.percent < 0 || row.percent > 100) {
+      invalidRows++;
+      continue;
+    }
+    const account = tokenSubjectIdentity(chain, row.address)?.ref;
+    if (!account || accounts.has(account)) {
+      invalidRows++;
+      continue;
+    }
+    accounts.add(account);
+    const previous = unique2.get(key.ref);
+    if (previous) {
+      if (input.aggregateOwners && previous.address !== row.address) previous.percent += row.percent;
+      else invalidRows++;
+    } else unique2.set(key.ref, { ...row, address: row.address, ...input.aggregateOwners ? { owner: key.address } : {} });
+  }
+  const all = [...unique2.values()].sort((a, b) => b.percent - a.percent);
+  const consistent = all.reduce((sum, row) => sum + row.percent, 0) <= 100.01;
+  if (!consistent) notes.push("Provider rows exceed total supply; percentages are not a valid concentration measure.");
+  if (invalidRows) notes.push(`${invalidRows} invalid or duplicate provider rows were not used; coverage is incomplete.`);
+  if (input.aggregateOwners) notes.push("Token accounts were grouped by their reported owners. Owners outside this provider sample may rank higher.");
+  if (!input.ranked) notes.push("The provider sample does not establish the globally largest 25 holders.");
+  const rows = all.slice(0, HOLDER_TARGET).map((row, index) => {
+    const address = row.owner ?? row.address;
+    const market = classifyMarketAddress(address, { poolAddresses: input.poolAddresses, knownAccounts: input.knownAccounts });
+    const burn = /^0x0{40}$/i.test(address) || /^0x0{36}dead$/i.test(address);
+    const matches = findCabalWallets(chain, address).map(({ cabal, wallet }) => ({
+      registryId: cabal.id,
+      name: cabal.name,
+      role: wallet.role,
+      label: wallet.label ?? wallet.role,
+      evidence: wallet.evidence,
+      lastSeen: cabal.lastSeen,
+      intent: cabal.intent,
+      attribution: "curated-record"
+    }));
+    return {
+      ...row,
+      address,
+      rank: index + 1,
+      role: market?.kind ?? (burn ? "burn" : row.isContract ? "unclassified-contract" : "unattributed"),
+      roleEvidence: market?.label ?? (burn ? "Exact burn address" : null),
+      matches
+    };
+  });
+  const complete = input.ranked && !input.aggregateOwners && consistent && !invalidRows && (rows.length === HOLDER_TARGET || input.completeUniverse === true);
+  if (!complete) notes.push(`${rows.length}/${HOLDER_TARGET} addresses examined; the requested holder investigation remains incomplete.`);
+  return {
+    version: 1,
+    chain,
+    tokenAddress: identity?.address ?? input.tokenAddress,
+    capturedAt: input.capturedAt,
+    source: input.source,
+    sourceUrl: input.sourceUrl ?? null,
+    block: input.block ?? null,
+    registryVersion: CABAL_REGISTRY_VERSION,
+    target: HOLDER_TARGET,
+    status: !rows.length ? "unavailable" : complete ? "complete" : "partial",
+    ranking: input.aggregateOwners ? "observed-owners" : input.ranked ? "ranked-addresses" : "unranked-sample",
+    examined: rows.length,
+    matched: rows.filter((row) => row.matches.length).length,
+    supplyCoveredPct: consistent ? rows.reduce((sum, row) => sum + row.percent, 0) : null,
+    invalidRows,
+    notes,
+    enrichment: { arkham: "not-run", fomo: "not-run" },
+    rows
+  };
+}
+
 // src/lib/retry.ts
 async function retryFetch(input, init, attempts = 3, fetchImpl2 = fetch) {
   let lastErr;
@@ -12653,8 +12895,13 @@ var GOPLUS_UNSORTED_HOLDER_CHAINS = /* @__PURE__ */ new Set(["robinhood"]);
 var BLOCKSCOUT_API = {
   robinhood: "https://robinhoodchain.blockscout.com"
 };
+var BLOCKSCOUT_HOLDER_API = {
+  ...BLOCKSCOUT_API,
+  base: "https://base.blockscout.com",
+  ethereum: "https://eth.blockscout.com"
+};
 function blockscoutHolderSourceUrl(chain, address) {
-  const base = BLOCKSCOUT_API[chain.trim().toLowerCase()];
+  const base = BLOCKSCOUT_HOLDER_API[chain.trim().toLowerCase()];
   return base ? `${base}/api/v2/tokens/${encodeURIComponent(address)}/holders` : null;
 }
 async function blockscoutContractSource(chain, address, fetchImpl2 = fetch) {
@@ -12677,7 +12924,7 @@ async function blockscoutContractSource(chain, address, fetchImpl2 = fetch) {
 }
 async function blockscoutHolders(chain, address, fetchImpl2 = fetch) {
   const chainKey = chain.trim().toLowerCase();
-  const base = BLOCKSCOUT_API[chainKey];
+  const base = BLOCKSCOUT_HOLDER_API[chainKey];
   if (!base) return null;
   const holderSourceUrl = blockscoutHolderSourceUrl(chainKey, address);
   if (!holderSourceUrl) return null;
@@ -12698,7 +12945,7 @@ async function blockscoutHolders(chain, address, fetchImpl2 = fetch) {
       const hash3 = item?.address?.hash;
       if (!hash3 || !Number.isFinite(value) || value <= 0) continue;
       rows.push({ address: hash3, percent: value / supply * 100, isContract: item.address?.is_contract === true });
-      if (rows.length >= 10) break;
+      if (rows.length >= HOLDER_TARGET) break;
     }
     return rows;
   } catch {
@@ -12845,7 +13092,7 @@ async function goplusSolana(mint, fetchImpl2 = fetch) {
     return null;
   }
 }
-var SOLANA_ADDRESS2 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 function supplySharePercent(amount, supply) {
   const balance = Number(amount);
   const total = Number(supply);
@@ -12897,11 +13144,15 @@ async function rugcheckReport(mint, fetchImpl2 = fetch) {
     }, 2, fetchImpl2);
     if (!res.ok) return null;
     const d = await res.json();
-    const creator = typeof d?.creator === "string" && SOLANA_ADDRESS2.test(d.creator.trim()) ? d.creator.trim() : null;
+    const creator = typeof d?.creator === "string" && SOLANA_ADDRESS3.test(d.creator.trim()) ? d.creator.trim() : null;
     const supply = d?.token?.supply;
     const networks = Array.isArray(d?.insiderNetworks) ? d.insiderNetworks : [];
     return {
       creator,
+      topHolders: (Array.isArray(d.topHolders) ? d.topHolders : []).flatMap((row) => {
+        const pct2 = boundedPercent(row.pct);
+        return typeof row.address === "string" && typeof row.owner === "string" && pct2 != null ? [{ address: row.address, owner: row.owner, percent: pct2 }] : [];
+      }),
       // With no creator there is nobody for a balance to belong to, and a bare
       // zero would read as "the creator sold out" rather than "not measured".
       creatorPercent: creator ? supplySharePercent(d?.creatorBalance, supply) : null,
@@ -12964,7 +13215,8 @@ var VENUES = [
     lpOnGraduation: "burned",
     lpNote: "graduation moves liquidity into pump.fun's own AMM (PumpSwap) with the migration LP burned - the creator cannot pull it",
     platformPaysCreator: true,
-    feeNote: "pump.fun pays creators a tiered share of trading fees (claimable on-chain), on the curve and after graduation"
+    feeNote: "pump.fun pays creators a tiered share of trading fees (claimable on-chain), on the curve and after graduation",
+    creatorFeeAsset: "quote"
   },
   {
     // bonk.fun / LetsBonk. The bonk suffix is the brand's default but NOT
@@ -12978,7 +13230,8 @@ var VENUES = [
     lpOnGraduation: "burned",
     lpNote: "graduates to Raydium CPMM at 85 SOL raised with ~100% of the migration LP burned (current LetsBonk config)",
     platformPaysCreator: true,
-    feeNote: "current LetsBonk config sets the creator fee to 0 - platform fees partly buy BONK; older launches had a creator share"
+    feeNote: "current LetsBonk config sets the creator fee to 0 - platform fees partly buy BONK; older launches had a creator share",
+    creatorFeeAsset: "quote"
   },
   {
     // Raydium LaunchLab family (shared curve program): LetsBonk without the
@@ -12991,7 +13244,8 @@ var VENUES = [
     lpOnGraduation: "locked",
     lpNote: "LaunchLab graduates into Raydium CPMM; migration LP is burned and/or locked per platform config (creator LP, where any, is a locked fee-rights NFT - principal can't be pulled)",
     platformPaysCreator: true,
-    feeNote: "creator fee share is per-platform (Bankr pays 50% of the 1% trade fee; current LetsBonk pays 0)"
+    feeNote: "creator fee share is per-platform (Bankr pays 50% of the 1% trade fee; current LetsBonk pays 0)",
+    creatorFeeAsset: "quote"
   },
   {
     name: "bags",
@@ -13002,7 +13256,8 @@ var VENUES = [
     lpOnGraduation: "locked",
     lpNote: "Bags curves on Meteora DBC and graduates into Meteora DAMM v2 with the LP locked - creators claim fees on the locked position, not principal",
     platformPaysCreator: true,
-    feeNote: "~1% of trading volume routed to the creator (and any fee-shared X account) in perpetuity, via the Bags fee-share program"
+    feeNote: "~1% of trading volume routed to the creator (and any fee-shared X account) in perpetuity, via the Bags fee-share program",
+    creatorFeeAsset: "quote"
   },
   {
     name: "moonit",
@@ -13012,7 +13267,8 @@ var VENUES = [
     lpOnGraduation: "locked",
     lpNote: "Moonit (DexScreener's launchpad, ex-Moonshot) migrates graduated liquidity into platform-managed Meteora/Raydium pools",
     platformPaysCreator: false,
-    feeNote: "no standing creator fee stream"
+    feeNote: "no standing creator fee stream",
+    creatorFeeAsset: "none"
   },
   {
     // Generic Meteora DBC curve dexId: Believe and other DBC launchpads (Bags
@@ -13024,7 +13280,8 @@ var VENUES = [
     lpOnGraduation: "locked",
     lpNote: "Meteora DBC curve; graduates into a locked DAMM v2 position (fee-claim-only, principal locked)",
     platformPaysCreator: true,
-    feeNote: "DBC platforms typically split trading fees with the creator (Believe: 50/50), claimed via the DBC program"
+    feeNote: "DBC platforms typically split trading fees with the creator (Believe: 50/50), claimed via the DBC program",
+    creatorFeeAsset: "quote"
   },
   {
     name: "boop",
@@ -13033,7 +13290,8 @@ var VENUES = [
     lpOnGraduation: "locked",
     lpNote: "Boop graduates (~400 SOL mcap) into a platform-managed Raydium pool; the platform is largely dormant in 2026",
     platformPaysCreator: true,
-    feeNote: "post-graduation fees distributed to BOOP stakers with a creator cut"
+    feeNote: "post-graduation fees distributed to BOOP stakers with a creator cut",
+    creatorFeeAsset: "quote"
   },
   {
     name: "virtuals",
@@ -13048,7 +13306,8 @@ var VENUES = [
     lpOnGraduation: "locked",
     lpNote: "Virtuals auto-stakes graduated LP under a 10-year lock (the pool's LP majority sits in a 'Staked ... by Virtuals' contract) - not creator-pullable",
     platformPaysCreator: true,
-    feeNote: "1% trading fee routed to fund the agent/creator (inference budget), not a claimable LP-fee stream"
+    feeNote: "1% trading fee routed to fund the agent/creator (inference budget), not a claimable LP-fee stream",
+    creatorFeeAsset: "quote"
   },
   {
     name: "flaunch",
@@ -13059,7 +13318,8 @@ var VENUES = [
     lpOnGraduation: "protocol-owned",
     lpNote: "Flaunch LP is managed by the protocol's v4 hook and cannot be extracted; a fee share feeds an automated buyback wall",
     platformPaysCreator: true,
-    feeNote: "creator revenue share is configurable 0-100% of trading fees (paid in flETH) - a high creator cut is by-design here, not a red flag"
+    feeNote: "creator revenue share is configurable 0-100% of trading fees (paid in flETH) - a high creator cut is by-design here, not a red flag",
+    creatorFeeAsset: "quote"
   },
   {
     name: "clanker",
@@ -13072,11 +13332,14 @@ var VENUES = [
     lpOnGraduation: "locked",
     lpNote: "full supply is pooled at deploy and the LP position is held by Clanker's locker; trading fees stream to the configured recipients",
     platformPaysCreator: true,
-    feeNote: "1% pool fee split to configured recipients (deployer/interface e.g. Bankr) - claimable by the fee admin"
+    feeNote: "1% pool fee split to configured recipients (deployer/interface e.g. Bankr) - claimable by the fee admin",
+    creatorFeeAsset: "mixed"
   },
   {
-    // Bankr on Base/Robinhood runs on Doppler protocol (post-Clanker era). No
-    // client fingerprint (no suffix, per-user 4337 deployer wallets) - resolved
+    // Bankr on Base/Robinhood runs on Doppler protocol (post-Clanker era,
+    // 2026-02-10 onward). Doppler-era Bankr tokens carry the vanity suffix
+    // ...ba3 on both chains (verified on musebook, Agrippa, museic, Nautilo,
+    // Euler and GME on Robinhood, 2026-09-23); tokens without it are resolved
     // server-side via Bankr's public per-token API. Custody verified on-chain
     // ($KUPO): the entire supply pools into a Uniswap V4 multicurve position
     // held book-entry INSIDE the Doppler initializer/hook - no position NFT
@@ -13087,23 +13350,96 @@ var VENUES = [
     domains: ["bankr.bot"],
     chain: "evm",
     chains: ["base", "robinhood"],
+    mintSuffix: /ba3$/i,
     lpOnGraduation: "locked",
     lpNote: "liquidity is locked book-entry inside Doppler's V4 multicurve initializer - no position NFT, no unlock path; creator and platform can only collect fees, never principal",
     platformPaysCreator: true,
-    feeNote: "0.7% pool fee split 95% creator / 5% Doppler, streamed forever; watch the creator's fee-claim wallet for dumping, and the optional premint (up to 15%, 1yr vest, 30-day cliff)"
+    feeNote: "1.75% all-in swap fee: creator 0.665%, LP leg 0.285% compounding into the locked position, Bankr 0.475%, BNKR buyback 0.2375%, Doppler ~0.09%; the launch fee starts at 80% and decays to that over ~10 seconds. Creator fees arrive as a mix of the launched token and the quote unless the launch opted into quote-only, plus an optional 15% premint (1yr vest, 30-day cliff) - watch the creator's claim wallet (docs/launchpads/bankr.md)",
+    creatorFeeAsset: "mixed"
   },
   {
     name: "pons",
+    domains: ["ponsfamily.com"],
     chain: "evm",
     chains: ["robinhood"],
-    // Pons pools read as plain uniswap v3/WETH on DexScreener - detection is
-    // the token's CREATOR contract (PonsLaunchFactory), checked server-side in
-    // /api/launch via Blockscout. No client-side fingerprint exists.
+    // Pons v2 (the only generation still launching): bonding curve into a
+    // Uniswap v4 pool under the Pons MemeHook, which reads as plain uniswap
+    // on DexScreener - detection is the token's CREATOR contract (the v2
+    // LaunchDeployer), checked server-side in /api/launch via Blockscout.
     dexIds: [],
     lpOnGraduation: "locked",
-    lpNote: "the liquidity position is transferred to the Pons launch locker at launch (PonsLaunchLocker on v1, PonsV2LaunchLocker on v2) - permanent custody, no unlock path for principal. On v2 the curve sells 71.4% of supply, graduation moves 20.4% plus the curve proceeds into a Uniswap v4 pool and 8.16% into the locker (verified 2026-09-12)",
+    lpNote: "the curve sells 71.4% of supply and graduation seeds a single full-range Uniswap v4 position with the reserved 28.6% plus everything the curve raised, minted straight into the Pons LaunchLocker - permanent custody with no withdraw function, and any leftover supply is locked there too (docs v2, read 2026-09-23)",
     platformPaysCreator: true,
-    feeNote: "v1: 1% pool fee split ~70% creator / 30% protocol inside the locked position. v2: the PonsV2MemeHook takes 5% on sells and 100% on sells by launch-block buyers, and both accrue as creator tax the deployer claims from PonsV2FeeEscrow - so a deployer who snipes their own launch recycles the tax; watch claim cadence and where the claimed ETH/USDG goes (RESEARCH.md, Pons V2 launch farms)"
+    feeNote: "1% base fee on the curve and the pool split 30% protocol / 70% creator, plus an optional creator tax of up to 10% that goes entirely to the creator, all denominated in the quote asset (ETH, USDG or the paired stock) and claimed from the FeeEscrow. The anti-snipe is a buy-side tax that opens at 99% and decays to zero over the first five seconds, with the creator's own launch-and-buy exempt - so a creator can still be first in. Watch the claim cadence and where the claimed quote goes (docs/launchpads/pons.md)",
+    creatorFeeAsset: "quote"
+  },
+  {
+    // Pons v1 (2026-07-13 to 2026-09-10; launching now disabled). Fixed
+    // supply straight into a locked Uniswap V3 pool, no curve. Its 1% pool
+    // fee accrued in BOTH the token and WETH inside the locked position, and
+    // the creator's share was paid out in kind - the origin of the in-token
+    // creator fee farms indexed in cabals.ts (wire bot, LEMON, MOTION).
+    // Server-only: resolved from the v1 factory addresses.
+    name: "pons v1",
+    chain: "evm",
+    chains: ["robinhood"],
+    dexIds: [],
+    lpOnGraduation: "locked",
+    lpNote: "the V3 position was transferred to the PonsLaunchLocker at launch - permanent custody, no unlock path for principal (verified on MOTION, position 232213)",
+    platformPaysCreator: true,
+    feeNote: "1% V3 pool fee split 70% creator / 30% protocol (90/10 on the legacy factory), accrued in both the token and WETH and paid to the creator in kind through the locker - MOTION's deployer received 85 such payments. A creator who forwards the token leg to fresh wallets that sell is the wire bot / LEMON pattern (docs/launchpads/pons.md)",
+    creatorFeeAsset: "mixed"
+  },
+  {
+    // LONG (app.long.xyz) on Robinhood Chain: an integrator on Whetstone's
+    // Doppler protocol, launching straight into a Uniswap v4 pool quoted in a
+    // Robinhood Stock Token, ETH, USDG or $AI. The trusted token factory mines
+    // every address to end in ...1e18 (verified on AI, MEME, TAIWAN, MONITOR,
+    // BONER; 56,242 such tokens by 2026-09-23). LongLauncher v1
+    // 0x22e99278... (paused) and v2 0x1eEF016F....
+    name: "long",
+    domains: ["long.xyz", "app.long.xyz"],
+    chain: "evm",
+    chains: ["robinhood"],
+    mintSuffix: /1e18$/i,
+    lpOnGraduation: "locked",
+    lpNote: "no curve phase: the full supply is pooled into a Uniswap v4 multicurve position held book-entry inside Doppler's initializer in the creation tx - no position NFT, no unlock path, no migration; the creator's rights are fee claims only",
+    platformPaysCreator: true,
+    feeNote: "the Rehype hook opens at an 80% swap fee decaying to 1.12% over ten seconds and routes 71-100% of that hook fee to LONG's own wallet; the creator is a 95% beneficiary of only the 0.1-0.2% Uniswap LP fee, paid in BOTH pool tokens through the initializer's collectFees - so every creator claim is part launched-token, and the observed pattern is to forward it to fresh wallets and sell (TAIWAN, MEME). Watch the claim cadence and the one-hop destinations (docs/launchpads/long.md)",
+    creatorFeeAsset: "mixed"
+  },
+  {
+    // Any other Doppler-protocol integrator on Base/Robinhood: same Airlock,
+    // token factory and initializer as LONG and Bankr, no client fingerprint.
+    // Server-only: resolved from the Doppler token factory as the creating
+    // contract. Custody and fee-asset mechanics are the protocol's, not the
+    // integrator's, so they hold here too.
+    name: "doppler",
+    chain: "evm",
+    chains: ["base", "robinhood"],
+    dexIds: [],
+    lpOnGraduation: "locked",
+    lpNote: "Doppler protocol launch: the full supply sits in a Uniswap v4 position held book-entry inside the DopplerHookInitializer - no position NFT, no unlock path, no migration",
+    platformPaysCreator: true,
+    feeNote: "Doppler pays the pool's fee beneficiaries (the creator, 95% by default) in both pool tokens via collectFees on the initializer; the integrator's own hook fee and split are set per launch",
+    creatorFeeAsset: "mixed"
+  },
+  {
+    // StonkBrokers (stonkbrokers.cash) on Robinhood Chain: one Smart Launch
+    // V2 pad per quote asset (WETH, STONKBROKER, USDG, GME, NVDA, AAPL, SPCX,
+    // USO, yBTC) with a virtual-reserve curve, bonding into a permanently
+    // locked Uniswap V3 / Slipstream position in the Safety Deposit Box.
+    // Server-only: resolved from the pad addresses as the creating contract.
+    name: "stonkbrokers",
+    domains: ["stonkbrokers.cash", "stonkbrokers.io", "stonkbrokers.wtf"],
+    chain: "evm",
+    chains: ["robinhood"],
+    dexIds: [],
+    lpOnGraduation: "locked",
+    lpNote: "at bond the raise plus a 50% fee reserve mint a full-range position straight into the Safety Deposit Box as a permanent lock; the lock NFT only collects fees (80% to the creator) and principal is never withdrawable",
+    platformPaysCreator: true,
+    feeNote: "every curve tax splits 16.5% creator / 16.5% protocol / 16.5% StockBooster / 0.5% referral / 50% LP reserve, paid in the lane's quote asset; anti-snipe modes open at up to 99% tax decaying 1% per minute, which in the v1 era taxed launch buyers 85.8% on WALL. Creator keeps up to 50% of supply unlocked unless vested - read the team-overhang badge (docs/launchpads/stonkbrokers.md)",
+    creatorFeeAsset: "quote"
   },
   {
     // o1 Launchpad (o1.exchange): one launchpad-v4-minimal suite on Base,
@@ -13124,7 +13460,8 @@ var VENUES = [
     lpOnGraduation: "locked",
     lpNote: "no curve phase: the full supply is pooled into a Uniswap v4 pool under the o1 launch hook in the creation tx and o1 documents the liquidity as permanent - creator rights are fee claims only, so an LP-pull is not the exit path here; the deployer's optional atomic Dev Buy and the 20-second anti-snipe window are the launch-block variables to read",
     platformPaysCreator: true,
-    feeNote: "1% per swap split creator 50 bps / platform 30 bps / referrer 20 bps, claimed from the suite's Fee Escrow (claimFor) as ETH or the quote asset; a creator who sets their own address as referrer takes 70 bps of every trade. Watch the claim cadence and where the claimed ETH goes - $BRAINARM's creator claimed 1.68 ETH in 10 claims over 26 hours and parked it as USDC in two fresh wallets (RESEARCH.md, o1 Launchpad)"
+    feeNote: "1% per swap split creator 50 bps / platform 30 bps / referrer 20 bps, claimed from the suite's Fee Escrow (claimFor) as ETH or the quote asset; a creator who sets their own address as referrer takes 70 bps of every trade. Watch the claim cadence and where the claimed ETH goes - $BRAINARM's creator claimed 1.68 ETH in 10 claims over 26 hours and parked it as USDC in two fresh wallets (RESEARCH.md, o1 Launchpad)",
+    creatorFeeAsset: "quote"
   },
   {
     name: "four.meme",
@@ -13136,7 +13473,8 @@ var VENUES = [
     lpOnGraduation: "burned",
     lpNote: "graduates to PancakeSwap V2 with the LP tokens burned by the platform",
     platformPaysCreator: false,
-    feeNote: "no ongoing creator fee stream"
+    feeNote: "no ongoing creator fee stream",
+    creatorFeeAsset: "none"
   },
   {
     name: "flap.sh",
@@ -13148,7 +13486,8 @@ var VENUES = [
     lpOnGraduation: "protocol-owned",
     lpNote: "bonding curve migrates into a platform-created pool on fill; supports tax tokens and tokenized-stock dividend vaults by design",
     platformPaysCreator: true,
-    feeNote: "platform fee model; tax-token launches are expected here - a token-level tax is not automatically a rug signal on flap.sh"
+    feeNote: "platform fee model; tax-token launches are expected here - a token-level tax is not automatically a rug signal on flap.sh",
+    creatorFeeAsset: "unknown"
   }
 ];
 function launchVenueForOfficialDomain(officialDomain) {
@@ -18847,10 +19186,10 @@ async function enrichPersonViaMonid(params, fetcher = deadlineFetch) {
 }
 
 // src/lib/employmentCurrency.ts
-var normalize = (value) => value.toLowerCase().replace(/\b(?:inc|llc|ltd|limited|corp|corporation|labs?|group|holdings?|technologies|tech|foundation|protocol|network|ai)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+var normalize2 = (value) => value.toLowerCase().replace(/\b(?:inc|llc|ltd|limited|corp|corporation|labs?|group|holdings?|technologies|tech|foundation|protocol|network|ai)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
 function sameCompany(recordName, target) {
-  const a = normalize(recordName);
-  const b = normalize(target);
+  const a = normalize2(recordName);
+  const b = normalize2(target);
   if (!a || !b) return false;
   if (a === b) return true;
   const aTokens = a.split(" ").filter(Boolean);
@@ -21852,7 +22191,7 @@ async function fetchAddressRiskBatch(addresses, key, timeoutMs = 15e3) {
 
 // server/adapters/evmControlReality.ts
 import { createHash as createHash5 } from "node:crypto";
-var EVM_ADDRESS2 = /^0x[a-fA-F0-9]{40}$/;
+var EVM_ADDRESS3 = /^0x[a-fA-F0-9]{40}$/;
 var HEX = /^0x[0-9a-fA-F]*$/;
 var ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 var ERC1967_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
@@ -22197,7 +22536,7 @@ var unavailableSnapshot = (chain, target, rpcCalls, note, chainIdentity) => ({
 async function collectEvmControlRealityFromTransport(chainInput, targetInput, transport) {
   const chain = chainInput.trim().toLowerCase();
   const target = normalizeAddress2(targetInput.trim());
-  if (!EVM_ADDRESS2.test(target)) throw new Error("valid EVM target address required");
+  if (!EVM_ADDRESS3.test(target)) throw new Error("valid EVM target address required");
   if (!EXPECTED_EVM_CHAIN_IDS[chain]) {
     return unavailableSnapshot(
       chain,
@@ -22382,7 +22721,7 @@ async function collectEvmControlRealityFromTransport(chainInput, targetInput, tr
 async function collectEvmControlReality(chainInput, targetInput, options = {}) {
   const chain = chainInput.trim().toLowerCase();
   const target = normalizeAddress2(targetInput.trim());
-  if (!EVM_ADDRESS2.test(target)) throw new Error("valid EVM target address required");
+  if (!EVM_ADDRESS3.test(target)) throw new Error("valid EVM target address required");
   const urls = options.rpcUrls ?? PUBLIC_EVM_RPC[chain];
   if (!urls?.length) return unavailableSnapshot(chain, target, 0, `No direct RPC is configured for chain '${chain}'.`);
   let totalCalls = 0;
@@ -23153,8 +23492,8 @@ function basicFactsResearchQuestions(ctx) {
   }));
 }
 var clean = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
-var normalize2 = (value) => value.normalize("NFKC").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim();
-var searchable = (value) => normalize2(value).toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
+var normalize3 = (value) => value.normalize("NFKC").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim();
+var searchable = (value) => normalize3(value).toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
 var looseTokens = (value) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
 var looseContainsPhrase = (text2, phrase) => {
   const haystack = ` ${looseTokens(text2).join(" ")} `;
@@ -23447,7 +23786,7 @@ function verifiedPublicSecurityValue(value, passage) {
 function fundingAmounts(value) {
   const pattern = /(?:\b(?:usd|us\$)\s*|[$€£]\s*)\d[\d,]*(?:\.\d+)?\s*(?:thousand|million|billion|[kmb])?\b|\b\d[\d,]*(?:\.\d+)?\s*(?:thousand|million|billion)\s+(?:u\.s\.\s+)?dollars?\b/gi;
   return [...value.matchAll(pattern)].flatMap((match) => {
-    const display = normalize2(match[0]);
+    const display = normalize3(match[0]);
     const normalized4 = display.toLowerCase().replace(/,/g, "").replace(/\s+/g, " ");
     const numeric = normalized4.match(/\d+(?:\.\d+)?/)?.[0];
     if (!numeric) return [];
@@ -23463,7 +23802,7 @@ function verifiedFundingValue(value, passage) {
     const match = observed.find((source2) => source2.key === candidate.key);
     return match ? [match.display] : [];
   })[0];
-  if (!amount) return looseContainsPhrase(passage, value) ? normalize2(value) : null;
+  if (!amount) return looseContainsPhrase(passage, value) ? normalize3(value) : null;
   const round = [
     /\bpre[- ]seed\b/i,
     /\bseed(?:\s+round)?\b/i,
@@ -23471,7 +23810,7 @@ function verifiedFundingValue(value, passage) {
     /\bstrategic\s+(?:financing|funding|round)\b/i,
     /\btoken\s+sale\b/i
   ].map((pattern) => pattern.exec(value)?.[0]).find((candidate) => candidate && looseContainsPhrase(passage, candidate));
-  return normalize2(`${amount}${round ? ` ${round}` : ""}`);
+  return normalize3(`${amount}${round ? ` ${round}` : ""}`);
 }
 function safeCandidateUrl(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
@@ -23507,13 +23846,13 @@ function isAtomicValue(predicate, value) {
   return true;
 }
 function atomicPersonVentureValue(value) {
-  const candidate = normalize2(value);
+  const candidate = normalize3(value);
   if (!candidate || candidate.length > 120 || /[()[\]{}/|;]/.test(candidate) || /\b(?:also known as|formerly|originally|previously|rebrand(?:ed)?|aka)\b/i.test(candidate) || /\b(?:co[- ]?)?founder\s+(?:of|at)\b/i.test(candidate) || /\s(?:and|&)\s/i.test(candidate)) return null;
   const tokens = looseTokens(candidate);
   return tokens.length >= 1 && tokens.length <= 8 ? candidate : null;
 }
 function canonicalOfficialTokenLeadValue(value) {
-  const normalized4 = normalize2(value);
+  const normalized4 = normalize3(value);
   const symbol = "\\$?[A-Za-z][A-Za-z0-9.-]{1,15}";
   const leading = new RegExp(`^(${symbol})\\s*\\([^)]{2,100}\\)\\s*(?:[\xB7:\\u2013\\u2014]|\\s-\\s|$)`).exec(normalized4)?.[1];
   if (leading) return leading;
@@ -23523,7 +23862,7 @@ function canonicalOfficialTokenLeadValue(value) {
   return named ?? normalized4;
 }
 function canonicalLeadValueCore(value) {
-  const normalized4 = normalize2(value);
+  const normalized4 = normalize3(value);
   const MEANING_BEARING = /\b(?:also known as|formerly|originally|previously|rebrand(?:ed)?|aka|f\.?k\.?a\.?|not|never|no longer|denies|denied|disputed|contested|alleged(?:ly)?|unproven|unconfirmed|rumou?red|purported(?:ly)?|claimed|proposed|planned|abandoned|withdrawn|parody|fake|impersonat\w*|different|unrelated|another|against|until|but|however|pleaded|charged|indicted)\b/i;
   if (MEANING_BEARING.test(normalized4)) return { value: normalized4 };
   const parenthetical = /^(.*?[^\s(])\s*\(([^()]{2,160})\)$/.exec(normalized4);
@@ -23536,7 +23875,7 @@ function canonicalLeadValueCore(value) {
   return { value: normalized4 };
 }
 function canonicalOfficialIdentityLeadValue(value) {
-  const normalized4 = normalize2(value);
+  const normalized4 = normalize3(value);
   if (/\b(?:alleged|claimed|purported|self[- ]?described|unconfirmed|unverified)\b/i.test(normalized4)) return null;
   const nameToken = "[\\p{L}\\p{M}][\\p{L}\\p{M}'\u2019.-]*";
   const role = "(?:co[- ]?)?founder|chief executive officer|chief technology officer|chief operating officer|chief financial officer|ceo|cto|coo|cfo|president|chair(?:man|woman|person)?|partner|principal|entrepreneur|investor";
@@ -23545,12 +23884,12 @@ function canonicalOfficialIdentityLeadValue(value) {
     "iu"
   ).exec(normalized4);
   if (!match?.[1]) return /[,;:()[\]\u2013\u2014]/u.test(normalized4) ? null : normalized4;
-  const candidate = normalize2(match[1]);
+  const candidate = normalize3(match[1]);
   return plausiblePersonIdentity(candidate) ? candidate : null;
 }
 function isEmptyAssetPlaceholder(predicate, value) {
   if (!supportsExplicitEmptyBasicFact(predicate)) return false;
-  const normalized4 = normalize2(value).toLowerCase().replace(/[.!]+$/, "").trim();
+  const normalized4 = normalize3(value).toLowerCase().replace(/[.!]+$/, "").trim();
   return /^(?:n\/?a|none|no|not applicable|not found|unknown|unavailable)$/.test(normalized4) || /^(?:no|does not have|has no)\s+(?:known\s+|verified\s+|official\s+|native\s+|governance\s+)?(?:crypto\s+)?(?:token|security|stock|bond)s?$/.test(normalized4);
 }
 function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-search", questions = []) {
@@ -23625,7 +23964,7 @@ function subjectName(ctx) {
 }
 function handleDerivedPersonName(ctx) {
   if (researchAudience(ctx) === "project") return null;
-  const display = normalize2(ctx.evidence.profile.display_name);
+  const display = normalize3(ctx.evidence.profile.display_name);
   if (looseTokens(display).length !== 1 || !new RegExp("^\\p{L}[\\p{L}\\p{M}'\u2019.-]*$", "u").test(display)) return null;
   const handle = ctx.handle.replace(/^@/, "").trim();
   if (!handle.toLocaleLowerCase().startsWith(display.toLocaleLowerCase())) return null;
@@ -24330,9 +24669,9 @@ function extractJsonLdText(html) {
   return objects.join(` ${JSON_LD_OBJECT_BOUNDARY} `);
 }
 function documentText(document) {
-  if (!/html|xhtml/i.test(document.contentType)) return normalize2(document.text);
+  if (!/html|xhtml/i.test(document.contentType)) return normalize3(document.text);
   const jsonLd = extractJsonLdText(document.text);
-  return normalize2(decodeHtmlEntities(`${jsonLd}${jsonLd ? ` ${JSON_LD_OBJECT_BOUNDARY} ` : ""}${document.text.replace(/<(?:script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|svg)>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<br\s*\/?\s*>|<\/(?:p|div|section|article|li|h[1-6]|tr|td|th|main|header|footer|blockquote)>/gi, ". ").replace(/<[^>]+>/g, " ")}`));
+  return normalize3(decodeHtmlEntities(`${jsonLd}${jsonLd ? ` ${JSON_LD_OBJECT_BOUNDARY} ` : ""}${document.text.replace(/<(?:script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|svg)>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<br\s*\/?\s*>|<\/(?:p|div|section|article|li|h[1-6]|tr|td|th|main|header|footer|blockquote)>/gi, ". ").replace(/<[^>]+>/g, " ")}`));
 }
 var PREDICATE_PATTERNS = {
   official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company|person|entrepreneur|investor|(?:co[- ]?)?founder|chief executive officer|ceo)\b/i,
@@ -24404,23 +24743,23 @@ function exactTokenPassage(page, excerpt) {
   if (!excerptTokens.length || excerptTokens.length > pageTokens.length) return null;
   for (let index = 0; index <= pageTokens.length - excerptTokens.length; index += 1) {
     if (!excerptTokens.every((token, offset) => pageTokens[index + offset].key === token)) continue;
-    return normalize2(page.slice(pageTokens[index].start, pageTokens[index + excerptTokens.length - 1].end));
+    return normalize3(page.slice(pageTokens[index].start, pageTokens[index + excerptTokens.length - 1].end));
   }
   return null;
 }
 function sourceSegments(page) {
-  return page.split(JSON_LD_OBJECT_BOUNDARY).map((segment) => normalize2(segment)).filter(Boolean);
+  return page.split(JSON_LD_OBJECT_BOUNDARY).map((segment) => normalize3(segment)).filter(Boolean);
 }
 function sourceSentencePassages(page) {
   const passages = [];
   for (const segment of sourceSegments(page)) {
     const sentences = [...segment.matchAll(/[^.!?]+(?:[.!?]+|$)/g)].flatMap((match) => {
-      if (match.index === void 0 || !normalize2(match[0])) return [];
+      if (match.index === void 0 || !normalize3(match[0])) return [];
       return [{ start: match.index, end: match.index + match[0].length }];
     });
     for (let start = 0; start < sentences.length; start += 1) {
       for (let count = 0; count < 3 && start + count < sentences.length; count += 1) {
-        const passage = normalize2(segment.slice(sentences[start].start, sentences[start + count].end));
+        const passage = normalize3(segment.slice(sentences[start].start, sentences[start + count].end));
         if (passage.length > MAX_SUPPORT_PASSAGE_CHARS) break;
         passages.push(passage);
       }
@@ -24436,7 +24775,7 @@ function sourceAnchorPassages(page, value) {
     return phraseTokenStarts(tokens, value).map((start) => {
       const from = Math.max(0, start - 28);
       const to = Math.min(tokens.length - 1, start + valueTokens.length - 1 + 28);
-      return normalize2(segment.slice(tokens[from].start, tokens[to].end));
+      return normalize3(segment.slice(tokens[from].start, tokens[to].end));
     }).filter((passage) => passage.length <= MAX_SUPPORT_PASSAGE_CHARS);
   });
 }
@@ -24476,14 +24815,14 @@ function individualSentences(value) {
     /\b(?:Mr|Mrs|Ms|Dr|Inc|Ltd|Corp|Co|No|U\.S)\./g,
     (match) => match.replace(/\./g, marker2)
   );
-  return [...protectedValue.matchAll(/[^.!?]+(?:[.!?]+|$)/g)].map((match) => normalize2(match[0].replaceAll(marker2, "."))).filter(Boolean);
+  return [...protectedValue.matchAll(/[^.!?]+(?:[.!?]+|$)/g)].map((match) => normalize3(match[0].replaceAll(marker2, "."))).filter(Boolean);
 }
 function attributionClauses(value) {
   return individualSentences(value).flatMap((sentence) => sentence.split(/\s*(?:;|,\s*(?:and|but|while|whereas|which|who|that)|\s+(?:but|while|whereas)\s+)\s*/i).flatMap((clause) => clause.split(
     /\s+and\s+(?=(?:(?:[A-Z][A-Za-z0-9.'’-]*)\s+){0,3}(?:[A-Z][A-Za-z0-9.'’-]*)\s+(?:is|was|has|had|serves?|served|settled|reported|announced|founded|co[- ]?founded|leads?|led|works?|worked|went|became)\b)/
   )).flatMap((clause) => clause.split(
     /\s+and\s+(?=(?:founded|co[- ]?founded|serves?|served|works?|worked|reported|announced|settled|went|became|launched|built|created|led|leads)\b)/i
-  )).map(normalize2).filter(Boolean));
+  )).map(normalize3).filter(Boolean));
 }
 function hasSubjectAlias(value, aliases2) {
   if (aliases2.some((alias2) => looseContainsPhrase(value, alias2))) return true;
@@ -25046,7 +25385,7 @@ function overlapScore(left, right) {
   return rightTokens.length ? rightTokens.filter((token) => leftTokens.has(token)).length / rightTokens.length : 0;
 }
 function supportingSourcePassage(page, lead, aliases2, trustedContextTokens = /* @__PURE__ */ new Set()) {
-  const excerpt = normalize2(decodeHtmlEntities(lead.excerpt));
+  const excerpt = normalize3(decodeHtmlEntities(lead.excerpt));
   const exact = page.includes(excerpt) ? excerpt : exactTokenPassage(page, excerpt);
   if (exact && passageSupportsLead(exact, lead, aliases2, trustedContextTokens)) return exact;
   const candidates = [.../* @__PURE__ */ new Set([
@@ -25292,15 +25631,15 @@ function coinbaseWrappedAssetLocaleFallback(raw) {
 }
 function coinbaseWrappedAssetProductPassage(title, body, symbol) {
   if (!looseContainsPhrase(title, "Coinbase") || !looseContainsPhrase(title, symbol) || /\b(?:404|not found|page unavailable)\b/i.test(title)) return null;
-  const normalizedBody = normalize2(decodeHtmlEntities(body.replace(/<[^>]+>/g, " ")));
+  const normalizedBody = normalize3(decodeHtmlEntities(body.replace(/<[^>]+>/g, " ")));
   if (searchable(symbol) === "cbbtc") {
     const wrappedCustody = /\bCoinbase\s+wrapped\s+assets?\b[^.!?]{0,220}\bbacked\s+1:1\b[^.!?]{0,160}\bheld\s+in\s+custody\s+by\s+Coinbase\b/i.exec(normalizedBody);
-    return wrappedCustody ? normalize2(`${title}. ${wrappedCustody[0]}`) : null;
+    return wrappedCustody ? normalize3(`${title}. ${wrappedCustody[0]}`) : null;
   }
   if (searchable(symbol) === "cbeth") {
     const productClass = /(?:\bliquid\s+staking\s+token\b|\bwrap\s+your\s+staked\s+ETH\s+to\s+cbETH\b|\bcbETH\b[^.!?]{0,120}\btraded\s+on\s+Coinbase\b)/i.exec(normalizedBody);
     const ventureWhitepaper = /(?:\bCoinbase['’]s\s+whitepaper\b[^.!?]{0,260}\bcbETH\b|\bcbETH\b[^.!?]{0,260}\bCoinbase['’]s\s+whitepaper\b)/i.exec(normalizedBody);
-    return productClass && ventureWhitepaper ? normalize2(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`) : null;
+    return productClass && ventureWhitepaper ? normalize3(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`) : null;
   }
   return null;
 }
@@ -25317,7 +25656,7 @@ function isExpectedCoinbaseWrappedAssetPage(result, fallbackUrl) {
   if (!exactProductPath || searchable(pathSegments.at(-1) ?? "") !== searchable(symbol)) return false;
   const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(result.text);
   const htmlTitle = /<title\b[^>]*>([\s\S]{1,1000}?)<\/title>/i.exec(result.text)?.[1];
-  const title = normalize2(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
+  const title = normalize3(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
   const body = metadata?.[1] && metadata.index === 0 ? result.text.slice(metadata[0].length) : result.text;
   return Boolean(coinbaseWrappedAssetProductPassage(title, body, symbol));
 }
@@ -25326,7 +25665,7 @@ function officialVentureAssetPagePassage(document, page, lead, relationships) {
   const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(page);
   const htmlTitle = /html|xhtml/i.test(document.contentType) ? /<title\b[^>]*>([\s\S]{1,1000}?)<\/title>/i.exec(document.text)?.[1] : void 0;
   if ((!metadata?.[1] || metadata.index !== 0) && !htmlTitle) return null;
-  const title = normalize2(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
+  const title = normalize3(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
   const body = metadata?.[1] && metadata.index === 0 ? page.slice(metadata[0].length) : page;
   let pathSymbol;
   try {
@@ -25352,7 +25691,7 @@ function officialVentureAssetPagePassage(document, page, lead, relationships) {
       "i"
     ).exec(body);
     if (wrappedCustody) {
-      const passage2 = normalize2(`${title}. ${wrappedCustody[0]}`);
+      const passage2 = normalize3(`${title}. ${wrappedCustody[0]}`);
       if (passage2.length <= MAX_SUPPORT_PASSAGE_CHARS && !TOKEN_PAGE_UNCERTAINTY.test(passage2)) return passage2;
     }
     const tokenClass = new RegExp(
@@ -25369,7 +25708,7 @@ function officialVentureAssetPagePassage(document, page, lead, relationships) {
     ).exec(body);
     const productClass = tokenClass ?? wrappedStakingProduct;
     if (!productClass || !ventureWhitepaper) continue;
-    const passage = normalize2(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`);
+    const passage = normalize3(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`);
     if (passage.length <= MAX_SUPPORT_PASSAGE_CHARS && looseContainsPhrase(passage, relationship.name) && looseContainsPhrase(passage, lead.value) && !TOKEN_PAGE_UNCERTAINTY.test(passage)) return passage;
   }
   return null;
@@ -25935,8 +26274,8 @@ function verifiedVentureAssetRelationships(ctx) {
   });
 }
 function currentRoleRelationshipParts(value) {
-  const direct = /^(.{2,160}?)\s+(?:at|of)\s+(.{2,160})$/i.exec(normalize2(value));
-  const comma = direct ? null : /^(.{2,160}?),\s+(.{2,160})$/.exec(normalize2(value));
+  const direct = /^(.{2,160}?)\s+(?:at|of)\s+(.{2,160})$/i.exec(normalize3(value));
+  const comma = direct ? null : /^(.{2,160}?),\s+(.{2,160})$/.exec(normalize3(value));
   const role = clean(direct?.[1] ?? comma?.[1], 160);
   const name = clean(direct?.[2] ?? comma?.[2], 160);
   return role && name && CURRENT_CONTROL_ROLE.test(role) ? { role, name } : null;
@@ -28187,7 +28526,7 @@ function nameNeedles(name) {
 // server/adapters/wallet.ts
 var ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
 var NAME_IN_TEXT = /(?<![./])\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b(?!\.[a-z0-9])/gi;
-var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+var SOLANA_ADDRESS4 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 async function getJson(url) {
   let operation;
   try {
@@ -28245,7 +28584,7 @@ async function snsResolve(name) {
   const arr2 = Array.isArray(d) ? d : d ? [d] : [];
   for (const row of arr2) {
     const address = row?.address;
-    if (typeof address === "string" && SOLANA_ADDRESS3.test(address)) return address;
+    if (typeof address === "string" && SOLANA_ADDRESS4.test(address)) return address;
   }
   return null;
 }
@@ -30883,8 +31222,8 @@ var MAX_HISTORY_POINTS = 90;
 var PRICE_TOLERANCE = 0.25;
 var MIN_POOL_LIQUIDITY_USD = 25e3;
 var SITE_DECLARATION_MAX_BYTES = 4e5;
-var EVM_ADDRESS3 = /^0x[a-fA-F0-9]{40}$/;
-var SOLANA_ADDRESS4 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+var EVM_ADDRESS4 = /^0x[a-fA-F0-9]{40}$/;
+var SOLANA_ADDRESS5 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 var PLATFORM_CHAIN = {
   solana: "solana",
   ethereum: "ethereum",
@@ -31149,14 +31488,14 @@ function parseSeededContract(ctx) {
   if (!address || !chain) return null;
   const platform = CHAIN_PLATFORM[chain];
   if (!platform) return null;
-  const addressValid = chain === "solana" ? SOLANA_ADDRESS4.test(address) : EVM_ADDRESS3.test(address);
+  const addressValid = chain === "solana" ? SOLANA_ADDRESS5.test(address) : EVM_ADDRESS4.test(address);
   return addressValid ? { address, chain, platform } : null;
 }
 var validContract = (platform, value) => {
   const address = cleanText2(value);
   if (!address) return null;
-  if (platform === "solana") return SOLANA_ADDRESS4.test(address) ? address : null;
-  return PLATFORM_CHAIN[platform] && EVM_ADDRESS3.test(address) ? address : null;
+  if (platform === "solana") return SOLANA_ADDRESS5.test(address) ? address : null;
+  return PLATFORM_CHAIN[platform] && EVM_ADDRESS4.test(address) ? address : null;
 };
 function canonicalContract(details) {
   const platforms = isRecord4(details.platforms) ? details.platforms : {};
@@ -31538,7 +31877,7 @@ function dexProjectCandidates(ctx, query, rows) {
     const pairAddress = cleanText2(row.pairAddress);
     const sourceUrl2 = cleanText2(row.url);
     const relevance = tokenNameRelevance(query, name, symbol);
-    const addressValid = chain === "solana" ? SOLANA_ADDRESS4.test(address) : EVM_ADDRESS3.test(address);
+    const addressValid = chain === "solana" ? SOLANA_ADDRESS5.test(address) : EVM_ADDRESS4.test(address);
     if (!name || !symbol || !addressValid || !chain || !pairAddress || !sourceUrl2 || relevance < MIN_NAME_RELEVANCE) return [];
     const identity = dexIdentity(ctx, row);
     if (!identity) return [];
@@ -34300,7 +34639,7 @@ async function collectCryptoRankFunding(subject, options = {}) {
 
 // server/adapters/tokenHolders.ts
 var FETCH_TIMEOUT_MS2 = 8e3;
-var isBurnAddr = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
+var isBurnAddr = (a) => !!a && (/^0x0{40}$/i.test(a) || /^0x0{36}dead$/i.test(a));
 var isBurnTag = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
 var t1 = (v) => v === "1";
 var AUTHORITY_NOTE = " On a token with real centralized-exchange listings this is typically a governed emissions/ops mechanism, not a rug setup. Confirm the controller.";
@@ -34309,6 +34648,41 @@ var OWNER_UNREPORTED_NOTE = " GoPlus reported no owner address for this contract
 async function collectHolderProfile(chain, address) {
   const chainKey = chain.trim().toLowerCase();
   const chainId = GOPLUS_CHAIN[chainKey];
+  if (chainKey === "solana" && address) {
+    const rug = await rugcheckReport(address);
+    const sourceCapturedAt2 = captureTimestamp();
+    recordCall("rugcheck", "holder-profile", 0, "Solana owner sample", rug ? "succeeded" : "partial");
+    if (!rug) return { available: false, note: "RugCheck returned no owner register." };
+    const sourceUrl2 = `https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(address)}/report`;
+    const holderIntelligence = buildHolderIntelligence({
+      chain: chainKey,
+      tokenAddress: address,
+      capturedAt: sourceCapturedAt2,
+      source: "rugcheck",
+      sourceUrl: sourceUrl2,
+      rows: rug.topHolders ?? [],
+      ranked: false,
+      aggregateOwners: true,
+      knownAccounts: rug.knownAccounts
+    });
+    return { available: true, value: {
+      binding: { canonicalAddress: address, chain: chainKey, method: "canonical_token_address_chain" },
+      holderIntelligence,
+      topHolderPct: null,
+      top10Pct: null,
+      assessedWalletCount: null,
+      top10PctIsFloor: true,
+      holderCount: null,
+      lpLockedOrBurnedPct: rug.lpLockedPct,
+      holdersAssessed: false,
+      distributionSource: null,
+      distributionNote: "RugCheck owner observations are retained; the sample does not establish globally ranked owner concentration.",
+      contractFlags: [],
+      creatorPct: rug.creatorPercent,
+      sourceUrl: sourceUrl2,
+      sourceCapturedAt: sourceCapturedAt2
+    } };
+  }
   if (!chainId || !address) {
     return { available: false, note: `No GoPlus holder register for chain "${chain}".` };
   }
@@ -34317,11 +34691,12 @@ async function collectHolderProfile(chain, address) {
     new Promise((resolve) => setTimeout(() => resolve(null), FETCH_TIMEOUT_MS2))
   ]);
   const unordered = GOPLUS_UNSORTED_HOLDER_CHAINS.has(chainKey);
-  const [gp, explorerHolders] = await Promise.all([
+  const [gpResult, explorerHolders] = await Promise.all([
     boxed(goplus(chainId, address)),
-    unordered ? boxed(blockscoutHolders(chainKey, address)) : Promise.resolve(null)
+    boxed(blockscoutHolders(chainKey, address))
   ]);
   const sourceCapturedAt = captureTimestamp();
+  const gp = gpResult ?? (explorerHolders?.length ? {} : null);
   if (!gp) {
     recordCall("goplus", "holder-profile", 0, `${chain}:${address.slice(0, 10)} \xB7 no_data`, "partial");
     return { available: false, note: "GoPlus returned no token security record." };
@@ -34331,21 +34706,21 @@ async function collectHolderProfile(chain, address) {
     const value = Number(raw) * 100;
     return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
   };
-  const isMarketRow = (holder) => holder.is_contract === 1 || holder.is_locked === 1 || /lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(holder.tag ?? "");
+  const isMarketRow = (holder) => Boolean(classifyMarketAddress(holder.address)) || isBurnAddr(holder.address);
   const goplusWallets = holders.filter((holder) => !isMarketRow(holder));
   const goplusExcluded = holders.length - goplusWallets.length;
   const goplusShares = goplusWallets.map((holder) => shareOfSupply(holder.percent)).filter((share) => share !== null).sort((a, b) => b - a);
-  const explorerWallets = (explorerHolders ?? []).filter((holder) => holder.isContract !== true);
+  const explorerWallets = (explorerHolders ?? []).filter((holder) => !isMarketRow(holder));
   const explorerExcluded = (explorerHolders?.length ?? 0) - explorerWallets.length;
   const explorerShares = explorerWallets.map((holder) => holder.percent).filter((share) => Number.isFinite(share) && share >= 0 && share <= 100).sort((a, b) => b - a);
-  const excludedNote = (count, register) => count ? ` ${count} ${register} row${count === 1 ? " was" : "s were"} excluded as a pool, contract, or locked address, so this is wallet concentration and not every address holding supply.` : "";
+  const excludedNote = (count, register) => count ? ` ${count} ${register} row${count === 1 ? " was" : "s were"} excluded by an exact infrastructure or burn-address match, so this is wallet concentration and not every address holding supply.` : "";
   let distributionSource = null;
   let distributionNote;
   let shares = [];
-  if (unordered && explorerShares.length) {
+  if (explorerShares.length) {
     shares = explorerShares;
     distributionSource = "explorer";
-    distributionNote = `Holder concentration is the chain explorer's ordered register, since GoPlus does not order its holder rows on this chain.${excludedNote(explorerExcluded, "explorer")}`;
+    distributionNote = `Holder concentration is the chain explorer's ordered register, captured separately from the GoPlus security response.${excludedNote(explorerExcluded, "explorer")}`;
   } else if (unordered) {
     distributionNote = holders.length ? "GoPlus does not order its holder register on this chain and the chain explorer returned no distribution, so holder concentration is not reported." : "No holder register was returned for this token, so holder concentration is not reported.";
   } else if (goplusShares.length) {
@@ -34353,7 +34728,7 @@ async function collectHolderProfile(chain, address) {
     distributionSource = "goplus";
     distributionNote = excludedNote(goplusExcluded, "GoPlus holder").trim() || null;
   } else {
-    distributionNote = goplusExcluded ? `Every holder row GoPlus returned was a pool, contract, or locked address, so no wallet concentration figure is reported.` : holders.length ? "The GoPlus holder rows carried no usable share of supply, so holder concentration is not reported." : "No holder register was returned for this token, so holder concentration is not reported.";
+    distributionNote = goplusExcluded ? `Every holder row GoPlus returned matched infrastructure or a burn address, so no wallet concentration figure is reported.` : holders.length ? "The GoPlus holder rows carried no usable share of supply, so holder concentration is not reported." : "No holder register was returned for this token, so holder concentration is not reported.";
   }
   const consistencySum = shares.slice(0, 15).reduce((total, share) => total + share, 0);
   if (shares.length && consistencySum > 101) {
@@ -34403,6 +34778,15 @@ async function collectHolderProfile(chain, address) {
   return {
     available: true,
     value: {
+      holderIntelligence: buildHolderIntelligence({
+        chain: chainKey,
+        tokenAddress: address,
+        capturedAt: sourceCapturedAt,
+        source: explorerHolders ? "blockscout" : "goplus",
+        sourceUrl: explorerHolders ? blockscoutHolderSourceUrl(chainKey, address) : `https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`,
+        rows: explorerHolders ?? holders.map((row) => ({ address: row.address, percent: Number(row.percent) * 100, isContract: row.is_contract === 1, ...row.tag ? { tag: row.tag } : {} })),
+        ranked: Boolean(explorerHolders) || !unordered
+      }),
       binding: {
         canonicalAddress: address,
         chain: chainKey,
@@ -35118,43 +35502,6 @@ function describeOutcomeDelta(prior, current) {
   if (!parts.length) return null;
   const when = prior.capturedAt ? ` (v${prior.version}, ${prior.capturedAt.slice(0, 10)})` : ` (v${prior.version})`;
   return `Since last scan${when}: ${parts.join(" \xB7 ")}`;
-}
-
-// src/lib/subjectRef.ts
-var EVM_ADDRESS4 = /^0x[0-9a-f]{40}$/i;
-var SOLANA_ADDRESS5 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-function normalizeSubjectRef(value) {
-  const clean4 = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
-  const qualified = clean4.match(/^([a-z0-9_-]+):(.+)$/i);
-  if (qualified && (EVM_ADDRESS4.test(qualified[2]) || SOLANA_ADDRESS5.test(qualified[2]) || !/^https?$/i.test(qualified[1]) && /^[A-Za-z0-9._-]{10,128}$/.test(qualified[2]))) {
-    return `${qualified[1].toLowerCase()}:${EVM_ADDRESS4.test(qualified[2]) ? qualified[2].toLowerCase() : qualified[2]}`;
-  }
-  if (SOLANA_ADDRESS5.test(clean4)) return clean4;
-  if (EVM_ADDRESS4.test(clean4)) return clean4.toLowerCase();
-  return clean4.toLowerCase();
-}
-
-// src/lib/tokenIdentity.ts
-var aliases = { eth: "ethereum", "1": "ethereum", "8453": "base", "42161": "arbitrum", "10": "optimism", "137": "polygon", "56": "bsc", "43114": "avalanche" };
-function tokenSubjectIdentity(chain, address) {
-  if (typeof chain !== "string" || typeof address !== "string") return null;
-  const rawChain = chain.trim().toLowerCase();
-  const network = aliases[rawChain] ?? rawChain;
-  const clean4 = address.trim();
-  if (!/^[a-z0-9_-]{1,40}$/.test(network)) return null;
-  const evm = /^0x[0-9a-f]{40}$/i.test(clean4);
-  const evmNetwork = /^(ethereum|base|arbitrum|optimism|polygon|bsc|avalanche|fantom|cronos|linea|scroll|mantle|zksync|blast|celo|gnosis|sonic|abstract|pulsechain|berachain|unichain|opbnb|polygonzkevm)$/.test(network);
-  if (network === "solana" ? !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(clean4) : evmNetwork ? !evm : !/^[A-Za-z0-9._-]{10,128}$/.test(clean4)) return null;
-  const normalized4 = evm ? normalizeSubjectRef(clean4) : clean4;
-  return { chain: network, address: normalized4, ref: `${network}:${normalized4}` };
-}
-function payloadTokenIdentity(kind, payload) {
-  if (!payload || typeof payload !== "object") return null;
-  const root = payload;
-  const token = kind === "investigation" ? root.token : kind === "token" ? root : null;
-  if (!token || typeof token !== "object") return null;
-  const row = token;
-  return tokenSubjectIdentity(row.chain, row.address);
 }
 
 // src/lib/reportDelta.ts
@@ -41367,83 +41714,6 @@ function scannerEvasionClaim(finding) {
   return `The deployer writes about ${surfaces} in the contract source: "${finding.quote}" Read as stated, the flagged behaviour was removed rather than hidden, so the clean scanner result is accurate. It is recorded because a deployer iterating against scanner heuristics is worth knowing, not because it is misconduct.`;
 }
 
-// src/lib/marketAddresses.ts
-var SOLANA_CEX_WALLETS = {
-  "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9": "Binance",
-  "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S": "Binance",
-  "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM": "Binance",
-  GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE: "Coinbase",
-  H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS: "Coinbase",
-  "2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm": "Coinbase",
-  FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5: "Kraken",
-  AobVSwdW9BbpMdJvTqeCN4hPAmh4rHm7vwLnQ5ATSyrS: "OKX",
-  "5VVBHtk2QQBy5rZ2pBdgcb4yj9DBYy8tDksBs2pWnUKr": "Bybit",
-  "9un5wqE3q4oCjyrDkwsdD48KteCJitQX5978Vh7KKxHo": "Gate.io",
-  "6gnCPhXtLnUD76HjQuSYPENLSZdG8RvDB1pTLM5aLSss": "MEXC"
-};
-var EVM_CEX_WALLETS = {
-  "0x28c6c06298d514db089934071355e5743bf21d60": "Binance",
-  "0x21a31ee1afc51d94c2efccaa2092ad1028285549": "Binance",
-  "0xdfd5293d8e347dfe59e90efd55b2956a1343963d": "Binance",
-  "0x56eddb7aa87536c09ccc2793473599fd21a8b17f": "Binance",
-  "0xf977814e90da44bfa03b6295a0616a897441acec": "Binance",
-  "0x71660c4005ba85c37ccec55d0c4493e66fe775d3": "Coinbase",
-  "0x503828976d22510aad0201ac7ec88293211d23da": "Coinbase",
-  "0xddfabcdc4d8ffc6d5beaf154f18b778f892a0740": "Coinbase",
-  "0x3cc936b795a188f0e246cbb2d74c5bd190aecf18": "OKX",
-  "0x2b5634c42055806a59e9107ed44d43c426e58258": "Kucoin",
-  "0x0d0707963952f2fba59dd06f2b425ace40b492fe": "Gate.io",
-  "0xf89d7b9c864f589bbF53a82105107622B35EaA40": "Bybit",
-  // Merged from the EVM deployer route, which had been carrying a longer list of
-  // its own. Every one of these is exchange custody, so holder concentration was
-  // counting them as insider wallets on any token they hold float in.
-  "0x9696f59e4d72e237be84ffd425dcad154bf96976": "Binance",
-  "0x4976a4a02f38326660d17bf34b431dc6e2eb2327": "Binance",
-  "0x0681d8db095565fe8a346fa0277bffde9c0edbbf": "Binance",
-  "0xddb1b4c4fb1e19bd353bc07d1d46c87d67b8e1e0": "Coinbase",
-  "0x3cd751e6b0078be393132286c442345e5dc49699": "Coinbase",
-  "0xeb2629a2734e272bcc07bda959863f316f4bd4cf": "Coinbase",
-  "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43": "Coinbase",
-  "0x2910543af39aba0cd09dbb2d50200b3e800a63d2": "Kraken",
-  "0x0a869d79a7052c7f1b55a8ebabbea3420f0d1e13": "Kraken",
-  "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b": "OKX",
-  "0x236f9f97e0e62388479bf9e5ba4889e46b0273c3": "OKX",
-  "0x1522900b6dafac587d499a862861c0869be6e428": "Bitfinex"
-};
-var normalize3 = (address) => {
-  const value = String(address ?? "").trim();
-  return /^0x[0-9a-fA-F]{40}$/.test(value) ? value.toLowerCase() : value;
-};
-var lookup = (map, address) => {
-  const direct = map[address];
-  if (direct) return direct;
-  const lowered = normalize3(address);
-  for (const [candidate, name] of Object.entries(map)) {
-    if (normalize3(candidate) === lowered) return name;
-  }
-  return void 0;
-};
-function classifyMarketAddress(address, context2 = {}) {
-  const value = String(address ?? "").trim();
-  if (!value) return null;
-  const pool = (context2.poolAddresses ?? []).some((candidate) => normalize3(candidate) === normalize3(value));
-  if (pool) return { label: "liquidity pool", kind: "pool" };
-  const exchange = lookup(SOLANA_CEX_WALLETS, value) ?? lookup(EVM_CEX_WALLETS, value);
-  if (exchange) return { label: exchange, kind: "exchange" };
-  const known = context2.knownAccounts?.[value];
-  const type = String(known?.type ?? "").toUpperCase();
-  if (type === "AMM" || type === "MARKET" || type === "POOL") {
-    return { label: known?.name?.trim() || "liquidity pool", kind: "pool" };
-  }
-  if (type === "LOCKER" || type === "VAULT") {
-    return { label: known?.name?.trim() || "locked vault", kind: "locker" };
-  }
-  if (type === "EXCHANGE" || type === "CEX") {
-    return { label: known?.name?.trim() || "exchange", kind: "exchange" };
-  }
-  return null;
-}
-
 // src/token/cloneCheck.ts
 var ORDERING_MARGIN_MS = 6e4;
 var BURST_WINDOW_MS = 15 * 6e4;
@@ -41806,6 +42076,39 @@ async function screenAddressSanctions(chain, addresses, fetchImpl2 = fetch) {
     return { available: false, checked: unique2.length, sanctioned: [], completedAt, reason: "list_unavailable" };
   }
 }
+function washSignatureFor(m) {
+  const vol = Number.isFinite(m.vol24) ? Math.max(0, m.vol24) : 0;
+  const liq = Number.isFinite(m.liquidityUsd) ? Math.max(0, m.liquidityUsd) : 0;
+  const txns = (m.buys ?? 0) + (m.sells ?? 0);
+  const ratio = liq > 0 ? vol / liq : vol > 0 ? Number.POSITIVE_INFINITY : 0;
+  const rx = Number.isFinite(ratio) ? `${ratio.toFixed(ratio >= 100 ? 0 : 1)}x` : "unbounded";
+  const money = (n) => `$${Math.round(n).toLocaleString()}`;
+  if (liq < 1e3 && vol >= 1e4) {
+    return {
+      wash: true,
+      ratio,
+      rationale: `${money(vol)} of 24h volume on ${money(liq)} of liquidity: volume without a pool to carry it, a fake-volume signature.`,
+      claim: `${money(vol)} of 24h volume is reported against ${money(liq)} of liquidity. No pool that shallow can host that trading; the volume is fabricated or the pool was drained after it. A fake-volume signature.`
+    };
+  }
+  if (ratio >= 100 && txns >= 20) {
+    return {
+      wash: true,
+      ratio,
+      rationale: `vol/liquidity ${rx} in 24h: the pool turned over ${rx} its depth and is still standing, a cycled-volume signature.`,
+      claim: `Volume is ${rx} liquidity in 24h (${money(vol)} on ${money(liq)}). A pool cycled a hundred times its depth in a day without being drained is being traded against itself; treat the volume as manufactured until the buyers are shown to be distinct wallets.`
+    };
+  }
+  if (m.pc24 != null && Number.isFinite(m.pc24) && ratio >= 15 && Math.abs(m.pc24) < 10 && txns >= 50) {
+    return {
+      wash: true,
+      ratio,
+      rationale: `vol/liquidity ${ratio.toFixed(1)}x but price flat (${m.pc24.toFixed(1)}%): wash-trade signature.`,
+      claim: `Volume is ${ratio.toFixed(0)}x liquidity in 24h while the price moved only ${m.pc24.toFixed(1)}%: a wash-trading or fake-volume signature.`
+    };
+  }
+  return { wash: false, ratio: Number.isFinite(ratio) ? ratio : 0, rationale: "", claim: "" };
+}
 var clamp2 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 var num4 = (s) => s == null || s === "" ? null : Number(s);
 var t12 = (s) => s === "1";
@@ -41819,23 +42122,25 @@ function handleFromUrl(url) {
 }
 var isBurnAddr2 = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
 var isBurnTag2 = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
-function evmSafety(gp, sim) {
+function evmSafety(gp, sim, tokenAddress) {
   const s = sim;
   const goplusTradeabilityAssessed = hasCompleteGoplusTradeability(gp);
   const simulationCompleted = s?.simSuccess === true;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
   let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
-  let lpRowsSeen = 0;
+  let lpRowsSeen = 0, lpSelfPct = 0;
+  const selfAddress = (tokenAddress ?? "").trim().toLowerCase();
   for (const h of gp?.lp_holders ?? []) {
     const pct2 = Number(h.percent) * 100;
     if (!Number.isFinite(pct2) || pct2 < 0 || pct2 > 100) continue;
     lpRowsSeen += 1;
-    if (!Number.isFinite(pct2)) continue;
+    if (selfAddress && (h.address ?? "").trim().toLowerCase() === selfAddress) lpSelfPct += pct2;
     if (isBurnAddr2(h.address) || isBurnTag2(h.tag)) lpBurnedPct += pct2;
     else if (h.is_locked === 1) lpLockedPct += pct2;
     else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct2);
   }
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
+  const lpRowsAreSelfReferential = lpRowsSeen > 0 && lpSelfPct >= 50 && lpBurnedPct + lpLockedPct === 0;
   const creatorShare = num4(gp?.creator_percent);
   const ownerAddressReported = typeof gp?.owner_address === "string";
   const ownerAddress = (gp?.owner_address ?? "").trim();
@@ -41889,7 +42194,7 @@ function evmSafety(gp, sim) {
     ownerChangeBalance: t12(gp?.owner_change_balance),
     creatorPercent: (creatorShare ?? 0) * 100,
     creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
-    lpAssessed: lpRowsSeen > 0
+    lpAssessed: lpRowsSeen > 0 && !lpRowsAreSelfReferential
   };
 }
 function recordObservedTradeability(safety, market) {
@@ -42078,8 +42383,9 @@ async function runTokenAudit(input, emit, opts) {
   const sells = pair.txns?.h24?.sells ?? 0;
   const pc24 = pair.priceChange?.h24 ?? 0;
   const ageDays = pair.pairCreatedAt ? (Date.now() - pair.pairCreatedAt) / 864e5 : void 0;
-  const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
-  const washSignature = pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
+  const wash = washSignatureFor({ vol24, liquidityUsd, pc24: pair.priceChange?.h24 ?? null, buys, sells });
+  const volLiq = wash.ratio;
+  const washSignature = wash.wash;
   step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15e3 ? "warn" : "neutral" });
   const gpChain = GOPLUS_CHAIN[chain];
   let safety = emptySafety();
@@ -42135,7 +42441,7 @@ async function runTokenAudit(input, emit, opts) {
       opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address, fetcher),
       // Where GoPlus cannot order holders, the chain's own explorer is the
       // only correct distribution source. Runs in parallel: no added latency.
-      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address, fetcher) : Promise.resolve(null),
+      blockscoutHolders(chain, address, fetcher),
       // What the deployer wrote about their own contract. Free, and the only
       // place an intent to defeat safety scanners is ever stated outright.
       blockscoutContractSource(chain, address, fetcher)
@@ -42143,7 +42449,7 @@ async function runTokenAudit(input, emit, opts) {
     gpEvm = gp;
     explorerHolders = explorer;
     contractSource = source2;
-    safety = evmSafety(gp, sim);
+    safety = evmSafety(gp, sim, address);
     safety = recordObservedTradeability(safety, { buys24h: buys, sells24h: sells, liquidityUsd });
     const evmCreator = gp?.creator_address?.trim();
     const evmOwner = gp?.owner_address?.trim();
@@ -42287,7 +42593,7 @@ async function runTokenAudit(input, emit, opts) {
   }
   if (pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd) && liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
-  if (washSignature) findings.push({ claim: `Volume is ${volLiq.toFixed(0)}x liquidity in 24h while the price moved only ${pc24.toFixed(1)}%: a wash-trading or fake-volume signature.`, tone: "bad", source: "dexscreener" });
+  if (washSignature) findings.push({ claim: wash.claim, tone: "bad", source: "dexscreener" });
   if (pc24 <= -60) findings.push({ claim: `Down ${Math.abs(pc24).toFixed(0)}% in 24h. The token appears to have already dumped.`, tone: "bad", source: "dexscreener" });
   else if (pc24 >= 300 && liquidityUsd < 1e5) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity. This is a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
   if (!opts?.skipSim) {
@@ -42330,12 +42636,10 @@ async function runTokenAudit(input, emit, opts) {
     });
     return false;
   });
-  const eoaHolders = walletRows.filter(
-    (h) => !(h.is_contract === 1 || h.is_contract === "1") && h.is_locked !== 1 && !/lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(h.tag || "")
-  );
-  const topSum = eoaHolders.slice(0, 15).reduce((a, h) => a + Number(h.percent) * 100, 0);
-  const holdersReliable = rawHolders.length > 0 && topSum <= 101;
-  const topWalletPct = eoaHolders.length ? Number(eoaHolders[0].percent) * 100 : null;
+  const eoaHolders = walletRows.filter((h) => !/^0x(?:0{40}|0{36}dead)$/i.test(h.address ?? h.account ?? ""));
+  const topSum = eoaHolders.slice(0, 25).reduce((a, h) => a + Number(h.percent) * 100, 0);
+  const holdersReliable = rawHolders.length > 0 && rawHolders.every((h) => Number.isFinite(Number(h.percent)) && Number(h.percent) >= 0) && rawHolders.reduce((sum, h) => sum + Number(h.percent) * 100, 0) <= 101;
+  const topWalletPct = eoaHolders.length ? Math.max(...eoaHolders.map((h) => Number(h.percent) * 100)) : null;
   const concentrationTopPct = topWalletPct;
   const insiderPct = holdersReliable ? Math.round(topSum) : 0;
   const materialWalletPcts = holdersReliable ? eoaHolders.map((h) => Number(h.percent) * 100).filter((pct2) => Number.isFinite(pct2) && pct2 >= 1).sort((a, b) => b - a) : [];
@@ -42433,7 +42737,7 @@ async function runTokenAudit(input, emit, opts) {
   if (washSignature) aT5 = 2;
   else if (total > 20 && sells / total > 0.8) aT5 = clamp2(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp2(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? wash.rationale : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
     ...(pair.info?.socials ?? []).map((x) => ({ label: x.type, url: x.url }))
@@ -42516,12 +42820,28 @@ async function runTokenAudit(input, emit, opts) {
   }
   const deployer = deployerAttribution?.address ?? null;
   const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
-  const topHolders = rawHolders.slice(0, 10).map((h) => ({
+  let topHolders = rawHolders.slice(0, HOLDER_TARGET).map((h) => ({
     address: h.address ?? h.account ?? "",
     percent: Number(h.percent) * 100,
     tag: h.tag || void 0,
-    isContract: h.is_contract === 1 || h.is_contract === "1"
+    isContract: h.is_contract === 1 || h.is_contract === "1",
+    marketKind: classifyMarketAddress(h.address ?? h.account ?? "", { poolAddresses, knownAccounts })?.kind
   })).filter((h) => h.address);
+  const holderIntelligence = buildHolderIntelligence({
+    chain,
+    tokenAddress: address,
+    capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    source: explorerHolders ? "blockscout" : chain === "solana" && rugcheck?.topHolders?.length ? "rugcheck" : "goplus",
+    sourceUrl: explorerHolders ? blockscoutHolderSourceUrl(chain, address) : chain === "solana" && rugcheck?.topHolders?.length ? `https://api.rugcheck.xyz/v1/tokens/${address}/report` : `https://api.gopluslabs.io/api/v1/${chain === "solana" ? "solana/token_security" : `token_security/${gpChain}`}?contract_addresses=${address}`,
+    rows: chain === "solana" && rugcheck?.topHolders?.length ? rugcheck.topHolders : topHolders,
+    ranked: chain !== "solana" && !GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) || Boolean(explorerHolders),
+    aggregateOwners: chain === "solana" && Boolean(rugcheck?.topHolders?.length),
+    poolAddresses,
+    ...knownAccounts ? { knownAccounts } : {}
+  });
+  if (chain === "solana" && rugcheck?.topHolders?.length) {
+    topHolders = holderIntelligence.rows.map((row) => ({ address: row.address, percent: row.percent }));
+  }
   const screenFn = opts?.screenSanctions ?? ((chain2, addresses) => screenAddressSanctions(chain2, addresses, fetcher));
   const deployerRiskFn = opts?.screenDeployerRisk ?? ((address2) => screenDeployerRisk(address2, fetcher));
   const deployerRiskEnabled = Boolean(opts?.screenDeployerRisk) || arkhamProviderEnabled();
@@ -42643,6 +42963,7 @@ async function runTokenAudit(input, emit, opts) {
     deployer,
     ...deployerAttribution ? { deployerAttribution } : {},
     topHolders,
+    holderIntelligence,
     insiderPct,
     bundleCount,
     bundleRisk,
@@ -42694,7 +43015,7 @@ function buildGraph(chain, address, symbol, verdict, projectX, attribution, hold
       .../^https?:\/\//i.test(attribution.source) ? { source_url: attribution.source, evidence_origin: "deterministic", artifact_verified: true } : {}
     });
   }
-  holders.slice(0, 4).forEach((h) => {
+  holders.slice(0, HOLDER_TARGET).forEach((h) => {
     const k = walletEntityKey(chain, h.address);
     nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: (h.tag || "holder") + ":" + h.address.slice(0, 8), chain, address: h.address, concentration: h.percent });
     edges.push({
