@@ -40,6 +40,7 @@
   "providerEntrypoints": {
     "generic": "AGENTS.md",
     "claude": "CLAUDE.md",
+    "codex": "CODEX.md",
     "grok": "GROK.md",
     "cursor": ".cursor/rules/00-agent-contract.mdc",
     "copilot": ".github/copilot-instructions.md"
