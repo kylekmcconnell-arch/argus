@@ -135,3 +135,38 @@ describe("audit SSE liveness", () => {
     expect(handlers.onDone).not.toHaveBeenCalled();
   });
 });
+
+describe("scan replay recovery", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it.each([
+    ["scan_run_already_claimed", "stream_dropped"],
+    ["idempotency_subject_mismatch", "rejected"],
+  ])("classifies %s without issuing a replacement request", async (error, kind) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error, message: "request conflict" }), { status: 409 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const handlers = { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() };
+    streamAudit("@example", false, handlers, undefined, undefined, "owned-run-key");
+    await vi.waitFor(() => expect(handlers.onError).toHaveBeenCalledWith(expect.any(String), { kind }));
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("creditKey=owned-run-key"), expect.objectContaining({ method: "POST", cache: "no-store" }));
+  });
+  it("ignores all events after the terminal event", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('event: done\ndata: {"handle":"@example"}\n\nevent: step\ndata: {"token":{"address":"late"}}\n\nevent: error\ndata: {"error":"late"}\n\n')));
+    const handlers = { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() };
+    streamAudit("@example", false, handlers);
+    await vi.waitFor(() => expect(handlers.onDone).toHaveBeenCalledOnce());
+    expect(handlers.onStep).not.toHaveBeenCalled();
+    expect(handlers.onError).not.toHaveBeenCalled();
+  });
+  it("cannot finish an explicitly cancelled scan when a late response arrives", async () => {
+    let respond!: (value: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => { respond = resolve; })));
+    const handlers = { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() };
+    const cancel = streamAudit("@example", false, handlers);
+    cancel();
+    respond(new Response('event: done\ndata: {"handle":"@example"}\n\n'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(handlers.onDone).not.toHaveBeenCalled();
+    expect(handlers.onError).not.toHaveBeenCalled();
+  });
+});

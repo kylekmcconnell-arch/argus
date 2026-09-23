@@ -1156,3 +1156,67 @@ describe("reportSearchParams", () => {
     expect([...reportSearchParams({ url: "http://%" }).keys()]).toEqual([]);
   });
 });
+
+describe("read-only exact scan recovery", () => {
+  const userId = "00000000-0000-4000-8000-000000000010";
+  const organizationId = "00000000-0000-4000-8000-000000000001";
+  const caseId = "00000000-0000-4000-8000-000000000101";
+  const versionId = "00000000-0000-4000-8000-000000000201";
+  const receipt = { initiated_by: userId, route: "/api/audit", kind: "person", canonical_ref: "example", status: "complete", report_version_id: versionId };
+  afterEach(() => { vi.unstubAllGlobals(); });
+  function store(row: Record<string, unknown> | null, archived = false) {
+    const mock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      expect(init?.method ?? "GET").toBe("GET");
+      expect(url).toContain(`organization_id=eq.${organizationId}`);
+      if (url.includes("/scan_run_receipts?")) return jsonResponse(row ? [row] : []);
+      if (url.includes("report_versions?select=id,case_id,payload")) {
+        expect(url).toContain(`id=eq.${versionId}`);
+        return jsonResponse([{ id: versionId, case_id: caseId, payload: { handle: "@example", report: { audit_id: "test" } }, verdict: "PROVISIONAL", score: 55 }]);
+      }
+      if (url.includes("/cases?select=id,kind,canonical_ref")) return jsonResponse([{ id: caseId, kind: "person", canonical_ref: "example", status: archived ? "archived" : "open" }]);
+      if (url.includes("report_versions?select=id,case_id,version")) return jsonResponse([{ id: versionId, case_id: caseId, version: 2, completeness_state: "partial", attestation_state: "server_collected", methodology_version: "test", created_at: "2026-09-23T00:00:00Z" }]);
+      if (url.includes("/check_runs?")) return jsonResponse([]);
+      throw new Error(`Unexpected storage access: ${url}`);
+    });
+    vi.stubGlobal("fetch", mock);
+    return mock;
+  }
+  it("reads the receipt's immutable result even if another report has become active", async () => {
+    const fetch = store(receipt);
+    issuePanelCostToken.mockReturnValue("recovery-panel-token");
+    const { res, captured } = response();
+    await handler(request("GET", { query: { runKey: "test-owned-run", ref: "@Example" } }), res);
+    expect(captured.statusCode).toBe(200);
+    expect(captured.headers["cache-control"]).toBe("private, no-store");
+    expect(captured.body).toMatchObject({ state: "saved", panelToken: "recovery-panel-token", report: { kind: "person", ref: "example", versionContext: { reportVersionId: versionId } } });
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("/reports?"))).toBe(false);
+  });
+  it.each([
+    { ...receipt, initiated_by: "another-user" },
+    { ...receipt, canonical_ref: "otherproject" },
+    { ...receipt, route: "/api/launch" },
+    { ...receipt, kind: "token" },
+    null,
+  ])("does not disclose another user, subject or kind through the run key", async (row) => {
+    const fetch = store(row);
+    const { res, captured } = response();
+    await handler(request("GET", { query: { runKey: "test-owned-run", ref: "example" } }), res);
+    expect(captured.statusCode).toBe(404);
+    expect(captured.body).toEqual({ state: "not_found" });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it("reports a still-running receipt without reading an older report", async () => {
+    const fetch = store({ ...receipt, status: "running", report_version_id: null });
+    const { res, captured } = response();
+    await handler(request("GET", { query: { runKey: "test-owned-run", ref: "example" } }), res);
+    expect(captured.body).toEqual({ state: "running" });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it("does not restore an archived case through scan recovery", async () => {
+    store(receipt, true);
+    const { res, captured } = response();
+    await handler(request("GET", { query: { runKey: "test-owned-run", ref: "example" } }), res);
+    expect(captured.statusCode).toBe(404);
+  });
+});

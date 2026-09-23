@@ -2243,6 +2243,8 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("3 of 5 decision areas were assessed");
     expect(container.textContent).toContain("Portfolio quality and Fund scale & tier remain unmeasured");
     expect(container.textContent).toContain("missing evidence was not treated as zero");
+    expect(container.textContent).toContain("Any displayed score covers the assessed areas only and remains provisional");
+    expect(container.textContent).not.toContain("no overall score was produced");
     expect(container.textContent).not.toContain("No decision areas scored");
     expect(container.textContent).not.toContain("the scoring pass did not complete");
     expect(container.textContent).not.toContain("No official token");

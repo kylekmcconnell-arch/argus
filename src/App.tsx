@@ -1041,7 +1041,7 @@ export default function App() {
             },
           },
         });
-        return;
+        throw new Error(persisted.reason || "The project report is saved, but its completed token assessment could not be saved.");
       }
 
       const versionContext = savedVersionContext("person", d, persisted);
@@ -1183,6 +1183,18 @@ export default function App() {
       ? recorded
       : null;
     const run = getRun(ref);
+    // Current runners own exact-receipt recovery and token finalization. A
+    // terminal failure here must not be "recovered" by opening an unrelated
+    // newer version or the pre-token snapshot from that same run.
+    if (run?.runKey && run.status === "error") {
+      setLiveError(run.error ?? "The complete report could not be saved.");
+      const cached = resultCache.current.get(cacheKey(ref, "person"));
+      const storedAvailable = !!baseline?.reportVersionId
+        || (cached?.kind === "person" && !!cached.dossier.persistence?.reportVersionId);
+      setCaseNotice({ reason: "rescan-failed", ref, kind: "person", storedAvailable });
+      setPhase("notfound");
+      return;
+    }
     const dropped = run?.status === "error" && run.errorKind === "stream_dropped";
     const recoveryDeadline = dropped && run ? streamDropRecoveryDeadline(run) : 0;
     if (dropped) {
@@ -2089,8 +2101,8 @@ export default function App() {
                       ? "ARGUS hit an unexpected resolver or orchestration error and exited the launch flow instead of leaving it stuck. Retry once; any same-subject run already in flight will be reused rather than duplicated."
                       : caseNotice.reason === "rescan-failed"
                         ? caseNotice.storedAvailable
-                          ? "This scan produced no new report, so ARGUS is not showing one. The last saved report is unchanged and still available below. It is the earlier scan's result, not this one's."
-                          : "This scan produced no new report, and nothing was saved for this subject. ARGUS did not show an older result in its place."
+                          ? "ARGUS could not confirm a complete saved report for this scan. You can open the last saved version below; it may not include this scan's completed assessment."
+                          : "ARGUS could not confirm a complete saved report for this scan. Check the failure details below. Any saved project evidence remains available in Dossiers."
                       : caseNotice.reason === "stream-dropped"
                         ? `The live stream to this scan was interrupted, but the collector keeps running on the server and saves its result on its own, usually within a few minutes. ARGUS is checking for the saved report and will open it as soon as it appears${caseNotice.recoveryDeadline ? ` (until ${new Date(caseNotice.recoveryDeadline).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})` : ""}. No second scan was launched and no additional credit was used.`
                       : caseNotice.reason === "privacy-conflict"

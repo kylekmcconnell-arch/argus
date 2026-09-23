@@ -101,6 +101,20 @@ describe("person audit input guard", () => {
     vi.unstubAllGlobals();
   });
 
+  it("accepts an explicit POST launch with the same replay protection", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 0, used: 1 });
+    vi.mocked(claimScanReceipt).mockResolvedValueOnce("written").mockResolvedValueOnce("duplicate");
+    vi.mocked(runAudit).mockResolvedValue(null);
+    vi.mocked(describeClaimedRun).mockResolvedValue("same_subject");
+    const post = request("example", { creditKey: "post-launch-run" });
+    post.method = "POST";
+    await handler(post, response().res);
+    const replay = response();
+    await handler(post, replay.res);
+    expect(runAudit).toHaveBeenCalledOnce();
+    expect(replay.captured.statusCode).toBe(409);
+  });
+
   it.each([
     ["argus", "same_subject", "scan_run_already_claimed"],
     ["different", "subject_mismatch", "idempotency_subject_mismatch"],
