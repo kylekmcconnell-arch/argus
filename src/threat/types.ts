@@ -62,8 +62,13 @@ export interface CodeStats {
 }
 
 export interface CodeReview {
-  checked: boolean; // false when the chain has no per-token code (Solana SPL) or fetch failed
+  checked: boolean; // false when the chain has no per-token code (Solana SPL, Base B20) or fetch failed
   verified: boolean;
+  // Set when the token is a chain-native asset standard with no per-token
+  // bytecode at all: Base B20 assets carry a 1-byte 0xef marker and run on the
+  // chain's precompile, so "no verified source" is not a finding - there is no
+  // source to verify. The authority reads are the whole power surface.
+  system?: "b20" | null;
   origin: ContractSource["origin"];
   contractName: string | null;
   compiler: string | null;

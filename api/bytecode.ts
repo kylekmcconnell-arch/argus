@@ -126,6 +126,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const raw = await getCode(urls, address);
     if (raw == null) { res.status(200).json({ address, chain, available: false, note: "RPC did not return contract code." }); return; }
+    // Base B20 assets are chain-native: the address holds a 1-byte 0xef marker
+    // and the token runs on the B20 precompile, so there is no per-token code
+    // to fingerprint and nothing for a source database to verify. Reported as
+    // the standard, not as an EOA and not as an unverified contract. No
+    // fingerprint is issued: every B20 asset shares the marker, and a shared
+    // hash would make each one a "clone" of every other.
+    if (chain === "base" && raw.toLowerCase() === "0xef") {
+      res.status(200).json({
+        address, chain, available: true, isContract: true, isToken: true, proxy: false, implementation: null,
+        system: "b20", fingerprint: null, codeSize: 1, selectorCount: 0, capabilities: [],
+        verdict: { tone: "good", line: "Base B20 system asset: no per-token bytecode exists, so there is no hidden code to read - the token's powers are the on-chain roles and supply cap, nothing else." },
+      });
+      return;
+    }
     if (raw === "0x" || raw.length <= 4) { res.status(200).json({ address, chain, available: true, isContract: false, note: "No contract code at this address (an externally-owned account, not a contract token)." }); return; }
 
     // If it's a proxy, fingerprint the IMPLEMENTATION — that's where the token
