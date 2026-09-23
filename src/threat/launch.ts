@@ -1,14 +1,6 @@
-// Launch provenance: HOW the token came to market. Fair launch (DIY on a DEX)
-// vs a launchpad - and if a launchpad, whether the bonding curve completed,
-// what the curve/pool is bonded to, what the venue does with LP on graduation
-// (the rug crux: a pump.fun graduate's pool is protocol-owned - "lock
-// unconfirmed" is a false alarm there), and whether the platform pays the
-// creator ongoing fees (in which case what the creator DOES with them is a
-// first-class signal - LP adds / buyback-burns are bullish, dumping is not).
-//
-// Detection is layered: mint-address vanity suffix -> DexScreener dexId/labels
-// -> venue API state (via /api/launch, server-proxied). Every layer degrades
-// to null rather than guessing.
+// Launch provenance separates observed factory/protocol identity from copyable
+// suffix, quote-symbol and venue-label leads. Neither identifies custody of the
+// particular pool under review; pool protection requires its own evidence.
 
 import type { TokenDossier } from "../token/audit";
 import { dexByToken, pickPair } from "../token/sources";
@@ -157,7 +149,7 @@ const VENUES: Venue[] = [
     // Uniswap v2 pool QUOTED IN VIRTUAL.
     dexIds: [],
     quoteIs: ["VIRTUAL"],
-    quoteNoteFor: (q) => q === "VIRTUAL" ? "bonded to VIRTUAL - the floor is denominated in the Virtuals protocol token, so this token carries VIRTUAL's beta on top of its own" : null,
+    quoteNoteFor: (q) => q === "VIRTUAL" ? "quoted in VIRTUAL - its dollar value depends on both the token/VIRTUAL exchange rate and VIRTUAL's price; this does not establish a price floor" : null,
     lpOnGraduation: "locked",
     lpNote: "Virtuals auto-stakes graduated LP under a 10-year lock (the pool's LP majority sits in a 'Staked ... by Virtuals' contract) - not creator-pullable",
     platformPaysCreator: true,
@@ -396,6 +388,20 @@ export function matchVenue(chain: string, address: string, dexId: string, quote:
   ) ?? null;
 }
 
+/** Vanity suffixes and quote symbols are copyable: keep them as leads, not provenance. */
+export function resolveVenueEvidence(chain: string, address: string, dexId: string, quote: string | null, api: LaunchApiResponse | null) {
+  const candidate = matchVenue(chain, address, dexId, quote);
+  const factory = api?.creatorVenue ? VENUES.find(v => v.name === api.creatorVenue && (!v.chains || v.chains.includes(chain)) && (v.chain === "any" || (v.chain === "solana") === (chain === "solana"))) : null;
+  const pump = chain === "solana" && typeof api?.pumpfun?.complete === "boolean" ? VENUES.find(v => v.name === "pump.fun") : null;
+  const confirmed = factory ?? pump ?? null;
+  const attribution: NonNullable<LaunchProvenance["attribution"]> = {
+    state: confirmed ? "confirmed" : candidate ? "candidate" : "unresolved",
+    basis: factory ? "Server-observed creator/factory or protocol announcement attribution." : pump ? "Token-specific pump.fun record." : candidate ? "Copyable address suffix, quote symbol or trading-venue label only; launch provenance is unconfirmed." : "No corroborated launch origin was collected. A DEX listing alone does not establish a fair launch.",
+    candidate: candidate?.name ?? null,
+  };
+  return { venue: confirmed, attribution };
+}
+
 /**
  * The venue itself, as an auditable subject. A launchpad scanned by its own X
  * account must never be judged on a native token it does not have; what it CAN
@@ -454,13 +460,13 @@ export function creatorFeeAssetNote(venue: string, asset: NonNullable<LaunchProv
 }
 
 // Quote-asset ramifications that hold regardless of venue.
-export function genericQuoteNote(quote: string, sol: boolean): string | null {
+export function genericQuoteNote(quote: string, _sol: boolean): string | null {
   const q = quote.toUpperCase();
   if (["USDC", "USDT", "USDG", "USD1", "DAI"].includes(q)) {
-    return `bonded to ${q} - a stable quote: the pool's floor is dollar-denominated rather than riding ${sol ? "SOL" : "the gas token"}`;
+    return `quoted in ${q} - a stable quote currency and a dollar-denominated quote, subject to the quote asset's peg risk. This is not a token price floor or redemption guarantee`;
   }
   if (["SOL", "WSOL", "WETH", "ETH", "WBNB", "BNB"].includes(q)) return null; // the default; nothing remarkable
-  return `bonded to ${quote} - the floor is denominated in another volatile token, so this token carries ${quote}'s risk on top of its own`;
+  return `quoted in ${quote} - another volatile token; dollar value depends on both prices. The pairing does not establish a price floor`;
 }
 
 export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenance | null> {
@@ -475,14 +481,11 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
     const dexId = (d.dexId || pair?.dexId || "").toLowerCase();
 
     const api = await fromApi(d.chain, d.address, d.pairAddress, d.symbol);
-    // Client fingerprints first; the server's creator-contract check (Blockscout)
-    // catches the venues that leave no client-visible trace (Pons reads as plain
-    // uniswap/WETH - only the token's creator address gives it away).
-    let venue = matchVenue(d.chain, d.address, dexId, quote);
-    if (!venue && api?.creatorVenue) venue = VENUES.find((v) => v.name === api.creatorVenue) ?? null;
+    const { venue, attribution } = resolveVenueEvidence(d.chain, d.address, dexId, quote, api);
 
     const out: LaunchProvenance = {
-      kind: venue ? "launchpad" : dexId ? "fair-launch" : "unknown",
+      kind: venue ? "launchpad" : "unknown",
+      attribution,
       venue: venue?.name ?? null,
       onCurve: null,
       graduated: null,
@@ -507,8 +510,9 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
         out.lpDisposition = "curve";
         out.lpNote = "no LP yet - the bonding curve contract IS the market; the pool only exists after graduation";
       } else if (out.graduated !== false) {
-        out.lpDisposition = venue.lpOnGraduation;
-        out.lpNote = venue.lpNote;
+        // Factory identity does not prove custody of the particular audited pool.
+        out.lpDisposition = "unknown";
+        out.lpNote = `Venue documentation describes: ${venue.lpNote}. Custody and withdrawal rights of this specific pool were not verified by this attribution check.`;
       }
       out.creatorFees = {
         platformPays: venue.platformPaysCreator,
@@ -533,9 +537,9 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
       out.quoteNote = (quote && venue.quoteNoteFor?.(quote)) || (quote ? genericQuoteNote(quote, sol) : null);
       const feeAssetNote = creatorFeeAssetNote(venue.name, venue.creatorFeeAsset, quote);
       if (feeAssetNote) out.notes.push(feeAssetNote);
-    } else if (out.kind === "fair-launch") {
+    } else {
       out.quoteNote = quote ? genericQuoteNote(quote, sol) : null;
-      out.notes.push("No launchpad signature (mint suffix, dexId, quote) - launched directly on the DEX.");
+      out.notes.push(attribution.candidate ? `Possible ${attribution.candidate} origin. ${attribution.basis}` : attribution.basis);
     }
     // Exchange-era debut: a token trading on several CEXs may not have "launched"
     // on a DEX at all - it may have debuted via an exchange listing or a sale
