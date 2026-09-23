@@ -26,9 +26,10 @@ jobs:
       # burst. On 2026-09-23 five consecutive runs died on "toomanyrequests:
       # allowed 44000/minute, retry-after <1ms" before a test ran - a burst
       # limit on parallel layer downloads, which a login alone did not clear.
-      # Three measures: authenticate (per-account allowance), cap the docker
-      # daemon's parallel downloads so the burst is smaller, and retry with
-      # exponential backoff instead of three quick attempts.
+      # Four measures: authenticate (per-account allowance), cap the docker
+      # daemon's parallel downloads so the burst is smaller, retry with
+      # exponential backoff instead of three quick attempts, and pull from
+      # the ECR Public mirror instead of ghcr.io (set on the start step).
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
@@ -39,6 +40,11 @@ jobs:
           sudo systemctl restart docker
 
       - name: Start isolated Supabase database
+        # The pinned CLI defaults to ghcr.io; the same images are mirrored to
+        # ECR Public (the registry newer CLIs default to), on a separate
+        # allowance. Every pinned tag was checked there on 2026-09-23.
+        env:
+          SUPABASE_INTERNAL_IMAGE_REGISTRY: public.ecr.aws
         run: |
           set -eu
           supabase stop --no-backup || true
