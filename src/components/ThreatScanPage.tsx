@@ -940,7 +940,7 @@ function Report({ scan }: { scan: ThreatScan }) {
           <span className="mono text-[10.5px] text-ink-faint">
             {code.verified
               ? `${code.contractName ?? "contract"} · ${code.stats?.functions ?? 0} fns · ${code.stats?.gatedFunctions ?? 0} privileged · via ${code.origin}`
-              : code.checked ? "no verified source" : "SPL - no per-token code"}
+              : code.checked ? "no verified source" : code.system === "b20" ? "B20 system asset - no per-token code" : "SPL - no per-token code"}
           </span>
         </div>
         {code.verified && code.flags.length === 0 && (
@@ -950,7 +950,10 @@ function Report({ scan }: { scan: ThreatScan }) {
         {!code.verified && code.checked && (
           <p className="mt-2 text-[13px] text-ink-dim">The source is not published on any public verification database. Unreadable code is a risk in itself - nobody outside the team knows what it does.</p>
         )}
-        {!code.checked && (
+        {!code.checked && code.system === "b20" && (
+          <p className="mt-2 text-[13px] text-ink-dim">This is a Base B20 asset: the chain's native token standard. The address holds a one-byte marker and the token runs on the B20 precompile, so there is no per-token source to verify and no hidden code to read. The supply cap, mint and owner reads above are its whole power surface.</p>
+        )}
+        {!code.checked && code.system !== "b20" && (
           <p className="mt-2 text-[13px] text-ink-dim">Solana tokens share the standard token program - there is no per-token code to read. The mint, freeze, and transfer-hook authorities above carry the equivalent risk.</p>
         )}
         <EngineRead scan={scan} />

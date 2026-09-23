@@ -83,7 +83,7 @@ export async function threatScan(
       : "Simulating sells for real holders - selective honeypots, siphoned wallets, max caps…",
     tone: "neutral",
   });
-  const [code, rc, hp, meta, fp, xchain, launch] = await Promise.all([
+  const [codeRead, rc, hp, meta, fp, xchain, launch] = await Promise.all([
     reviewCode(dossier.chain, dossier.address),
     sol ? rugcheckReport(dossier.address) : Promise.resolve(null),
     sol ? Promise.resolve(null) : honeypotDeep(dossier.chain, dossier.address),
@@ -92,6 +92,13 @@ export async function threatScan(
     sol ? Promise.resolve(null) : crossChain(dossier.chain, dossier.address, dossier.liquidityUsd ?? 0),
     launchProvenance(dossier),
   ]);
+  // A Base B20 asset has no per-token bytecode (the route reports the
+  // standard, not a fingerprint), so the source databases' silence is not
+  // "unverified": there is nothing to verify. Folded into the review here so
+  // every consumer - trace, judge, check row, report - reads one fact.
+  const code: CodeReview = fp?.system === "b20"
+    ? { ...codeRead, checked: false, verified: false, system: "b20" }
+    : codeRead;
   // Linked-site safety: is the token's own website a drainer / blacklisted host,
   // and does it even have an X account. The danger here is off-chain.
   const site = await siteSafety(dossier.socials ?? [], dossier.address, dossier.chain);
@@ -166,7 +173,7 @@ export async function threatScan(
   // Known-rug-clone check: does this contract's bytecode fingerprint match a
   // token we already flagged? A byte-identical clone of a known rug is the same
   // trap wearing a new ticker.
-  const clones = fp ? await knownRugClones(fp.fingerprint, dossier.address) : [];
+  const clones = fp?.fingerprint ? await knownRugClones(fp.fingerprint, dossier.address) : [];
   if (clones.length) {
     // A fingerprint identifies a template (see judge): only a confirmed trap
     // on a non-launchpad token is a known-rug clone; the rest is a disclosure.
@@ -177,13 +184,15 @@ export async function threatScan(
   }
   emit?.({
     phase: "ARGUS · Code",
-    label: code.verified ? `${code.contractName ?? "Contract"} read` : code.checked ? "No verified source" : "No per-token code on this chain",
+    label: code.verified ? `${code.contractName ?? "Contract"} read` : code.checked ? "No verified source" : code.system === "b20" ? "B20 system asset" : "No per-token code on this chain",
     detail: code.verified
       ? `${code.stats?.functions ?? 0} functions, ${code.stats?.gatedFunctions ?? 0} privileged, ${code.flags.length} code flags${code.ai ? ", AI read complete" : ""}.`
       : code.checked
         ? "Source is not verified on any public database - the code cannot be read."
-        : "SPL tokens share the standard token program; authorities carry the risk.",
-    tone: code.verified ? (code.flags.some((f) => f.severity === "critical") ? "bad" : "good") : "warn",
+        : code.system === "b20"
+          ? "Base-native asset standard: no per-token bytecode exists, so there is no source to verify and no hidden code to read; the authority reads are the whole power surface."
+          : "SPL tokens share the standard token program; authorities carry the risk.",
+    tone: code.verified ? (code.flags.some((f) => f.severity === "critical") ? "bad" : "good") : code.system === "b20" ? "neutral" : "warn",
   });
 
   // Re-run classification now that the code has been read - what the tax
@@ -538,6 +547,11 @@ export function judge( // exported for unit tests only
   } else if (code.checked && EVM(d.chain)) {
     soft(15);
     warnings.push("UNVERIFIED contract - the source is hidden, so nobody can read what the code really does");
+  } else if (code.system === "b20") {
+    // Not a verified contract and not an unverified one: a chain-native asset
+    // with no per-token code. No source to read means no hidden code either,
+    // so the mint, owner and pause reads above are the complete power surface.
+    positives.push("Base B20 system asset - no per-token contract exists to hide anything in; the token runs on the chain's asset precompile and the authority reads above are its whole power surface");
   }
 
   // --- taxes: the % AND what the tax DOES ---
@@ -971,7 +985,7 @@ export function buildChecks( // exported for unit tests only
       !code.checked ? "na"
         : d.capApplied === "documented_scanner_concealment" || d.findings.some((f) => f.tone === "bad" && f.source === "contract source") ? "fail"
         : code.verified ? (code.flags.some((f) => f.severity === "critical") ? "fail" : code.flags.some((f) => f.severity === "high") ? "warn" : "pass") : "warn",
-      !code.checked ? (sol ? "SPL - standard program, no per-token code" : "Not checked")
+      !code.checked ? (sol ? "SPL - standard program, no per-token code" : code.system === "b20" ? "B20 system asset - no per-token code, nothing to verify" : "Not checked")
         : d.capApplied === "documented_scanner_concealment" || d.findings.some((f) => f.tone === "bad" && f.source === "contract source") ? "The source documents defeating a safety scanner"
         : code.verified ? `${code.stats?.functions ?? 0} functions read, ${code.flags.length} flag${code.flags.length === 1 ? "" : "s"}` : "Source unverified - unreadable"),
     chk("market", "market", "Market conduct",
