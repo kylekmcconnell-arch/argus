@@ -472,7 +472,7 @@ const isBurnAddr = (a?: string) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a
 const isBurnTag = (t?: string) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
 
 // --- normalize EVM safety from GoPlus + honeypot.is ---
-function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): NormalizedSafety {
+function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null, tokenAddress?: string): NormalizedSafety {
   const s = sim;
   // GoPlus documents missing/empty trading fields as unknown. Only a DEX-listed
   // response with all three key outcomes recorded is a completed provider
@@ -485,17 +485,25 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
   // contract, as PEPE shows) is not a rug signal — only an unlocked non-contract
   // wallet holding the LP is rug-ready.
   let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
-  let lpRowsSeen = 0;
+  let lpRowsSeen = 0, lpSelfPct = 0;
+  const selfAddress = (tokenAddress ?? "").trim().toLowerCase();
   for (const h of gp?.lp_holders ?? []) {
     const pct = Number(h.percent) * 100;
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) continue;
     lpRowsSeen += 1;
-    if (!Number.isFinite(pct)) continue;
+    if (selfAddress && (h.address ?? "").trim().toLowerCase() === selfAddress) lpSelfPct += pct;
     if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct;
     else if (h.is_locked === 1) lpLockedPct += pct;
     else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
   }
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
+  // A list whose rows are mostly the token's own contract measures nothing about
+  // custody: the provider returned the mint back to us, not the pool's holders.
+  // Publishing "LP not locked" off that is an assertion from absent data, and it
+  // also suppressed the RugCheck fallback that could have measured it properly.
+  const lpRowsAreSelfReferential = lpRowsSeen > 0
+    && lpSelfPct >= 50
+    && lpBurnedPct + lpLockedPct === 0;
   const creatorShare = num(gp?.creator_percent);
   const ownerAddressReported = typeof gp?.owner_address === "string";
   const ownerAddress = (gp?.owner_address ?? "").trim();
@@ -549,7 +557,7 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     ownerChangeBalance: t1(gp?.owner_change_balance),
     creatorPercent: (creatorShare ?? 0) * 100,
     creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
-    lpAssessed: lpRowsSeen > 0,
+    lpAssessed: lpRowsSeen > 0 && !lpRowsAreSelfReferential,
   };
 }
 
@@ -827,7 +835,7 @@ async function runTokenAudit(
     gpEvm = gp;
     explorerHolders = explorer;
     contractSource = source;
-    safety = evmSafety(gp, sim);
+    safety = evmSafety(gp, sim, address);
     // Honeypot.is officially supports only Ethereum, BSC, and Base. On another
     // chain, two-sided activity in the selected liquid pool is a bounded but
     // definitive receipt that buying and selling occurred. It does not waive
