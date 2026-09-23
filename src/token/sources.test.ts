@@ -36,6 +36,7 @@ describe("pickPair", () => {
       links: { homepage: [], twitter_screen_name: "" },
       market_data: {
         market_cap: { usd: 8_000_000_000 },
+        fully_diluted_valuation: { usd: 11_000_000_000 },
         ath: { usd: 44.92 },
         ath_date: { usd: "2021-05-03T00:00:00.000Z" },
         ath_change_percentage: { usd: -87.4 },
@@ -46,6 +47,7 @@ describe("pickPair", () => {
       .resolves.toMatchObject({
         listed: true,
         mcapUsd: 8_000_000_000,
+        fdvUsd: 11_000_000_000,
         ath: {
           priceUsd: 44.92,
           date: "2021-05-03T00:00:00.000Z",

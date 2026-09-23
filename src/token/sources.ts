@@ -224,6 +224,7 @@ export interface CgInfo {
   id?: string | null;
   rank: number | null;
   mcapUsd: number | null;
+  fdvUsd?: number | null;
   marketCount: number;
   cexCount: number;
   cexNames: string[];
@@ -253,6 +254,7 @@ interface CoinGeckoResponse {
   market_cap_rank?: number;
   market_data?: {
     market_cap?: { usd?: number };
+    fully_diluted_valuation?: { usd?: number };
     ath?: { usd?: number };
     ath_date?: { usd?: string };
     ath_change_percentage?: { usd?: number };
@@ -318,6 +320,7 @@ export async function coingeckoToken(chain: string, address: string, fetchImpl: 
       id: typeof d.id === "string" && d.id ? d.id : null,
       rank: d.market_cap_rank ?? null,
       mcapUsd: d.market_data?.market_cap?.usd ?? null,
+      fdvUsd: d.market_data?.fully_diluted_valuation?.usd ?? null,
       marketCount: markets.size,
       cexCount: cex.size,
       cexNames,

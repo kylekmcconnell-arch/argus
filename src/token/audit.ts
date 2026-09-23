@@ -19,6 +19,7 @@ import { fetchPriceHistory, type PriceHistory } from "../lib/priceHistory";
 import { arkhamProviderEnabled } from "../lib/providerCapabilities.js";
 import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
 import { classifyMarketAddress } from "../lib/marketAddresses";
+import { finitePlausibleUsd } from "../lib/tokenMarketPresentation";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
 import {
   dexByPairResult, dexByTokenResult, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
@@ -729,10 +730,14 @@ async function runTokenAudit(
   const address = pair.baseToken.address;
   const chain = pair.chainId;
   const liquidityUsd = pair.liquidity?.usd ?? 0;
-  // `mcap` is the circulating value when DexScreener provides it. Preserve FDV
-  // separately so the report does not label one as the other.
-  const fdv = pair.marketCap ?? pair.fdv ?? 0;
-  const fullyDilutedValuation = pair.fdv ?? pair.marketCap ?? 0;
+  // DexScreener sometimes puts an overflowed circulating cap in `marketCap`
+  // (UNI printed ~$5.5 quadrillion). A figure above the $20T ceiling is
+  // unmeasured, never a headline, and CoinGecko's circulating cap/FDV win when
+  // they exist or the pair disagrees by an order of magnitude.
+  let circulatingUsd = finitePlausibleUsd(pair.marketCap) ? pair.marketCap : undefined;
+  let fullyDilutedUsd = finitePlausibleUsd(pair.fdv) ? pair.fdv : undefined;
+  let fdv = circulatingUsd ?? 0;
+  let fullyDilutedValuation = fullyDilutedUsd ?? 0;
   const vol24 = pair.volume?.h24 ?? 0;
   const buys = pair.txns?.h24?.buys ?? 0;
   const sells = pair.txns?.h24?.sells ?? 0;
@@ -743,7 +748,8 @@ async function runTokenAudit(
   // heavy churn with the price going nowhere (volume that does not move price).
   const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
   const washSignature = pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
-  step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
+  const mcapDetail = circulatingUsd != null ? `mcap $${Math.round(circulatingUsd).toLocaleString()}` : "mcap unmeasured";
+  step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, ${mcapDetail}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
 
   // ---- safety (chain-specific) ----
   const gpChain = GOPLUS_CHAIN[chain];
@@ -893,6 +899,12 @@ async function runTokenAudit(
     step({ phase: "Corroborate", label: "CoinGecko cross-check", detail: "Independent listing, CEX markets, market-cap vs FDV…", tone: "neutral" });
     cg = await coingeckoToken(chain, address, fetcher);
   }
+  const geckoMcap = finitePlausibleUsd(cg?.mcapUsd) ? cg.mcapUsd : undefined;
+  const geckoFdv = finitePlausibleUsd(cg?.fdvUsd) ? cg.fdvUsd : undefined;
+  if (geckoMcap) circulatingUsd = geckoMcap;
+  if (geckoFdv && (circulatingUsd == null || geckoFdv >= circulatingUsd * 0.5)) fullyDilutedUsd = geckoFdv;
+  fdv = circulatingUsd ?? 0;
+  fullyDilutedValuation = fullyDilutedUsd ?? 0;
   // Independent evidence that holders can actually sell: a honeypot cannot
   // produce genuine sell transactions against deep liquidity, and cannot be
   // listed on many centralized venues. Both signals are keyless.
@@ -1088,8 +1100,8 @@ async function runTokenAudit(
       });
     } else if (cg) {
       findings.push({ claim: `Corroborated on CoinGecko${cg.rank ? ` (rank #${cg.rank})` : ""}, ${cg.cexCount} centralized market${cg.cexCount === 1 ? "" : "s"}.`, tone: "good", source: "coingecko" });
-      if (cg.mcapUsd && fdv && fdv > cg.mcapUsd * 3) {
-        findings.push({ claim: `FDV is ${(fdv / cg.mcapUsd).toFixed(1)}x circulating market cap, creating a large unlock or dilution overhang.`, tone: "warn", source: "coingecko" });
+      if (circulatingUsd && fullyDilutedValuation > circulatingUsd * 3) {
+        findings.push({ claim: `FDV is ${(fullyDilutedValuation / circulatingUsd).toFixed(1)}x circulating market cap, creating a large unlock or dilution overhang.`, tone: "warn", source: "coingecko" });
       }
     }
   }
@@ -1503,8 +1515,8 @@ async function runTokenAudit(
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? undefined, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
     mcap: fdv, fdv: fullyDilutedValuation, liquidityUsd, vol24, ageDays,
     marketEvidence: {
-      mcap: pair.marketCap != null && Number.isFinite(pair.marketCap),
-      fdv: pair.fdv != null && Number.isFinite(pair.fdv),
+      mcap: circulatingUsd != null,
+      fdv: fullyDilutedUsd != null,
       liquidityUsd: pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd),
       vol24: pair.volume?.h24 != null && Number.isFinite(pair.volume.h24),
       ageDays: pair.pairCreatedAt != null && Number.isFinite(pair.pairCreatedAt),
