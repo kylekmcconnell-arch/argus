@@ -109,6 +109,14 @@ export function plainScoreRationale(value: string): string {
   if (wash) {
     return `Trading volume was ${wash[1]} times the pool size while the price barely moved (${wash[2]}%). That pattern is a wash-trade signature, not proof of genuine demand.`;
   }
+  const cycled = raw.match(/^vol\/liquidity ([\d.]+x|unbounded) in 24h: the pool turned over .* a cycled-volume signature\.?$/i);
+  if (cycled) {
+    return `Trading volume was ${cycled[1] === "unbounded" ? "unbounded relative to" : cycled[1].replace(/x$/, "") + " times"} the pool size in a day, and the pool is still standing. A pool that turns over a hundred times its depth without being drained is being traded against itself; the volume is manufactured, not demand.`;
+  }
+  const noPool = raw.match(/^\$([\d,]+) of 24h volume on \$([\d,]+) of liquidity: volume without a pool to carry it, a fake-volume signature\.?$/i);
+  if (noPool) {
+    return `$${noPool[1]} of trading volume is reported against $${noPool[2]} of liquidity. No pool that shallow can host that trading, so the volume is fabricated or the pool was emptied after it. Read the volume figure as fake.`;
+  }
 
   const tape = raw.match(/^24h vol\/liquidity ([\d.]+)x,\s*([\d,]+) buys \/ ([\d,]+) sells\.?$/i);
   if (tape) {
