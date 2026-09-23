@@ -15,20 +15,28 @@ concurrency:
 jobs:
   database:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
           version: 2.109.1
 
-      # supabase start pulls ~10 images from ghcr.io. Anonymous pulls share one
-      # allowance across every GitHub-hosted runner behind the same egress, and
-      # on 2026-09-23 four consecutive runs died on "toomanyrequests" before a
-      # test ran. Logging in with the job's own token moves the pulls onto a
-      # per-account limit.
+      # supabase start pulls ~10 images (dozens of layers) from ghcr.io in one
+      # burst. On 2026-09-23 five consecutive runs died on "toomanyrequests:
+      # allowed 44000/minute, retry-after <1ms" before a test ran - a burst
+      # limit on parallel layer downloads, which a login alone did not clear.
+      # Three measures: authenticate (per-account allowance), cap the docker
+      # daemon's parallel downloads so the burst is smaller, and retry with
+      # exponential backoff instead of three quick attempts.
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Throttle docker image downloads
+        run: |
+          set -eu
+          echo '{"max-concurrent-downloads": 2}' | sudo tee /etc/docker/daemon.json >/dev/null
+          sudo systemctl restart docker
 
       - name: Start isolated Supabase database
         run: |
@@ -37,17 +45,19 @@ jobs:
           docker rm -f supabase_db_ARGUS 2>/dev/null || true
 
           attempt=1
-          max_attempts=3
+          max_attempts=6
+          delay=10
           until supabase start; do
             if [ "$attempt" -ge "$max_attempts" ]; then
               echo "supabase start failed after ${max_attempts} attempts"
               exit 1
             fi
-            echo "supabase start failed (attempt ${attempt}/${max_attempts}); retrying..."
+            echo "supabase start failed (attempt ${attempt}/${max_attempts}); retrying in ${delay}s..."
             supabase stop --no-backup || true
             docker rm -f supabase_db_ARGUS 2>/dev/null || true
             attempt=$((attempt + 1))
-            sleep 5
+            sleep "$delay"
+            delay=$((delay * 2))
           done
 
       - name: Executable Postgres persistence and activation gates
