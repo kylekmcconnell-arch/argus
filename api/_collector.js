@@ -35504,6 +35504,40 @@ function describeOutcomeDelta(prior, current) {
   return `Since last scan${when}: ${parts.join(" \xB7 ")}`;
 }
 
+// src/lib/holderChanges.ts
+function compareHolderObservations(before, after) {
+  if (!before || !after || before.version !== 1 || after.version !== 1) return [];
+  const validRows = (snapshot) => Array.isArray(snapshot.rows) && snapshot.rows.length > 0 && snapshot.rows.length <= 25 && snapshot.rows.every((row) => row && tokenSubjectIdentity(snapshot.chain, row.address) && Number.isFinite(row.percent) && row.percent >= 0 && row.percent <= 100 && Array.isArray(row.matches) && row.matches.every((match) => match && typeof match.name === "string")) && snapshot.rows.reduce((sum, row) => sum + row.percent, 0) <= 100.01 && snapshot.examined === snapshot.rows.length && snapshot.invalidRows === 0 && new Set(snapshot.rows.map((row) => tokenSubjectIdentity(snapshot.chain, row.address)?.ref)).size === snapshot.rows.length;
+  if (!validRows(before) || !validRows(after)) return [];
+  const oldIdentity = tokenSubjectIdentity(before.chain, before.tokenAddress);
+  const newIdentity = tokenSubjectIdentity(after.chain, after.tokenAddress);
+  if (!oldIdentity || oldIdentity.ref !== newIdentity?.ref) return [];
+  if (before.status !== "complete" || after.status !== "complete" || before.ranking !== "ranked-addresses" || after.ranking !== "ranked-addresses") return [];
+  if (before.source !== after.source || before.supplyCoveredPct == null || after.supplyCoveredPct == null) return [];
+  const previousTime = Date.parse(before.capturedAt), currentTime = Date.parse(after.capturedAt);
+  if (!Number.isFinite(previousTime) || !Number.isFinite(currentTime) || currentTime <= previousTime) return [];
+  const key = (address) => tokenSubjectIdentity(before.chain, address)?.ref;
+  const oldRows = new Map(before.rows.map((row) => [key(row.address), row]));
+  const newRows = new Map(after.rows.map((row) => [key(row.address), row]));
+  const comparableRegistry = before.registryVersion === after.registryVersion;
+  const isWallet = (role) => role === "unattributed" || role === "unclassified-contract";
+  const changes = [];
+  for (const row of after.rows) {
+    if (!isWallet(row.role)) continue;
+    const old = oldRows.get(key(row.address));
+    const registryNames = [...new Set(row.matches.map((match) => match.name))];
+    if (!old && registryNames.length && comparableRegistry) {
+      changes.push({ kind: "newly-observed-indexed-wallet", address: row.address, before: null, after: row.percent, registryNames });
+    } else if (old && isWallet(old.role) && Math.abs(row.percent - old.percent) >= 2) {
+      changes.push({ kind: "share-change", address: row.address, before: old.percent, after: row.percent, registryNames });
+    }
+  }
+  for (const old of before.rows) if (isWallet(old.role) && comparableRegistry && old.matches.length && !newRows.has(key(old.address))) {
+    changes.push({ kind: "no-longer-observed-indexed-wallet", address: old.address, before: old.percent, after: null, registryNames: [...new Set(old.matches.map((match) => match.name))] });
+  }
+  return changes;
+}
+
 // src/lib/reportDelta.ts
 var record4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 var finite2 = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -35601,6 +35635,10 @@ function holderDelta(kind, previousPayload, currentPayload, prior) {
   const previous = tokenPayload(kind, previousPayload);
   const current = tokenPayload(kind, currentPayload);
   if (!previous || !current || previous.holdersAssessed !== true || current.holdersAssessed !== true) return null;
+  if (previous.holderIntelligence || current.holderIntelligence) {
+    const beforeCheck = previous.holderIntelligence, afterCheck = current.holderIntelligence;
+    if (!beforeCheck || !afterCheck || beforeCheck.status !== "complete" || afterCheck.status !== "complete" || beforeCheck.ranking !== "ranked-addresses" || afterCheck.ranking !== "ranked-addresses" || beforeCheck.source !== afterCheck.source || beforeCheck.supplyCoveredPct == null || afterCheck.supplyCoveredPct == null) return null;
+  }
   const before = finite2(previous.safety.topHolderPct);
   const after = finite2(current.safety.topHolderPct);
   if (before === null || after === null || Math.abs(after - before) < 10) return null;
@@ -35612,6 +35650,25 @@ function holderDelta(kind, previousPayload, currentPayload, prior) {
     reversalCondition: "Comparable holder receipts showing the same wallet share in both scans would reverse this change.",
     evidenceHref: kind === "investigation" ? "#investigation-evidence" : "#composition"
   }, `${before.toFixed(2)}%`, `${after.toFixed(2)}%`);
+}
+function holderObservationDelta(kind, previousPayload, currentPayload, prior) {
+  const snapshot = (payload) => {
+    const root = record4(payload);
+    return kind === "person" ? record4(root.holderProfile).holderIntelligence : kind === "investigation" ? record4(root.token).holderIntelligence : root.holderIntelligence;
+  };
+  const changes = compareHolderObservations(snapshot(previousPayload), snapshot(currentPayload));
+  const change = changes.find((item) => item.kind === "newly-observed-indexed-wallet") ?? changes[0];
+  if (!change) return null;
+  const format = (value) => value == null ? "Outside the captured ranks" : `${value.toFixed(2)}% of supply`;
+  const headline = change.kind === "newly-observed-indexed-wallet" ? "An indexed wallet is newly visible among the top 25" : change.kind === "no-longer-observed-indexed-wallet" ? "An indexed wallet is no longer visible among the top 25" : "A holder's observed supply share changed by at least 2 percentage points";
+  return makeDelta(prior, {
+    id: `delta-holder-observation-${change.address}`,
+    category: "holder_observation",
+    headline,
+    consequence: `${change.address}: ${format(change.before)} \u2192 ${format(change.after)}.${change.registryNames.length ? ` Curated records: ${change.registryNames.join(", ")}.` : ""} This compares complete ranked samples from the same provider. It does not establish a buy, sale, exit, beneficial owner or common control. Supply changes and movement below rank 25 can change the observation.`,
+    reversalCondition: "Reconcile both dated holder registers, token supply and intervening transfers. A corrected register or changed provider scope can invalidate this comparison.",
+    evidenceHref: "#holder-intelligence"
+  }, format(change.before), format(change.after));
 }
 function shippingSummary(kind, payload) {
   const token = tokenPayload(kind, payload);
@@ -35669,9 +35726,9 @@ function buildMaterialReportDelta(kind, prior, currentPayload) {
     const before = payloadTokenIdentity(kind, prior.payload);
     const after = payloadTokenIdentity(kind, currentPayload);
     if (before && after && before.ref !== after.ref) return null;
-    return contractDelta(kind, prior.payload, currentPayload, prior) ?? liquidityDelta(kind, prior.payload, currentPayload, prior) ?? holderDelta(kind, prior.payload, currentPayload, prior) ?? developmentDelta(kind, prior.payload, currentPayload, prior) ?? verifiedFactDelta(kind, prior.payload, currentPayload, prior);
+    return contractDelta(kind, prior.payload, currentPayload, prior) ?? liquidityDelta(kind, prior.payload, currentPayload, prior) ?? holderObservationDelta(kind, prior.payload, currentPayload, prior) ?? holderDelta(kind, prior.payload, currentPayload, prior) ?? developmentDelta(kind, prior.payload, currentPayload, prior) ?? verifiedFactDelta(kind, prior.payload, currentPayload, prior);
   }
-  return verifiedFactDelta(kind, prior.payload, currentPayload, prior);
+  return holderObservationDelta(kind, prior.payload, currentPayload, prior) ?? verifiedFactDelta(kind, prior.payload, currentPayload, prior);
 }
 
 // server/adapters/securityAudits.ts
