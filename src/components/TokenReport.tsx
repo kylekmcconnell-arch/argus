@@ -41,24 +41,12 @@ import { ExpandableText } from "./ExpandableText";
 import { ReportDisclaimer } from "./ReportDisclaimer";
 import { RingAlert } from "./RingAlert";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
-import {
-  ArrowClockwise,
-  ArrowLeft,
-  Briefcase,
-  ChartDonut,
-  ChatsCircle,
-  ClipboardText,
-  Database,
-  FileText,
-  Graph,
-  Plus,
-  ShareNetwork,
-  ShieldWarning,
-  Star,
-} from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
-import { ReportExperienceLayout, ReportStickyTableOfContents, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
+import { ArgusReportShell, type MoreAction } from "../reports/argus/ArgusReportShell";
+import { LegacySection } from "../reports/argus/primitives";
+import { CodeChapter } from "../reports/argus/chapters/CodeChapter";
+import { buildCodeView } from "../reports/argus/codeView";
 import { ScoreComposition } from "./ScoreComposition";
 import { ReportChallengeButton } from "./ReportChallengeButton";
 import { ReportActionsRow } from "./ReportActionsRow";
@@ -269,6 +257,25 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     setCopiedTxt(true);
     setTimeout(() => setCopiedTxt(false), 1500);
   };
+  /** Mint a share link for this exact saved version and hand the URL back. */
+  const shareUrl = async (): Promise<string> => {
+    const response = await fetch("/api/share", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "token",
+        ref: d.address,
+        reportVersionId: d.versionContext?.reportVersionId
+          ?? (d.persistence?.state === "persisted" ? d.persistence.reportVersionId : undefined),
+      }),
+    });
+    const body = (await response.json().catch(() => null)) as { url?: unknown; message?: unknown } | null;
+    if (!body) throw new Error("The sharing service could not be reached. Please try again.");
+    if (!response.ok || typeof body.url !== "string") {
+      throw new Error(typeof body.message === "string" ? body.message : "Secure share link creation failed.");
+    }
+    return new URL(body.url, location.origin).toString();
+  };
   const share = async () => {
     if (shareState === "creating") return;
     setShareState("creating");
@@ -364,395 +371,326 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     : presentedVerdict === "CAUTION" || presentedVerdict === "INCOMPLETE" || presentedVerdict === "UNVERIFIABLE_IDENTITY"
       ? "caution"
       : "avoid";
-  const reportNavItems: ReportCanvasNavItem[] = [
-    { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
-    { href: "#report-risks", label: "Risks", icon: <ChartDonut size={16} weight="duotone" aria-hidden="true" /> },
-    { href: "#token-story", label: "Market", icon: <FileText size={16} weight="duotone" aria-hidden="true" /> },
-    ...(d.socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
-    { href: "#token-relationships", label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
-    { href: "#token-evidence", label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
-    { href: "#token-methodology", label: "Method", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
-    ...(!shareView ? [{ href: "#token-challenge" as const, label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
+
+  const codeView = buildCodeView({
+    shipping: d.shipping ?? null,
+    people: [],
+    linkedOrg: ghOrg,
+    absentReason: ghOrg
+      ? "A repository is linked but this saved scan did not read it."
+      : "No repository is linked from a surface this project controls, so no development read was taken.",
+  });
+
+  const codeLegacy = (
+    <LegacySection title="Development panels on record" note="The frozen scorecard the engine scored and the deeper live read. The live panel charges a panel cost and reads GitHub now, not at scan time.">
+      <ShippingScorecard shipping={d.shipping} delta={d.reportDelta} githubOrg={ghOrg} />
+    </LegacySection>
+  );
+
+  const moreActions: MoreAction[] = shareView ? [] : [
+    ...(onOpenBrief ? [{ label: "Case brief", detail: "Analyst decision brief for this case", onClick: onOpenBrief }] : []),
+    { label: "Rescan", detail: "Run this audit again with current evidence", onClick: onRescan },
+    { label: "Print the full report", detail: "Every chapter, through your browser", onClick: () => printReportPdf(d.name || d.symbol) },
+    { label: copiedTxt ? "Copied" : "Copy report", detail: "The plain-text summary", onClick: copyReport },
+    { label: "New scan", onClick: onReset },
   ];
 
   return (
-    <div className="relative min-h-full pb-24">
-      <header className="sticky top-0 z-30 border-b border-line bg-void/90 backdrop-blur">
-        <div className="report-frame flex flex-wrap items-center gap-2 py-3">
-          <button onClick={onReset} className="btn-ghost flex min-h-9 items-center gap-1.5 px-1 text-[12.5px]">
-            <ArrowLeft size={15} weight="bold" aria-hidden="true" />
-            New investigation
-          </button>
-          <span className="mono text-[11px] text-ink-faint" aria-label={caseLabel ? `Case ${caseLabel}` : undefined}>
-            / {caseLabel ?? "token report"}
-          </span>
-          <span className={`chip ${versionContext ? "" : "tint-signal"}`}>
-            {versionContext ? `saved report v${versionContext.version}` : "new scan"}
-          </span>
-          <div className="scrollbar-none order-3 flex w-full items-center gap-2 overflow-x-auto pb-1 sm:order-none sm:ml-auto sm:w-auto sm:justify-end sm:overflow-visible sm:pb-0">
-            {onOpenBrief && (
-              <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact token case" className="btn-primary btn-brand flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
-                <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
-              </button>
-            )}
-            {!shareView && (
-              <a href="#token-challenge" title="Tell ARGUS what looks wrong or missing in this report" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
-                <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
-              </a>
-            )}
-            <button type="button" onClick={() => printReportPdf(d.name || d.symbol)} title="Save this report as a PDF (opens the print dialog)" className="btn-secondary print:hidden flex min-h-10 items-center gap-2 px-3 text-[12.5px]">Export PDF</button>
-            {canShare && (
-              <button onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Share link could not be created or copied. Try again." : "Copy a report link that works for 30 days"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
-                <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
-                {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share"}
-              </button>
-            )}
-            {!shareView && (
-              <button onClick={onRescan} title="Run this audit again with current evidence" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
-                <ArrowClockwise size={16} weight="duotone" aria-hidden="true" /> Rescan
-              </button>
-            )}
-            <button onClick={copyReport} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
-              <ClipboardText size={16} weight="duotone" aria-hidden="true" /> {copiedTxt ? "Copied" : "Copy report"}
-            </button>
-            {canMutateWorkspace && (
-              <button onClick={watch} className={`btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] ${watched ? "tint-signal" : ""}`}>
-                <Star size={16} weight={watched ? "fill" : "duotone"} aria-hidden="true" /> {watched ? "Watching" : "Watch"}
-              </button>
-            )}
-            {!shareView && (
-              <button onClick={onReset} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
-                <Plus size={16} weight="bold" aria-hidden="true" /> New
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <div className={`report-frame report-style-${reportStyle}`} data-report-style={reportStyle}>
-        {versionContext && (
-          <div className="mt-4">
-            <SnapshotEvidenceControl
-              snapshotVersion={versionContext.version}
-              capturedAt={versionContext.createdAt}
-              subjectKind="token"
-              currentIntelligenceEnabled={currentIntelligenceEnabled}
-              onLoadCurrentIntelligence={loadCurrentIntelligence}
-            />
-          </div>
-        )}
-        {!versionContext && (showCurrentIntelligence || privateSession) && (
-          <div className="mt-4">
-            <LiveSupplementalNotice private={privateSession} persisted={livePersistence?.state === "persisted"} />
-          </div>
-        )}
-        {persistencePending && (
-          <div className="mt-4 panel px-4 py-3 text-[12.5px] text-ink-dim" role="status">
-            Saving this report before running extra checks…
-          </div>
-        )}
-        {(persistenceFailed || persistenceMissingCapability) && (
-          <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
-            <strong className="block text-ink">This report is visible now, but it was not saved.</strong>
-            <span className="mt-1 block">It will disappear when you leave this page. Run the scan again to create a saved version before opening extra research.</span>
-            {livePersistence?.state === "failed" && livePersistence.reason && (
-              <span className="mt-1 block text-ink-dim">{livePersistence.reason}</span>
-            )}
-          </div>
-        )}
-        {showCurrentIntelligence && <RingAlert handle={"$" + d.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
-        <section className="investigation-story-cover mt-6" data-canonical-report-header="true" aria-labelledby="token-report-title">
-          <div className="flex flex-wrap items-end gap-3">
-            {d.imageUrl ? (
-              <img src={d.imageUrl} alt="" className="h-11 w-11 rounded-xl border border-line object-cover soft-shadow" />
-            ) : (
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-panel text-sm font-semibold text-signal-lift">${d.symbol.slice(0, 3)}</div>
-            )}
-            <div>
-              <p className="eyebrow">Token investigation</p>
-              <h1 id="token-report-title" className="display-sm mt-0.5 text-[30px] leading-none text-ink sm:text-[34px]">${d.symbol}</h1>
-            </div>
-            <button type="button" onClick={copyReport} className="btn-chip mb-0.5 ml-auto min-h-8 px-2.5 text-[10px] uppercase tracking-[0.08em]">
-              {copiedTxt ? "Copied" : "Copy summary"}
-            </button>
-          </div>
-
-          <ProjectLinks
-            className="mt-3"
-            website={projectSite}
-            xHandle={d.projectX ?? d.cg?.twitter}
-            contractAddress={d.address}
-            chain={d.chain}
-            links={d.socials}
-          />
-        </section>
-
-        {/* Neutralized external description: product function, not promotional copy. */}
-        {neutralProjectDescription && (
-          <ExpandableText
-            text={neutralProjectDescription}
-            className="mt-3 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim"
-          />
-        )}
-        <ReportDisclaimer className="mt-2 max-w-3xl" />
-
-        <InvestigationDecisionCanvas
-          presentationStyle={reportStyle}
-          subjectName={d.name || `$${d.symbol}`}
-          subjectSummary={neutralProjectDescription}
-          reportSummary={d.headline}
-          verdictLabel={presentationMeta.label}
-          score={d.score}
-          scoreLabel="Token safety score"
-          scoreContext="Can it be bought and sold? Who can change its rules, and how concentrated are its funds and ownership?"
-          scoreIsProvisional={d.assessment?.provisional === true || readiness.status !== "ready"}
-          favorable={favorableVerdict}
-          verdictTone={decisionCanvasTone}
-          argument={verdictArgument}
-          discovery={materialChangeDiscovery ?? controlPathDiscovery ?? decisionDiscovery}
-          decisionBoundary={d.decisionBoundary}
-          decisionBoundaryEvidenceHref={d.decisionBoundary ? decisionBoundaryHref(d.decisionBoundary, "token") : undefined}
-          supports={supportItems}
-          concerns={concernItems}
-          nextSteps={nextStepItems}
-          verified={verifiedItems}
-          challengeAnchorId={shareView ? null : "token-challenge"}
-          coveragePercent={readiness.coveragePercent}
-          successful={readiness.successful}
-          applicable={readiness.applicable}
-          checkScopeLabel="Token safety checks"
-          openItemsLabel={requiredGapChecks.length > 0
-            ? "Required checks still open"
-            : supplementalGapChecks.length > 0
-              ? "Optional follow-up research"
-              : "What is still open"}
-          capturedAt={capturedAt}
-          composition={compositionRows.length > 0 ? compositionRows : undefined}
-        />
-
-        {reportLane.definition.navigation === "sticky" && (
-          <ReportStickyTableOfContents items={reportNavItems} />
-        )}
-
-        <ReportExperienceLayout
-          items={reportNavItems}
-          showGuideNavigation={reportLane.definition.navigation === "guide"}
-        >
-        <TokenStory dossier={d} />
-
-        {!shareView && (
-          <div className="mt-4">
-            <SecondOpinion id="token-challenge" dossier={d} panelCostToken={panelCostToken} onRescan={onRescan} />
-          </div>
-        )}
-
-        <div id="token-market" className="mt-4 scroll-mt-28">
-          <ReportChallengeButton context="Market data: price, trading volume and liquidity" anchorId={shareView ? null : "token-challenge"} />
-          <MarketPerformancePanel
-            token={d}
-            showCurrentIntelligence={showCurrentIntelligence}
-            refreshCurrentMarket={currentIntelligenceEnabled}
-            onLoadCurrentIntelligence={loadCurrentIntelligence}
-          />
-        </div>
-
-        {d.socialActivity && (
-          <SocialActivityPanel
-            snapshot={d.socialActivity}
-            className="mt-4"
-            panelCostToken={panelCostToken}
-            afterActivity={isEarn ? (
-              <SubjectAccusationStage leads={EARN_SUBJECT_LEADS} subject="@earnonhood" />
-            ) : undefined}
-          />
-        )}
-        {isEarn && !d.socialActivity && (
-          <div id="subject-leads" className="panel mt-4 scroll-mt-28 px-5 py-5">
-            <SubjectAccusationStage leads={EARN_SUBJECT_LEADS} subject="@earnonhood" />
-          </div>
-        )}
-
-        {!shareView && <DeepLaunchPanel chain={d.chain} reportVersionId={versionContext?.reportVersionId ?? (livePersistence?.state === 'persisted' ? livePersistence.reportVersionId ?? undefined : undefined)} />}
-        {/* frozen development read: scored by the engine, closed on the checklist, printed with the PDF */}
-        <ShippingScorecard shipping={d.shipping} delta={d.reportDelta} githubOrg={ghOrg} />
-        {/* on-chain forensic suite — the same cluster the investigation report uses */}
-        {showCurrentIntelligence && panelCostToken && (
-          <div className="mt-4">
-            <OnChainForensics token={d} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
-            {arkhamDeployer && <div className="mt-3"><MoneyFlowStory address={arkhamDeployer} chain={d.chain} panelCostToken={panelCostToken} roleLabel={deployerLabel} /></div>}
-            {arkhamDeployer && <div className="mt-3"><Counterparties address={arkhamDeployer} subject={`$${d.symbol}`} chain={d.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} /></div>}
-            {arkhamDeployer && <div className="mt-3"><RiskPaths address={arkhamDeployer} panelCostToken={panelCostToken} /></div>}
-            {arkhamDeployer && <div className="mt-3"><Holdings address={arkhamDeployer} symbol={d.symbol} panelCostToken={panelCostToken} /></div>}
-          </div>
-        )}
-
-        {/* unified project research: news & press, documents & resources, domain
-            intelligence, and GitHub forensics — the same cluster every report uses */}
-        {showCurrentIntelligence && (
-          <div className="mt-4">
-            <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} record={canRecordCurrentIntelligence} token={{ address: d.address, chain: d.chain, deployer: d.deployer, mcap: d.mcap ?? undefined, ageDays: d.ageDays ?? undefined }} projectHandle={d.projectX} previousShipping={d.reportDelta?.category === "development" ? d.reportDelta.previousShipping ?? null : null} {...(panelCostToken ? { panelCostToken } : {})} />
-          </div>
-        )}
-
-        {!gp && (
-          <div className="mt-3 panel px-4 py-3 text-[12.5px] text-ink-dim">
-            Contract-internal safety (honeypot, mint authority, ownership, tax) could not be verified by a supported collector on <span className="capitalize">{d.chain}</span>. Unassessed areas are excluded from the score; this report cannot claim that path is complete.
-          </div>
-        )}
-
-        {/* the document's own actions: share the read-only file, save the PDF */}
-        <ReportActionsRow
-          canShare={canShare}
-          shareState={shareState}
-          onShare={() => void share()}
-          onExportPdf={() => printReportPdf(d.name || d.symbol)}
-        />
-
-        {/* the composition: the file's table of contents, Auric File framing */}
-        <section id="composition" className="af-doc mt-10 scroll-mt-28">
-          <p className="af-sec-label">The composition</p>
-          <h2 className="af-h2 mt-3">{compositionHeadline(d.axes.length)}</h2>
-          <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
-        <ScoreComposition
-          rows={compositionRows}
-          totalScore={d.score}
-          capNote={d.capApplied ? `limited to ${d.score}` : null}
-          challengeAnchor={shareView ? null : "#token-challenge"}
-        />
-
-        </section>
-
-        {/* the reading spine: each weighted dimension as its own chapter */}
-        <div className="af-doc">
-          <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />
-        </div>
-
-        {/* panels */}
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
-          <Card title="Contract safety">
-            <ReportChallengeButton context="Contract safety" anchorId={shareView ? null : "token-challenge"} />
-            <div className="divide-y divide-line/60">
-              <Check label="Not a honeypot" ok={!s.honeypot} na={!gp} value={s.simChecked && !s.honeypot ? "simulated ✓" : undefined} />
-              <Check label={isSol ? "Mint authority revoked" : "Supply not mintable"} ok={!s.mintable} na={!gp} />
-              {isSol ? (
-                <>
-                  <Check label="Freeze authority revoked" ok={!s.freezable} na={!gp} />
-                  <Check label="No balance-mutable authority" ok={!s.balanceMutable} na={!gp} />
-                  <Check label="No transfer hook" ok={!s.transferHook} na={!gp} />
-                  <Check label="No transfer fee" ok={!s.transferFee} na={!gp} />
-                  <Check label="Token details cannot be changed" ok={!s.metadataMutable} na={!gp} />
-                  <Check label="Transferable" ok={!s.nonTransferable} na={!gp} />
-                </>
-              ) : (
-                <>
-                  <Check label="Ownership renounced" ok={!!s.ownerRenounced} na={!gp} />
-                  <Check label="No take-back ownership" ok={!s.takeBack} na={!gp} />
-                  <Check label="No hidden owner" ok={!s.hiddenOwner} na={!gp} />
-                  <Check label="Not upgradeable (proxy)" ok={!s.proxy} na={!gp} />
-                  <Check label="Owner can't rewrite balances" ok={!s.ownerChangeBalance} na={!gp} />
-                  <Check label="Transfers not pausable" ok={!s.pausable} na={!gp} />
-                  <Check label="Source verified" ok={!!s.openSource} na={!gp} />
-                </>
-              )}
-              {isSol
-                ? <Check label="Transfer fee" ok={!s.transferFee} value={gp ? (s.transferFee ? "configured" : "none") : undefined} na={!gp} />
-                : <Check label="Taxes" ok={s.buyTax + s.sellTax < 10} value={s.taxesAssessed ? `${s.buyTax.toFixed(0)}/${s.sellTax.toFixed(0)}%` : undefined} na={!s.taxesAssessed} />}
-              {!isSol && <Check label="Tax not modifiable" ok={!s.slippageModifiable} na={!gp} />}
-            </div>
-          </Card>
-
-          <Card title="Liquidity & holders">
-            <ReportChallengeButton context="Liquidity and token holders" anchorId={shareView ? null : "token-challenge"} />
-            <div className="divide-y divide-line/60">
-              {/* On Solana the lock can be measured by RugCheck while GoPlus is
-                  down, in which case GoPlus availability is the wrong gate: it
-                  would print n/a over an answer the report already holds. An
-                  explicit lpAssessed therefore stands on its own. Everything
-                  else is unchanged, including a frozen dossier that predates the
-                  flag, where undefined still follows GoPlus. */}
-              <Check
-                label="Liquidity locked / burned"
-                ok={s.lpBurnedPct >= 50 || s.lpLockedPct >= 50}
-                value={(gp || s.lpAssessed === true) && s.lpAssessed !== false ? (s.lpBurnedPct >= 50 ? `burned ${s.lpBurnedPct.toFixed(0)}%` : s.lpLockedPct >= 50 ? `locked ${s.lpLockedPct.toFixed(0)}%` : s.lpTopUnlockedEoaPct >= 50 ? `1 wallet ${s.lpTopUnlockedEoaPct.toFixed(0)}%` : "not locked") : undefined}
-                na={(!gp && s.lpAssessed !== true) || s.lpAssessed === false}
+    <ArgusReportShell
+      runtime={{
+        subjectName: d.name || `$${d.symbol}`,
+        subjectRef: d.address,
+        caseLabel,
+        auditId: d.address,
+        ...(versionContext?.reportVersionId ? { reportVersionId: versionContext.reportVersionId } : {}),
+        ...(versionContext?.version != null ? { version: versionContext.version } : {}),
+        ...(capturedAt ? { savedAt: capturedAt } : {}),
+        officialDomain: projectDomain,
+      }}
+      shareView={shareView}
+      breadcrumbName={`$${d.symbol}`}
+      versionLabel={versionContext ? `v${versionContext.version}` : "new scan"}
+      topScores={[{ label: "Token safety", value: d.score == null ? "n/a" : String(d.score) }]}
+      savedLine={versionContext
+        ? `SAVED REPORT · ${new Date(versionContext.createdAt).toUTCString().replace(/^\w+, /, "").replace(/ GMT$/, " UTC")}`
+        : "LIVE SCAN · NOT YET SAVED"}
+      issues={[]}
+      watch={canMutateWorkspace ? { watched, toggle: watch } : null}
+      exportBrief={async () => { printReportPdf(d.name || d.symbol); }}
+      share={shareView || privateSession ? null : {
+        ...(canShare ? { create: shareUrl } : {
+          unavailableReason: embeddedFacet
+            ? "Share the parent investigation to share this facet."
+            : "This scan has not been saved as an immutable version yet, so a share link cannot be created.",
+        }),
+        subjectLabel: `$${d.symbol}`,
+        versionLabel: versionContext ? `Version ${versionContext.version}` : "Saved version",
+      }}
+      more={moreActions}
+      chapters={{
+        decision: () => (
+          <>
+            {versionContext && (
+              <SnapshotEvidenceControl
+                snapshotVersion={versionContext.version}
+                capturedAt={versionContext.createdAt}
+                subjectKind="token"
+                currentIntelligenceEnabled={currentIntelligenceEnabled}
+                onLoadCurrentIntelligence={loadCurrentIntelligence}
               />
-              <Check label="Liquidity depth" ok={(d.liquidityUsd ?? 0) >= 50000} na={market.liquidityUsd == null} value={money(market.liquidityUsd ?? undefined)} />
-              <Check label="Creator holdings" ok={s.creatorPercent < 5} value={s.creatorPercentAssessed ? creatorPercentLabel : undefined} na={!s.creatorPercentAssessed} />
-              <Check label="Holders" ok={Number(s.holderCount) >= 500} value={gp ? Number(s.holderCount).toLocaleString() : undefined} na={!gp} />
-              <Check label="Top holder concentration" ok={s.topHolderPct == null || Number(s.topHolderPct) <= 25} value={s.topHolderPct != null ? `${Number(s.topHolderPct).toFixed(0)}%` : undefined} na={s.topHolderPct == null} />
-              <Check label="Bundle / snipe concentration" ok={d.bundleRisk === "low"} value={gp && d.holdersAssessed !== false ? `${d.insiderPct}% · ${d.bundleCount} wallets` : undefined} na={!gp || d.holdersAssessed === false} />
-              <Check label="Pair age" ok={(d.ageDays ?? 0) >= 30} value={d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : undefined} />
-              <Check
-                label="CoinGecko listing"
-                ok={!!d.cg?.listed && (d.cg?.cexCount ?? 0) > 0}
-                value={d.cg ? (d.cg.listed ? `${d.cg.rank ? "#" + d.cg.rank + " · " : ""}${d.cg.cexCount} centralized exchanges` : "unlisted") : undefined}
-                na={!d.cg}
-              />
-            </div>
-            {d.cg?.cexNames && d.cg.cexNames.length > 0 && (
-              <div className="mt-2.5 flex flex-wrap items-center gap-1 border-t border-line/60 pt-2.5">
-                <span className="text-[11px] text-ink-faint">listed on</span>
-                {d.cg.cexNames.slice(0, 10).map((n) => (
-                  <span key={n} className="chip tint-pass normal-case tracking-normal">{n}</span>
-                ))}
-                {d.cg.cexCount > 10 && <span className="text-[11px] text-ink-faint">+{d.cg.cexCount - 10} more</span>}
+            )}
+            {!versionContext && (showCurrentIntelligence || privateSession) && (
+              <LiveSupplementalNotice private={privateSession} persisted={livePersistence?.state === "persisted"} />
+            )}
+            {persistencePending && (
+              <div className="panel mt-4 px-4 py-3 text-[12.5px] text-ink-dim" role="status">
+                Saving this report before running extra checks…
               </div>
             )}
-          </Card>
-        </div>
-
-        {/* team & provenance + unified graph */}
-        <div id="token-relationships" className="scroll-mt-28 mt-3 grid gap-3 lg:grid-cols-2">
-          <Card title="Team and sources">
-            <ReportChallengeButton context="Team identity and sources" anchorId={shareView ? null : "token-challenge"} />
-            <div className="mb-1 text-[11px] leading-snug text-ink-faint">Vet the people behind it. These run a full audit of the project's account and site.</div>
-            {d.projectX ? (
-              <div className="flex items-center justify-between gap-2 py-1.5">
-                <span className="text-[12.5px] text-ink-dim">Project X account</span>
-                <button onClick={() => onAudit(d.projectX!)} className="btn-chip tint-signal">
-                  {d.projectX} <span aria-hidden>audit →</span>
-                </button>
-              </div>
-            ) : (
-              <div className="py-1.5 text-[12.5px] text-ink-faint">No X account linked to this token.</div>
-            )}
-            {projectSite && (
-              <div className="flex items-center justify-between gap-2 border-t border-line/60 py-1.5">
-                <span className="text-[12.5px] text-ink-dim">Project site</span>
-                <button onClick={() => onAudit(projectSite)} className="btn-chip tint-signal">
-                  recon for team <span aria-hidden>→</span>
-                </button>
-              </div>
-            )}
-            {otherLinks.length > 0 && (
-              <div className="flex items-center gap-2 border-t border-line/60 py-1.5 text-[12.5px]">
-                <span className="text-ink-dim">Other links</span>
-                <span className="ml-auto flex flex-wrap justify-end gap-x-2 gap-y-0.5">
-                  {otherLinks.map((x) => (
-                    <a key={x.url} href={x.url} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">{x.label}</a>
-                  ))}
-                </span>
-              </div>
-            )}
-            {d.deployer && (
-              <div className="border-t border-line/60 py-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[12.5px] text-ink-dim">{deployerLabel}</span>
-                  <span className="mono text-[11px] text-ink-faint">{shortAddr(d.deployer)}</span>
-                </div>
-                {attribution && (
-                  <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">
-                    named by {attribution.source} ({attribution.method})
-                    {attribution.kind !== "deployer" && ". No source confirmed this wallet signed the token's creation, so it may be a mint or update authority rather than the person who launched it."}
-                  </div>
+            {(persistenceFailed || persistenceMissingCapability) && (
+              <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
+                <strong className="block text-ink">This report is visible now, but it was not saved.</strong>
+                <span className="mt-1 block">It will disappear when you leave this page. Run the scan again to create a saved version before opening extra research.</span>
+                {livePersistence?.state === "failed" && livePersistence.reason && (
+                  <span className="mt-1 block text-ink-dim">{livePersistence.reason}</span>
                 )}
               </div>
             )}
+            {showCurrentIntelligence && <RingAlert handle={"$" + d.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
+            <section className="investigation-story-cover rd-legacy" data-canonical-report-header="true" aria-labelledby="token-report-title">
+              <div className="flex flex-wrap items-end gap-3">
+                {d.imageUrl ? (
+                  <img src={d.imageUrl} alt="" className="h-11 w-11 rounded-xl border border-line object-cover soft-shadow" />
+                ) : (
+                  <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-panel text-sm font-semibold text-signal-lift">${d.symbol.slice(0, 3)}</div>
+                )}
+                <div>
+                  <p className="eyebrow">Token investigation</p>
+                  <h1 id="token-report-title" className="display-sm mt-0.5 text-[30px] leading-none text-ink sm:text-[34px]">${d.symbol}</h1>
+                </div>
+                <button type="button" onClick={copyReport} className="btn-chip mb-0.5 ml-auto min-h-8 px-2.5 text-[10px] uppercase tracking-[0.08em]">
+                  {copiedTxt ? "Copied" : "Copy summary"}
+                </button>
+              </div>
+              <ProjectLinks
+                className="mt-3"
+                website={projectSite}
+                xHandle={d.projectX ?? d.cg?.twitter}
+                contractAddress={d.address}
+                chain={d.chain}
+                links={d.socials}
+              />
+              {neutralProjectDescription && (
+                <ExpandableText
+                  text={neutralProjectDescription}
+                  className="mt-3 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim"
+                />
+              )}
+              <ReportDisclaimer className="mt-2 max-w-3xl" />
+            </section>
+            <div className="rd-legacy">
+              <InvestigationDecisionCanvas
+                presentationStyle={reportStyle}
+                subjectName={d.name || `$${d.symbol}`}
+                subjectSummary={neutralProjectDescription}
+                reportSummary={d.headline}
+                verdictLabel={presentationMeta.label}
+                score={d.score}
+                scoreLabel="Token safety score"
+                scoreContext="Can it be bought and sold? Who can change its rules, and how concentrated are its funds and ownership?"
+                scoreIsProvisional={d.assessment?.provisional === true || readiness.status !== "ready"}
+                favorable={favorableVerdict}
+                verdictTone={decisionCanvasTone}
+                argument={verdictArgument}
+                discovery={materialChangeDiscovery ?? controlPathDiscovery ?? decisionDiscovery}
+                decisionBoundary={d.decisionBoundary}
+                decisionBoundaryEvidenceHref={d.decisionBoundary ? decisionBoundaryHref(d.decisionBoundary, "token") : undefined}
+                supports={supportItems}
+                concerns={concernItems}
+                nextSteps={nextStepItems}
+                verified={verifiedItems}
+                challengeAnchorId={shareView ? null : "token-challenge"}
+                coveragePercent={readiness.coveragePercent}
+                successful={readiness.successful}
+                applicable={readiness.applicable}
+                checkScopeLabel="Token safety checks"
+                openItemsLabel={requiredGapChecks.length > 0
+                  ? "Required checks still open"
+                  : supplementalGapChecks.length > 0
+                    ? "Optional follow-up research"
+                    : "What is still open"}
+                capturedAt={capturedAt}
+                composition={compositionRows.length > 0 ? compositionRows : undefined}
+              />
+              <ReportActionsRow
+                canShare={canShare}
+                shareState={shareState}
+                onShare={() => void share()}
+                onExportPdf={() => printReportPdf(d.name || d.symbol)}
+              />
+            </div>
+          </>
+        ),
+        scores: () => (
+          <LegacySection title="How this score was composed" note="Every weighted dimension of the saved token result, with its evidence and what it could not measure.">
+            <section id="composition" className="af-doc scroll-mt-28">
+              <p className="af-sec-label">The composition</p>
+              <h2 className="af-h2 mt-3">{compositionHeadline(d.axes.length)}</h2>
+              <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
+              <ScoreComposition
+                rows={compositionRows}
+                totalScore={d.score}
+                capNote={d.capApplied ? `limited to ${d.score}` : null}
+                challengeAnchor={shareView ? null : "#token-challenge"}
+              />
+            </section>
+            <div className="af-doc">
+              <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />
+            </div>
+          </LegacySection>
+        ),
+        product: () => (
+          <LegacySection title="The project behind the token" note="News and press, documents and resources, and domain intelligence for the project this token belongs to.">
+            {showCurrentIntelligence ? (
+              <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} record={canRecordCurrentIntelligence} token={{ address: d.address, chain: d.chain, deployer: d.deployer, mcap: d.mcap ?? undefined, ageDays: d.ageDays ?? undefined }} projectHandle={d.projectX} previousShipping={d.reportDelta?.category === "development" ? d.reportDelta.previousShipping ?? null : null} {...(panelCostToken ? { panelCostToken } : {})} />
+            ) : (
+              <p className="text-[12.5px] text-ink-dim">Project research panels open on a saved report.</p>
+            )}
+          </LegacySection>
+        ),
+        code: () => <CodeChapter subjectKind="token" code={codeView} legacy={codeLegacy} />,
+        people: () => (
+          <LegacySection title="Team and sources" note="A token scan does not publish a roster. These actions run a full audit of the project's own account and site, which does.">
+            <Card title="Team and sources">
+              <ReportChallengeButton context="Team identity and sources" anchorId={shareView ? null : "token-challenge"} />
+              <div className="mb-1 text-[11px] leading-snug text-ink-faint">Vet the people behind it. These run a full audit of the project's account and site.</div>
+              {d.projectX ? (
+                <div className="flex items-center justify-between gap-2 py-1.5">
+                  <span className="text-[12.5px] text-ink-dim">Project X account</span>
+                  <button onClick={() => onAudit(d.projectX!)} className="btn-chip tint-signal">
+                    {d.projectX} <span aria-hidden>audit →</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="py-1.5 text-[12.5px] text-ink-faint">No X account linked to this token.</div>
+              )}
+              {projectSite && (
+                <div className="flex items-center justify-between gap-2 border-t border-line/60 py-1.5">
+                  <span className="text-[12.5px] text-ink-dim">Project site</span>
+                  <button onClick={() => onAudit(projectSite)} className="btn-chip tint-signal">
+                    recon for team <span aria-hidden>→</span>
+                  </button>
+                </div>
+              )}
+              {otherLinks.length > 0 && (
+                <div className="flex items-center gap-2 border-t border-line/60 py-1.5 text-[12.5px]">
+                  <span className="text-ink-dim">Other links</span>
+                  <span className="ml-auto flex flex-wrap justify-end gap-x-2 gap-y-0.5">
+                    {otherLinks.map((x) => (
+                      <a key={x.url} href={x.url} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">{x.label}</a>
+                    ))}
+                  </span>
+                </div>
+              )}
+              {d.deployer && (
+                <div className="border-t border-line/60 py-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[12.5px] text-ink-dim">{deployerLabel}</span>
+                    <span className="mono text-[11px] text-ink-faint">{shortAddr(d.deployer)}</span>
+                  </div>
+                  {attribution && (
+                    <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">
+                      named by {attribution.source} ({attribution.method})
+                      {attribution.kind !== "deployer" && ". No source confirmed this wallet signed the token's creation, so it may be a mint or update authority rather than the person who launched it."}
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          </LegacySection>
+        ),
+        market: () => (
+          <LegacySection title="Market, mechanics and holders" note="The saved market snapshot, the contract's own rules, liquidity, concentration and the on-chain forensic panels.">
+            <TokenStory dossier={d} />
+            <div id="token-market" className="mt-4 scroll-mt-28">
+              <ReportChallengeButton context="Market data: price, trading volume and liquidity" anchorId={shareView ? null : "token-challenge"} />
+              <MarketPerformancePanel
+                token={d}
+                showCurrentIntelligence={showCurrentIntelligence}
+                refreshCurrentMarket={currentIntelligenceEnabled}
+                onLoadCurrentIntelligence={loadCurrentIntelligence}
+              />
+            </div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              <Card title="Contract safety">
+                <ReportChallengeButton context="Contract safety" anchorId={shareView ? null : "token-challenge"} />
+                <div className="divide-y divide-line/60">
+                  <Check label="Not a honeypot" ok={!s.honeypot} na={!gp} value={s.simChecked && !s.honeypot ? "simulated ✓" : undefined} />
+                  <Check label={isSol ? "Mint authority revoked" : "Supply not mintable"} ok={!s.mintable} na={!gp} />
+                  {isSol ? (
+                    <>
+                      <Check label="Freeze authority revoked" ok={!s.freezable} na={!gp} />
+                      <Check label="No balance-mutable authority" ok={!s.balanceMutable} na={!gp} />
+                      <Check label="No transfer hook" ok={!s.transferHook} na={!gp} />
+                      <Check label="No transfer fee" ok={!s.transferFee} na={!gp} />
+                      <Check label="Token details cannot be changed" ok={!s.metadataMutable} na={!gp} />
+                      <Check label="Transferable" ok={!s.nonTransferable} na={!gp} />
+                    </>
+                  ) : (
+                    <>
+                      <Check label="Ownership renounced" ok={!!s.ownerRenounced} na={!gp} />
+                      <Check label="No take-back ownership" ok={!s.takeBack} na={!gp} />
+                      <Check label="No hidden owner" ok={!s.hiddenOwner} na={!gp} />
+                      <Check label="Not upgradeable (proxy)" ok={!s.proxy} na={!gp} />
+                      <Check label="Owner can't rewrite balances" ok={!s.ownerChangeBalance} na={!gp} />
+                      <Check label="Transfers not pausable" ok={!s.pausable} na={!gp} />
+                      <Check label="Source verified" ok={!!s.openSource} na={!gp} />
+                    </>
+                  )}
+                  {isSol
+                    ? <Check label="Transfer fee" ok={!s.transferFee} value={gp ? (s.transferFee ? "configured" : "none") : undefined} na={!gp} />
+                    : <Check label="Taxes" ok={s.buyTax + s.sellTax < 10} value={s.taxesAssessed ? `${s.buyTax.toFixed(0)}/${s.sellTax.toFixed(0)}%` : undefined} na={!s.taxesAssessed} />}
+                  {!isSol && <Check label="Tax not modifiable" ok={!s.slippageModifiable} na={!gp} />}
+                </div>
+              </Card>
+              <Card title="Liquidity & holders">
+                <ReportChallengeButton context="Liquidity and token holders" anchorId={shareView ? null : "token-challenge"} />
+                <div className="divide-y divide-line/60">
+                  <Check
+                    label="Liquidity locked / burned"
+                    ok={s.lpBurnedPct >= 50 || s.lpLockedPct >= 50}
+                    value={(gp || s.lpAssessed === true) && s.lpAssessed !== false ? (s.lpBurnedPct >= 50 ? `burned ${s.lpBurnedPct.toFixed(0)}%` : s.lpLockedPct >= 50 ? `locked ${s.lpLockedPct.toFixed(0)}%` : s.lpTopUnlockedEoaPct >= 50 ? `1 wallet ${s.lpTopUnlockedEoaPct.toFixed(0)}%` : "not locked") : undefined}
+                    na={(!gp && s.lpAssessed !== true) || s.lpAssessed === false}
+                  />
+                  <Check label="Liquidity depth" ok={(d.liquidityUsd ?? 0) >= 50000} na={market.liquidityUsd == null} value={money(market.liquidityUsd ?? undefined)} />
+                  <Check label="Creator holdings" ok={s.creatorPercent < 5} value={s.creatorPercentAssessed ? creatorPercentLabel : undefined} na={!s.creatorPercentAssessed} />
+                  <Check label="Holders" ok={Number(s.holderCount) >= 500} value={gp ? Number(s.holderCount).toLocaleString() : undefined} na={!gp} />
+                  <Check label="Top holder concentration" ok={s.topHolderPct == null || Number(s.topHolderPct) <= 25} value={s.topHolderPct != null ? `${Number(s.topHolderPct).toFixed(0)}%` : undefined} na={s.topHolderPct == null} />
+                  <Check label="Bundle / snipe concentration" ok={d.bundleRisk === "low"} value={gp && d.holdersAssessed !== false ? `${d.insiderPct}% · ${d.bundleCount} wallets` : undefined} na={!gp || d.holdersAssessed === false} />
+                  <Check label="Pair age" ok={(d.ageDays ?? 0) >= 30} value={d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : undefined} />
+                  <Check
+                    label="CoinGecko listing"
+                    ok={!!d.cg?.listed && (d.cg?.cexCount ?? 0) > 0}
+                    value={d.cg ? (d.cg.listed ? `${d.cg.rank ? "#" + d.cg.rank + " · " : ""}${d.cg.cexCount} centralized exchanges` : "unlisted") : undefined}
+                    na={!d.cg}
+                  />
+                </div>
+                {d.cg?.cexNames && d.cg.cexNames.length > 0 && (
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1 border-t border-line/60 pt-2.5">
+                    <span className="text-[11px] text-ink-faint">listed on</span>
+                    {d.cg.cexNames.slice(0, 10).map((n) => (
+                      <span key={n} className="chip tint-pass normal-case tracking-normal">{n}</span>
+                    ))}
+                    {d.cg.cexCount > 10 && <span className="text-[11px] text-ink-faint">+{d.cg.cexCount - 10} more</span>}
+                  </div>
+                )}
+              </Card>
+            </div>
             {d.topHolders.length > 0 && (
-              <div className="mt-1 border-t border-line/60 pt-2">
+              <Card title="Holder concentration">
                 <div className="mb-1.5 flex items-center justify-between">
-                  <span className="eyebrow">Holder concentration</span>
-                  <span className="mono text-[11px]" style={{ color: topSum > 50 ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>top {d.topHolders.length} = {topSum.toFixed(0)}%</span>
+                  <span className="eyebrow">Top {d.topHolders.length} holders</span>
+                  <span className="mono text-[11px]" style={{ color: topSum > 50 ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>{topSum.toFixed(0)}% of supply</span>
                 </div>
                 <div className="flex h-2 overflow-hidden rounded-full bg-line">
                   {d.topHolders.map((h, i) => (
@@ -767,80 +705,120 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                     </div>
                   ))}
                 </div>
+              </Card>
+            )}
+            {!shareView && <DeepLaunchPanel chain={d.chain} reportVersionId={versionContext?.reportVersionId ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId ?? undefined : undefined)} />}
+            {showCurrentIntelligence && panelCostToken && (
+              <div className="mt-4">
+                <OnChainForensics token={d} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
+                {arkhamDeployer && <div className="mt-3"><MoneyFlowStory address={arkhamDeployer} chain={d.chain} panelCostToken={panelCostToken} roleLabel={deployerLabel} /></div>}
+                {arkhamDeployer && <div className="mt-3"><Counterparties address={arkhamDeployer} subject={`$${d.symbol}`} chain={d.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} /></div>}
+                {arkhamDeployer && <div className="mt-3"><RiskPaths address={arkhamDeployer} panelCostToken={panelCostToken} /></div>}
+                {arkhamDeployer && <div className="mt-3"><Holdings address={arkhamDeployer} symbol={d.symbol} panelCostToken={panelCostToken} /></div>}
               </div>
             )}
-          </Card>
-          <Card title="Known connections">
-            <ReportChallengeButton context="Known connections" anchorId={shareView ? null : "token-challenge"} />
-            <TrustGraph nodes={d.graph.nodes} edges={d.graph.edges} />
-          </Card>
-        </div>
-
-        {/* findings */}
-        {d.findings.length > 0 && (
-          <section className="mt-5">
-            <div className="mb-2.5 text-[13.5px] font-semibold tracking-tight text-ink">Signals</div>
-            <div className="space-y-2">
-              {d.findings.map((f, i) => (
-                <div key={i} className="panel flex items-start gap-3 p-3.5">
-                  <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: f.tone === "good" ? "var(--color-pass)" : f.tone === "warn" ? "var(--color-caution)" : "var(--color-avoid)" }} />
-                  <p className="flex-1 text-[13.5px] leading-snug text-ink">{f.claim}</p>
-                  <span className="mono text-[11px] text-ink-faint">{f.source}</span>
-                </div>
-              ))}
+            {!gp && (
+              <div className="mt-3 panel px-4 py-3 text-[12.5px] text-ink-dim">
+                Contract-internal safety (honeypot, mint authority, ownership, tax) could not be verified by a supported collector on <span className="capitalize">{d.chain}</span>. Unassessed areas are excluded from the score; this report cannot claim that path is complete.
+              </div>
+            )}
+          </LegacySection>
+        ),
+        social: () => (
+          <LegacySection title="Conversation on record" note="The saved social snapshot for this token, and the warning posts the search matched.">
+            {d.socialActivity ? (
+              <SocialActivityPanel
+                snapshot={d.socialActivity}
+                panelCostToken={panelCostToken}
+                afterActivity={isEarn ? (
+                  <SubjectAccusationStage leads={EARN_SUBJECT_LEADS} subject="@earnonhood" />
+                ) : undefined}
+              />
+            ) : isEarn ? (
+              <div id="subject-leads" className="panel scroll-mt-28 px-5 py-5">
+                <SubjectAccusationStage leads={EARN_SUBJECT_LEADS} subject="@earnonhood" />
+              </div>
+            ) : (
+              <p className="text-[12.5px] text-ink-dim">No social activity snapshot is saved with this scan. Missing activity data is not a finding about the token.</p>
+            )}
+          </LegacySection>
+        ),
+        connections: () => (
+          <LegacySection title="Known connections" note="Wallets, accounts and entities this scan bound to the token, with the evidence for each edge.">
+            <div id="token-relationships" className="scroll-mt-28">
+              <Card title="Known connections">
+                <ReportChallengeButton context="Known connections" anchorId={shareView ? null : "token-challenge"} />
+                <TrustGraph nodes={d.graph.nodes} edges={d.graph.edges} />
+              </Card>
             </div>
-          </section>
-        )}
-
-        {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
-        <div className="mt-5">
-          <MethodologyChecklist id="token-methodology" checks={checks} />
-        </div>
-
-        {!shareView && (
-          <ArgusEyeAssistant
-            subject={`$${d.symbol}`}
-            reportVersionId={versionContext?.reportVersionId
-              ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId : undefined)
-              ?? undefined}
-            anchorId="ask-report"
-          />
-        )}
-
-        {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
-        {showCurrentIntelligence && canMutateWorkspace && (
-          <div className="mt-3">
-            <AddInfo subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} subjectGraphKey={tokenSubjectGraphKey} />
-          </div>
-        )}
-
-        {/* hard link — manually bridge this subject to another entity in the graph */}
-        {showCurrentIntelligence && canMutateWorkspace && (
-          <div className="mt-3">
-            <LinkEntity subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} graphSubjectKey={tokenSubjectGraphKey} />
-          </div>
-        )}
-
-        {/* Full threat scan, merged into the investigation lane: verdict,
-            flags, the AI source read, launch provenance, tokenomics, and the
-            auditable checklist - same pipeline as the standalone Threat scan
-            surface, cache-shared with it (1h). */}
-        {!shareView && (
-          <div className="mt-8 panel p-5">
-            <div className="mb-1 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> Threat scan</div>
-            <EmbeddedThreatScan address={d.address} chain={d.chain} />
-          </div>
-        )}
-
-        <div className="mt-8 panel p-5">
-          <div className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> How this result was reached</div>
-          <p className="text-[12.5px] leading-relaxed text-ink-faint">
-            ARGUS checks market data, the contract, liquidity, and large holders. Serious contract risks can limit
-            the score even when the market looks healthy. This report is research, not financial advice.
-          </p>
-        </div>
-        </ReportExperienceLayout>
-      </div>
-    </div>
+          </LegacySection>
+        ),
+        evidence: () => (
+          <LegacySection title="Evidence, method and challenge" note="Every check ARGUS ran on this token, the signals it recorded, and the way to contest any of it.">
+            {d.findings.length > 0 && (
+              <section>
+                <div className="mb-2.5 text-[13.5px] font-semibold tracking-tight text-ink">Signals</div>
+                <div className="space-y-2">
+                  {d.findings.map((f, i) => (
+                    <div key={i} className="panel flex items-start gap-3 p-3.5">
+                      <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: f.tone === "good" ? "var(--color-pass)" : f.tone === "warn" ? "var(--color-caution)" : "var(--color-avoid)" }} />
+                      <p className="flex-1 text-[13.5px] leading-snug text-ink">{f.claim}</p>
+                      <span className="mono text-[11px] text-ink-faint">{f.source}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+            <div className="mt-5">
+              <MethodologyChecklist id="token-methodology" checks={checks} />
+            </div>
+            {!shareView && (
+              <div className="mt-4">
+                <SecondOpinion id="token-challenge" dossier={d} panelCostToken={panelCostToken} onRescan={onRescan} />
+              </div>
+            )}
+            {!shareView && (
+              <ArgusEyeAssistant
+                subject={`$${d.symbol}`}
+                reportVersionId={versionContext?.reportVersionId
+                  ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId : undefined)
+                  ?? undefined}
+                anchorId="ask-report"
+              />
+            )}
+            {showCurrentIntelligence && canMutateWorkspace && (
+              <div className="mt-3">
+                <AddInfo subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} subjectGraphKey={tokenSubjectGraphKey} />
+              </div>
+            )}
+            {showCurrentIntelligence && canMutateWorkspace && (
+              <div className="mt-3">
+                <LinkEntity subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} graphSubjectKey={tokenSubjectGraphKey} />
+              </div>
+            )}
+            {!shareView && (
+              <div className="mt-8 panel p-5">
+                <div className="mb-1 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> Threat scan</div>
+                <EmbeddedThreatScan address={d.address} chain={d.chain} />
+              </div>
+            )}
+            <div className="mt-8 panel p-5">
+              <div className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> How this result was reached</div>
+              <p className="text-[12.5px] leading-relaxed text-ink-faint">
+                ARGUS checks market data, the contract, liquidity, and large holders. Serious contract risks can limit
+                the score even when the market looks healthy. This report is research, not financial advice.
+              </p>
+            </div>
+          </LegacySection>
+        ),
+      }}
+      footerNote={`Snapshot ${versionContext ? `v${versionContext.version}` : "live"}${caseLabel ? ` · Case ${caseLabel}` : ""} · Token ${d.address}`}
+      scope={(
+        <>
+          <p>This report covers one token contract on {d.chain}: its market, its contract rules, its liquidity and its holders.</p>
+          <p>It does not audit the project behind it. Run a full audit of the project's account or site for people, funding and claims.</p>
+        </>
+      )}
+    />
   );
 }

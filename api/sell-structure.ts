@@ -95,7 +95,10 @@ async function geckoTape(net: string, token: string, deployer: string) {
     return {
       sells: sN, buys: bN, sellUsd: Math.round(sellUsd), buyUsd: Math.round(buyUsd),
       distinctSellers: sells.size, distinctBuyers: buys.size, topSellers,
-      note: `Last 24h: ${sN} sells ($${Math.round(sellUsd).toLocaleString()}) vs ${bN} buys ($${Math.round(buyUsd).toLocaleString()}) across ${sells.size} sellers / ${buys.size} buyers.${bN === 0 && sN > 0 ? " No buyers - only exits." : ratio >= 3 ? " Heavily sell-skewed." : ""}`,
+      // Name the population. This tape is GeckoTerminal's bounded recent-trades
+      // feed for ONE pool, which is not the DexScreener pair the score's
+      // buy/sell counts come from, so the two legitimately differ (ARGUS-11).
+      note: `Last 24h: ${sN} sells ($${Math.round(sellUsd).toLocaleString()}) vs ${bN} buys ($${Math.round(buyUsd).toLocaleString()}) across ${sells.size} sellers / ${buys.size} buyers.${bN === 0 && sN > 0 ? " No buyers - only exits." : ratio >= 3 ? " Heavily sell-skewed." : ""} Source: GeckoTerminal recent-trades tape for one pool, a bounded sample rather than every trade.`,
     };
   } catch { return null; }
 }

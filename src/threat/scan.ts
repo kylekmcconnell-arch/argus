@@ -1,3 +1,4 @@
+import { apiFetch } from "./net";
 import { assetIdentity } from "../lib/assetIdentity";
 // The threat scan orchestrator: token ref in → mechanical audit (src/token) →
 // code review (AI read layer) → deployer memory → one risk call. Output model:
@@ -39,14 +40,14 @@ export async function threatScan(
   emit?: (s: TraceStep) => void,
   // `signal` lets the owning run cancel or time-box the leg; without it the
   // person-audit runner could not stop a threat leg it had already given up on.
-  options?: { force?: boolean; chain?: string; signal?: AbortSignal },
+  options?: { force?: boolean; chain?: string; signal?: AbortSignal; fetchImpl?: typeof fetch },
 ): Promise<ThreatScan | null> {
   // auditToken needs an already-resolved runnable token (main tightened
   // RunnableTokenInput.via to solana|evm|dexscreener). A bare ticker or
   // address-candidate isn't runnable - the caller resolves those first.
   if (!isRunnableTokenInput(input)) return null;
 
-  const dossier = await auditToken(input, emit, { force: options?.force, chain: options?.chain, ...(options?.signal ? { signal: options.signal } : {}) });
+  const dossier = await auditToken(input, emit, { force: options?.force, chain: options?.chain, fetchImpl: options?.fetchImpl ?? apiFetch, ...(options?.signal ? { signal: options.signal } : {}) });
   if (!dossier) return null;
   // The report must be about the token that was ASKED for. If the market
   // resolver ever falls back to a different base token (search fallback, stale
@@ -98,6 +99,17 @@ export async function threatScan(
   else if (site?.worst === "suspicious") emit?.({ phase: "ARGUS · Site", label: "Suspicious linked site", detail: "The token's website shows drainer-style cloaking or phishing signatures.", tone: "warn" });
   if (site?.xBio?.status === "mismatch") emit?.({ phase: "ARGUS · Authenticity", label: "Namesake / impersonation", detail: site.xBio.note, tone: "bad" });
   else if (site?.xBio?.status === "verified") emit?.({ phase: "ARGUS · Authenticity", label: "CA verified on X", detail: site.xBio.note, tone: "good" });
+  // Handle provenance: the X profile shows a join date, never a rename. An
+  // account that answered to a different name before is wearing age and a
+  // following it did not earn under this identity.
+  if (site?.xHistory?.status === "renamed") {
+    emit?.({
+      phase: "ARGUS · Authenticity",
+      label: site.xHistory.handleReused ? "X handle changed hands" : "X account was renamed",
+      detail: site.xHistory.note,
+      tone: "warn",
+    });
+  }
   // Chart posture: a generic technical read for tickers that also trade on
   // major venues (matched by symbol with a market-cap sanity guard). Most fresh
   // CAs are not covered and the lane stays silent.
@@ -204,7 +216,7 @@ export async function threatScan(
     scannedAt: Date.now(),
   };
 
-  recordReceipt({
+  await recordReceipt({
     address: dossier.address, chain: dossier.chain, symbol: dossier.symbol,
     verdict: call.verdict, risk: call.risk, flaggedAt: scan.scannedAt,
     // Only a wallet goes into the ledger's deployer memory; a factory contract
@@ -618,6 +630,10 @@ export function judge( // exported for unit tests only
     // Authenticity: the official token's CA lives in the project's X bio.
     if (site.xBio?.status === "mismatch") { add(35); flags.push(site.xBio.note); }
     else if (site.xBio?.status === "verified") { positives.push("Contract verified in the project's official X bio - this is the real token, not a namesake"); }
+    // Handle provenance. Reported, not scored: plenty of legitimate projects
+    // rebrand, so the rename is a fact for the reader to weigh rather than a
+    // risk add - and scoring it would move every banding threshold at once.
+    if (site.xHistory?.status === "renamed") warnings.push(site.xHistory.note);
   }
   // Realized sell behaviour. Dev selling is the loudest signal; deployer-seeded
   // wallets exiting are a coordinated distribution the holder chart hides.

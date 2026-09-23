@@ -252,6 +252,12 @@ export interface QuotaResult {
   creditRemaining?: number;
   error?: string;
   reason?: "credit_budget_exhausted";
+  /**
+   * The key was already paid for, so nothing was charged for this call. The
+   * caller must not start fresh work on it: that spends one credit twice
+   * (#355). A legitimate replay is a retry, and its receipt already exists.
+   */
+  replayed?: boolean;
 }
 
 export async function consumeInvestigationQuota(
@@ -293,7 +299,9 @@ export async function consumeInvestigationQuota(
     if (row.allowed !== true) {
       return { allowed: false, used: 0, remaining: creditRemaining, creditRemaining, reason: "credit_budget_exhausted" };
     }
-    return { allowed: true, used: 1, remaining: creditRemaining, creditRemaining };
+    const replayed = row.replayed === true;
+    // A replay is not a second charge, so it must not report a credit used.
+    return { allowed: true, used: replayed ? 0 : 1, remaining: creditRemaining, creditRemaining, replayed };
   } catch (error) {
     console.error("[credits] ledger check failed", error, metadata);
     return { allowed: false, used: 0, remaining: 0, error: "credit_ledger_unavailable" };
@@ -342,6 +350,9 @@ export interface SupplementalReservation {
   used?: number;
   remaining?: number;
   limit: number;
+  /** Set when the analyst's own daily share is what stopped this, not the workspace's (#356). */
+  perUser?: boolean;
+  userLimit?: number;
   error?: "supplemental_budget_not_configured" | "supplemental_budget_unavailable";
 }
 
@@ -357,13 +368,20 @@ export async function reserveSupplementalBudget(auth: AuthContext, route: string
   if (!Number.isInteger(limit) || limit < 1 || limit > 100000) {
     return { allowed: false, limit: 0, error: "supplemental_budget_not_configured" };
   }
+  // The workspace allowance is shared. Without a per-analyst share, one
+  // session can exhaust it for everybody (#356). Unset means no cap.
+  const configuredUser = process.env.ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT?.trim();
+  const userLimit = configuredUser ? Number(configuredUser) : null;
+  if (userLimit !== null && (!Number.isInteger(userLimit) || userLimit < 1 || userLimit > 100000)) {
+    return { allowed: false, limit: 0, error: "supplemental_budget_not_configured" };
+  }
   const credentials = serviceCredentials();
   if (!credentials) return { allowed: false, limit, error: "supplemental_budget_unavailable" };
   try {
     const response = await fetch(`${credentials.url}/rest/v1/rpc/reserve_supplemental_budget`, {
       method: "POST",
       headers: serviceHeaders(credentials.key),
-      body: JSON.stringify({ p_organization_id: auth.organizationId, p_user_id: auth.userId, p_route: route, p_daily_limit: limit }),
+      body: JSON.stringify({ p_organization_id: auth.organizationId, p_user_id: auth.userId, p_route: route, p_daily_limit: limit, p_user_daily_limit: userLimit }),
       signal: AbortSignal.timeout(8_000),
     });
     const rows: unknown = response.ok ? await response.json().catch(() => null) : null;
@@ -373,6 +391,8 @@ export async function reserveSupplementalBudget(auth: AuthContext, route: string
       allowed: row.allowed,
       used: typeof row.used === "number" ? row.used : undefined,
       remaining: typeof row.remaining === "number" ? row.remaining : undefined,
+      ...(row.reason === "user_daily_limit" ? { perUser: true } : {}),
+      ...(userLimit !== null ? { userLimit } : {}),
       limit,
     };
   } catch (error) {

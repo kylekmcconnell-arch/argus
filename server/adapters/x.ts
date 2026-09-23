@@ -1,3 +1,4 @@
+import { grokAccessFailure, recordGrokAccessFailure } from "../providerAccess";
 import { deadlineFetch } from "../providerDeadline.js";
 // X adapter — the signature data path, split into two layers per our provider
 // review:
@@ -66,6 +67,7 @@ export async function grokSearch(system: string, user: string, opts?: {
   claimProviderCall?: () => boolean;
 }): Promise<string | null> {
   const key = env("XAI_API_KEY");
+  const model = env("ARGUS_GROK_MODEL") || "grok-4-fast";
   if (!key) return null;
   const requestedTools = opts?.tools?.length
     ? [...new Set(opts.tools)]
@@ -82,6 +84,7 @@ export async function grokSearch(system: string, user: string, opts?: {
   // once without it. Every physical attempt is recorded, including rejected
   // compatibility calls and transport/parse failures.
   const call = async (withCap: boolean): Promise<{ status: number | null; text: string | null; budgetExhausted?: boolean }> => {
+    if (grokAccessFailure(model, "search")) return { status: null, text: null, budgetExhausted: true };
     if (opts?.claimProviderCall && !opts.claimProviderCall()) {
       return { status: null, text: null, budgetExhausted: true };
     }
@@ -112,6 +115,7 @@ export async function grokSearch(system: string, user: string, opts?: {
       return { status: null, text: null };
     }
     if (!res.ok) {
+      await recordGrokAccessFailure(res, model, "search");
       addGrokUsage(undefined, 0, "live-search", "failed", `http_${res.status}`);
       return { status: res.status, text: null };
     }

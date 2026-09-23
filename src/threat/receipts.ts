@@ -31,16 +31,18 @@ function save(items: Receipt[]) {
   }
 }
 
-export function recordReceipt(r: Receipt) {
+export function recordReceipt(r: Receipt): Promise<void> {
   const items = getReceipts().filter(
     (x) => !(assetIdentity(x.chain, x.address) === assetIdentity(r.chain, r.address)),
   );
   items.unshift(r);
   save(items);
-  // Fire-and-forget sync to the shared server ledger. This is what makes the
+  // Bounded sync to the shared server ledger. The scanner awaits it before
+  // ending its server invocation. This is what makes the
   // track record and deployer memory span every analyst, not just this browser.
-  void apiFetch("/api/threat-receipts", {
+  return apiFetch("/api/threat-receipts", {
     method: "POST",
+    signal: AbortSignal.timeout(6000),
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       address: r.address, chain: r.chain, symbol: r.symbol, verdict: r.verdict,
@@ -50,7 +52,7 @@ export function recordReceipt(r: Receipt) {
       // silently killed the whole byte-identical-clone match.
       codeVerified: r.codeVerified, flagCount: r.flagCount, codeFingerprint: r.codeFingerprint,
     }),
-  }).catch(() => { /* offline / static host — localStorage still holds it */ });
+  }).then(() => undefined).catch(() => { /* offline / static host — localStorage still holds it */ });
 }
 
 // Prior scans by the same deployer — the LOCAL "rug factory" memory (sync).

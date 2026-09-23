@@ -128,6 +128,7 @@ export interface Dossier {
   website?: string;
   /** Grok's bound-source explanation of what this exact subject is and does. */
   subjectOrientation?: CollectedEvidence["subjectOrientation"];
+  officialProductDescription?: CollectedEvidence["officialProductDescription"];
   profile_collection_state?: CollectedEvidence["profile"]["profile_collection_state"];
   profile_provider?: string;
   profile_captured_at?: string;
@@ -221,14 +222,22 @@ export interface Dossier {
   /** Model-only or otherwise unverified team candidates; never grounded evidence. */
   webTeamLeads?: WebTeamMember[];
   githubAssessment?: GithubAssessment; // subject's resolved GitHub: quality/claims/history
-  // The token threat leg of the FULL scan. Attached client-side by the runner
-  // (the threat scanner runs in the browser, in parallel with the server
-  // collection) and persisted with the report. Absent: no project token could
+  // The token threat leg of the FULL scan. New public scans complete and save
+  // it on the server; legacy/private runs retain browser completion.
+  // Absent: no project token could
   // be attributed to this subject. null: a token was found but the scan failed.
   threat?: import("../threat/types").ThreatScan | null;
+  /** Server-owned completion: browsers must not rerun this leg or resave it. */
+  tokenAssessment?: { owner: "server"; state: "complete" | "unavailable" | "unattributed"; completedAt: string };
   // Why the threat leg ran on that token (or why it was skipped) - one line,
   // rendered with the section so the attribution is auditable.
   threatNote?: string;
+  /**
+   * How the scanned contract was tied to this subject. A card, share or export
+   * that reads `threat` must read this too: only "canonical" is the subject's
+   * own token (#371).
+   */
+  threatBinding?: "canonical" | "bio" | "promotion";
   /** Second-hop discovery stays inspectable even when excluded from the graph. */
   ventureTeams?: CollectedEvidence["ventureTeams"];
   /** Cited model discoveries that did not govern the frozen result. */
@@ -290,6 +299,7 @@ export interface Dossier {
   evidenceAttempts?: import("../lib/evidenceRetry").EvidenceAttempt[];
   /** What the investigation director asked, delegated, and could not finish. */
   researchPlan?: ResearchPlan;
+  scoringOutcome?: CollectedEvidence["scoringOutcome"];
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
@@ -575,6 +585,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     bio: ev.profile.bio,
     website: ev.profile.website,
     ...(ev.subjectOrientation ? { subjectOrientation: structuredClone(ev.subjectOrientation) } : {}),
+    ...(ev.officialProductDescription ? { officialProductDescription: { ...ev.officialProductDescription } } : {}),
     profile_collection_state: ev.profile.profile_collection_state,
     profile_provider: ev.profile.profile_provider,
     profile_captured_at: ev.profile.profile_captured_at,
@@ -702,6 +713,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),
     ...(intelligence ? { intelligence } : {}),
+    ...(ev.scoringOutcome ? { scoringOutcome: structuredClone(ev.scoringOutcome) } : {}),
     ...(ev.researchPlan ? {
       researchPlan: {
         ...ev.researchPlan,

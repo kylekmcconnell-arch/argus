@@ -7,12 +7,14 @@ var PROVIDERS = [
   { id: "safebrowsing", label: "Google Safe Browsing", env: ["GOOGLE_SAFE_BROWSING_KEY"], free: false, feeds: "optional best-recall site-safety; GoPlus/URLhaus/heuristics still run" },
   { id: "coingecko", label: "CoinGecko", env: ["COINGECKO_API_KEY"], free: true, feeds: "token price/mcap, call performance (K2)" },
   { id: "dexscreener", label: "DexScreener", env: [], free: true, feeds: "live DEX liquidity/volume, rug signals" },
+  { id: "memorylol", label: "memory.lol (X handle history)", env: [], free: true, feeds: "prior X screen names for a linked project account - recycled-handle and handle-reuse forensics" },
   { id: "crunchbase", label: "Crunchbase", env: ["CRUNCHBASE_API_KEY"], free: false, feeds: "optional company/funding enrichment; never required for portfolio certification" },
   { id: "peopledatalabs", label: "People Data Labs", env: ["PDL_API_KEY"], free: false, feeds: "identity, off-LinkedIn career history (F1/F2)" },
   { id: "github", label: "GitHub forensics", env: ["GITHUB_TOKEN"], free: false, feeds: "twitter-linked identity, org/repo affiliations (F1/F2)" },
   { id: "reddit", label: "Reddit", env: ["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"], free: false, feeds: "community FUD / reputation (F5/I5/AG4)" },
   { id: "helius", label: "Helius (Solana)", env: ["HELIUS_API_KEY"], free: false, feeds: "attributed-wallet activity (K4 context)" },
   { id: "arkham", label: "Arkham", env: ["ARKHAM_API_KEY"], free: false, feeds: "score-neutral identity and exposure context for evidence-bound wallets" },
+  { id: "fomoscan", label: "FomoScan (FOMO trader identity)", env: ["FOMOSCAN_API_KEY"], free: false, feeds: "FOMO handle to verified-wallet attribution for KOL subjects (K4 input), trader cash-flow numbers and posted theses; metered in compute units" },
   { id: "bitquery", label: "Bitquery (not yet in core collector)", env: ["BITQUERY_API_KEY"], free: false, feeds: "reserved credential only; does not run or attest core audits" },
   { id: "analyst", label: "Grok analyst agent", env: ["XAI_API_KEY"], free: false, feeds: "messy-to-structured axis scoring + rationale + headline" },
   { id: "openrouter", label: "OpenRouter (optional extract fallback)", env: ["OPENROUTER_API_KEY"], free: false, feeds: "cheap extraction fallback when ARGUS_PROVIDER_FALLBACKS is on" },
@@ -42,6 +44,56 @@ var providerFallbacksEnabled = () => {
 };
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
+// server/providerAccess.ts
+import { AsyncLocalStorage } from "node:async_hooks";
+var access = new AsyncLocalStorage();
+function withProviderAccessScope(work) {
+  return access.run(/* @__PURE__ */ new Map(), work);
+}
+function grokAccessFailure(model, endpoint = "chat") {
+  return access.getStore()?.get("*") ?? access.getStore()?.get(`${endpoint}:${model}`);
+}
+async function recordGrokAccessFailure(response, model, endpoint = "chat") {
+  if (response.status !== 401 && response.status !== 403) return;
+  const failure2 = {
+    provider: "grok",
+    httpStatus: response.status,
+    model,
+    endpoint,
+    diagnostic: response.status === 401 ? "credentials_rejected" : "access_denied"
+  };
+  access.getStore()?.set(response.status === 401 ? "*" : `${endpoint}:${model}`, failure2);
+  const requestId = response.headers.get("x-request-id") || response.headers.get("request-id");
+  if (requestId && /^[a-zA-Z0-9_-]{1,100}$/.test(requestId)) failure2.requestId = requestId;
+  const reader = response.body?.getReader();
+  if (reader) {
+    let text2 = "";
+    let bytes = 0;
+    const deadline = Date.now() + 1e3;
+    try {
+      while (bytes < 4096 && Date.now() < deadline) {
+        let timer;
+        const result = await Promise.race([
+          reader.read(),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error("diagnostic_timeout")), Math.max(1, deadline - Date.now()));
+            timer.unref?.();
+          })
+        ]).finally(() => clearTimeout(timer));
+        if (result.done) break;
+        text2 += new TextDecoder().decode(result.value.subarray(0, 4096 - bytes));
+        bytes += result.value.byteLength;
+      }
+      if (/credit|billing|payment|spending.limit|insufficient.balance/i.test(text2)) failure2.diagnostic = "billing_required";
+      else if (/model.*(?:access|permission|not.allowed|not.available)/i.test(text2)) failure2.diagnostic = "model_access_denied";
+    } catch {
+    } finally {
+      void reader.cancel().catch(() => void 0);
+    }
+  }
+  console.info("[provider-access]", JSON.stringify(failure2));
+}
+
 // src/lib/scoreComparison.ts
 var object = (v) => v && typeof v === "object" ? v : {};
 function scoreComparisonNote(previous, current, previousMethodology, currentMethodology) {
@@ -61,8 +113,8 @@ function scoreComparisonNote(previous, current, previousMethodology, currentMeth
 }
 
 // server/providerDeadline.ts
-import { AsyncLocalStorage } from "node:async_hooks";
-var context = new AsyncLocalStorage();
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "node:async_hooks";
+var context = new AsyncLocalStorage2();
 async function withProviderDeadline(deadlineAt, work) {
   const controller = new AbortController();
   const remaining = deadlineAt - Date.now();
@@ -1151,7 +1203,173 @@ function isOrganizationAccount(evidence) {
 // src/data/cabals.ts
 var RH = "robinhood";
 var SOL = "solana";
+var BASE = "base";
 var CABALS = [
+  {
+    id: "rh-lemonfun-fee-farm",
+    name: "$LEMON (Lemon.fun) creator fee farm",
+    kind: "launch-farm",
+    intent: "nefarious",
+    summary: "The same in-token fee model as rh-wirebot-fee-farm, on the same launchpad family, one week earlier. The launch was clean on its mechanics: no bonding curve, the full billion straight to the pair, and the deployer bought 2.0 percent in the launch transaction for 0.028 ETH. The extraction is the fee stream the launchpad pays in the token: 46,881,851 tokens, 4.69 percent of supply, arrived at the deployer across roughly 396 payments. The deployer holds none of it. It burned 10,000,000 and pushed the remaining 57M out to five wallets, four of which forwarded everything to the swap router 0xbdbae060 and one of which sold 22.8M straight into the pair. All five are empty or near empty now. Tagged nefarious on the same basis as the wire bot record: continuous extraction paid in the token, sold into the token's own market through intermediaries, with the deployer's own sell record left clean. The 1 percent burn is the one point in the operator's favour.",
+    firstSeen: "2026-07-25",
+    lastSeen: "2026-09-20",
+    wallets: [
+      { chain: RH, address: "0x2f75a321b571006ac11674aa7bbda890e16d6c25", role: "deployer", label: "creator wallet: claims the fee stream, distributes, never sells directly", evidence: "sent launch tx 0x48a82224ef11e3b49902c03f962bb64a74fd828b843774a18883c31e0759104d to factory 0x2ba793fd at 2026-07-25 12:46:57 UTC paying 0.028 ETH and receiving 20,037,911 tokens (2.0%) from the pair; received 46,881,851 more from fee contract 0xc10309cf03bc81c121a8270e3a28e159a9296903 across 398 inbound transfers; sent all 66,932,210 back out in 10 transfers; nonce 1,913, holds 0 tokens, read 2026-09-20" },
+      { chain: RH, address: "0xd120c6eeb3024721908dfe641689350323c90301", role: "off-ramp", label: "largest fee recipient", evidence: "received 20,000,000 from the deployer and forwarded 10,000,000 to router 0xbdbae060 and 9,922,223 onward; holds 0, read 2026-09-20" },
+      { chain: RH, address: "0x5655e9bfdbce8d4a73ead52a6afb9df5002888f7", role: "off-ramp", label: "fee recipient, routed out in full", evidence: "received 12,433,831 from the deployer and sent 14,257,514 to router 0xbdbae060; holds 0, read 2026-09-20" },
+      { chain: RH, address: "0x880efd2803ad382963fef923cb714226e2840555", role: "off-ramp", label: "fee recipient, routed out in full", evidence: "received 10,000,000 from the deployer and sent 10,000,000 to router 0xbdbae060; holds 0, read 2026-09-20" },
+      { chain: RH, address: "0x851dc4d0a2c03b08c0c748bc16a1a52dbc1316ca", role: "off-ramp", label: "fee recipient, routed out in full", evidence: "received 10,000,000 from the deployer and sent 10,874,779 to router 0xbdbae060; holds 0, read 2026-09-20" },
+      { chain: RH, address: "0xef2c099803fff879443009722aa2b9c46e020ab6", role: "off-ramp", label: "fee recipient that sold straight into the pair", evidence: "received 4,420,676 from the deployer and sent 39,510,017 out in total, of which 22,819,498 went directly into the pair 0x01fe057d; EIP-7702 account, holds 262,594, read 2026-09-20" }
+    ],
+    accounts: [
+      { handle: "lemondotfun", role: "project", label: "Lemon.fun project account", evidence: "the token's listed X account, with a Telegram at t.me/lemondotfun, carried on the DexScreener pair for 0xf0e17e54 (read 2026-09-20)" }
+    ],
+    launches: [
+      { chain: RH, address: "0xf0e17e54239cd945cd7bea471a3a2ca6a8c7f7a3", symbol: "LEMON", name: "Lemon.fun", launchedAt: "2026-07-25", venue: "unknown factory 0x2ba793fd69bf251fd1af90b576be8b9fa6be46db", outcome: "fee-farmed", note: "No bonding curve: the full 1,000,000,000 went to the pair inside the launch transaction, and the deployer's only allocation was the 2.0 percent it bought there. About 255,000 USD fully diluted against 61,200 USD of liquidity, down 20 percent on the day of the read. The fee stream is 4.69 percent of supply and has been sold through five intermediary wallets; 1 percent was burned.", evidence: "launch transaction and Transfer logs read from Robinhood RPC on 2026-09-20; launch block 19,020,802 located by timestamp binary search; deployer, fee contract and recipient flows traced by topic-filtered getLogs across blocks 19,020,802 to 67,950,000; DexScreener for market state" }
+    ],
+    related: ["rh-wirebot-fee-farm"]
+  },
+  {
+    id: "base-b20-serial-launcher-58d0fdcb",
+    name: "Base B20 and o1 serial launcher",
+    kind: "launch-farm",
+    intent: "unestablished",
+    summary: "One Base wallet has pushed 35 tokens through the B20 and o1 factories between 2026-07-17 and 2026-09-15, and lives on the creator fee stream those factories pay in ETH. Thirty-two of the 35 were abandoned at the mint with no live pair and single-digit holder counts; only O1DOLL, Sparkplug and Zuckasaurus trade at all, and only O1DOLL has real depth. The names lean on borrowed identity, including ELON, COINBASE, COBIE and BALD, and several are launched twice within days of each other, such as TRILLIONS, BAPU and MACBOOK. Income is 10.08 ETH across 125 fee claims measured by balance delta, swept to one controller wallet that has taken 13.36 ETH from it. What is absent is extraction from holders: no allocation at any launch, fees paid in ETH rather than in the tokens, and no trace of the deployer holding or selling its own launches. Recorded as unestablished rather than nefarious for that reason. The volume and the borrowed names are the reason it is indexed at all, so the next launch from this wallet is recognised.",
+    firstSeen: "2026-07-17",
+    lastSeen: "2026-09-20",
+    wallets: [
+      { chain: BASE, address: "0x58d0fdcb58a82a0eae59bd1487dfc5b71f88abfc", role: "deployer", label: "serial launcher and fee claimant", evidence: "sender of 35 createLaunch transactions across the B20 factories 0xa52ad458 and 0xff70918e and the o1 factory 0x1176122e between 2026-07-17 and 2026-09-15; 125 fee claims on the escrows 0xa2cbd906 and 0x1d8c991a delivering 10.0776 ETH measured by balance delta at each claim block; holds 0.0366 ETH; its only token flows are the METAc quote asset and address-poisoning spam, never its own launches, read 2026-09-20" },
+      { chain: BASE, address: "0x85ce096548ead95e625d37e1a711baa817e8ed7b", role: "off-ramp", label: "controller wallet that funds the deployer and receives the fees", evidence: "received 13.3592 ETH from the deployer and sent it 0.015 ETH back; note two address-poisoning lookalikes appear in the deployer's counterparty list, 0x85ceef797763b8d1706b34895871229ba765ed7b and 0x85cea55c82a5b4f52192f76761125d4f6fd41d7b, which mimic this address at both ends and are not it; read 2026-09-20" }
+    ],
+    accounts: [],
+    launches: [
+      { chain: BASE, address: "0xb200000000000000000000986020255bd8315b01", symbol: "ELON", name: "Space Man", launchedAt: "2026-07-17", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-07-17; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000f558106335ebad8401", symbol: "COINBASE", name: "The Everything Exchange", launchedAt: "2026-07-17", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 2 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-07-17; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000002616193cac026fda01", symbol: "D", name: "D coin", launchedAt: "2026-07-27", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 2 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-07-27; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000007f2fbd4594ac5e4601", symbol: "Sparkplug", name: "Base cat", launchedAt: "2026-08-15", venue: "b20-launchpad 0xa52ad458", outcome: "organic", note: "81 holders, about 11,200 USD of liquidity, barely trading", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-15; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb20000000000000000000058b36c53255fcb5f01", symbol: "Trillions", name: "Trillions", launchedAt: "2026-08-16", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-16; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000e3daccc2dddd09d501", symbol: "Catslam", name: "Catslam Makhachev", launchedAt: "2026-08-16", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-16; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000002973890049ec3aad01", symbol: "BASESZN", name: "Base Szn", launchedAt: "2026-08-17", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 7 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-17; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000005b978da30e6f2e6201", symbol: "unnamed", name: "unnamed B20 token", launchedAt: "2026-08-17", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-17; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000767cfe0d53ca049601", symbol: "unnamed", name: "unnamed B20 token", launchedAt: "2026-08-17", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-17; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000fe053f82506f0f0d01", symbol: "COBIE", name: "BaseApp Man", launchedAt: "2026-08-17", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 3 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-17; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000001e4c69d5e5e4b12501", symbol: "BALD", name: "Believe in Bald", launchedAt: "2026-08-18", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-18; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000002e646b86580db31e01", symbol: "BUILDER", name: "Base Builder", launchedAt: "2026-08-18", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 2 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-18; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000d5b21475e86cc82201", symbol: "BULL", name: "Base Bull", launchedAt: "2026-08-18", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-18; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb20000000000000000000062effc15271a3ea401", symbol: "Augup", name: "Augup", launchedAt: "2026-08-19", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-19; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000d5c9729ae132e64701", symbol: "Upgust", name: "Upgust", launchedAt: "2026-08-19", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-19; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000a061ba52ee15e9a001", symbol: "O1DOLL", name: "O1 Doll", launchedAt: "2026-08-20", venue: "b20-launchpad 0xa52ad458", outcome: "organic", note: "319 holders, about 43,900 USD of liquidity and 107,000 USD fully diluted, the only one of the 35 with real depth", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-20; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000ef3f917982266f8901", symbol: "CATE", name: "Catecoin", launchedAt: "2026-08-21", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 1 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-21; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000f3283573ce61ab7401", symbol: "Cate", name: "Cate coin", launchedAt: "2026-08-21", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 1 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-21; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb20000000000000000000028c8b2d67229903601", symbol: "CATS", name: "Cats", launchedAt: "2026-08-23", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 1 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-23; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000000ba21fd556a9ceea01", symbol: "Hit", name: "Base hit", launchedAt: "2026-08-28", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 4 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-28; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000a4375986a894d52801", symbol: "Agent", name: "Call my agent", launchedAt: "2026-08-28", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 2 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-28; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000be7f96503f4cc07f01", symbol: "unnamed", name: "unnamed B20 token", launchedAt: "2026-08-28", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the b20 factory on 2026-08-28; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000dc6b015769cc69ec01", symbol: "Zuckasaurus", name: "Zuckasaurus", launchedAt: "2026-08-28", venue: "b20-launchpad 0xff70918e", outcome: "organic", note: "52 holders, about 11,300 USD of liquidity and 367 USD of daily volume; named after a Facebook privacy mascot, its only listed link is a news article, and the deployer never appears in its transfer ledger", evidence: "createLaunch from 0x58d0fdcb via the b20-v2 factory on 2026-08-28; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000501ad7a2dd5be9f301", symbol: "AiFi", name: "AiFi", launchedAt: "2026-09-01", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-01; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000007fcb1c81ac966bc501", symbol: "TRILLIONS", name: "Trillions", launchedAt: "2026-09-01", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-01; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000e432e6f021ecae3b01", symbol: "TRILLIONS", name: "Trillions", launchedAt: "2026-09-01", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-01; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000296c1d94e84d0f4b01", symbol: "BAPU", name: "BaseApu", launchedAt: "2026-09-03", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-03; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000002d029a14a4aff5f401", symbol: "unnamed", name: "unnamed B20 token", launchedAt: "2026-09-03", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-03; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000407de45bb3444ad001", symbol: "BAPU", name: "Blue Apu", launchedAt: "2026-09-03", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-03; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000f039966fa8ecc90401", symbol: "MIM", name: "Magic Internet Money", launchedAt: "2026-09-03", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-03; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000002a55c3bbaf8fcbb701", symbol: "MACBOOK", name: "Hunter Biden's Macbook", launchedAt: "2026-09-09", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-09; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb2000000000000000000008ac24c56ce4e08aa01", symbol: "MO", name: "Hunter Biden's Dog", launchedAt: "2026-09-09", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-09; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000c907224c1a0963b401", symbol: "MACBOOK", name: "Macbook", launchedAt: "2026-09-09", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-09; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb200000000000000000000418972026830771d01", symbol: "Cashdog", name: "Cashdog", launchedAt: "2026-09-15", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-15; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" },
+      { chain: BASE, address: "0xb20000000000000000000085240c01dbceed2401", symbol: "CashDoge", name: "CashDoge", launchedAt: "2026-09-15", venue: "o1", outcome: "unestablished", note: "Abandoned at the mint: 0 holders and no live pair a month on.", evidence: "createLaunch from 0x58d0fdcb via the o1 factory on 2026-09-15; token metadata and holder count from Base Blockscout, market state from DexScreener, both read 2026-09-20" }
+    ]
+  },
+  {
+    id: "rh-wirebot-fee-farm",
+    name: "$wire (wire bot) creator fee farm",
+    kind: "launch-farm",
+    intent: "nefarious",
+    summary: "A Robinhood Chain token whose operator lives on the launchpad's creator fee stream, paid in the token itself and sold back into the token's own market through two intermediary wallets. The launch mechanics were clean: no bonding curve, the full billion went straight to the pair, the deployer bought 1.44 percent in the launch transaction and took no allocation, and there is no honeypot, no tax and no liquidity pull. What followed is the record: the deployer has claimed 84.3M tokens, 8.43 percent of supply, in 210 payments worth about 52,000 USD at the prices on the days they arrived, and was still claiming on 2026-09-20. It has never sold a token itself. It forwards to a sink wallet that sells into the pair and passes the rest to a second wallet that also sells, together about 78,000 USD at sale-time prices. Indexed nefarious for the combination of continuous extraction at that scale and the two-hop routing that leaves the deployer's own sell record empty, which is what separates it from a creator who simply claims fees. Holders are the counterparty to the stream, and the token is down 99 percent from its peak. The judgement is on the operator, not the launch: the 84 percent fall across 2026-09-18 and 09-19 was 886 wallets selling, not an operator dump.",
+    firstSeen: "2026-07-17",
+    lastSeen: "2026-09-20",
+    wallets: [
+      { chain: RH, address: "0xfe4b46c8dbdf982a4f68c5268de440d1db790920", role: "deployer", label: "creator wallet: claims the fee stream, never sells", evidence: "sent launch tx 0x274e45dc79f3b3074cc262d95d81034afdd85ac717c432e685094d7b0df0c1ff to factory 0x0c37a24f at 2026-07-17 19:04:11 UTC paying 0.0205 ETH and receiving 14,395,208 tokens (1.44%) from the pair; received 84,349,332 tokens in 210 payments from fee contract 0x31ca5e10; its visible transaction history is 260 fee claims plus one setFeeRedirect call; forwarded 63,661,037 to 0xf7b84493; zero attributed sales into the pair across 314,399 transfers; holds 0 tokens and 0.0004 ETH, read 2026-09-20" },
+      { chain: RH, address: "0xf7b844930315e6b0b20268ec0f69553232eafcd0", role: "off-ramp", label: "first-hop wallet that sells the fee stream", evidence: "received 63,661,037 tokens from the deployer; 71,163,310 attributed sales into the pair worth about 25,100 USD at sale-time prices, and forwarded 43,420,226 to 0xa58bdd0a; EOA, nonce 185, holds 0, read 2026-09-20" },
+      { chain: RH, address: "0xa58bdd0ab5ebbb8dc425090fea8fd0ba969c1668", role: "off-ramp", label: "second-hop seller", evidence: "received 43,420,226 tokens from 0xf7b84493 and sold 84,887,615 directly into the pair, about 53,300 USD at sale-time prices, read 2026-09-20" }
+    ],
+    accounts: [
+      { handle: "wirebotRH", role: "project", label: "$wire (wire bot) project account", evidence: "the token's listed X account, with a Telegram at t.me/rh_wirebot, carried on every DexScreener pair for 0x8ecea3d0 (read 2026-09-20). Not to be confused with a separate token also called Wire, 0x15f3d1ba06aeeb26470bf4995305f58082a20859, account wireonrh, launched on the same chain 2026-09-18 and unrelated to this cluster." }
+    ],
+    launches: [
+      { chain: RH, address: "0x8ecea3d0e648db646d824aa51eedeb16ac3d6878", symbol: "wire", name: "wire bot", launchedAt: "2026-07-17", venue: "unknown factory 0x0c37a24f5d23a486fa692d1500881d698b1f77a4", outcome: "fee-farmed", note: "No bonding curve: the full 1,000,000,000 supply went to the pair inside the launch transaction. Peaked 2026-07-21 and is down 99 percent from there, including 84 percent across 2026-09-18 and 09-19 on rising volume. That fall was dispersed across 886 selling wallets with the top ten at 29.5 percent, and the deployer sold nothing in the window, so the fee stream is a persistent drag rather than the trigger. Over the token's life 12,378 wallets have sold with the top ten at 9.7 percent of flow, the pair holds 25.6 percent of supply and 3,912 wallets carry a balance. The factory has launched roughly 1,896 tokens.", evidence: "314,399 transfers read from Robinhood RPC logs over blocks 12,356,072 to 67,869,616 on 2026-09-20; sales attributed by walking router hops inside each transaction after classifying every busy address with eth_getCode; GeckoTerminal daily and hourly candles for the price path" }
+    ]
+  },
+  {
+    id: "base-b20-basecat-creator",
+    name: "BaseCat creator's Base launch series",
+    kind: "launch-farm",
+    intent: "benign",
+    summary: "One Base wallet deployed fourteen tokens in seven weeks and lives on creator fees rather than on token supply. Ten were abandoned at the mint with no pool and no transfers, two launches never traded, one collapsed, and one, BASECAT, became a real market. The operator has claimed 233 ETH of BASECAT creator fees and swept 244 ETH to a second wallet that bridges off Base through Relay. What is absent is the usual farm behaviour: no creator allocation at any launch, no self-snipe, no sale into any of his own tokens, and on the apple-emoji launch he spent essentially all of the fee income buying the token back and burning it. Indexed as benign because nothing in the flows shows holders being sold into; the record is here because the scale of the fee extraction and the ten-token deployment pattern are worth recognising on the next launch.",
+    firstSeen: "2026-07-21",
+    lastSeen: "2026-09-17",
+    wallets: [
+      { chain: BASE, address: "0x48c7ab8f293d0c55fd4a95764ffabcfddc240faf", role: "deployer", label: "creator of all fourteen tokens and the fee recipient", evidence: "sole sender of every createLaunch and deployToken call in its 572-tx history (2026-07-18 to 2026-09-17); receives creator fees via 169 claims on the B20 fee escrow 0xa2cbd906 totalling 233.234 ETH measured by balance delta, plus 17.62 AAPLc on the o1 launch; holds 0.0097 ETH and no token balances, read 2026-09-17" },
+      { chain: BASE, address: "0x60578f65353cb00d5b6834ce2cc39b816df74fcc", role: "off-ramp", label: "sweep wallet, 500 ETH in and 496 ETH out", evidence: "received 243.85 ETH from the creator across 95 transfers 2026-08-16 to 2026-09-17 and 179.61 ETH from the Relay solver; forwarded 232.51 ETH to the RelayDepository 0x4cd00e38 and the rest to 39 other addresses; Blockscout tx history read 2026-09-17" }
+    ],
+    accounts: [],
+    launches: [
+      { chain: BASE, address: "0x3115ee557dcbe36e95beb132ed570dd2adeb06b4", symbol: "Comma club", name: "triple comma club", launchedAt: "2026-07-21", venue: "unknown factory 0xb1900f41", outcome: "unestablished", note: "Deployed with a 1,000,000,000 supply and then abandoned: no pool, no market, and not one transfer after the mint.", evidence: "creation call from 0x48c7ab8f to 0xb1900f41 read 2026-09-17; Blockscout token counters show 0 transfers and 0 to 2 holders" },
+      { chain: BASE, address: "0x1d30a3d803376db3d0e449d24b0ce8c86111f444", symbol: "154,279,092", name: "154,279,092", launchedAt: "2026-07-21", venue: "unknown factory 0xb1900f41", outcome: "unestablished", note: "Deployed with a 1,000,000,000 supply and then abandoned: no pool, no market, and not one transfer after the mint.", evidence: "creation call from 0x48c7ab8f to 0xb1900f41 read 2026-09-17; Blockscout token counters show 0 transfers and 0 to 2 holders" },
+      { chain: BASE, address: "0x0c0d7808763703b60c99ee68790f184677a5224d", symbol: "corgi cafe", name: "corgi cafe", launchedAt: "2026-07-22", venue: "unknown factory 0xb1900f41", outcome: "unestablished", note: "Deployed with a 1,000,000,000 supply and then abandoned: no pool, no market, and not one transfer after the mint.", evidence: "creation call from 0x48c7ab8f to 0xb1900f41 read 2026-09-17; Blockscout token counters show 0 transfers and 0 to 2 holders" },
+      { chain: BASE, address: "0x01c54fa7bef071195cdd22298c0fa3476540a9fe", symbol: "Based Jimothy", name: "Based Jimothy", launchedAt: "2026-07-23", venue: "unknown factory 0xb1900f41", outcome: "unestablished", note: "Deployed with a 1,000,000,000 supply and then abandoned: no pool, no market, and not one transfer after the mint.", evidence: "creation call from 0x48c7ab8f to 0xb1900f41 read 2026-09-17; Blockscout token counters show 0 transfers and 0 to 2 holders" },
+      { chain: BASE, address: "0x313cb52b8f5b03813f7566a728522613659487ab", symbol: "BSC", name: "Bitcoin Security Consortium", launchedAt: "2026-07-23", venue: "unknown factory 0xb1900f41", outcome: "unestablished", note: "Deployed with a 1,000,000,000 supply and then abandoned: no pool, no market, and not one transfer after the mint.", evidence: "creation call from 0x48c7ab8f to 0xb1900f41 read 2026-09-17; Blockscout token counters show 0 transfers and 0 to 2 holders" },
+      { chain: BASE, address: "0x0e0e9a8e17c8703834e83335e0a3431a78060eab", symbol: "US500", name: "US500", launchedAt: "2026-07-30", venue: "unknown factory 0xb1900f41", outcome: "unestablished", note: "Deployed with a 1,000,000,000 supply and then abandoned: no pool, no market, and not one transfer after the mint.", evidence: "creation call from 0x48c7ab8f to 0xb1900f41 read 2026-09-17; Blockscout token counters show 0 transfers and 0 to 2 holders" },
+      { chain: BASE, address: "0x0251e5b197726550e12d4dfe78ce73536186b36b", symbol: "Tenders", name: "Chicken tenders", launchedAt: "2026-07-31", venue: "unknown factory 0xb1900f41", outcome: "unestablished", note: "Deployed with a 1,000,000,000 supply and then abandoned: no pool, no market, and not one transfer after the mint.", evidence: "creation call from 0x48c7ab8f to 0xb1900f41 read 2026-09-17; Blockscout token counters show 0 transfers and 0 to 2 holders" },
+      { chain: BASE, address: "0x355aef5a9a70d871df95c6790805056621ff6178", symbol: "Base app cat", name: "Base app cat", launchedAt: "2026-08-11", venue: "unknown factory 0xb1900f41", outcome: "unestablished", note: "Deployed with a 1,000,000,000 supply and then abandoned: no pool, no market, and not one transfer after the mint.", evidence: "creation call from 0x48c7ab8f to 0xb1900f41 read 2026-09-17; Blockscout token counters show 0 transfers and 0 to 2 holders" },
+      { chain: BASE, address: "0x3a00113239029e57f36785890cf06fbd48f0eb68", symbol: "Pipe", name: "Based pipe", launchedAt: "2026-08-12", venue: "unknown factory 0xb1900f41", outcome: "unestablished", note: "Deployed with a 1,000,000,000 supply and then abandoned: no pool, no market, and not one transfer after the mint.", evidence: "creation call from 0x48c7ab8f to 0xb1900f41 read 2026-09-17; Blockscout token counters show 0 transfers and 0 to 2 holders" },
+      { chain: BASE, address: "0x36be58b068a75a7f23ea79e3a0dd9cb16f802268", symbol: "Plumber", name: "Plumber", launchedAt: "2026-08-12", venue: "unknown factory 0xb1900f41", outcome: "unestablished", note: "Deployed with a 1,000,000,000 supply and then abandoned: no pool, no market, and not one transfer after the mint.", evidence: "creation call from 0x48c7ab8f to 0xb1900f41 read 2026-09-17; Blockscout token counters show 0 transfers and 0 to 2 holders" },
+      { chain: BASE, address: "0xb200000000000000000000d3677a2bddb1184d01", symbol: "Plumbing", name: "Plumbing", launchedAt: "2026-08-12", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "Reached a pool but never a market: 44 holders, about 11,400 USD of liquidity and no daily volume a month later.", evidence: "createLaunch tx 0xd7d9e08f\u2026 2026-08-12 00:47 UTC; DexScreener and GeckoTerminal read 2026-09-17" },
+      { chain: BASE, address: "0xb200000000000000000000c10035691f52d62601", symbol: "Absolute", name: "Absolute bald", launchedAt: "2026-08-12", venue: "b20-launchpad 0xa52ad458", outcome: "unestablished", note: "13 holders and no live pool; the launch never traded.", evidence: "createLaunch tx 0xc2b77d01\u2026 2026-08-12 02:24 UTC; Blockscout token page read 2026-09-17" },
+      { chain: BASE, address: "0xb2000000000000000000004c27f6523082f41d01", symbol: "BASECAT", name: "Basecat", launchedAt: "2026-08-15", venue: "b20-launchpad 0xa52ad458", outcome: "organic", note: "The one launch of the series that held: 4,720 holders, about 615,000 USD of liquidity and 487,000 USD of daily volume a month on, with the price up on the day. The creator never held or sold a single BASECAT token; his entire take is the creator fee stream of 233 ETH.", evidence: "createLaunch tx 0xa3416ee4\u2026 2026-08-15 18:03 UTC; 169 fee claims 2026-08-15 to 2026-09-17 measured by balance delta at each claim block; GeckoTerminal read 2026-09-17" },
+      { chain: BASE, address: "0xb200000000000000000000d6af5c3d433de36601", symbol: "APPLE-EMOJI", name: "apple emoji token (name and symbol are the apple emoji)", launchedAt: "2026-09-08", venue: "o1", outcome: "organic", note: "Paired against AAPLc, the tokenized Apple stock, rather than ETH. Peaked five hours after the 16:55 UTC launch and is down 97.6 percent from that high. The collapse was launch snipers flipping, not the operator: sales attribute to 1,415 wallets with the top ten holding only 11 percent, and the creator sold nothing. He instead spent 16.87 of his 17.62 AAPLc of fees buying 39,119,746 tokens back off the market and burning them, which is 3.91 percent of supply now sitting at the burn address.", evidence: "createLaunch tx 0x8905e2ed\u2026 2026-09-08 16:55 UTC; 15,866 transfers merged from Base RPC logs and Blockscout over blocks 51047087 to 51442136, read 2026-09-17; burn balance confirmed by balanceOf" }
+    ]
+  },
+  {
+    id: "rh-machi-taiwan",
+    name: "Machi Big Brother's $TAIWAN launch",
+    kind: "launch-farm",
+    intent: "unestablished",
+    summary: "Jeffrey Huang, @machibigbrother, deployed $TAIWAN on Robinhood Chain from his public wallet machibigbrother.eth on 2026-08-31 and announced it on X the next day as 'Taiwan Coin paired with Taiwan Semiconductor Manufacturing', then on 2026-09-03 as 'my Mona Lisa'. He took no allocation at the mint: the full billion went to the launch hook and he bought his position on the open market. He then promoted the token on FOMO while buying, and began selling nine days after launch. Every sale from the FomoScan-verified wallet bridged to Solana as USDC, and two of the four Solana tokens he posted theses about on 09-13 and 09-14 were first acquired by his Solana wallet after those proceeds landed. He has since fully exited. On 2026-09-19 he claimed 5,886,504 tokens, 0.59 percent of supply, as creator fees from the launchpad fee contract, and in the same hour bought 19,108,118 more through the Robinhood app, moving the price up 27 percent on 36,158 USD of volume. On 2026-09-23 00:00 UTC he sold the entire 33,994,623 in one transaction, routed into TSM and out as 27,125 STANDARD worth about 5,350 USD, and the price did not move. The FomoScan wallet emptied its last 8,000,001 through the Relay router between 09-18 and 09-20. Both wallets now hold zero; only the 1,000,000 parked in a fresh EOA on 09-07 remains. Across the two wallets he acquired 49,909,964 tokens, 5.0 percent of supply, and has sold all of it. Intent stays unestablished, not nefarious: he claimed a fee stream and is now the largest single seller on the token, but he is still roughly 15,000 USD down on it overall, he posted nothing about it during the exit window, and the 92 percent collapse happened on 09-11, twelve days before he sold. The selling that took the token down 92 percent from its peak was dispersed across 5,373 wallets, with the top ten accounting for 6.6 percent of sell flow and his own wallet ranked 238th.",
+    firstSeen: "2026-08-31",
+    lastSeen: "2026-09-23",
+    wallets: [
+      { chain: RH, address: "0x020ca66c30bec2c4fe3861a94e4db4a498a35872", role: "deployer", label: "machibigbrother.eth, the public wallet that launched $TAIWAN", evidence: "sent the launch tx 0xccbfd848a241472a46ae0a640eb0e59946e7580ac22393521a678ab79db7fd1d to factory 0x22e99278 at 2026-08-31 17:46 UTC, which minted 1,000,000,000 to hook 0xeb7c0347; ENS forward resolution of machibigbrother.eth returns this address; bought 10,435,660 tokens through the swap hub on 09-03 and 09-04, sold 435,660 on 09-07 08:40 and moved 1,000,000 to the fresh EOA 0x5fc7030f875851fd6fe4c8f199b009b1908b9ef4 (nonce 0, still holds them). On 09-19 07:18 it received 5,886,504 as creator fees from the shared launchpad fee contract 0x4e346895, contradicting the earlier read that there was no creator income, then bought 19,108,118 in six transactions through RobinHoodSettler 0x6aa80dbb between 07:36 and 07:45, taking the hourly candle from 0.00014663 to 0.00018609. On 09-23 00:00:34 UTC it sold all 33,994,623 in tx 0x3bbdc03e92a90858e5cfb4f929df8546f0e11e8ef30a46d3108c3e2a8a4ada84, receiving 27,125.467 STANDARD (0x88ad8ddf1e3898412146a534538d418c6f8a9062, about 5,350 USD); that single sale is 17.3 percent of all sell flow into the pool between 09-17 and 09-23. Holds 0 TAIWAN and 0.1308 ETH, down from 2.30, read 2026-09-23" },
+      { chain: RH, address: "0x3205c07eb8d4f59fa709d64ca68c51d427094be4", role: "kol-wallet", label: "FomoScan-verified trading wallet of FOMO account machibigbrother", evidence: "FomoScan record for FOMO account machibigbrother, display name Machi Big Brother (read 2026-09-17; FOMO stores no X link, so the binding rests on the account name, and no direct transfer links this address to machibigbrother.eth). EIP-7702 account, Simple7702Account delegate 0xe6cae83b. Bought 14,479,681 $TAIWAN in 20 buys 09-01 to 09-07 for about 12,825 USD and sold 6,479,680 in six sales 09-09 13:51 to 09-17 11:18 for about 3,563 USD, each sale routed $TAIWAN into TSM and bridged to Solana as USDC (Relay requests, 1,206.42 USDC total). It then emptied the remaining 8,000,001 through the same Relay router in four transfers on 09-18 13:17, 09-18 16:29, 09-20 13:05 and 09-20 16:32. Total in and total out are both 14,479,681; holds 0 TAIWAN and 0 ETH, read 2026-09-23" },
+      { chain: SOL, address: "CvmrvyKfkJQtGNVKzaJ6H337CN9F2vxrLsZZnmjP2omq", role: "kol-wallet", label: "FomoScan-verified Solana wallet, destination of the $TAIWAN sale proceeds", evidence: "FomoScan record for FOMO account machibigbrother (read 2026-09-17); holds all four Solana tokens he posted theses about on 09-13 and 09-14, of which HneTUS79 was first acquired 09-10 17:22 and AmPojoiS 09-12 22:04, both after the 09-09 and 09-10 $TAIWAN sales bridged in" }
+    ],
+    accounts: [
+      { handle: "machibigbrother", role: "kol", label: "Jeffrey Huang, 223.4k followers on X, creator and promoter of $TAIWAN", evidence: "X posts 2026-09-01 'Taiwan Coin paired with Taiwan Semiconductor Manufacturing' and 2026-09-03 'I am addicted to creating coins but I have now created my Mona Lisa. $TAIWAN'; FOMO theses on the token 09-06 16:57 'We are building the world's largest $TSM reserve. Long your longs.' and 09-07 04:03 'There is no ai without Taiwan', posted while buying and two days before he began selling; neither of his wallets holds any TSM, so the reserve being built sits in the pool, not with him; read 2026-09-17" }
+    ],
+    launches: [
+      { chain: RH, address: "0xaa0b48defde440b8445ba45db88cb076cf261e18", symbol: "TAIWAN", name: "Taiwan Coin", launchedAt: "2026-08-31", venue: "unknown factory 0x22e99278308b393ea1260859b181ad7e78f5eeed", outcome: "organic", note: "Paired against tokenized TSM rather than ETH. Peaked 20 hours after launch and is down 92 percent from that high, at about 104,000 USD of liquidity and a 146,000 USD valuation on 2026-09-23. No allocation at the mint and no self-snipe, but the launchpad did pay the creator 5,886,504 tokens in fees on 09-19. The 92 percent decline came from dispersed selling across 5,373 attributed wallets, top ten at 6.6 percent of flow, and the single worst day was 09-11, when the price fell from 0.00071 to 0.00019. The creator's own selling began 2026-09-09 and finished on 09-23; in the 09-17 to 09-23 window he is the largest single seller at 17.3 percent of sell flow, against 195,953,724 sold and 175,339,298 bought across about 69 and 65 wallets.", evidence: "156,948 transfers merged from Robinhood RPC logs over blocks 51,053,350 to 65,718,843, read 2026-09-17; sales attributed by walking router hops inside each tx; GeckoTerminal hourly candles for the price path" }
+    ]
+  },
+  {
+    id: "rh-meme-amc",
+    name: "A Meme Coin ($MEME) and its AMC campaign",
+    kind: "launch-farm",
+    intent: "unestablished",
+    summary: "$MEME launched on Robinhood Chain on 2026-09-03 through factory 0x22e99278, the venue behind $TAIWAN, and on 2026-09-19 repositioned itself as a campaign to 'Fix AMC' ahead of AMC's 2026-09-24 annual meeting. Distribution is the flattest indexed on this chain: 31,023 holders, the top ten non-pool holders at 14.96 percent of supply, no creator allocation and no launch-block snipe. The deployer bought 1.18 percent of supply for 0.1 ETH 37 seconds after launch and has drawn a recurring creator fee paid in the token, 5.01M across 28 claims through 2026-09-21. It never sold from its own address. It forwarded 17.62M to intermediaries that are now empty: 5.0M sold into the pool, 0.47M sold through the Robinhood app settler, 6.08M bridged out through Relay. That is the same routing as rh-wirebot-fee-farm and rh-lemonfun-fee-farm. Intent is recorded as unestablished, not nefarious, because the stream is small, 0.50 percent of supply against 4.69 and 8.43 percent on those two, and holders have not been sold into at scale. No project address holds tokenized AMC in any meaningful amount, so the campaign is not backed by a position that could be voted.",
+    firstSeen: "2026-09-03",
+    lastSeen: "2026-09-21",
+    wallets: [
+      { chain: RH, address: "0xa72a5b06927badb020d235f5f43ce56507ab2399", role: "deployer", label: "$MEME deployer and creator-fee recipient", evidence: "sent launch tx 0x75c36932619070f16f65bd7d252f689a4e6cf7d170a99ee72774d56f4315e41e (block 53,697,172, 2026-09-03 20:30 UTC) to factory 0x22e99278, which minted 1,000,000,000 to hook 0xeb7c0347; bought 11,816,778 at block +371 in tx 0xc72f60f08d9133d698b396381e56c04cb2a8afe6dbf04d083bdedc9cc81e478d, 0.1 ETH through RelayRouterV3 0xb92fe925; received 5,010,685 in 28 creator-fee claims (selector 0x817db73b) from the shared DopplerHookInitializer 0x4e346895 between 2026-09-04 and 2026-09-21; 17,940,485 in, 17,621,349 out, zero sent to the pool; holds 319,135 and 0.11 ETH, nonce 100, read 2026-09-21. Also holds 1.08B NEB, 430M SIGNAL, 273M SCOUT, 249M TERRA and 98M SZN, none with any market." },
+      { chain: RH, address: "0x8e74a2b037d29934d12c04becccb627a7883acb7", role: "farm", label: "$MEME forwarding wallet A, sold into the pool", evidence: "received 12,029,478 from the deployer 2026-09-04 04:34 to 16:25; sent 5,000,000 to PoolManager 0x8366a39c in 15 transfers, 4,683,059 through proxy 0xdeadc0de, 1,846,419 through RelayRouterV3 and 500,000 to swap router 0xbdbae060, last transfer 2026-09-05 00:24; holds zero, read 2026-09-21" },
+      { chain: RH, address: "0x8bc35bf8844123c93d8399f3c35f232ce201b328", role: "off-ramp", label: "$MEME forwarding wallet B, bridged out", evidence: "received 4,700,053, of which 3,296,638 from the deployer on 2026-09-04 and 09-05; sent 4,232,318 through RelayRouterV3 0xb92fe925 in 11 transfers and sold 467,735 through RobinHoodSettler 0x39b38686, last transfer 2026-09-05 03:49; holds zero, read 2026-09-21" }
+    ],
+    accounts: [
+      { handle: "amemecoinrh", role: "project", label: "A Meme Coin project account, 12.3k followers, follows three", evidence: "listed on every DexScreener pair for 0x385f4f8a; pinned post 2026-09-19 'Today, A $MEME Coin gets a new mission. Fix @AMCTheatres.' quoting Vlad Tenev's 2026-09-14 post on voting for Robinhood Stock Tokens; 2026-09-20 post lists the 2026-09-24 AMC annual meeting; read 2026-09-21" }
+    ],
+    launches: [
+      { chain: RH, address: "0x385f4f8ae47651ce5f58f5265395a669f8281e18", symbol: "MEME", name: "A Meme Coin", launchedAt: "2026-09-03", venue: "unknown factory 0x22e99278308b393ea1260859b181ad7e78f5eeed", outcome: "unestablished", note: "EIP-1167 clone of implementation 0x3be8b97f; one mint, no burns, no mint or rename function. Peaked at 0.063651 USD on 2026-09-13 and set a new low of 0.025312 on 2026-09-21, down 59 percent, with daily volume falling from 11.7M to 2.4M USD. About 2.0M USD of its 4.22M headline liquidity is the AMC/MEME pool, where MEME is the quote asset. Blockscout indexes the symbol as AMC while the contract returns MEME, so explorer balance views list it beside the real tokenized AMC 0x05a3d1cd.", evidence: "Blockscout holders, counters and per-address token transfers, and Robinhood RPC reads of name, symbol, supply and the mint log, all read 2026-09-21; GeckoTerminal hourly candles for pool 0x46525dc1 from 2026-09-13" }
+    ]
+  },
   {
     id: "rh-snipe-infra",
     name: "Robinhood Chain snipe infrastructure",
@@ -1325,7 +1543,11 @@ var CABALS = [
       { chain: RH, address: "0x2344eee2d839a83412760a0ba43e6324c34a7c5f", role: "holder-bridge", label: "manual trader holding both ring tokens", evidence: "top-50 holder of both FIH (1.68%) and WRESTLER (1.53%) on 2026-09-14; EOA holding 10.9 ETH, 500+ txs, trades through KyberSwap MetaAggregationRouterV2 and the 0x AllowanceHolder; held WRESTLER since launch day 2026-09-03; sold 1.53% of WRESTLER in 40 pieces on 2026-09-14/15 (0.86% inside the 13:30 UTC drop) and 1.10% of FIH at 10:42 UTC on 2026-09-15; no transfers or shared funders with the WRESTLER arbitrage bots" },
       { chain: RH, address: "0x2977b96b4235330075165ca5e3b0ef563745c354", role: "sniper", label: "launch-scalping bot wallet (also the FIH/WRESTLER holder bridge)", evidence: "top-50 holder of both FIH and WRESTLER on 2026-09-14; EOA with 6,945 txs and 0.009 ETH on 2026-09-15, approving a stream of PonsV2LauncherToken / PonsLauncherToken / LaunchToken contracts and trading through the unverified router 0xeF161b8b\u2026 (25 of its last 50 txs), the same router that flows curve-phase buys on PRISM and 0xb33eb167; ETH funded by that router, 0x0630dfBd\u2026 and the Pons proxy; sold 0.10% of WRESTLER on 2026-09-14/15. No transfers or shared funders with the WRESTLER arbitrage bots 0xed4728d8\u2026, 0x636d3380\u2026, 0x6da432f6\u2026" },
       { chain: RH, address: "0xbbfd5b62d83554c57674b27aee5b8a5228ded5a5", role: "deployer", label: "FIH creator (via launch factory 0xd9ec2db5\u2026)", evidence: "creation tx 0xec3a15b6\u2026 2026-07-01 20:44:19 paid 0.0005 ETH to the factory; bought 2.00% at block +2052 (~3.5 min) and holds 0.00% on 2026-09-14; 929 txs, 32.5 ETH" },
-      { chain: RH, address: "0x059ae3cd996c5a0db82783224cb19ae5dc598c5e", role: "deployer", label: "WRESTLER creator (via the o1 Launchpad factory 0xce9c48cf\u2026)", evidence: "creation tx 0xeaf4478a\u2026 2026-09-03 03:24:21 paid 0.001 ETH to the launcher; holds 0.43% on 2026-09-14; 114 txs, 0.09 ETH" }
+      { chain: RH, address: "0x059ae3cd996c5a0db82783224cb19ae5dc598c5e", role: "deployer", label: "WRESTLER creator (via the o1 Launchpad factory 0xce9c48cf\u2026)", evidence: "creation tx 0xeaf4478a\u2026 2026-09-03 03:24:21 paid 0.001 ETH to the launcher; holds 0.43% on 2026-09-14; 114 txs, 0.09 ETH" },
+      { chain: SOL, address: "DVFYHVKFYLxws4bV97va6EceVRrKjddHSWYq3is4ad49", role: "kol-wallet", label: "@Altcoinist FOMO-verified Solana wallet", evidence: "FomoScan record for FOMO account Altcoinist (read 2026-09-17; FOMO holds no X link, binding rests on the name and the $TIBBIR bio). FOMO cash flow all-time net -$7.6k on $180k volume, 125 trades. He posted 8 FOMO theses on FIH and WRESTLER 2026-09-07 to 09-17." },
+      { chain: RH, address: "0xccdeb7744e778992bfbff798f239638b76448e75", role: "kol-wallet", label: "@Altcoinist FOMO-verified EVM wallet", evidence: "FomoScan record for FOMO account Altcoinist (read 2026-09-17). Not yet traced against FIH, WRESTLER, TIBBIR, PONS or CASHCAT flows." },
+      { chain: SOL, address: "4CH1wgHqyirN8KR3o9L8oYNpDtRmDccCtiRJjnjLtnYp", role: "kol-wallet", label: "@lowcap_hunter FOMO-verified Solana wallet", evidence: "FomoScan record for FOMO account lowcap_hunter, X link https://x.com/lowcap_hunter (read 2026-09-17). FOMO cash flow all-time net -$32.7k on $1.41M volume, 4,312 trades." },
+      { chain: RH, address: "0x517b826b1902f9d44edaa2259afaa7e6e4b23b3b", role: "kol-wallet", label: "@lowcap_hunter FOMO-verified EVM wallet", evidence: "FomoScan record for FOMO account lowcap_hunter (read 2026-09-17). Not yet traced against ring token flows." }
     ],
     accounts: [
       { handle: "Altcoinist", role: "promoter", label: "Altcoinist \xB7 $ALTT \xB7 103k followers", evidence: "pinned 2026-08-22: 'Be Early. $TIBBIR 1339x $PONS 838x $CASHCAT 314x $LFI 77x'; $FIH calls 08-25..09-07 ('100% organic OG coin'); $WRESTLER calls 09-07 and 09-13 (Novogratz / GLXY narrative)" },
@@ -1389,6 +1611,30 @@ var CABALS = [
       { chain: SOL, address: "G5QriGjyai2hkwC1Vw6rBm8jQZaib7kceecayKCoBAGS", symbol: "ORBCROWN", name: "Orbit Crown", launchedAt: "2026-09-15T21:09:29Z", venue: "PumpSwap create_pool by a throwaway wallet (no pump.fun curve), fake launchpad address suffix", outcome: "liquidity-pulled", note: "pool opened with 401.0 SOL by 3n74UMjHoG\u2026 naming the PARK creator as coin_creator; drained to 0.00 SOL within minutes; DexScreener still quoted a multi-million market cap on zero liquidity on 2026-09-16", evidence: "create_pool tx 4awtrUJtE1Va\u2026 at 2026-09-15T21:09:29Z; pool WSOL vault balance 0.00 read 2026-09-16 16:00 UTC" },
       { chain: SOL, address: "HFKHqyJroRgU9j9hVya2rqm48T5WJwrU1KStygwABAGS", symbol: "Uclcrab", name: "CHAMPIONS CRAB", launchedAt: "2026-09-15T21:19:06Z", venue: "PumpSwap create_pool by a throwaway wallet (no pump.fun curve), fake launchpad address suffix", outcome: "liquidity-pulled", note: "pool opened with 400.6 SOL by CwXYLnAi7q\u2026 naming the PARK creator as coin_creator; drained to 0.00 SOL within minutes; DexScreener still quoted a multi-million market cap on zero liquidity on 2026-09-16", evidence: "create_pool tx 3wCQ458SrD2T\u2026 at 2026-09-15T21:19:06Z; pool WSOL vault balance 0.00 read 2026-09-16 16:00 UTC" },
       { chain: SOL, address: "5mwnJgccHmRBv5HkqaQ3zs83nnGABR6p2L9UscRSBAGS", symbol: "Dunworm", name: "DUNE SANDWORM", launchedAt: "2026-09-15T21:32:33Z", venue: "PumpSwap create_pool by a throwaway wallet (no pump.fun curve), fake launchpad address suffix", outcome: "liquidity-pulled", note: "pool opened with 415.4 SOL by ECmgGJqYLD\u2026 naming the PARK creator as coin_creator; drained to 0.00 SOL within minutes; DexScreener still quoted a multi-million market cap on zero liquidity on 2026-09-16", evidence: "create_pool tx 54Jx3m4ExoAi\u2026 at 2026-09-15T21:32:33Z; pool WSOL vault balance 0.00 read 2026-09-16 16:00 UTC" }
+    ]
+  },
+  {
+    id: "rh-farm-idx9000",
+    name: "IDX9000 self-launch and dividend pivot",
+    kind: "launch-farm",
+    intent: "nefarious",
+    summary: "One operator launched the same IDX token twice on Pons V2 within fifteen minutes, buying 36% and then 30% of supply in the creation transactions and selling every token back into the curve within minutes, then claimed the confiscated creator tax and bridged 2.59 ETH to BNB Chain. An hour before the last exit the deployer redirected the token's creator-fee stream to a Pons holder-rewards escrow, and the website, X account and a paid caller appeared after that, selling the token as a SPY-dividend index. The exit wallet re-entered with a small position nine minutes before the domain was registered.",
+    firstSeen: "2026-09-14",
+    lastSeen: "2026-09-16",
+    wallets: [
+      { chain: RH, address: "0x5cfdc3ee06936ea4d0522eaa444a863d89bf39d6", role: "deployer", label: "IDX deployer (EIP-7702 account, 69 txs)", evidence: "funded 0.5 ETH at 2026-09-14 03:50 UTC from the 5,845 ETH hot wallet 0x53091256\u2026; launched 0x8db9cbfa\u2026 at 04:52 with a 36.4% dev buy for 2.516 SPY and sold it by 04:57; launched 0xcd4e70bf\u2026 at 05:02:50 via PonsV2LaunchAndBuy with a 30.11% dev buy for 1.898 SPY (tx 0xff312ea8\u2026), sold 7.53%, 7.45% and 5.13% into the curve at 05:04 to 05:05, 7.49% at 14:39 to 14:48 and 2.51% into the graduated pool at 15:40; six PonsV2FeeEscrow claimToken calls took 1.137 SPY plus 0.132 SPY on the first token; called PonsV2LaunchFactory.transferCreatorFeeRecipient to escrow 0xaa10a1ca\u2026 at 16:37:05; last tx 16:40; holds 0" },
+      { chain: RH, address: "0xe00244b4f2f63b034dbf9d3e88cdfd606ad950df", role: "off-ramp", label: "exit wallet on BNB Chain and Robinhood, serial Pons sniper", evidence: "recipient of all seven deployer RelayDepository deposits (2.5946 ETH, 9.07 BNB) resolved via api.relay.link on 2026-09-16; the same address on Robinhood Chain has 1,587 txs since 2026-07-09, 34 Relay bridge-outs and approvals on dozens of PonsV2LauncherTokens; bought 0.39% of IDX at 2026-09-14 17:37 UTC and held 0.37% on 2026-09-16 while receiving the SPY holder drips" },
+      { chain: RH, address: "0xde42eaab9559311dca35ea946091021c69f557a3", role: "kol-wallet", label: "@YusufGemz FOMO-verified EVM wallet (FomoScan attribution)", evidence: "FomoScan record for FOMO account YusufGemz (read 2026-09-17; FOMO holds no X link, binding rests on the name and the $500-$10K challenge bio matching his X). Bought 22.8M IDX through RelayRouterV3 0xb92fe925 in six buys 2026-09-14 16:35-19:58 UTC, the first 3.6 h before his first public $IDX call at 20:12; moved 16.5M to 0xff218593 before the call and 6.1M after; holds 1.13M; 9 txs, 0 ETH on Robinhood (funds arrive bridged). Also received 555K PONSAN in the 8 h before his 2026-09-05 PONSAN call (small)." },
+      { chain: RH, address: "0xff2185935502c11811268a443f7651c3db5d3145", role: "kol-wallet", label: "@YusufGemz second wallet (EIP-7702 account, delegate 0xe8b12077\u2026)", evidence: "received IDX only from 0xde42eaab (22.06M across 2026-09-14 17:17 to 2026-09-16 13:01) and 3.6M from router 0x8366a39c; sold 23.8M IDX in 1M-lot chunks to contract 0x36dc95f1 from 2026-09-15 14:32 UTC (18 h after the first call) through the 2026-09-16 11:11 and 17:09 calls; 57 txs, 0.47 ETH (read 2026-09-17)" },
+      { chain: SOL, address: "EkeSXXNqPc5bvxeLgPmAQoVjwTPUB4k8hzNHDmfQ4S9p", role: "kol-wallet", label: "@YusufGemz FOMO-verified Solana wallet", evidence: "FomoScan record for FOMO account YusufGemz (read 2026-09-17); FOMO cash flow 30 d net -$985 on $94k volume, 359 trades. Not yet traced against his Solana calls." }
+    ],
+    accounts: [
+      { handle: "IDX_RH", role: "project", label: "$IDX9000 project account (appeared after the exit)", evidence: "joined September 2026; 45 posts by 2026-09-16 in a two-hour cadence framing IDX9000 as an index; follows MEADGod, ponsdotfamily, RobinhoodApp and RobinhoodCrypto; domain index9000.xyz registered on Namecheap 2026-09-14 17:46 UTC, 66 minutes after the deployer's last transaction" },
+      { handle: "YusufGemz", role: "kol", label: "Yusuf \xB7 paid caller (34.4k followers, Telegram channel)", evidence: "first $IDX mention 2026-09-14 20:12 UTC ('My $SPX friend never miss') at about an $80k cap, then four more calls to 2026-09-16 17:09 ('$1M next', 'Quant told me next phase coming') riding the cap from $227k to $435k; bio 'Alpha Frontrunner', private Telegram ('YG CABAL'); backtest of 28 priced calls 2026-08-31 to 09-16: median +24 h -15%, +72 h -18%, 20 of 28 under water at +72 h, $PONSAN -99%, $4AI -90%, $DOGE-1 -97% after 'called it early in the YG cabal' posts (RESEARCH.md, KOL call backtest)" }
+    ],
+    launches: [
+      { chain: RH, address: "0x8db9cbfa0c1a4bb474db19c5d92590f5b03f70eb", symbol: "IDX", name: "IDX (first attempt)", launchedAt: "2026-09-14T04:52:36Z", venue: "pons-v2", outcome: "self-sniped-and-dumped", note: "36.4% dev buy for 2.516 SPY in the creation tx, sold in two transactions at 04:56 and 04:57 UTC, creator tax claimed at 04:57 and 0.367 ETH bridged out at 04:58; never graduated, no DexScreener pair", evidence: "deployer token-transfer history on Blockscout read 2026-09-16" },
+      { chain: RH, address: "0xcd4e70bfd73952123449e453f08c12e44ab89e58", symbol: "IDX", name: "IDX9000", launchedAt: "2026-09-14T05:02:50Z", venue: "pons-v2", outcome: "self-sniped-and-dumped", note: "curve quoted in tokenized SPY; 30.11% dev buy sold in full by 15:40 UTC; 25 wallets took 23.97% in blocks +54 to +61 and three later buy clusters landed within four blocks of each dev sell; graduated 15:40 UTC with 8.16% in PonsV2LaunchLocker (position 2697526); creator-fee recipient moved to the Pons holder-rewards escrow 0xaa10a1ca\u2026 at 16:37, which has paid SPY to holders every 90 minutes since; on 2026-09-16 Robinhood-app retail bought 18.5% of supply in 24 h through RobinHoodSettler while aggregator and MEV bots sold 53%", evidence: "transfer logs from block 62544585 read 2026-09-16 via rpc.mainnet.chain.robinhood.com; PonsV2LaunchFactory.transferCreatorFeeRecipient decoded on Blockscout; DexScreener 2026-09-16: $358k cap, $49k liquidity, $235k 24h volume, 540 holders" }
     ]
   }
 ];
@@ -7435,7 +7681,7 @@ function assembleDossier(ev, live) {
   (row.handleProvenance === "subject_first_party" && Boolean(row.handle) || !teamNameIsOwnHandle(row));
   const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
     ...member,
-    ...member.identity_link_evidence_origin === "model_lead" ? { handle: void 0, linkedin: void 0, github: void 0, developerProfiles: void 0 } : {},
+    ...member.identity_link_evidence_origin === "model_lead" ? { handle: void 0, linkedin: void 0, telegram: void 0, email: void 0, github: void 0, developerProfiles: void 0 } : {},
     ...member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}
   }));
   const organizationRelationships = (ev.webTeam ?? []).filter((member) => member.kind === "org" && meaningfulTeamValue(member.name) && meaningfulTeamValue(member.role) && member.evidence_origin !== "model_lead" && member.artifact_verified === true).map((member) => ({ ...member }));
@@ -7614,6 +7860,7 @@ function assembleDossier(ev, live) {
     bio: ev.profile.bio,
     website: ev.profile.website,
     ...ev.subjectOrientation ? { subjectOrientation: structuredClone(ev.subjectOrientation) } : {},
+    ...ev.officialProductDescription ? { officialProductDescription: { ...ev.officialProductDescription } } : {},
     profile_collection_state: ev.profile.profile_collection_state,
     profile_provider: ev.profile.profile_provider,
     profile_captured_at: ev.profile.profile_captured_at,
@@ -7666,6 +7913,7 @@ function assembleDossier(ev, live) {
         ...ev.protocolTvl.hacks ? { hacks: ev.protocolTvl.hacks.map((incident) => ({ ...incident })) } : {}
       }
     } : {},
+    ...ev.cryptoRankFunding ? { cryptoRankFunding: structuredClone(ev.cryptoRankFunding) } : {},
     ...ev.protocolFunding ? {
       protocolFunding: {
         ...ev.protocolFunding,
@@ -7725,8 +7973,16 @@ function assembleDossier(ev, live) {
     ...ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {},
     ...ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {},
     ...ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {},
+    ...ev.launchVenueSubject ? { launchVenueSubject: structuredClone(ev.launchVenueSubject) } : {},
+    ...ev.stockHealth ? { stockHealth: structuredClone(ev.stockHealth) } : {},
+    ...ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {},
+    ...ev.companyRegistry ? { companyRegistry: structuredClone(ev.companyRegistry) } : {},
+    ...ev.siteBackers ? { siteBackers: structuredClone(ev.siteBackers) } : {},
+    ...ev.namesakeTokens ? { namesakeTokens: structuredClone(ev.namesakeTokens) } : {},
+    ...ev.subjectCategory ? { subjectCategory: structuredClone(ev.subjectCategory) } : {},
     ...ev.evmControlReality ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) } : {},
     ...intelligence ? { intelligence } : {},
+    ...ev.scoringOutcome ? { scoringOutcome: structuredClone(ev.scoringOutcome) } : {},
     ...ev.researchPlan ? {
       researchPlan: {
         ...ev.researchPlan,
@@ -8101,7 +8357,7 @@ function emptyEvidence(handle) {
 import { createHash } from "node:crypto";
 
 // server/cost.ts
-import { AsyncLocalStorage as AsyncLocalStorage2 } from "node:async_hooks";
+import { AsyncLocalStorage as AsyncLocalStorage3 } from "node:async_hooks";
 var PRICE = {
   // Fallback only. Successful xAI responses now return their exact billed
   // cost in usage.cost_in_usd_ticks, which always takes precedence. Grok 4.3
@@ -8125,7 +8381,7 @@ var createState = () => ({
   grok: { in: 0, out: 0, calls: 0, sources: 0 },
   claude: { in: 0, out: 0, calls: 0 }
 });
-var auditCostState = new AsyncLocalStorage2();
+var auditCostState = new AsyncLocalStorage3();
 var fallbackState = createState();
 var currentState = () => auditCostState.getStore() ?? fallbackState;
 function withCostLedger(work) {
@@ -8298,6 +8554,18 @@ var COLLECTION_ANALYST_RESERVE_MS = 25e4;
 var TRUST_GRAPH_SCREEN_RESERVE_MS = 6e4;
 var SOCIAL_ACTIVITY_BUDGET_MS = 45e3;
 
+// src/lib/evidenceTier.ts
+var isModelLead = (origin) => origin === "model_lead";
+function isRetainedSourceFact(fact) {
+  return fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated");
+}
+function isStrictlyVerifiedFact(fact) {
+  return isRetainedSourceFact(fact) && fact.providerProjection !== true && fact.floorEligible !== false && fact.attributionScope !== "identity_unresolved";
+}
+function isSourceGroundedTeamMember(member) {
+  return member.artifact_verified === true && !isModelLead(member.evidence_origin);
+}
+
 // server/agent.ts
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 var XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
@@ -8350,16 +8618,16 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs, onFail
       signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (e) {
-    const failure = failureMeta(e, timeoutMs, "transport_error");
-    addClaudeUsage(void 0, tool.name, "failed", failure);
+    const failure2 = failureMeta(e, timeoutMs, "transport_error");
+    addClaudeUsage(void 0, tool.name, "failed", failure2);
     console.info("[agent-call]", JSON.stringify({
       ...requestMetrics,
       state: "failed",
-      failure,
+      failure: failure2,
       elapsedMs: Date.now() - startedAt
     }));
-    console.error(`[agent] ${tool.name} request failed (${failure})`, e);
-    onFailure?.(failure);
+    console.error(`[agent] ${tool.name} request failed (${failure2})`, e);
+    onFailure?.(failure2);
     return null;
   }
   const requestId = res.headers.get("request-id") || res.headers.get("x-request-id");
@@ -8369,13 +8637,13 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs, onFail
       detail = await res.text();
     } catch {
     }
-    const failure = res.status === 400 && SCHEMA_COMPILATION_ERROR.test(detail) ? "schema_too_complex" : `http_${res.status}`;
-    addClaudeUsage(void 0, tool.name, "failed", failure);
-    onFailure?.(failure);
+    const failure2 = res.status === 400 && SCHEMA_COMPILATION_ERROR.test(detail) ? "schema_too_complex" : `http_${res.status}`;
+    addClaudeUsage(void 0, tool.name, "failed", failure2);
+    onFailure?.(failure2);
     console.info("[agent-call]", JSON.stringify({
       ...requestMetrics,
       state: "failed",
-      failure,
+      failure: failure2,
       httpStatus: res.status,
       requestId,
       elapsedMs: Date.now() - startedAt
@@ -8387,18 +8655,18 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs, onFail
   try {
     data = await res.json();
   } catch (e) {
-    const failure = failureMeta(e, timeoutMs, "response_json_error");
-    addClaudeUsage(void 0, tool.name, "failed", failure);
+    const failure2 = failureMeta(e, timeoutMs, "response_json_error");
+    addClaudeUsage(void 0, tool.name, "failed", failure2);
     console.info("[agent-call]", JSON.stringify({
       ...requestMetrics,
       state: "failed",
-      failure,
+      failure: failure2,
       httpStatus: res.status,
       requestId,
       elapsedMs: Date.now() - startedAt
     }));
-    console.error(`[agent] ${tool.name} response parse failed (${failure})`, e);
-    onFailure?.(failure);
+    console.error(`[agent] ${tool.name} response parse failed (${failure2})`, e);
+    onFailure?.(failure2);
     return null;
   }
   const toolBlocks = Array.isArray(data.content) ? data.content.filter((candidate) => candidate.type === "tool_use") : [];
@@ -8429,6 +8697,11 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs, onFail
 async function structuredGrok(system, user, tool, maxTokens, timeoutMs, onFailure) {
   const key = env("XAI_API_KEY");
   if (!key) return null;
+  const blocked = grokAccessFailure(GROK_ANALYST_MODEL);
+  if (blocked) {
+    onFailure?.(`http_${blocked.httpStatus}`);
+    return null;
+  }
   const startedAt = Date.now();
   const requestBody = JSON.stringify({
     model: GROK_ANALYST_MODEL,
@@ -8468,19 +8741,20 @@ Return exactly one ${tool.name} object. ${tool.description}` },
       signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (error) {
-    const failure = failureMeta(error, timeoutMs, "transport_error");
-    addGrokUsage(void 0, 0, tool.name, "failed", failure);
+    const failure2 = failureMeta(error, timeoutMs, "transport_error");
+    addGrokUsage(void 0, 0, tool.name, "failed", failure2);
     console.info("[agent-call]", JSON.stringify({
       ...requestMetrics,
       state: "failed",
-      failure,
+      failure: failure2,
       elapsedMs: Date.now() - startedAt
     }));
-    onFailure?.(failure);
+    onFailure?.(failure2);
     return null;
   }
   const requestId = response.headers.get("x-request-id") || response.headers.get("request-id");
   if (!response.ok) {
+    await recordGrokAccessFailure(response, GROK_ANALYST_MODEL);
     addGrokUsage(void 0, 0, tool.name, "failed", `http_${response.status}`);
     console.info("[agent-call]", JSON.stringify({
       ...requestMetrics,
@@ -8497,17 +8771,17 @@ Return exactly one ${tool.name} object. ${tool.description}` },
   try {
     data = await response.json();
   } catch (error) {
-    const failure = failureMeta(error, timeoutMs, "response_json_error");
-    addGrokUsage(void 0, 0, tool.name, "failed", failure);
+    const failure2 = failureMeta(error, timeoutMs, "response_json_error");
+    addGrokUsage(void 0, 0, tool.name, "failed", failure2);
     console.info("[agent-call]", JSON.stringify({
       ...requestMetrics,
       state: "failed",
-      failure,
+      failure: failure2,
       httpStatus: response.status,
       requestId,
       elapsedMs: Date.now() - startedAt
     }));
-    onFailure?.(failure);
+    onFailure?.(failure2);
     return null;
   }
   const content = data.choices?.[0]?.message?.content;
@@ -8679,7 +8953,7 @@ var PROJECT_SCORING_POLICY = [
   "P3 token conduct is governed by the frozen tokenApplicability state established before scoring. verified_live_token and historical_token_lineage are assessed; lineage means the analyst must consider predecessor names, contracts, migrations, and current status together. confirmed_tokenless removes P3 as not applicable and normalizes the project score over the remaining 80 weighted points. prelaunch_token_deferred also removes P3 without penalty until a token is live. unresolved_token_identity keeps P3 unresolved and the overall project verdict provisional. Never infer applicability from biography wording, never award clean-conduct points for lacking a token, and never penalize a tokenless business for having no token history.",
   "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
   "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end because no positive backing signal was verified on that axis only, never as counter-evidence against any other axis.",
-  "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
+  "P5 traction and liveness: current product activity plus concrete operating metrics - users, revenue, fees, TVL, transactions, retention - justify a strong score. Token market capitalization, trading volume, liquidity and posting cadence are audience attention, not product traction: they may support a reading but can never stand in for a usage metric. When no dated operating metric was collected, say the operating metrics are unknown; do not score that absence as adverse, and do not treat token turnover as evidence that the product is used. Verified live usage must not be reduced to moderate merely because another metric was not collected.",
   "A severe canonical-token market drawdown is material counter-evidence for P5 and must be cited, but price performance alone only caps otherwise exceptional traction and liveness at the solid band. It cannot erase verified current protocol usage or imply token misconduct.",
   "P6 transparency and integrity: a named legal operator, terms, public docs or repositories, governance materials, and consistent current disclosures justify a solid score. Published independent audits, treasury reporting, and fuller financial disclosures may justify the exceptional band. An unavailable disclosure path is a confidence gap unless a direct verified search establishes a material nondisclosure.",
   "Only cite substantive counterEvidenceRefs for distinct verified facts that pull a score below its evidence-strength band. A verified adverse fact may be primary support for an adverse band, but positive support and score-limiting counter-evidence must otherwise remain separate citations. An emerging score reflects limited demonstrated maturity or scale and does not require adverse evidence. Never use absence wording or operational coverage telemetry as a reason to lower a band."
@@ -9563,10 +9837,10 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const records = (value) => Array.isArray(value) ? value.filter((row) => Boolean(row && typeof row === "object" && !Array.isArray(row))) : [];
   const artifactIds = (values) => [...new Set(values.map((row) => typeof row.artifactId === "string" ? row.artifactId : "").filter(Boolean))];
   const basicFacts2 = records(packet.basicFacts);
-  const verifiedFacts = (...predicates) => basicFacts2.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.floorEligible !== false && fact.providerProjection !== true);
+  const verifiedFacts = (...predicates) => basicFacts2.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && isStrictlyVerifiedFact(fact));
   const ceilingOnlyFacts = (...predicates) => basicFacts2.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && (fact.floorEligible === false || fact.providerProjection === true));
   const factText = (facts) => facts.map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`).join(" ");
-  const team = records(packet.team).filter((member) => member.artifact_verified === true && member.evidence_origin !== "model_lead");
+  const team = records(packet.team).filter((member) => isSourceGroundedTeamMember(member));
   const leaders = team.filter((member) => PROJECT_LEADER_TEAM_ROLE.test(String(member.role ?? "")));
   const leaderNames = new Set(leaders.map((member) => String(member.name ?? "").trim().toLowerCase()).filter(Boolean));
   const profile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile) ? packet.profile : void 0;
@@ -9747,8 +10021,8 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     // An assessed-null band is a plain band, never a press-widened one.
   ], p4Assessment ? void 0 : p4FloorTier);
   const verifiedCurrentActivity = currentSocialActivity;
-  let p5FloorTier = verifiedCurrentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
-  if (verifiedCurrentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5FloorTier = "solid";
+  let p5FloorTier = verifiedCurrentActivity || protocolTractionFacts.length > 0 ? "emerging" : "none";
+  if (verifiedCurrentActivity && protocolTractionFacts.length > 0) p5FloorTier = "solid";
   if (verifiedCurrentActivity && currentProtocolTractionFacts.length > 0 && scaleSignals >= 2 && tokenProviders >= 2) p5FloorTier = "exceptional";
   let p5Tier = currentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
   if (currentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5Tier = "solid";
@@ -9770,7 +10044,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...protocolTractionFacts.length ? ["verified protocol usage metric"] : [],
     ...currentProtocolTractionFacts.length ? ["dated current protocol metric"] : [],
     ...tvlLongevity ? ["multi-year billion-scale TVL history"] : [],
-    ...moderateMarket ? ["measured token-market corroboration"] : [],
+    ...moderateMarket ? ["measured token-market activity widens the ceiling only, never the floor"] : [],
     ...severeProjectTokenDrawdown ? ["severe canonical-token drawdown caps exceptional traction"] : []
   ], artifactIds([
     ...currentSocialActivity && daysSincePost !== null && profile ? [profile] : [],
@@ -11627,6 +11901,7 @@ function tokenFromVerifiedProjectToken(token) {
   return {
     address,
     via,
+    binding: "canonical",
     source: `the canonical${symbol ? ` $${symbol}` : ""} project token verified through ${identitySource}`
   };
 }
@@ -11634,10 +11909,10 @@ function declaredTokenFromBio(bio) {
   const candidates = [...(bio ?? "").matchAll(DECLARED_CA)].flatMap((match) => {
     const address = match[1] ?? "";
     if (/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      return [{ address, via: "evm", source: "the contract explicitly declared in the subject's own bio" }];
+      return [{ address, via: "evm", binding: "bio", source: "the contract explicitly declared in the subject's own bio" }];
     }
     if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
-      return [{ address, via: "solana", source: "the contract explicitly declared in the subject's own bio" }];
+      return [{ address, via: "solana", binding: "bio", source: "the contract explicitly declared in the subject's own bio" }];
     }
     return [];
   });
@@ -11650,9 +11925,9 @@ function declaredTokenFromBio(bio) {
 function tokenFromBio(bio) {
   const b = bio ?? "";
   const evm = b.match(EVM_CA)?.[0];
-  if (evm) return { address: evm, via: "evm", source: "the contract in the subject's own bio" };
+  if (evm) return { address: evm, via: "evm", binding: "bio", source: "the contract in the subject's own bio" };
   const sol = b.match(SOL_WORD)?.[1];
-  if (sol) return { address: sol, via: "solana", source: "the contract in the subject's own bio" };
+  if (sol) return { address: sol, via: "solana", binding: "bio", source: "the contract in the subject's own bio" };
   return null;
 }
 function tokenFromPromotions(promos) {
@@ -11664,7 +11939,7 @@ function tokenFromPromotions(promos) {
     if (via === "evm" && !/^0x[a-fA-F0-9]{40}$/.test(a)) continue;
     if (via === "solana" && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) continue;
     const tick = (p.ticker ?? "").replace(/^\$+/, "");
-    return { address: a, via, source: `a claimed promotion${tick ? ` ($${tick})` : ""}` };
+    return { address: a, via, binding: "promotion", source: `a claimed promotion${tick ? ` ($${tick})` : ""}` };
   }
   return null;
 }
@@ -11735,6 +12010,10 @@ var NEVER_WAIVE_CHECK_IDS = /* @__PURE__ */ new Set([
   "founder-asset-distinction"
 ]);
 var CLEARANCE_COVERAGE_FLOOR_PERCENT = 100;
+function coveragePercentOf(recorded, applicable) {
+  if (!(applicable > 0)) return 0;
+  return Math.floor(recorded / applicable * 1e3) / 10;
+}
 function clearanceCoverage(checks) {
   const governing = decisionCriticalChecks(checks);
   const applicableRows = governing.filter((check) => check.status !== "not-applicable");
@@ -11743,7 +12022,7 @@ function clearanceCoverage(checks) {
   const openNeverWaive = hasStableIds ? applicableRows.filter((check) => check.checkId && NEVER_WAIVE_CHECK_IDS.has(check.checkId) && !neverWaiveCheckRecorded(check.checkId, check.status)).map((check) => check.checkId) : [];
   const applicable = applicableRows.length;
   const recorded = recordedRows.length;
-  const recordedPercent = applicable > 0 ? Math.floor(recorded / applicable * 100) : 0;
+  const recordedPercent = coveragePercentOf(recorded, applicable);
   const sufficient = applicable > 0 && (hasStableIds ? openNeverWaive.length === 0 && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT : recorded === applicable);
   return { applicable, recorded, openNeverWaive, recordedPercent, sufficient };
 }
@@ -12213,6 +12492,17 @@ var PersonCheckTracker = class {
   }
 };
 
+// server/captureTime.ts
+function captureTimestamp() {
+  if (process.env.ARGUS_EVAL_MODE === "replay") {
+    const recordedAt = process.env.ARGUS_EVAL_CAPTURED_AT?.trim();
+    if (recordedAt && Number.isFinite(Date.parse(recordedAt))) {
+      return new Date(recordedAt).toISOString();
+    }
+  }
+  return (/* @__PURE__ */ new Date()).toISOString();
+}
+
 // server/tokenApplicability.ts
 var PRELAUNCH_TOKEN = /\b(?:token|coin)\b[\s\S]{0,45}\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched)\b|\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched)\b[\s\S]{0,45}\b(?:token|coin)\b/i;
 var completed = (status) => status === "confirmed" || status === "reported" || status === "finding" || status === "checked-empty";
@@ -12307,6 +12597,636 @@ function deriveTokenApplicability(evidence, checks, determinedAt = (/* @__PURE__
     evidence: evidenceLines,
     determinedAt
   };
+}
+
+// src/lib/retry.ts
+async function retryFetch(input, init, attempts = 3, fetchImpl2 = fetch) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      init?.signal?.throwIfAborted();
+      const res = await fetchImpl2(input, init);
+      if (res.ok || res.status !== 429 && res.status < 500) return res;
+      lastErr = new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      lastErr = e;
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 300 * 2 ** i));
+  }
+  throw lastErr;
+}
+async function retryFetchWithFreshTimeout(input, timeoutMs, init = {}, attempts = 2, fetchImpl2 = fetch) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const response = await fetchImpl2(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      if (response.ok || response.status !== 429 && response.status < 500) return response;
+      lastErr = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastErr = error;
+    }
+    if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 300 * 2 ** i));
+  }
+  throw lastErr;
+}
+
+// src/token/sources.ts
+var GOPLUS_CHAIN = {
+  ethereum: "1",
+  bsc: "56",
+  base: "8453",
+  polygon: "137",
+  arbitrum: "42161",
+  optimism: "10",
+  avalanche: "43114",
+  fantom: "250",
+  cronos: "25",
+  zksync: "324",
+  linea: "59144",
+  scroll: "534352",
+  // Robinhood Chain (Arbitrum stack, mainnet Jul 2026). GoPlus has covered it
+  // since launch; ARGUS simply never asked, which left every token on this
+  // chain with no safety data, no creator, and therefore no sanctions screen.
+  robinhood: "4663"
+};
+var GOPLUS_UNSORTED_HOLDER_CHAINS = /* @__PURE__ */ new Set(["robinhood"]);
+var BLOCKSCOUT_API = {
+  robinhood: "https://robinhoodchain.blockscout.com"
+};
+function blockscoutHolderSourceUrl(chain, address) {
+  const base = BLOCKSCOUT_API[chain.trim().toLowerCase()];
+  return base ? `${base}/api/v2/tokens/${encodeURIComponent(address)}/holders` : null;
+}
+async function blockscoutContractSource(chain, address, fetchImpl2 = fetch) {
+  const base = BLOCKSCOUT_API[chain];
+  if (!base) return null;
+  try {
+    const response = await fetchImpl2(`${base}/api/v2/smart-contracts/${address}`, { signal: AbortSignal.timeout(9e3) });
+    if (!response.ok) return null;
+    const body = await response.json();
+    const sourceCode = typeof body?.source_code === "string" ? body.source_code : "";
+    if (!sourceCode) return null;
+    return {
+      name: typeof body?.name === "string" ? body.name : null,
+      isVerified: body?.is_verified === true,
+      sourceCode: sourceCode.slice(0, 4e5)
+    };
+  } catch {
+    return null;
+  }
+}
+async function blockscoutHolders(chain, address, fetchImpl2 = fetch) {
+  const chainKey = chain.trim().toLowerCase();
+  const base = BLOCKSCOUT_API[chainKey];
+  if (!base) return null;
+  const holderSourceUrl = blockscoutHolderSourceUrl(chainKey, address);
+  if (!holderSourceUrl) return null;
+  try {
+    const [tokenRes, holderRes] = await Promise.all([
+      fetchImpl2(`${base}/api/v2/tokens/${address}`, { signal: AbortSignal.timeout(9e3) }),
+      fetchImpl2(holderSourceUrl, { signal: AbortSignal.timeout(9e3) })
+    ]);
+    if (!tokenRes.ok || !holderRes.ok) return null;
+    const meta = await tokenRes.json();
+    const supply = Number(meta?.total_supply ?? 0);
+    if (!Number.isFinite(supply) || supply <= 0) return null;
+    const body = await holderRes.json();
+    const items = Array.isArray(body?.items) ? body.items : [];
+    const rows = [];
+    for (const item of items) {
+      const value = Number(item?.value ?? 0);
+      const hash3 = item?.address?.hash;
+      if (!hash3 || !Number.isFinite(value) || value <= 0) continue;
+      rows.push({ address: hash3, percent: value / supply * 100, isContract: item.address?.is_contract === true });
+      if (rows.length >= 10) break;
+    }
+    return rows;
+  } catch {
+    return null;
+  }
+}
+async function dexByTokenResult(address, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
+  try {
+    const res = await request(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (!res.ok) return { ok: false, pairs: [] };
+    const d = await res.json();
+    if (d.pairs !== null && !Array.isArray(d.pairs)) return { ok: false, pairs: [] };
+    if (d.pairs?.some((p) => !p || typeof p.chainId !== "string" || typeof p.baseToken?.address !== "string")) return { ok: false, pairs: [] };
+    return { ok: true, pairs: d.pairs ?? [] };
+  } catch {
+    return { ok: false, pairs: [] };
+  }
+}
+var CG_PLATFORM = {
+  ethereum: "ethereum",
+  eth: "ethereum",
+  base: "base",
+  solana: "solana",
+  bsc: "binance-smart-chain",
+  polygon: "polygon-pos",
+  arbitrum: "arbitrum-one",
+  optimism: "optimistic-ethereum",
+  avalanche: "avalanche",
+  fantom: "fantom"
+};
+var CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
+function cleanBlurb(raw) {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  let s = raw.replace(/<[^>]+>/g, " ").replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1").replace(/https?:\/\/\S+/g, "").replace(/[*_`>#]+/g, " ").replace(/&amp;/g, "&").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+  if (!s) return null;
+  if (s.length > 1600) s = `${s.slice(0, 1597).replace(/\s+\S*$/, "").trim()}\u2026`;
+  return s;
+}
+var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
+async function coingeckoToken(chain, address, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
+  const plat = CG_PLATFORM[chain] ?? chain;
+  try {
+    const res = await request(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (res.status === 404) return { listed: false, id: null, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null, categories: [] };
+    if (!res.ok) return null;
+    const d = await res.json();
+    const tickers = d.tickers ?? [];
+    const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
+    const cex = new Set(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean));
+    const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
+    const homepageValue = (d.links?.homepage ?? []).find((value) => typeof value === "string" && /^https?:\/\//i.test(value));
+    const homepage = typeof homepageValue === "string" ? homepageValue : null;
+    const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
+    const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
+    const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
+    const athPrice = d.market_data?.ath?.usd;
+    const athDate = d.market_data?.ath_date?.usd;
+    const athDrawdown = d.market_data?.ath_change_percentage?.usd;
+    const ath = athPrice != null || athDate != null || athDrawdown != null ? {
+      priceUsd: typeof athPrice === "number" && Number.isFinite(athPrice) ? athPrice : null,
+      date: typeof athDate === "string" && athDate.trim() ? athDate : null,
+      drawdownPct: typeof athDrawdown === "number" && Number.isFinite(athDrawdown) ? athDrawdown : null
+    } : null;
+    return {
+      listed: true,
+      id: typeof d.id === "string" && d.id ? d.id : null,
+      rank: d.market_cap_rank ?? null,
+      mcapUsd: d.market_data?.market_cap?.usd ?? null,
+      marketCount: markets.size,
+      cexCount: cex.size,
+      cexNames,
+      homepage,
+      twitter,
+      image,
+      description: cleanBlurb(d.description?.en),
+      categories: (d.categories ?? []).filter((c) => typeof c === "string" && c.trim().length > 0).slice(0, 12),
+      ath
+    };
+  } catch {
+    return null;
+  }
+}
+async function dexByPairResult(chain, pair, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
+  try {
+    const res = await request(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (!res.ok) return { ok: false, pair: null };
+    const d = await res.json();
+    return { ok: true, pair: d.pair ?? d.pairs?.[0] ?? null };
+  } catch {
+    return { ok: false, pair: null };
+  }
+}
+function pickPair(pairs, wantAddress) {
+  if (!pairs.length) return null;
+  const byLiq = [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
+  if (wantAddress) {
+    const exact = byLiq.find((p) => p.baseToken?.address === wantAddress);
+    if (exact) return exact;
+    const match = /^0x[0-9a-f]{40}$/i.test(wantAddress) ? byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase()) : void 0;
+    if (match) return match;
+    return null;
+  }
+  return byLiq[0];
+}
+function hasCompleteGoplusTradeability(result) {
+  const reported = (value) => typeof value === "string" && value.trim().length > 0;
+  return result?.is_in_dex === "1" && reported(result.buy_tax) && reported(result.sell_tax) && reported(result.cannot_sell_all);
+}
+async function honeypotIs(chainId, address, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
+  try {
+    const res = await request(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
+    if (!res.ok) return null;
+    const d = await res.json();
+    return {
+      isHoneypot: !!d.honeypotResult?.isHoneypot,
+      simSuccess: !!d.simulationSuccess,
+      buyTax: d.simulationResult?.buyTax ?? 0,
+      sellTax: d.simulationResult?.sellTax ?? 0,
+      flags: (d.flags ?? []).map((flag) => typeof flag === "string" ? flag : flag.description ?? flag.flag ?? String(flag))
+    };
+  } catch {
+    return null;
+  }
+}
+async function goplusSolana(mint, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
+  try {
+    const res = await request(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
+    if (!res.ok) return null;
+    const d = await res.json();
+    const row = d.result?.[mint];
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+var SOLANA_ADDRESS2 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function supplySharePercent(amount, supply) {
+  const balance = Number(amount);
+  const total = Number(supply);
+  if (!Number.isFinite(balance) || balance < 0) return null;
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const percent = balance / total * 100;
+  return percent >= 0 && percent <= 100 ? percent : null;
+}
+function lockedShare(lpLockedPct, markets) {
+  const percent = boundedPercent(lpLockedPct);
+  if (percent == null) return null;
+  if (percent > 0) return percent;
+  const marketsSeen = Array.isArray(markets) ? markets.length : 0;
+  return marketsSeen > 0 ? percent : null;
+}
+function boundedPercent(value) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const percent = Number(value);
+  if (!Number.isFinite(percent)) return null;
+  return percent >= 0 && percent <= 100 ? percent : null;
+}
+function finiteCount(value) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : null;
+}
+function parseKnownAccounts(value) {
+  const accounts = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return accounts;
+  for (const [address, entry] of Object.entries(value)) {
+    if (!address.trim() || !entry || typeof entry !== "object") continue;
+    const record5 = entry;
+    accounts[address] = {
+      ...typeof record5.name === "string" ? { name: record5.name } : {},
+      ...typeof record5.type === "string" ? { type: record5.type } : {}
+    };
+  }
+  return accounts;
+}
+function largestInsiderClusterPercent(networks) {
+  const measured = networks.map((network) => network.percent).filter((percent) => percent != null);
+  return measured.length ? Math.max(...measured) : null;
+}
+async function rugcheckReport(mint, fetchImpl2 = fetch) {
+  try {
+    const res = await retryFetchWithFreshTimeout(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, 15e3, {
+      headers: { accept: "application/json" }
+    }, 2, fetchImpl2);
+    if (!res.ok) return null;
+    const d = await res.json();
+    const creator = typeof d?.creator === "string" && SOLANA_ADDRESS2.test(d.creator.trim()) ? d.creator.trim() : null;
+    const supply = d?.token?.supply;
+    const networks = Array.isArray(d?.insiderNetworks) ? d.insiderNetworks : [];
+    return {
+      creator,
+      // With no creator there is nobody for a balance to belong to, and a bare
+      // zero would read as "the creator sold out" rather than "not measured".
+      creatorPercent: creator ? supplySharePercent(d?.creatorBalance, supply) : null,
+      lpLockedPct: lockedShare(d?.lpLockedPct, d?.markets),
+      rugged: d?.rugged === true,
+      knownAccounts: parseKnownAccounts(d?.knownAccounts),
+      insiderNetworks: networks.map((network) => ({
+        // Null, not zero. A cluster whose wallet count RugCheck did not report
+        // is not a cluster of nobody, and "0 linked wallets" is the reading that
+        // would talk a reader out of looking.
+        size: finiteCount(network?.size ?? network?.activeAccounts),
+        percent: supplySharePercent(network?.tokenAmount, supply)
+      })),
+      graphInsidersDetected: finiteCount(d?.graphInsidersDetected)
+    };
+  } catch {
+    return null;
+  }
+}
+async function goplus(chainId, address, fetchImpl2 = fetch) {
+  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
+  const once = async () => {
+    try {
+      const res = await request(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
+      if (!res.ok) return null;
+      const d = await res.json();
+      return d.result?.[address.toLowerCase()] ?? d.result?.[address] ?? null;
+    } catch {
+      return null;
+    }
+  };
+  let row = await once();
+  if (row && !(row.holders && row.holders.length)) {
+    await new Promise((r) => setTimeout(r, 700));
+    const retry = await once();
+    if (retry?.holders?.length) row = retry;
+  }
+  return row;
+}
+
+// src/threat/net.ts
+var legacyContext;
+var contextForRequest;
+function hasThreatApiContext() {
+  return !!(contextForRequest?.() ?? legacyContext)?.base;
+}
+
+// src/threat/launch.ts
+var VENUES = [
+  {
+    name: "pump.fun",
+    domains: ["pump.fun"],
+    chain: "solana",
+    mintSuffix: /pump$/,
+    // Graduated tokens keep the old pumpfun pair ALONGSIDE the new pumpswap
+    // one - graduation state comes from the coins API (.complete), never from
+    // "the curve pair is gone".
+    dexIds: ["pumpfun", "pumpswap"],
+    onCurveDexIds: ["pumpfun"],
+    lpOnGraduation: "burned",
+    lpNote: "graduation moves liquidity into pump.fun's own AMM (PumpSwap) with the migration LP burned - the creator cannot pull it",
+    platformPaysCreator: true,
+    feeNote: "pump.fun pays creators a tiered share of trading fees (claimable on-chain), on the curve and after graduation"
+  },
+  {
+    // bonk.fun / LetsBonk. The bonk suffix is the brand's default but NOT
+    // guaranteed; the on-curve dexId is Raydium LaunchLab's shared "launchlab"
+    // (also Bankr and Raydium-native launches - see the generic entry below).
+    // Suffix match only here.
+    name: "bonk.fun",
+    domains: ["bonk.fun"],
+    chain: "solana",
+    mintSuffix: /bonk$/i,
+    lpOnGraduation: "burned",
+    lpNote: "graduates to Raydium CPMM at 85 SOL raised with ~100% of the migration LP burned (current LetsBonk config)",
+    platformPaysCreator: true,
+    feeNote: "current LetsBonk config sets the creator fee to 0 - platform fees partly buy BONK; older launches had a creator share"
+  },
+  {
+    // Raydium LaunchLab family (shared curve program): LetsBonk without the
+    // suffix, Bankr, and Raydium-native launches all present as "launchlab" on
+    // the curve and plain Raydium CPMM after graduation.
+    name: "raydium-launchlab",
+    chain: "solana",
+    dexIds: ["launchlab"],
+    onCurveDexIds: ["launchlab"],
+    lpOnGraduation: "locked",
+    lpNote: "LaunchLab graduates into Raydium CPMM; migration LP is burned and/or locked per platform config (creator LP, where any, is a locked fee-rights NFT - principal can't be pulled)",
+    platformPaysCreator: true,
+    feeNote: "creator fee share is per-platform (Bankr pays 50% of the 1% trade fee; current LetsBonk pays 0)"
+  },
+  {
+    name: "bags",
+    chain: "solana",
+    mintSuffix: /BAGS$/,
+    dexIds: ["bags"],
+    onCurveDexIds: ["bags"],
+    lpOnGraduation: "locked",
+    lpNote: "Bags curves on Meteora DBC and graduates into Meteora DAMM v2 with the LP locked - creators claim fees on the locked position, not principal",
+    platformPaysCreator: true,
+    feeNote: "~1% of trading volume routed to the creator (and any fee-shared X account) in perpetuity, via the Bags fee-share program"
+  },
+  {
+    name: "moonit",
+    chain: "solana",
+    dexIds: ["moonit"],
+    onCurveDexIds: ["moonit"],
+    lpOnGraduation: "locked",
+    lpNote: "Moonit (DexScreener's launchpad, ex-Moonshot) migrates graduated liquidity into platform-managed Meteora/Raydium pools",
+    platformPaysCreator: false,
+    feeNote: "no standing creator fee stream"
+  },
+  {
+    // Generic Meteora DBC curve dexId: Believe and other DBC launchpads (Bags
+    // has its own dexId and matches above).
+    name: "meteora-dbc launchpad",
+    chain: "solana",
+    dexIds: ["meteoradbc"],
+    onCurveDexIds: ["meteoradbc"],
+    lpOnGraduation: "locked",
+    lpNote: "Meteora DBC curve; graduates into a locked DAMM v2 position (fee-claim-only, principal locked)",
+    platformPaysCreator: true,
+    feeNote: "DBC platforms typically split trading fees with the creator (Believe: 50/50), claimed via the DBC program"
+  },
+  {
+    name: "boop",
+    chain: "solana",
+    mintSuffix: /boop$/,
+    lpOnGraduation: "locked",
+    lpNote: "Boop graduates (~400 SOL mcap) into a platform-managed Raydium pool; the platform is largely dormant in 2026",
+    platformPaysCreator: true,
+    feeNote: "post-graduation fees distributed to BOOP stakers with a creator cut"
+  },
+  {
+    name: "virtuals",
+    chain: "evm",
+    chains: ["base", "robinhood"],
+    // Bonding-phase Virtuals tokens are INVISIBLE on DexScreener (verified) -
+    // if we can see a pair at all, it graduated. The graduated fingerprint is a
+    // Uniswap v2 pool QUOTED IN VIRTUAL.
+    dexIds: [],
+    quoteIs: ["VIRTUAL"],
+    quoteNoteFor: (q) => q === "VIRTUAL" ? "bonded to VIRTUAL - the floor is denominated in the Virtuals protocol token, so this token carries VIRTUAL's beta on top of its own" : null,
+    lpOnGraduation: "locked",
+    lpNote: "Virtuals auto-stakes graduated LP under a 10-year lock (the pool's LP majority sits in a 'Staked ... by Virtuals' contract) - not creator-pullable",
+    platformPaysCreator: true,
+    feeNote: "1% trading fee routed to fund the agent/creator (inference budget), not a claimable LP-fee stream"
+  },
+  {
+    name: "flaunch",
+    chain: "evm",
+    chains: ["base", "robinhood"],
+    // flETH-quoted Uniswap v4 pool = Flaunch (verified on both chains).
+    quoteIs: ["flETH"],
+    lpOnGraduation: "protocol-owned",
+    lpNote: "Flaunch LP is managed by the protocol's v4 hook and cannot be extracted; a fee share feeds an automated buyback wall",
+    platformPaysCreator: true,
+    feeNote: "creator revenue share is configurable 0-100% of trading fees (paid in flETH) - a high creator cut is by-design here, not a red flag"
+  },
+  {
+    name: "clanker",
+    domains: ["clanker.world"],
+    chain: "evm",
+    chains: ["base", "robinhood"],
+    // Clanker v4 deployments carry a vanity address suffix ...b07 (verified).
+    // Bankr(bot) launches are Clanker deployments under the hood.
+    mintSuffix: /b07$/i,
+    lpOnGraduation: "locked",
+    lpNote: "full supply is pooled at deploy and the LP position is held by Clanker's locker; trading fees stream to the configured recipients",
+    platformPaysCreator: true,
+    feeNote: "1% pool fee split to configured recipients (deployer/interface e.g. Bankr) - claimable by the fee admin"
+  },
+  {
+    // Bankr on Base/Robinhood runs on Doppler protocol (post-Clanker era). No
+    // client fingerprint (no suffix, per-user 4337 deployer wallets) - resolved
+    // server-side via Bankr's public per-token API. Custody verified on-chain
+    // ($KUPO): the entire supply pools into a Uniswap V4 multicurve position
+    // held book-entry INSIDE the Doppler initializer/hook - no position NFT
+    // exists, exitLiquidity() is structurally unreachable (pool locked at
+    // creation), and neither creator nor Bankr can pull liquidity or change
+    // the fee schedule.
+    name: "bankr",
+    domains: ["bankr.bot"],
+    chain: "evm",
+    chains: ["base", "robinhood"],
+    lpOnGraduation: "locked",
+    lpNote: "liquidity is locked book-entry inside Doppler's V4 multicurve initializer - no position NFT, no unlock path; creator and platform can only collect fees, never principal",
+    platformPaysCreator: true,
+    feeNote: "0.7% pool fee split 95% creator / 5% Doppler, streamed forever; watch the creator's fee-claim wallet for dumping, and the optional premint (up to 15%, 1yr vest, 30-day cliff)"
+  },
+  {
+    name: "pons",
+    chain: "evm",
+    chains: ["robinhood"],
+    // Pons pools read as plain uniswap v3/WETH on DexScreener - detection is
+    // the token's CREATOR contract (PonsLaunchFactory), checked server-side in
+    // /api/launch via Blockscout. No client-side fingerprint exists.
+    dexIds: [],
+    lpOnGraduation: "locked",
+    lpNote: "the liquidity position is transferred to the Pons launch locker at launch (PonsLaunchLocker on v1, PonsV2LaunchLocker on v2) - permanent custody, no unlock path for principal. On v2 the curve sells 71.4% of supply, graduation moves 20.4% plus the curve proceeds into a Uniswap v4 pool and 8.16% into the locker (verified 2026-09-12)",
+    platformPaysCreator: true,
+    feeNote: "v1: 1% pool fee split ~70% creator / 30% protocol inside the locked position. v2: the PonsV2MemeHook takes 5% on sells and 100% on sells by launch-block buyers, and both accrue as creator tax the deployer claims from PonsV2FeeEscrow - so a deployer who snipes their own launch recycles the tax; watch claim cadence and where the claimed ETH/USDG goes (RESEARCH.md, Pons V2 launch farms)"
+  },
+  {
+    // o1 Launchpad (o1.exchange): one launchpad-v4-minimal suite on Base,
+    // Robinhood Chain, Monad and Arc. No bonding curve - the creation tx pools
+    // the full supply into a Uniswap v4 pool under the o1 launch hook, quoted
+    // in ETH, USDC/USDG or a tokenized stock, so the pool reads as plain
+    // uniswap on DexScreener. Robinhood tokens are resolved server-side from
+    // the creating contract (/api/launch, current and historical o1 factories).
+    // Base tokens are native B20 assets (system addresses 0xb20000..., no
+    // creator on Blockscout); the 0xb2 prefix marks the B20 standard, not o1,
+    // so there is no client fingerprint yet on Base. Verified on $WRESTLER
+    // (Robinhood, 2026-09-14) and $BRAINARM (Base, 2026-09-16); see RESEARCH.md.
+    name: "o1",
+    domains: ["o1.exchange"],
+    chain: "evm",
+    chains: ["base", "robinhood"],
+    dexIds: [],
+    lpOnGraduation: "locked",
+    lpNote: "no curve phase: the full supply is pooled into a Uniswap v4 pool under the o1 launch hook in the creation tx and o1 documents the liquidity as permanent - creator rights are fee claims only, so an LP-pull is not the exit path here; the deployer's optional atomic Dev Buy and the 20-second anti-snipe window are the launch-block variables to read",
+    platformPaysCreator: true,
+    feeNote: "1% per swap split creator 50 bps / platform 30 bps / referrer 20 bps, claimed from the suite's Fee Escrow (claimFor) as ETH or the quote asset; a creator who sets their own address as referrer takes 70 bps of every trade. Watch the claim cadence and where the claimed ETH goes - $BRAINARM's creator claimed 1.68 ETH in 10 claims over 26 hours and parked it as USDC in two fresh wallets (RESEARCH.md, o1 Launchpad)"
+  },
+  {
+    name: "four.meme",
+    domains: ["four.meme"],
+    chain: "evm",
+    chains: ["bsc"],
+    dexIds: ["fourmeme"],
+    onCurveDexIds: ["fourmeme"],
+    lpOnGraduation: "burned",
+    lpNote: "graduates to PancakeSwap V2 with the LP tokens burned by the platform",
+    platformPaysCreator: false,
+    feeNote: "no ongoing creator fee stream"
+  },
+  {
+    name: "flap.sh",
+    domains: ["flap.sh"],
+    chain: "evm",
+    chains: ["bsc", "robinhood"],
+    dexIds: ["flapsh"],
+    onCurveDexIds: ["flapsh"],
+    lpOnGraduation: "protocol-owned",
+    lpNote: "bonding curve migrates into a platform-created pool on fill; supports tax tokens and tokenized-stock dividend vaults by design",
+    platformPaysCreator: true,
+    feeNote: "platform fee model; tax-token launches are expected here - a token-level tax is not automatically a rug signal on flap.sh"
+  }
+];
+function launchVenueForOfficialDomain(officialDomain) {
+  const apex = officialDomain.trim().toLowerCase().replace(/^www\./, "");
+  if (!apex) return null;
+  for (const venue of VENUES) {
+    const matched = venue.domains?.find((domain) => domain === apex);
+    if (!matched) continue;
+    return {
+      name: venue.name,
+      matchedDomain: matched,
+      chains: venue.chain === "solana" ? ["solana"] : venue.chains ?? [],
+      lpDisposition: venue.lpOnGraduation,
+      lpNote: venue.lpNote,
+      platformPaysCreator: venue.platformPaysCreator,
+      feeNote: venue.feeNote
+    };
+  }
+  return null;
+}
+function launchVenueNames() {
+  return VENUES.map((venue) => venue.name);
+}
+
+// server/subjectCategory.ts
+var WEB3_VOCABULARY = /\b(?:crypto|web3|blockchain|on[- ]?chain|defi|cefi|tokens?|tokenomics|tokenized|memecoins?|nfts?|dao|dex|cex|stablecoins?|smart contracts?|airdrops?|tge|launchpad|staking|validators?|rollups?|zk[- ]?proofs?|solana|ethereum|evm|bitcoin|altcoins?)\b/i;
+var boundFirstPartyText = (evidence) => [
+  evidence.profile.bio,
+  evidence.profile.self_post_sample,
+  ...(evidence.basicFacts ?? []).flatMap((fact) => (fact.sources ?? []).filter((source2) => source2.sourceClass === "official_subject" && source2.artifactVerified && source2.relation === "supports").map((source2) => source2.excerpt))
+].filter((text2) => Boolean(text2));
+var TOKEN_STANDING = {
+  verified_live_token: "live_token",
+  historical_token_lineage: "live_token",
+  prelaunch_token_deferred: "token_planned",
+  confirmed_tokenless: "no_token",
+  unresolved_token_identity: "token_unverified"
+};
+function deriveSubjectCategory(evidence, determinedAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  const applicability = evidence.tokenApplicability;
+  if (!applicability) return void 0;
+  const basis = [];
+  const tokenStanding = TOKEN_STANDING[applicability.state] ?? "token_unverified";
+  let web3 = false;
+  if (applicability.state === "verified_live_token" || applicability.state === "historical_token_lineage" || applicability.state === "prelaunch_token_deferred") {
+    web3 = true;
+    basis.push(
+      applicability.state === "prelaunch_token_deferred" ? "The project describes a token as planned in bound first-party sources." : "A canonical token is bound to the official project identity."
+    );
+  }
+  if (!web3 && applicability.state === "unresolved_token_identity" && evidence.unresolvedProjectToken) {
+    web3 = true;
+    basis.push("The official X bio declares a token contract, even though no market or registry record confirmed it.");
+  }
+  if (!web3 && (evidence.protocolTvl || evidence.protocolFunding || evidence.cryptoRankFunding || evidence.holderProfile)) {
+    web3 = true;
+    basis.push("An identity-bound crypto protocol record (TVL, funding index, or holder register) exists for this subject.");
+  }
+  if (!web3 && boundFirstPartyText(evidence).some((text2) => WEB3_VOCABULARY.test(text2))) {
+    web3 = true;
+    basis.push("Bound first-party text (bio, own posts, or verified official-site excerpts) uses crypto vocabulary.");
+  }
+  const listingFact = (evidence.basicFacts ?? []).find((fact) => fact.predicate === "public_security" && (fact.status === "verified" || fact.status === "corroborated") && fact.artifact_verified === true && fact.value.trim());
+  const publicListing = listingFact ? { value: listingFact.value.trim(), sourceUrl: listingFact.sources[0]?.url ?? "" } : void 0;
+  if (publicListing) {
+    basis.push(`A verified public security is on record: ${publicListing.value}.`);
+  }
+  if (web3) {
+    return { market: "web3", tokenStanding, ...publicListing ? { publicListing } : {}, basis, determinedAt };
+  }
+  if (applicability.state === "confirmed_tokenless") {
+    basis.push(
+      publicListing ? "A completed identity-bound token search found no token, no crypto surface speaks, and the company trades as a listed security." : "A completed identity-bound token search found no token and no crypto surface speaks for this subject."
+    );
+    return { market: "non_web3", tokenStanding: "no_token", ...publicListing ? { publicListing } : {}, basis, determinedAt };
+  }
+  basis.push("The token identity search did not reach a completed result and no other market signal speaks, so the category stays open.");
+  return { market: "undetermined", tokenStanding, ...publicListing ? { publicListing } : {}, basis, determinedAt };
 }
 
 // server/cache.ts
@@ -12968,6 +13888,7 @@ async function callGrokExtract(system, user, maxTokens, op) {
   const key = env("XAI_API_KEY");
   if (!key) return null;
   const model = GROK_EXTRACT_MODEL();
+  if (grokAccessFailure(model)) return null;
   let res;
   try {
     res = await deadlineFetch(XAI_CHAT, {
@@ -12985,6 +13906,7 @@ async function callGrokExtract(system, user, maxTokens, op) {
     return null;
   }
   if (!res.ok) {
+    await recordGrokAccessFailure(res, model);
     addGrokUsage(void 0, 0, op, "failed", `http_${res.status}`);
     return null;
   }
@@ -13206,17 +14128,6 @@ ${context2}`, 3e3, "grounded-extract");
   return answer;
 }
 
-// server/captureTime.ts
-function captureTimestamp() {
-  if (process.env.ARGUS_EVAL_MODE === "replay") {
-    const recordedAt = process.env.ARGUS_EVAL_CAPTURED_AT?.trim();
-    if (recordedAt && Number.isFinite(Date.parse(recordedAt))) {
-      return new Date(recordedAt).toISOString();
-    }
-  }
-  return (/* @__PURE__ */ new Date()).toISOString();
-}
-
 // server/adapters/x.ts
 var TWITTERAPI = "https://api.twitterapi.io";
 var asRecord2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -13232,13 +14143,15 @@ var twitterProviderFailure = (payload) => {
 var GROK_AUDIT_SPEND_CEILING_USD = Number(env("ARGUS_GROK_AUDIT_CEILING_USD") || "8.00");
 async function grokSearch(system, user, opts) {
   const key = env("XAI_API_KEY");
+  const model = env("ARGUS_GROK_MODEL") || "grok-4-fast";
   if (!key) return null;
   const requestedTools = opts?.tools?.length ? [...new Set(opts.tools)] : ["web_search", "x_search"];
   if (opts?.cacheKey && !opts.bypassCache) {
     const hit = await cacheGet(opts.cacheKey);
     if (hit) return hit;
   }
-  const call = async (withCap) => {
+  const call2 = async (withCap) => {
+    if (grokAccessFailure(model, "search")) return { status: null, text: null, budgetExhausted: true };
     if (opts?.claimProviderCall && !opts.claimProviderCall()) {
       return { status: null, text: null, budgetExhausted: true };
     }
@@ -13264,6 +14177,7 @@ async function grokSearch(system, user, opts) {
       return { status: null, text: null };
     }
     if (!res.ok) {
+      await recordGrokAccessFailure(res, model, "search");
       addGrokUsage(void 0, 0, "live-search", "failed", `http_${res.status}`);
       return { status: res.status, text: null };
     }
@@ -13302,8 +14216,8 @@ async function grokSearch(system, user, opts) {
     );
     return { status: res.status, text: text2 || null };
   };
-  let result = await call(true);
-  if (result.status === 400 && !result.budgetExhausted) result = await call(false);
+  let result = await call2(true);
+  if (result.status === 400 && !result.budgetExhausted) result = await call2(false);
   if (result.text && opts?.cacheKey && !opts.bypassCache) void cacheSet(opts.cacheKey, result.text);
   return result.text;
 }
@@ -13744,10 +14658,10 @@ async function collectCorpus(handle) {
   const score = (p) => {
     const kw = (p.text.match(new RegExp(CLAIM_RE.source, "gi")) ?? []).length;
     const cashtags = (p.text.match(CASHTAG2) ?? []).length;
-    const call = (cashtags > 0 ? 2 : 0) + (CHARTLINK.test(p.text) ? 2 : 0);
+    const call2 = (cashtags > 0 ? 2 : 0) + (CHARTLINK.test(p.text) ? 2 : 0);
     const reach = Math.log10(p.views + p.likes + 1);
     const recency = p.at ? Math.max(0, 1 - (now - p.at) / (365 * 864e5)) : 0;
-    return kw * 3 + call + reach + recency * 0.8;
+    return kw * 3 + call2 + reach + recency * 0.8;
   };
   const ranked = [...all].sort((a, b) => score(b) - score(a)).slice(0, 70);
   const newest = [...originals].sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, 12);
@@ -14699,6 +15613,7 @@ async function discoverReverseBioFromTwitterapiUncached(subjectHandle, _subjectN
   const team = [];
   const personKeys = /* @__PURE__ */ new Set();
   const biosByHandle = /* @__PURE__ */ new Map();
+  const claimBiosByHandle = /* @__PURE__ */ new Map();
   let fetches = 0;
   const MAX_PROFILE_FETCHES = 12;
   for (const candidate of [...candidates.values()].slice(0, 40)) {
@@ -14723,6 +15638,7 @@ async function discoverReverseBioFromTwitterapiUncached(subjectHandle, _subjectN
     if (!claim) continue;
     const userName = candidate.handle.replace(/^@/, "");
     personKeys.add(userName.toLowerCase());
+    claimBiosByHandle.set(userName.toLowerCase(), bio);
     team.push({
       name: name?.trim() || `@${userName}`,
       handle: `@${userName}`,
@@ -14744,7 +15660,7 @@ async function discoverReverseBioFromTwitterapiUncached(subjectHandle, _subjectN
     orgSeen.add(keyHandle);
     orgs.push(org);
   };
-  for (const bio of [projectBio ?? "", ...biosByHandle.values()]) {
+  for (const bio of [projectBio ?? "", ...claimBiosByHandle.values()]) {
     for (const org of linkedOrgsFromBioText(bio, handle, personKeys)) addOrg(org);
   }
   const extraMentions = /* @__PURE__ */ new Map();
@@ -14878,7 +15794,7 @@ function scanPostsForRoles(posts, projectName2, subjectHandle) {
   return out.slice(0, 12);
 }
 var HANDLE_TOKEN = "@([A-Za-z0-9_]{2,30})";
-function scanPostsForLinkedOrgs(posts) {
+function scanPostsForLinkedOrgs(posts, projectName2) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
   const add = (handle, role, evidence) => {
@@ -14893,13 +15809,21 @@ function scanPostsForLinkedOrgs(posts) {
       source: "post org-scan"
     });
   };
+  const project = projectName2?.trim() ? regexEscape2(projectName2.trim()) : "";
+  const OWNER = new RegExp(`\\b(?:we|we'?re|we\\s+are|we\\s+were|us|our${project ? `|${project}` : ""})\\b`, "i");
+  const claimIsSubjectOwned = (post, index, length) => {
+    const clauseStart = Math.max(...[".", "!", "?", "\\n"].map((ch) => post.lastIndexOf(ch, index)), -1) + 1;
+    const clauseEndAt = post.slice(index + length).search(/[.!?\n]/);
+    const clauseEnd = clauseEndAt === -1 ? post.length : index + length + clauseEndAt;
+    return OWNER.test(post.slice(clauseStart, clauseEnd));
+  };
   const patterns = [
     { re: new RegExp(`\\bincubated\\s+by\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "incubator", evidence: (h) => `the official account named @${h} as its incubator` },
     { re: new RegExp(`\\bincubator\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "incubator", evidence: (h) => `the official account named @${h} as its incubator` },
     { re: new RegExp(`${HANDLE_TOKEN}\\s+(?:is\\s+)?(?:the\\s+|an?\\s+)?incubator\\b`, "gi"), role: "incubator", evidence: (h) => `the official account named @${h} as its incubator` },
     { re: new RegExp(`\\b(?:the\\s+)?team\\s+behind(?:\\s+(?:this|us|(?:the\\s+)?project))?\\s+(?:is\\s+)?${HANDLE_TOKEN}\\b`, "gi"), role: "team-behind", evidence: (h) => `the official account named @${h} as the team behind the project` },
     { re: new RegExp(`${HANDLE_TOKEN}\\s+is\\s+(?:the\\s+)?team\\s+behind\\b`, "gi"), role: "team-behind", evidence: (h) => `the official account named @${h} as the team behind the project` },
-    { re: new RegExp(`\\bbacked\\s+by\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "backed-by", evidence: (h) => `the official account named @${h} as a backer` }
+    { re: new RegExp(`\\bbacked\\s+by\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "backed-by", evidence: (h) => `the official account stated, about itself, that it is backed by @${h}` }
   ];
   for (const raw of posts.slice(0, 80)) {
     const p = String(raw ?? "");
@@ -14907,6 +15831,7 @@ function scanPostsForLinkedOrgs(posts) {
       for (const match of p.matchAll(re)) {
         const handle = match[1];
         if (!handle) continue;
+        if (!claimIsSubjectOwned(p, match.index ?? 0, match[0].length)) continue;
         add(handle, role, evidence(handle));
       }
     }
@@ -14933,8 +15858,8 @@ function officialXNamedTeam(posts, projectName2, subjectHandle) {
     }];
   });
 }
-function officialXNamedOrgs(posts) {
-  return scanPostsForLinkedOrgs(posts);
+function officialXNamedOrgs(posts, projectName2) {
+  return scanPostsForLinkedOrgs(posts, projectName2);
 }
 function parseTeamJSON(text2, selfHandle, source2) {
   if (!text2) return [];
@@ -15348,11 +16273,40 @@ function profileAnchors(html) {
       if (seen.has(value.toLowerCase())) continue;
       seen.add(value.toLowerCase());
       out.push({ value, kind: "x", anchorText, index });
+      continue;
+    }
+    const telegram = href.match(/(?:t\.me|telegram\.me)\/([A-Za-z0-9_]{4,32})(?:[/?#]|$)/i);
+    if (telegram && !/^(?:share|joinchat|addstickers|proxy)$/i.test(telegram[1])) {
+      const value = telegram[1];
+      if (seen.has(`tg:${value.toLowerCase()}`)) continue;
+      seen.add(`tg:${value.toLowerCase()}`);
+      out.push({ value, kind: "telegram", anchorText, index });
+      continue;
+    }
+    const email = href.match(/^mailto:([^\s?]+@[^\s?]+\.[^\s?]+)/i);
+    if (email) {
+      const value = email[1].toLowerCase();
+      if (seen.has(`mail:${value}`)) continue;
+      seen.add(`mail:${value}`);
+      out.push({ value, kind: "email", anchorText, index });
     }
   }
   return out;
 }
 var nameTokens = (value) => value.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 1);
+function bindContactAnchor(name, anchors, kind) {
+  const tokens = nameTokens(name).filter((token) => token.length >= 3);
+  if (!tokens.length) return void 0;
+  for (const anchor of anchors) {
+    if (anchor.kind !== kind) continue;
+    const anchorTokens2 = nameTokens(anchor.anchorText).join(" ");
+    const identity = kind === "email" ? anchor.value.split("@")[0].toLowerCase() : anchor.value.toLowerCase();
+    if (tokens.every((token) => anchorTokens2.includes(token)) || tokens.some((token) => identity.includes(token))) {
+      return anchor.value;
+    }
+  }
+  return void 0;
+}
 function bindProfileAnchor(name, html, anchors, kind) {
   const tokens = nameTokens(name);
   if (tokens.length < 2) return void 0;
@@ -15372,7 +16326,10 @@ function bindProfileAnchor(name, html, anchors, kind) {
   const namePosition = html.toLowerCase().indexOf(tokens.join(" "));
   if (namePosition < 0) return void 0;
   const near = candidates.filter((anchor) => Math.abs(anchor.index - namePosition) <= 1200).sort((a, b) => Math.abs(a.index - namePosition) - Math.abs(b.index - namePosition))[0];
-  return near?.value;
+  if (!near) return void 0;
+  const identifier = near.value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const echoesName = tokens.some((token) => token.length >= 3 && identifier.includes(token));
+  return echoesName ? near.value : void 0;
 }
 function htmlToText(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
@@ -15621,7 +16578,7 @@ var canonicalSourceUrl = (value) => {
   }
 };
 var pageScore = (page) => (/\/(?:team|leadership|founders?|people)(?:[/.?#-]|$)/i.test(page.url) ? 100 : 0) + (/\b(?:co-?founders?|founders?)\b/i.test(page.text) ? 70 : 0) + (/\/(?:tokenomics|governance|transparency)(?:[/.?#-]|$)/i.test(page.url) ? 35 : 0) + Math.min(20, page.text.length / 1e3);
-var TEAM_EXTRACTION_SYSTEM = "You extract a crypto/tech project's team roster from fetched first-party project text. List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. Use the person's role in THIS project (for example founder, team member, or advisor). When the page includes descriptive credentials or biography copy next to the person, preserve that entire phrase verbatim in biography; never split biography text into additional people. Capture any X/Twitter handle and LinkedIn URL shown next to a person. For every person copy the exact PAGE URL that directly states that person's role. Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
+var TEAM_EXTRACTION_SYSTEM = "You extract a crypto/tech project's team roster from fetched first-party project text. List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. Use the person's role in THIS project, preserving the FULL title exactly as the page states it: a person listed as Co-Founder & CEO is recorded as Co-Founder & CEO, never shortened to just Co-Founder or just CEO. When the page includes descriptive credentials or biography copy next to the person, preserve that entire phrase verbatim in biography; never split biography text into additional people. Capture any X/Twitter handle and LinkedIn URL shown next to a person. For every person copy the exact PAGE URL that directly states that person's role. Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
 var TEAM_EXTRACTION_TOOL = {
   name: "record_team",
   description: "Record named project people whose roles are directly stated in fetched first-party text.",
@@ -15673,6 +16630,8 @@ ${corpus}`,
     const sourcePage = selectedPages.find((page) => canonicalSourceUrl(page.url) === claimedSource);
     const linkedin = modelLinkedin ?? (sourcePage?.html && sourcePage.anchors ? bindProfileAnchor(displayName, sourcePage.html, sourcePage.anchors, "linkedin") : void 0);
     const boundHandle = handle ?? (sourcePage?.html && sourcePage.anchors ? bindProfileAnchor(displayName, sourcePage.html, sourcePage.anchors, "x") : void 0);
+    const telegram = sourcePage?.anchors ? bindContactAnchor(displayName, sourcePage.anchors, "telegram") : void 0;
+    const email = sourcePage?.anchors ? bindContactAnchor(displayName, sourcePage.anchors, "email") : void 0;
     const officialPortraitUrl = sourcePage?.html && sourcePage.portraits ? bindOfficialPortrait(displayName, sourcePage.html, sourcePage.portraits) : void 0;
     if (!sourcePage || !teamMemberIsDirectlySupported(
       sourcePage.text,
@@ -15688,6 +16647,8 @@ ${corpus}`,
       biography,
       kind,
       linkedin,
+      ...telegram ? { telegram } : {},
+      ...email ? { email } : {},
       evidence: `direct role statement on ${sourcePage.url}`,
       source: sourcePage.url,
       sourceUrl: sourcePage.url,
@@ -15955,13 +16916,13 @@ async function get(url, opts, retryAccessDenied = true) {
   return { kind: "page", url: finalUrl, html, truncated };
 }
 function failedSiteResult(domain, failures) {
-  const blocked = failures.find((failure) => failure.status === "access_blocked");
+  const blocked = failures.find((failure2) => failure2.status === "access_blocked");
   if (blocked) return { url: blocked.url, status: blocked.status, reason: blocked.reason, detail: blocked.detail };
-  const unavailable = failures.find((failure) => failure.status === "unavailable");
+  const unavailable = failures.find((failure2) => failure2.status === "unavailable");
   if (unavailable) {
     return { url: unavailable.url, status: unavailable.status, reason: unavailable.reason, detail: unavailable.detail };
   }
-  const reasons = new Set(failures.map((failure) => failure.reason));
+  const reasons = new Set(failures.map((failure2) => failure2.reason));
   const reason = reasons.has("dns") && reasons.has("transport") ? "dns_and_transport" : reasons.has("dns") ? "dns" : "transport";
   return {
     url: `https://${domain}`,
@@ -16058,6 +17019,7 @@ async function classifyServedPage(page) {
     return {
       url: page.url,
       status: "live",
+      ...meta.trim().length >= 24 ? { productDescription: stripText(meta).slice(0, 1200) } : {},
       retrievalMethod,
       detail: withOfficialReaderRecovery(`live site${excerpt2 ? `: "${excerpt2.slice(0, 80)}"` : ""}`, retrievalMethod)
     };
@@ -16589,6 +17551,8 @@ function deriveLaunchWindow(domainRegisteredAt, accountCreatedAt) {
 }
 
 // server/adapters/entityContinuity.ts
+var CONTINUITY_COVERAGE_COMPLETE_REASON = "The project's earlier names, the old and new token contracts, the swap terms for holders, and the dates were all confirmed from primary records.";
+var CONTINUITY_COVERAGE_PARTIAL_REASON = "There are signs this project renamed itself or replaced its token before, but the full story could not be confirmed: what it was called before, which contracts were involved, what holders received in the swap, or when it happened. Treat the history as not fully verified rather than clean.";
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
@@ -16719,7 +17683,7 @@ function recomputeContinuityCoverage(snapshot) {
   snapshot.replacementContract ??= current?.contract ?? null;
   snapshot.marketHistory = snapshot.tokenLineage.filter((node) => node.status !== "migration").map((node) => ({ ticker: node.ticker, contract: node.contract, status: node.status, sourceUrls: node.sourceUrls }));
   snapshot.coverage.state = complete ? "complete" : "partial";
-  snapshot.coverage.reason = complete ? "Historical aliases, the dated migration ratio and both sides of the token lineage were recovered from primary records." : "A lifecycle signal was found, but one or more predecessor, contract, migration-ratio or dated-event fields remain unresolved.";
+  snapshot.coverage.reason = complete ? CONTINUITY_COVERAGE_COMPLETE_REASON : CONTINUITY_COVERAGE_PARTIAL_REASON;
   snapshot.coverage.primarySourceCount = snapshot.sources.filter((source2) => source2.sourceClass !== "secondary").length;
   return snapshot;
 }
@@ -16835,7 +17799,7 @@ function normalizeEntityContinuity(raw, subject, organic, official, currentToken
     coverage: {
       required: Boolean(currentToken?.contract),
       state: complete ? "complete" : "partial",
-      reason: complete ? "Historical aliases, migration mechanics and both sides of the token lineage were recovered from primary records." : "A lifecycle signal was found, but one or more predecessor, contract, migration-ratio or dated-event fields remain unresolved.",
+      reason: complete ? CONTINUITY_COVERAGE_COMPLETE_REASON : CONTINUITY_COVERAGE_PARTIAL_REASON,
       primarySourceCount,
       searchedAt: (/* @__PURE__ */ new Date()).toISOString()
     }
@@ -16985,6 +17949,33 @@ function defiLlamaLookupName(name) {
   const normalized4 = name.trim();
   return normalized4.replace(/\s+protocol$/i, "").trim() || normalized4;
 }
+function defiLlamaSlugCandidates(name, officialWebsite, handle) {
+  const out = [];
+  const push = (value) => {
+    const slug = defiLlamaSlug(value);
+    if (slug && !out.includes(slug)) out.push(slug);
+  };
+  push(defiLlamaLookupName(name));
+  if (officialWebsite?.trim()) {
+    try {
+      const host2 = new URL(/^https?:\/\//i.test(officialWebsite) ? officialWebsite : `https://${officialWebsite}`).hostname;
+      const label = host2.toLowerCase().replace(/^www\./, "").split(".")[0];
+      if (label) push(label);
+    } catch {
+    }
+  }
+  const cleanHandle = (handle ?? "").replace(/^@/, "").trim();
+  if (cleanHandle) push(cleanHandle);
+  return out.slice(0, 3);
+}
+async function resolveDefiLlamaSlug(candidates, fetcher = deadlineFetch) {
+  for (const slug of candidates) {
+    const result = await fetchProtocol(slug, fetcher);
+    if (result.ok) return slug;
+    if (!result.notFound) return null;
+  }
+  return null;
+}
 var SCAN_MEMO_MS = 3e4;
 var scanMemo = /* @__PURE__ */ new Map();
 function resetDefiLlamaScanMemo() {
@@ -17129,6 +18120,8 @@ async function collectProtocolTvl(projectName2, options = {}) {
       chains: chainBreakdown.map((entry) => entry.chain),
       chainBreakdown,
       geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
+      officialTwitter: typeof data.twitter === "string" && data.twitter.trim() ? data.twitter.trim().replace(/^@/, "") : null,
+      officialUrl: typeof data.url === "string" && data.url.trim() ? data.url.trim() : null,
       firstRecordedAt,
       change30dPct,
       trend,
@@ -17251,6 +18244,8 @@ async function collectProtocolFunding(projectName2, options = {}) {
       slug,
       name: typeof result.data.name === "string" ? result.data.name : projectName2,
       geckoId: typeof result.data.gecko_id === "string" ? result.data.gecko_id : null,
+      officialTwitter: typeof result.data.twitter === "string" && result.data.twitter.trim() ? result.data.twitter.trim().replace(/^@/, "") : null,
+      officialUrl: typeof result.data.url === "string" && result.data.url.trim() ? result.data.url.trim() : null,
       rounds,
       totalRaisedUsd,
       leadInvestors,
@@ -17258,6 +18253,14 @@ async function collectProtocolFunding(projectName2, options = {}) {
       capturedAt: result.capturedAt
     }
   };
+}
+function formatUsd(usd3) {
+  const abs = Math.abs(usd3);
+  const unit = abs >= 1e12 ? [1e12, "T"] : abs >= 1e9 ? [1e9, "B"] : abs >= 1e6 ? [1e6, "M"] : abs >= 1e3 ? [1e3, "K"] : null;
+  if (!unit) return `$${Math.round(usd3)}`;
+  const scaled = usd3 / unit[0];
+  const digits = Math.abs(scaled) >= 100 ? 0 : Math.abs(scaled) >= 10 ? 1 : 2;
+  return `$${scaled.toFixed(digits)}${unit[1]}`;
 }
 
 // server/adapters/monid.ts
@@ -17895,7 +18898,7 @@ function employmentCurrency(records, company, person) {
 }
 
 // server/adapters/peopledatalabs.ts
-var BASE = "https://api.peopledatalabs.com/v5";
+var BASE2 = "https://api.peopledatalabs.com/v5";
 var asRecord3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
 var optionalString = (value) => typeof value === "string" && value.trim() ? value : void 0;
 var PROJECT_LEADER_ROLE = /\b(?:co-?founder|founder|chief(?:\s+\w+){0,3}\s+officer|ceo|cto|cfo|coo|cmo|president)\b/i;
@@ -17906,10 +18909,15 @@ async function checkLeaderDepartures(team, company, enrich = enrichPerson) {
   const out = [];
   for (const leader of leaders) {
     const name = (leader.name ?? "").trim();
+    const slugCarriesName = (() => {
+      const slug = (leader.linkedin ?? "").toLowerCase();
+      const tokens = name.toLowerCase().split(/\s+/).filter((token) => token.length > 2);
+      return tokens.length > 0 && tokens.every((token) => slug.includes(token));
+    })();
     const person = await enrich({
       name,
       company,
-      ...leader.linkedin ? { profile: leader.linkedin } : {}
+      ...slugCarriesName && leader.linkedin ? { profile: leader.linkedin } : {}
     });
     if (!person) continue;
     const currency = employmentCurrency(person.experience, company, name);
@@ -17952,7 +18960,7 @@ async function enrichPersonOutcome(params) {
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
   let res;
   try {
-    res = await deadlineFetch(`${BASE}/person/enrich?${qs}`, {
+    res = await deadlineFetch(`${BASE2}/person/enrich?${qs}`, {
       headers: { "X-Api-Key": key },
       signal: AbortSignal.timeout(1e4)
     });
@@ -18772,7 +19780,7 @@ async function enrichFirstPartyTeamAvatars(ctx) {
 }
 
 // server/adapters/dexscreener.ts
-var BASE2 = "https://api.dexscreener.com";
+var BASE3 = "https://api.dexscreener.com";
 var MAX_PROMO_LOOKUPS = 8;
 var isRecord2 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var isPair = (value) => isRecord2(value);
@@ -18782,7 +19790,7 @@ var recordDex = (op, status, detail) => {
 async function lookupToken(address) {
   let res;
   try {
-    res = await deadlineFetch(`${BASE2}/latest/dex/tokens/${address}`, {
+    res = await deadlineFetch(`${BASE3}/latest/dex/tokens/${address}`, {
       signal: AbortSignal.timeout(8e3)
     });
   } catch {
@@ -18833,7 +19841,7 @@ async function detectTokenLifecycle(ticker, knownAddress) {
   if (!sym) return null;
   let res;
   try {
-    res = await deadlineFetch(`${BASE2}/latest/dex/search?q=${encodeURIComponent(sym)}`, {
+    res = await deadlineFetch(`${BASE3}/latest/dex/search?q=${encodeURIComponent(sym)}`, {
       signal: AbortSignal.timeout(8e3)
     });
   } catch {
@@ -19828,6 +20836,104 @@ var apexOf = (value) => {
     return "";
   }
 };
+var GITHUB_RESERVED_PATH = /* @__PURE__ */ new Set([
+  "about",
+  "apps",
+  "collections",
+  "contact",
+  "customer-stories",
+  "enterprise",
+  "events",
+  "explore",
+  "features",
+  "home",
+  "join",
+  "login",
+  "logout",
+  "marketplace",
+  "new",
+  "notifications",
+  "organizations",
+  "orgs",
+  "pricing",
+  "readme",
+  "resources",
+  "search",
+  "security",
+  "settings",
+  "signup",
+  "site",
+  "solutions",
+  "sponsors",
+  "team",
+  "topics",
+  "trending"
+]);
+function sitemapCandidateUrls(sitemapXml, apex, cap = 4) {
+  const urls = /* @__PURE__ */ new Set();
+  for (const match of sitemapXml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)) {
+    try {
+      const url = new URL(match[1]);
+      const host2 = url.hostname.toLowerCase().replace(/^www\./, "");
+      if (host2 !== apex && !host2.endsWith(`.${apex}`)) continue;
+      if (url.pathname === "/" || url.pathname === "") continue;
+      urls.add(url.toString());
+    } catch {
+      continue;
+    }
+  }
+  const priority = (value) => {
+    const path = value.toLowerCase();
+    if (/(api|developer|docs|build|sdk|github|open[- ]?source)/.test(path)) return 0;
+    if (/(about|company|team|faq)/.test(path)) return 1;
+    return 2;
+  };
+  const depth = (value) => value.split("/").length;
+  return [...urls].sort((left, right) => priority(left) - priority(right) || depth(left) - depth(right) || left.localeCompare(right)).slice(0, cap);
+}
+async function githubOrgFromOfficialSite(officialWebsite, fetcher = deadlineFetch) {
+  const apex = apexOf(officialWebsite ?? void 0);
+  if (!apex) return null;
+  const candidates = [
+    `https://${apex}/`,
+    ...apex.startsWith("docs.") ? [] : [`https://docs.${apex}/`, `https://docs.${apex}/llms.txt`]
+  ];
+  try {
+    const sitemapResponse = await fetcher(`https://${apex}/sitemap.xml`, {
+      signal: AbortSignal.timeout(8e3),
+      headers: { accept: "application/xml,text/xml,*/*" },
+      redirect: "follow"
+    });
+    const landed = sitemapResponse.url ? new URL(sitemapResponse.url).hostname.toLowerCase().replace(/^www\./, "") : "";
+    if (sitemapResponse.ok && (!landed || landed === apex || landed.endsWith(`.${apex}`))) {
+      const xml = (await sitemapResponse.text()).slice(0, 6e5);
+      candidates.push(...sitemapCandidateUrls(xml, apex));
+    }
+  } catch {
+  }
+  for (const url of candidates) {
+    let body = "";
+    let landedHost = "";
+    try {
+      const response = await fetcher(url, {
+        signal: AbortSignal.timeout(8e3),
+        headers: { accept: "text/html,text/plain,*/*" },
+        redirect: "follow"
+      });
+      landedHost = response.url ? new URL(response.url).hostname.toLowerCase().replace(/^www\./, "") : "";
+      body = (await response.text()).slice(0, 6e5);
+    } catch {
+      continue;
+    }
+    if (landedHost && landedHost !== apex && !landedHost.endsWith(`.${apex}`)) continue;
+    for (const match of body.matchAll(/github\.com\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)\b/gi)) {
+      const org = match[1];
+      if (GITHUB_RESERVED_PATH.has(org.toLowerCase())) continue;
+      return { org, sourceUrl: url };
+    }
+  }
+  return null;
+}
 function searchQueryVariants(raw) {
   const original = raw.replace(/\s+/g, " ").trim();
   if (!original) return [];
@@ -20004,6 +21110,48 @@ var githubAdapter = {
       accountCreatedAt: ctx.evidence.profile.account_created_at,
       coverage
     });
+    if (match?.confidence !== "gold") {
+      const profileResolved = ctx.evidence.profile.profile_collection_state === "resolved" && ctx.evidence.profile.profile_provider === "twitterapi";
+      const siteOrg = profileResolved ? await githubOrgFromOfficialSite(ctx.evidence.profile.website) : null;
+      if (siteOrg) {
+        ctx.recordCheck?.({
+          id: "code-footprint-github",
+          status: "confirmed",
+          note: `github.com/${siteOrg.org} is linked from the subject's own verified web surface (${siteOrg.sourceUrl})`,
+          provider: "github/site-fetch",
+          sourceCount: 1
+        });
+        if (!ctx.evidence.ventures.some((venture) => venture.project_name.toLowerCase() === siteOrg.org.toLowerCase())) {
+          ctx.evidence.ventures.push({
+            project_name: siteOrg.org,
+            role: "github organization",
+            period: "",
+            outcome: "Active" /* ACTIVE */,
+            evidence_url: `https://github.com/${siteOrg.org}`,
+            notes: `GitHub: linked from ${siteOrg.sourceUrl}`,
+            provider: "github",
+            evidence_origin: "deterministic",
+            artifact_verified: true
+          });
+          ctx.evidence.associates.push({
+            associate_handle: siteOrg.org,
+            relation: "github org",
+            evidence_url: `https://github.com/${siteOrg.org}`,
+            provider: "github",
+            evidence_origin: "deterministic",
+            artifact_verified: true
+          });
+        }
+        ctx.emit({
+          phase: "P1 \xB7 Identity",
+          label: `GitHub linked from the project's own site \xB7 ${siteOrg.org}`,
+          detail: `github.com/${siteOrg.org} is linked from ${siteOrg.sourceUrl}, a surface this subject controls. Recorded as the project's code footprint.`,
+          source: "github",
+          tone: "good"
+        });
+        return;
+      }
+    }
     if (!match) {
       if (coverage.unavailable) {
         ctx.recordCheck?.({
@@ -20349,6 +21497,191 @@ var onchainAdapter = {
       attempts: attempts.length,
       detail: `${attempts.length} Helius attempt${attempts.length === 1 ? "" : "s"} \xB7 ${failed} failed \xB7 ${partial} partial`
     };
+  }
+};
+
+// server/adapters/fomoscan.ts
+var FOMOSCAN_HOST = "https://api.fomoscan.sh";
+var FOMOSCAN_PROVIDER = "fomoscan";
+var FOMOSCAN_CU = {
+  handleHit: 2500,
+  handleMiss: 250,
+  walletHit: 5e4,
+  walletMiss: 250,
+  pnl: 2500,
+  pnlBatchPerHandle: 1250,
+  thesisPage: 250,
+  me: 0
+};
+var CALL_TIMEOUT_MS = 1e4;
+var MIN_CALL_SPACING_MS = 1050;
+var lastCallAt = 0;
+async function pace() {
+  const wait = lastCallAt + MIN_CALL_SPACING_MS - Date.now();
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastCallAt = Date.now();
+}
+function apiKey() {
+  const key = env("FOMOSCAN_API_KEY")?.trim();
+  return key ? key : null;
+}
+var normalizeHandle3 = (handle) => handle.trim().replace(/^@/, "").toLowerCase();
+function xUsernameFromFomo(raw) {
+  if (!raw) return null;
+  let v = raw.trim();
+  const m = /^(?:https?:\/\/)?(?:www\.|mobile\.)?(?:x|twitter)\.com\/(?:#!\/)?@?([A-Za-z0-9_]{1,15})(?:[/?#].*)?$/i.exec(v);
+  if (m) v = m[1];
+  v = v.replace(/^@/, "");
+  return /^[A-Za-z0-9_]{1,15}$/.test(v) ? v : null;
+}
+async function call(path, opts = {}) {
+  const key = apiKey();
+  if (!key) return { error: "no_key" };
+  const fetchImpl2 = opts.fetchImpl ?? deadlineFetch;
+  if (!opts.fetchImpl) await pace();
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
+    try {
+      const res = await fetchImpl2(`${FOMOSCAN_HOST}${path}`, {
+        method: opts.method ?? "GET",
+        headers: {
+          authorization: `Bearer ${key}`,
+          accept: "application/json",
+          ...opts.body ? { "content-type": "application/json" } : {}
+        },
+        ...opts.body ? { body: JSON.stringify(opts.body) } : {},
+        signal: controller.signal
+      });
+      let json = null;
+      try {
+        json = await res.json();
+      } catch {
+        json = null;
+      }
+      if (res.status === 401) return { error: "unauthorized" };
+      if (res.status === 402) return { error: "no_plan" };
+      if (res.status === 429) return { error: "rate_limited" };
+      if (res.status >= 500) return { error: "unavailable" };
+      return { status: res.status, json };
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return { error: "unavailable" };
+  }
+}
+var STATE_NOTES = {
+  no_key: "FomoScan is not configured (FOMOSCAN_API_KEY is missing), so no trader identity was read.",
+  no_plan: "The FomoScan key has no compute units; every billable call returns 402 until a plan is active at partner.fomoscan.sh.",
+  unauthorized: "FomoScan rejected the API key, so no trader identity was read.",
+  rate_limited: "FomoScan rate-limited this call (60 a minute across all endpoints); nothing was read.",
+  unavailable: "FomoScan did not answer, so no trader identity was read.",
+  skipped: "FomoScan was not asked."
+};
+function failure(state, cu = 0) {
+  return { state, value: null, cu, note: STATE_NOTES[state] };
+}
+var str = (v) => typeof v === "string" && v.trim() ? v.trim() : null;
+function parseUser(json) {
+  if (!json || typeof json !== "object") return null;
+  const o = json;
+  const id = str(o.id);
+  const handle = str(o.handle);
+  if (!id || !handle) return null;
+  return {
+    id,
+    handle,
+    name: str(o.name),
+    bio: str(o.bio),
+    twitter: xUsernameFromFomo(str(o.twitter)),
+    solanaAddress: str(o.solanaAddress),
+    evmAddress: str(o.evmAddress)?.toLowerCase() ?? null
+  };
+}
+async function fetchFomoUserByHandle(handle, opts = {}) {
+  const h = normalizeHandle3(handle);
+  if (!h) return failure("skipped");
+  const res = await call(`/v2/user/handle/${encodeURIComponent(h)}`, opts);
+  if ("error" in res) {
+    recordCall(FOMOSCAN_PROVIDER, "user-by-handle", 0, res.error, "failed");
+    return failure(res.error);
+  }
+  if (res.status === 404) {
+    recordCall(FOMOSCAN_PROVIDER, "user-by-handle", 0, `${FOMOSCAN_CU.handleMiss} CU miss`);
+    return { state: "miss", value: null, cu: FOMOSCAN_CU.handleMiss, note: `FomoScan holds no FOMO account named ${h}.` };
+  }
+  const user = res.status === 200 ? parseUser(res.json) : null;
+  if (!user) {
+    recordCall(FOMOSCAN_PROVIDER, "user-by-handle", 0, `http ${res.status}`, "failed");
+    return failure("unavailable");
+  }
+  recordCall(FOMOSCAN_PROVIDER, "user-by-handle", 0, `${FOMOSCAN_CU.handleHit} CU`);
+  const wallets = [user.solanaAddress, user.evmAddress].filter(Boolean).length;
+  return {
+    state: "hit",
+    value: user,
+    cu: FOMOSCAN_CU.handleHit,
+    note: wallets ? `FomoScan holds FOMO account ${user.handle} with ${wallets} verified wallet${wallets === 1 ? "" : "s"}.` : `FomoScan holds FOMO account ${user.handle} but no verified wallet for it; that is an absence of a record, not proof of no wallet.`
+  };
+}
+function fomoRecordBindsToSubject(user, subjectHandle) {
+  const subject = normalizeHandle3(subjectHandle);
+  const x = xUsernameFromFomo(user.twitter);
+  const twitter = x ? normalizeHandle3(x) : null;
+  if (twitter) return twitter === subject ? "x-confirmed" : "other-person";
+  return normalizeHandle3(user.handle) === subject ? "handle-only" : "other-person";
+}
+var wasAsked = (evidence) => evidence.wallets.some((w) => w.provider === FOMOSCAN_PROVIDER);
+var fomoscanAdapter = {
+  id: "fomoscan",
+  label: "FomoScan (FOMO trader identity)",
+  available: () => !!apiKey(),
+  applicable: (evidence) => !!evidence.profile?.handle && !wasAsked(evidence),
+  async run(ctx) {
+    if (!apiKey()) return { state: "skipped", attempts: 0, detail: "FomoScan is not configured" };
+    const handle = normalizeHandle3(ctx.handle);
+    if (!handle) return { state: "skipped", attempts: 0, detail: "no handle to resolve" };
+    ctx.emit({ phase: "On-chain", label: "FomoScan identity", detail: `Resolving @${handle} on FOMO\u2026`, tone: "neutral" });
+    const result = await fetchFomoUserByHandle(handle);
+    if (result.state !== "hit" && result.state !== "miss") {
+      ctx.emit({ phase: "On-chain", label: "FomoScan identity", detail: result.note, source: FOMOSCAN_PROVIDER, tone: "neutral" });
+      return { state: "failed", attempts: 1, detail: result.note };
+    }
+    if (result.state === "miss" || !result.value) {
+      ctx.emit({ phase: "On-chain", label: "FomoScan identity", detail: result.note, source: FOMOSCAN_PROVIDER, tone: "neutral" });
+      return { state: "executed", attempts: 1, detail: result.note };
+    }
+    const user = result.value;
+    const binding = fomoRecordBindsToSubject(user, handle);
+    if (binding === "other-person") {
+      const detail2 = `FOMO account ${user.handle} links to X @${user.twitter}, not @${handle}; its wallets were not adopted.`;
+      ctx.emit({ phase: "On-chain", label: "FomoScan identity", detail: detail2, source: FOMOSCAN_PROVIDER, tone: "neutral" });
+      return { state: "executed", attempts: 1, detail: detail2 };
+    }
+    const known = new Set(ctx.evidence.wallets.map((w) => `${w.chain}:${w.address.toLowerCase()}`));
+    const added = [];
+    const candidates = [];
+    if (user.solanaAddress) candidates.push({ chain: "solana", address: user.solanaAddress });
+    if (user.evmAddress) candidates.push({ chain: "ethereum", address: user.evmAddress });
+    for (const c of candidates) {
+      const key = `${c.chain}:${c.address.toLowerCase()}`;
+      if (known.has(key)) continue;
+      ctx.evidence.wallets.push({
+        address: c.address,
+        chain: c.chain,
+        link_tier: "InvestigatorAttributed",
+        link_evidence_url: `${FOMOSCAN_HOST}/v2/user/handle/${encodeURIComponent(user.handle)}`,
+        notes: binding === "x-confirmed" ? `FomoScan: verified wallet of FOMO account ${user.handle}, whose linked X account is @${user.twitter}.` : `FomoScan: verified wallet of FOMO account ${user.handle} (same name as the subject; FOMO holds no X link for it, so the binding rests on the name).`,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: FOMOSCAN_PROVIDER
+      });
+      added.push(`${c.chain} ${c.address.slice(0, 8)}\u2026`);
+    }
+    const detail = added.length ? `FomoScan attached ${added.length} verified wallet${added.length === 1 ? "" : "s"} for FOMO account ${user.handle} (${added.join(", ")}).` : result.note;
+    ctx.emit({ phase: "On-chain", label: "FomoScan identity", detail, source: FOMOSCAN_PROVIDER, tone: "neutral" });
+    return { state: "executed", attempts: 1, detail };
   }
 };
 
@@ -24571,8 +25904,8 @@ function evidenceUrlMatchesVentureIdentity(scope, venture) {
     return false;
   }
   const host2 = normalizedHost2(url.hostname);
-  const identityTokens = ventureIdentityTokens(venture);
-  if (!identityTokens.length) return false;
+  const identityTokens2 = ventureIdentityTokens(venture);
+  if (!identityTokens2.length) return false;
   if (PATH_TENANTED_HOSTS.has(host2)) {
     let decodedPath;
     try {
@@ -24581,10 +25914,10 @@ function evidenceUrlMatchesVentureIdentity(scope, venture) {
       return false;
     }
     const pathTokens = looseTokens(decodedPath);
-    return identityTokens.some((token) => pathTokens.includes(token));
+    return identityTokens2.some((token) => pathTokens.includes(token));
   }
   const hostLabels = host2.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
-  return identityTokens.some((token) => hostLabels.includes(token));
+  return identityTokens2.some((token) => hostLabels.includes(token));
 }
 function verifiedVentureOfficialScopes(venture) {
   const domainScope = venture.domain_evidence_origin === "model_lead" ? null : safeVentureScope(venture.domain);
@@ -24649,8 +25982,8 @@ function scopeMatchesOrganizationIdentity(scope, name) {
   } catch {
     return false;
   }
-  const identityTokens = looseTokens(name).filter((token) => token.length >= 4 && !VENTURE_IDENTITY_STOP_WORDS.has(token));
-  if (!identityTokens.length) return false;
+  const identityTokens2 = looseTokens(name).filter((token) => token.length >= 4 && !VENTURE_IDENTITY_STOP_WORDS.has(token));
+  if (!identityTokens2.length) return false;
   const host2 = normalizedHost2(url.hostname);
   if (PATH_TENANTED_HOSTS.has(host2)) {
     let decodedPath;
@@ -24660,14 +25993,14 @@ function scopeMatchesOrganizationIdentity(scope, name) {
       return false;
     }
     const pathTokens = looseTokens(decodedPath);
-    return identityTokens.some((token) => pathTokens.includes(token));
+    return identityTokens2.some((token) => pathTokens.includes(token));
   }
   const hostLabels = host2.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
   const lastLabel = hostLabels.at(-1) ?? "";
   const penultimateLabel = hostLabels.at(-2) ?? "";
   const suffixWidth = hostLabels.length >= 3 && lastLabel.length === 2 && COMMON_COUNTRY_PUBLIC_SUFFIX_LABELS.has(penultimateLabel) ? 2 : 1;
   const organizationLabel = hostLabels.at(-(suffixWidth + 1));
-  return Boolean(organizationLabel && identityTokens.includes(organizationLabel));
+  return Boolean(organizationLabel && identityTokens2.includes(organizationLabel));
 }
 function verifiedOrganizationScope(scope, name) {
   if (!scopeMatchesOrganizationIdentity(scope, name)) return null;
@@ -24805,7 +26138,11 @@ function secRegistryPublicSecurityFacts(ctx, document, relationships, questionId
         }],
         evidence_origin: "deterministic",
         artifact_verified: true,
-        provider: "public-web"
+        provider: "public-web",
+        // Structured listing identity: downstream lanes (stock health, EDGAR
+        // filings) join on the CIK and ticker instead of re-parsing the value
+        // string or the frozen excerpt bytes.
+        security: { cik: row.cik, ticker: row.ticker, exchange: venue, issuer: relationship.name }
       }];
     });
   });
@@ -25430,6 +26767,208 @@ var basicFactsAdapter = {
   available: () => Boolean(env("ANTHROPIC_API_KEY") || env("XAI_API_KEY")),
   run: collectBasicFacts
 };
+
+// src/lib/fundraising.ts
+function sameRegistrableHost(a, b) {
+  const host2 = (value) => {
+    if (!value) return "";
+    try {
+      return new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`).hostname.replace(/^www\./i, "").toLowerCase();
+    } catch {
+      return "";
+    }
+  };
+  const left = host2(a);
+  return left !== "" && left === host2(b);
+}
+var roundKey = (date, amountUsd) => {
+  const month = date ? date.slice(0, 7) : "undated";
+  const bucket = amountUsd && amountUsd > 0 ? Math.round(Math.log10(amountUsd) * 4) : 0;
+  return `${month}|${bucket}`;
+};
+function mergeFundraisingRounds(dossier) {
+  const merged = /* @__PURE__ */ new Map();
+  const add = (round) => {
+    const key = roundKey(round.date, round.amountUsd);
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, round);
+      return;
+    }
+    const richness = (candidate) => (candidate.tokenPriceUsd ? 1 : 0) + (candidate.tokensForSale ? 1 : 0) + (candidate.allocationOfSupplyPct ? 1 : 0) + (candidate.valuationUsd ? 1 : 0) + (candidate.date ? 1 : 0);
+    const richer = richness(round) > richness(existing) ? round : existing;
+    const other = richer === existing ? round : existing;
+    const tokenPriceUsd = richer.tokenPriceUsd ?? other.tokenPriceUsd ?? null;
+    const tokensForSale = richer.tokensForSale ?? other.tokensForSale ?? null;
+    const allocationOfSupplyPct = richer.allocationOfSupplyPct ?? other.allocationOfSupplyPct ?? null;
+    const leadInvestors = [.../* @__PURE__ */ new Set([...richer.leadInvestors, ...other.leadInvestors])];
+    merged.set(key, {
+      ...richer,
+      date: richer.date ?? other.date,
+      amountUsd: richer.amountUsd ?? other.amountUsd,
+      valuationUsd: richer.valuationUsd ?? other.valuationUsd,
+      tokenPriceUsd,
+      tokensForSale,
+      allocationOfSupplyPct,
+      instrument: tokenPriceUsd || tokensForSale || allocationOfSupplyPct ? "token_sale" : "unstated",
+      leadInvestors,
+      otherInvestors: [.../* @__PURE__ */ new Set([...richer.otherInvestors, ...other.otherInvestors])].filter((name) => !leadInvestors.includes(name)),
+      announcementUrl: richer.announcementUrl ?? other.announcementUrl,
+      sources: [...richer.sources, ...other.sources.filter((source2) => !richer.sources.some((existingSource) => existingSource.url === source2.url))]
+    });
+  };
+  for (const round of dossier.protocolFunding?.rounds ?? []) {
+    add({
+      date: round.date,
+      label: round.round,
+      amountUsd: round.amountUsd,
+      valuationUsd: round.valuationUsd,
+      leadInvestors: [...round.leadInvestors],
+      otherInvestors: [...round.otherInvestors],
+      instrument: "unstated",
+      sources: [{ provider: "defillama", title: "DeFiLlama funding record", url: dossier.protocolFunding.sourceUrl }]
+    });
+  }
+  for (const round of dossier.cryptoRankFunding?.rounds ?? []) {
+    add({
+      date: round.date,
+      label: round.stage,
+      amountUsd: round.amountUsd,
+      valuationUsd: round.valuationUsd,
+      tokenPriceUsd: round.tokenPriceUsd ?? null,
+      tokensForSale: round.tokensForSale ?? null,
+      allocationOfSupplyPct: round.allocationOfSupplyPct ?? null,
+      leadInvestors: [...round.leadInvestors],
+      otherInvestors: [...round.otherInvestors],
+      instrument: round.tokenPriceUsd || round.tokensForSale || round.allocationOfSupplyPct ? "token_sale" : "unstated",
+      announcementUrl: round.announcementUrl,
+      sources: [{ provider: "cryptorank", title: "CryptoRank funding record", url: dossier.cryptoRankFunding.sourceUrl }]
+    });
+  }
+  const enrichment = dossier.companyEnrichment;
+  if (enrichment?.funding && isExactDomainBoundCompanyEnrichment(enrichment, dossier.website ?? null)) {
+    for (const round of enrichment.funding.rounds) {
+      add({
+        date: round.date ?? null,
+        label: round.round ?? "Round",
+        amountUsd: round.amountUsd ?? null,
+        valuationUsd: null,
+        leadInvestors: [...round.leadInvestors ?? []],
+        otherInvestors: [...round.otherInvestors ?? []],
+        instrument: "unstated",
+        // The enrichment's sourceUrl is frequently the company's own website
+        // (that is how the record was bound to the company). Saying "funding
+        // record" over a link to the subject's homepage presents first-party
+        // evidence as a provider receipt (ARGUS-18).
+        sources: [{
+          provider: "monid",
+          title: sameRegistrableHost(enrichment.sourceUrl, dossier.website ?? null) ? "Monid/Akta record \xB7 opens the company's own site, not a provider receipt" : "Monid/Akta funding record",
+          url: enrichment.sourceUrl
+        }]
+      });
+    }
+  }
+  return [...merged.values()].filter((round) => round.amountUsd || round.valuationUsd || round.tokenPriceUsd || round.tokensForSale).sort((left, right) => (left.date ?? "9999").localeCompare(right.date ?? "9999"));
+}
+function classifyBacker(name) {
+  const clean4 = name.trim().toLowerCase();
+  if (!clean4) return "backer";
+  if (launchVenueNames().some((venue) => venue.toLowerCase() === clean4)) return "launchpad";
+  if (/\bfamily office\b/.test(clean4)) return "family_office";
+  if (/\bprivate equity\b/.test(clean4)) return "private_equity";
+  if (/\bangel\b/.test(clean4)) return "angel";
+  if (/\b(?:capital|ventures?|partners|fund|holdings|labs|crypto|digital|management)\b/.test(clean4)) return "venture_fund";
+  if (/\b(?:exchange|launchpad|platform|foundation)\b/.test(clean4)) return "platform";
+  return "backer";
+}
+
+// server/investorStore.ts
+var TABLE2 = "investor_records";
+function creds3() {
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  return url && key ? { url: url.replace(/\/$/, ""), key } : null;
+}
+var authHeaders2 = (key) => ({
+  apikey: key,
+  ...!key.startsWith("sb_secret_") ? { authorization: `Bearer ${key}` } : {},
+  "content-type": "application/json"
+});
+var roundKey2 = (date, amountUsd) => {
+  const month = date ? date.slice(0, 7) : "undated";
+  const bucket = amountUsd && amountUsd > 0 ? Math.round(Math.log10(amountUsd) * 4) : 0;
+  return `${month}|${bucket}`;
+};
+function investorObservationsFromEvidence(organizationId, subjectRef, subjectKind, evidence, sourceReportVersionId) {
+  let rounds;
+  try {
+    rounds = mergeFundraisingRounds({
+      protocolFunding: evidence.protocolFunding,
+      cryptoRankFunding: evidence.cryptoRankFunding,
+      companyEnrichment: evidence.companyEnrichment,
+      website: evidence.website ?? void 0
+    });
+  } catch {
+    return [];
+  }
+  const rows = /* @__PURE__ */ new Map();
+  for (const round of rounds) {
+    const key = roundKey2(round.date, round.amountUsd);
+    const providers = [...new Set(round.sources.map((source2) => source2.provider))];
+    const backers = [
+      ...round.leadInvestors.map((name) => ({ name, isLead: true })),
+      ...round.otherInvestors.map((name) => ({ name, isLead: false }))
+    ];
+    for (const backer of backers) {
+      const name = backer.name.trim();
+      const investorKey = canonicalEntityKey({ name });
+      if (!name || !investorKey) continue;
+      const rowKey = `${investorKey}|${key}`;
+      const existing = rows.get(rowKey);
+      if (existing) {
+        existing.is_lead = existing.is_lead || backer.isLead;
+        existing.providers = [.../* @__PURE__ */ new Set([...existing.providers, ...providers])];
+        continue;
+      }
+      rows.set(rowKey, {
+        organization_id: organizationId,
+        investor_key: investorKey,
+        subject_ref: subjectRef,
+        subject_kind: subjectKind,
+        round_key: key,
+        display_name: name,
+        backer_type: classifyBacker(name),
+        is_lead: backer.isLead,
+        round_label: round.label || null,
+        round_date: round.date,
+        amount_usd: round.amountUsd,
+        valuation_usd: round.valuationUsd,
+        instrument: round.instrument,
+        providers,
+        source_report_version_id: sourceReportVersionId ?? null
+      });
+    }
+  }
+  return [...rows.values()];
+}
+async function writeInvestorObservations(rows) {
+  const c = creds3();
+  if (!c || !rows.length) return false;
+  try {
+    const res = await deadlineFetch(
+      `${c.url}/rest/v1/${TABLE2}?on_conflict=organization_id,investor_key,subject_ref,round_key`,
+      {
+        method: "POST",
+        headers: { ...authHeaders2(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(rows),
+        signal: AbortSignal.timeout(5e3)
+      }
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 // server/adapters/offchain.ts
 import { createHash as createHash7 } from "node:crypto";
@@ -26648,7 +28187,7 @@ function nameNeedles(name) {
 // server/adapters/wallet.ts
 var ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
 var NAME_IN_TEXT = /(?<![./])\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b(?!\.[a-z0-9])/gi;
-var SOLANA_ADDRESS2 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 async function getJson(url) {
   let operation;
   try {
@@ -26706,7 +28245,7 @@ async function snsResolve(name) {
   const arr2 = Array.isArray(d) ? d : d ? [d] : [];
   for (const row of arr2) {
     const address = row?.address;
-    if (typeof address === "string" && SOLANA_ADDRESS2.test(address)) return address;
+    if (typeof address === "string" && SOLANA_ADDRESS3.test(address)) return address;
   }
   return null;
 }
@@ -26855,7 +28394,7 @@ function coverageQualifiedCompleteness(input) {
   const hasStableIds = rows.some((row) => row.id);
   const recordedCount = rows.filter((row) => row.recorded).length;
   const openNeverWaive = hasStableIds && rows.some((row) => row.id && NEVER_WAIVE_CHECK_IDS.has(row.id) && !row.neverWaiveRecorded);
-  const recordedPercent = Math.floor(recordedCount / rows.length * 100);
+  const recordedPercent = coveragePercentOf(recordedCount, rows.length);
   const coverageSufficient = hasStableIds ? !openNeverWaive && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT : recordedCount === rows.length;
   return completeness === "complete" && coverageSufficient ? "complete" : "partial";
 }
@@ -29345,7 +30884,7 @@ var PRICE_TOLERANCE = 0.25;
 var MIN_POOL_LIQUIDITY_USD = 25e3;
 var SITE_DECLARATION_MAX_BYTES = 4e5;
 var EVM_ADDRESS3 = /^0x[a-fA-F0-9]{40}$/;
-var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+var SOLANA_ADDRESS4 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 var PLATFORM_CHAIN = {
   solana: "solana",
   ethereum: "ethereum",
@@ -29457,7 +30996,7 @@ function projectRegistrySearchQueries(displayName, products) {
   }
   return queries;
 }
-var normalizeHandle3 = (value) => value.trim().replace(/^@/, "").toLowerCase();
+var normalizeHandle4 = (value) => value.trim().replace(/^@/, "").toLowerCase();
 var sameAddress = (left, right) => left.toLowerCase() === right.toLowerCase();
 var coingeckoConfig = () => {
   const key = env("COINGECKO_API_KEY");
@@ -29610,13 +31149,13 @@ function parseSeededContract(ctx) {
   if (!address || !chain) return null;
   const platform = CHAIN_PLATFORM[chain];
   if (!platform) return null;
-  const addressValid = chain === "solana" ? SOLANA_ADDRESS3.test(address) : EVM_ADDRESS3.test(address);
+  const addressValid = chain === "solana" ? SOLANA_ADDRESS4.test(address) : EVM_ADDRESS3.test(address);
   return addressValid ? { address, chain, platform } : null;
 }
 var validContract = (platform, value) => {
   const address = cleanText2(value);
   if (!address) return null;
-  if (platform === "solana") return SOLANA_ADDRESS3.test(address) ? address : null;
+  if (platform === "solana") return SOLANA_ADDRESS4.test(address) ? address : null;
   return PLATFORM_CHAIN[platform] && EVM_ADDRESS3.test(address) ? address : null;
 };
 function canonicalContract(details) {
@@ -29686,7 +31225,7 @@ function verifyIdentity(ctx, details, namesakes) {
   const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), homepages);
   if (!homepage) return null;
   const registryHandles = registryOfficialXHandles(details);
-  if (registryHandles.length && !registryHandles.some((handle) => handle === normalizeHandle3(ctx.handle))) {
+  if (registryHandles.length && !registryHandles.some((handle) => handle === normalizeHandle4(ctx.handle))) {
     namesakes?.push({
       name: cleanText2(details.name),
       symbol: cleanText2(details.symbol).toUpperCase(),
@@ -29704,7 +31243,7 @@ function verifyIdentity(ctx, details, namesakes) {
 function registryOfficialXHandles(details) {
   const links = isRecord4(details.links) ? details.links : {};
   const out = /* @__PURE__ */ new Set();
-  const screenName = normalizeHandle3(cleanText2(links.twitter_screen_name).replace(/^@/, ""));
+  const screenName = normalizeHandle4(cleanText2(links.twitter_screen_name).replace(/^@/, ""));
   if (screenName) out.add(screenName);
   for (const key of COINGECKO_LINK_ARRAYS) {
     const value = links[key];
@@ -29719,7 +31258,7 @@ function registryOfficialXHandles(details) {
 var xHandleFromUrlRaw = officialXProfileHandle;
 var xHandleFromUrl = (value) => {
   const handle = xHandleFromUrlRaw(value);
-  return handle ? normalizeHandle3(handle) : null;
+  return handle ? normalizeHandle4(handle) : null;
 };
 var COINGECKO_LINK_ARRAYS = [
   "homepage",
@@ -29728,18 +31267,19 @@ var COINGECKO_LINK_ARRAYS = [
   "blockchain_site",
   "chat_url"
 ];
+var COINGECKO_OFFICIAL_X_BIND_ARRAYS = ["homepage"];
 function firstMatchingOfficialX(details, auditedHandle) {
-  const audited = normalizeHandle3(auditedHandle);
+  const audited = normalizeHandle4(auditedHandle);
   if (!audited) return null;
   const links = isRecord4(details.links) ? details.links : {};
   const officialHandle = cleanText2(links.twitter_screen_name).replace(/^@/, "");
-  if (officialHandle && normalizeHandle3(officialHandle) === audited) return officialHandle;
-  for (const key of COINGECKO_LINK_ARRAYS) {
+  if (officialHandle && normalizeHandle4(officialHandle) === audited) return officialHandle;
+  for (const key of COINGECKO_OFFICIAL_X_BIND_ARRAYS) {
     const value = links[key];
     const rows = Array.isArray(value) ? value : value ? [value] : [];
     for (const row of rows) {
       const handle = xHandleFromUrlRaw(row);
-      if (handle && normalizeHandle3(handle) === audited) return handle;
+      if (handle && normalizeHandle4(handle) === audited) return handle;
     }
   }
   return null;
@@ -29760,7 +31300,7 @@ function dexIdentity(ctx, row) {
     return handle ? [handle] : [];
   }) : [];
   const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), websites);
-  const exactHandle = handles.find((handle) => handle === normalizeHandle3(ctx.handle));
+  const exactHandle = handles.find((handle) => handle === normalizeHandle4(ctx.handle));
   if (!homepage || !exactHandle) return null;
   return {
     verification: "official_x",
@@ -29998,7 +31538,7 @@ function dexProjectCandidates(ctx, query, rows) {
     const pairAddress = cleanText2(row.pairAddress);
     const sourceUrl2 = cleanText2(row.url);
     const relevance = tokenNameRelevance(query, name, symbol);
-    const addressValid = chain === "solana" ? SOLANA_ADDRESS3.test(address) : EVM_ADDRESS3.test(address);
+    const addressValid = chain === "solana" ? SOLANA_ADDRESS4.test(address) : EVM_ADDRESS3.test(address);
     if (!name || !symbol || !addressValid || !chain || !pairAddress || !sourceUrl2 || relevance < MIN_NAME_RELEVANCE) return [];
     const identity = dexIdentity(ctx, row);
     if (!identity) return [];
@@ -30031,7 +31571,68 @@ async function collectDexProjectToken(ctx, query) {
   if (!rows) {
     return { state: "failed", attempts: 1, detail: "DexScreener project search failed" };
   }
-  const candidate = dexProjectCandidates(ctx, query, rows)[0];
+  const candidates = dexProjectCandidates(ctx, query, rows);
+  const bioDeclared = declaredTokenFromBio(ctx.evidence.profile.bio ?? "");
+  const ownText = `${ctx.evidence.profile.bio ?? ""}
+${ctx.evidence.profile.self_post_sample ?? ""}`;
+  const ownTextAdopts = (address) => {
+    if (!address) return false;
+    return address.startsWith("0x") ? ownText.toLowerCase().includes(address.toLowerCase()) : ownText.includes(address);
+  };
+  let siteAddresses = null;
+  let siteAttempts = 0;
+  const officialSiteAddresses = async () => {
+    if (siteAddresses) return siteAddresses;
+    siteAddresses = [];
+    for (const scope of profileOfficialScopes(ctx).slice(0, 2)) {
+      siteAttempts += 1;
+      try {
+        const response = await fetch(scope.canonicalUrl, {
+          headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" },
+          signal: AbortSignal.timeout(9e3)
+        });
+        if (response.ok) {
+          const body = await readBoundedResponseText(response, SITE_DECLARATION_MAX_BYTES);
+          if (body) siteAddresses.push(...siteDeclaredContractCandidates(body));
+        }
+      } catch {
+      }
+    }
+    return siteAddresses;
+  };
+  const namesakes = [];
+  let candidate;
+  for (const contender of candidates.slice(0, 3)) {
+    if (bioDeclared && sameAddress(bioDeclared.address, contender.address)) {
+      candidate = contender;
+      break;
+    }
+    if (ownTextAdopts(contender.address)) {
+      candidate = contender;
+      break;
+    }
+    if ((await officialSiteAddresses()).some((address) => sameAddress(address, contender.address))) {
+      candidate = contender;
+      break;
+    }
+    namesakes.push({
+      name: contender.name,
+      symbol: contender.symbol,
+      address: contender.address,
+      chain: contender.chain,
+      declaredX: contender.officialX ?? "",
+      sourceUrl: contender.sourceUrl,
+      ...contender.liquidityUsd !== void 0 ? { liquidityUsd: contender.liquidityUsd } : {}
+    });
+  }
+  if (!candidate && namesakes.length) {
+    return {
+      state: "empty",
+      attempts: 1 + siteAttempts,
+      detail: "DexScreener candidates refused: their listings claim this account, but neither the bio nor the official site adopts their contract",
+      namesakes
+    };
+  }
   if (!candidate) {
     const q = query.trim().toLowerCase();
     const nameAlikes = [...new Map(rows.filter((row) => {
@@ -30057,7 +31658,7 @@ async function collectDexProjectToken(ctx, query) {
   const hasMarketRead = candidate.priceUsd !== void 0 || candidate.marketCapUsd !== void 0 || candidate.fdvUsd !== void 0 || candidate.volume24hUsd !== void 0;
   return {
     state: "matched",
-    attempts: 1 + historyResult.attempts,
+    attempts: 1 + siteAttempts + historyResult.attempts,
     detail: `verified $${candidate.symbol} by ${candidate.verification} with an identity-bound DEX pair`,
     snapshot: {
       verified: true,
@@ -30100,7 +31701,7 @@ function dexHandleBoundHomepages(ctx, row) {
     const handle = xHandleFromUrl(candidate.url);
     return handle ? [handle] : [];
   }) : [];
-  if (!handles.some((handle) => handle === normalizeHandle3(ctx.handle))) return [];
+  if (!handles.some((handle) => handle === normalizeHandle4(ctx.handle))) return [];
   const websites = Array.isArray(info.websites) ? info.websites.flatMap((candidate) => {
     if (!isRecord4(candidate)) return [];
     const url = cleanText2(candidate.url);
@@ -30376,6 +31977,7 @@ function selectPriceCorroboratedPair(rows, token, coingeckoPrice) {
       pairAddress,
       chain,
       quoteSymbol: cleanText2(quoteToken.symbol),
+      quoteName: cleanText2(quoteToken.name),
       priceUsd,
       liquidityUsd: liquidity,
       sourceUrl: cleanText2(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`,
@@ -30497,8 +32099,8 @@ async function collectProfileDeclaredToken(ctx, candidate) {
   }
   const capturedAt = captureTimestamp();
   const identityCapturedAt = ctx.evidence.profile.profile_captured_at ?? capturedAt;
-  const officialX = `@${normalizeHandle3(ctx.handle)}`;
-  const identitySourceUrl = `https://x.com/${normalizeHandle3(ctx.handle)}`;
+  const officialX = `@${normalizeHandle4(ctx.handle)}`;
+  const identitySourceUrl = `https://x.com/${normalizeHandle4(ctx.handle)}`;
   const marketSourceUrl = cleanText2(best.url) || `${DEXSCREENER}/${encodeURIComponent(candidate.address)}`;
   const priceUsd = finiteNumber2(best.priceUsd);
   const marketCapUsd = finiteNumber2(best.marketCap);
@@ -30565,7 +32167,7 @@ function registryContractMatchingDeclared(details, candidate) {
   return null;
 }
 function recordDeclaredConflict(ctx, declared, registry, attempts) {
-  const handle = `@${normalizeHandle3(ctx.handle)}`;
+  const handle = `@${normalizeHandle4(ctx.handle)}`;
   ctx.evidence.unresolvedProjectToken = {
     address: declared.candidate.address,
     via: declared.candidate.via,
@@ -30649,7 +32251,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       ctx.emit({
         phase: "P0 \xB7 Routing",
         label: `Official bio contract resolved \xB7 $${snapshot2.symbol}`,
-        detail: `${snapshot2.address} was explicitly declared by @${normalizeHandle3(ctx.handle)} and resolved to an exact ${snapshot2.chain} market. Project methodology is now bound to that contract.`,
+        detail: `${snapshot2.address} was explicitly declared by @${normalizeHandle4(ctx.handle)} and resolved to an exact ${snapshot2.chain} market. Project methodology is now bound to that contract.`,
         source: "twitterapi / dexscreener",
         tone: "good"
       });
@@ -30745,6 +32347,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     let dexAttempts = 0;
     let dexSearchEverFailed = false;
     const dexNameMatches = /* @__PURE__ */ new Set();
+    const dexNamesakes = /* @__PURE__ */ new Map();
     let dexNameMatchCount = 0;
     let dexQueriesSkipped = 0;
     for (const fallbackQuery of dexQueries) {
@@ -30758,8 +32361,9 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       dexAttempts += retry.attempts;
       if (retry.state === "failed") dexSearchEverFailed = true;
       if (retry.state === "empty") {
-        if (!(retry.nameMatchCount ?? 0) && !retry.nameMatches?.length) emptyLedger.dexscreener.add(queryKey);
+        if (!(retry.nameMatchCount ?? 0) && !retry.nameMatches?.length && !retry.namesakes?.length) emptyLedger.dexscreener.add(queryKey);
         for (const match of retry.nameMatches ?? []) dexNameMatches.add(match);
+        for (const namesake2 of retry.namesakes ?? []) dexNamesakes.set(namesake2.address.toLowerCase(), namesake2);
         dexNameMatchCount = Math.max(dexNameMatchCount, retry.nameMatchCount ?? 0);
       }
       if (retry.state === "matched") dexFallback = retry;
@@ -30902,6 +32506,19 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     const cgSamples = candidates.slice(0, 3).map((row) => `${row.name} ($${row.symbol.toUpperCase()})`);
     const alikeSamples = [.../* @__PURE__ */ new Set([...cgSamples, ...dexAlikes])].slice(0, 3);
     const alikeCount = Math.max(candidates.length + dexAlikeCount, alikeSamples.length);
+    if (dexFallback.state !== "matched" && dexNamesakes.size) {
+      const refused = [...dexNamesakes.values()].slice(0, 5);
+      const capturedAt = captureTimestamp();
+      ctx.evidence.namesakeTokens = refused.map((entry) => ({ ...entry, capturedAt }));
+      const listed = refused.map((entry) => `$${entry.symbol} (${entry.chain} ${entry.address.slice(0, 10)}\u2026)`).join(", ");
+      ctx.emit({
+        phase: "Token",
+        label: `Namesake token${refused.length === 1 ? "" : "s"} refused \xB7 ${refused.map((entry) => `$${entry.symbol}`).slice(0, 3).join(", ")}`,
+        detail: `${listed} ${refused.length === 1 ? "declares" : "declare"} ${ctx.handle} as ${refused.length === 1 ? "its" : "their"} own social link, but anyone can attach any account to a token they deploy. Nothing on this subject's own bio or official site adopts ${refused.length === 1 ? "that contract" : "those contracts"}: ${refused.length === 1 ? "it was" : "they were"} launched by someone else and ${refused.length === 1 ? "has" : "have"} nothing to do with the subject.`,
+        source: "dexscreener",
+        tone: "warn"
+      });
+    }
     const namesake = registryNamesakes[0];
     if (namesake) {
       ctx.emit({
@@ -31011,6 +32628,10 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     ...pair ? {
       liquidityUsd: pair.liquidityUsd,
       pairAddress: pair.pairAddress,
+      // What the pool quotes in. StonkBroker-class venues pair tokens against
+      // tokenized stocks, so the quote side is identity data, not trivia.
+      ...pair.quoteSymbol ? { pairQuoteSymbol: pair.quoteSymbol } : {},
+      ...pair.quoteName ? { pairQuoteName: pair.quoteName } : {},
       ...pair.pairCreatedAt !== void 0 ? { pairCreatedAt: pair.pairCreatedAt } : {}
     } : {},
     ...ath ? { ath } : {},
@@ -31051,7 +32672,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
 }
 async function collectVentureTokenIdentity(venture) {
   const query = projectName(venture.name);
-  const ventureHandle = venture.xHandle?.trim() ? normalizeHandle3(venture.xHandle) : null;
+  const ventureHandle = venture.xHandle?.trim() ? normalizeHandle4(venture.xHandle) : null;
   const ventureScope = venture.domain?.trim() ? canonicalOfficialWebsite(venture.domain) : null;
   if (query.length < 2 || !ventureHandle && !ventureScope) return null;
   const search = await coinSearch(query);
@@ -31167,6 +32788,45 @@ function canonicalProtocolIndexMatch(evidence, geckoId) {
   const canonicalId = evidence.projectToken?.verified === true ? evidence.projectToken.coingeckoId?.trim().toLowerCase() : void 0;
   const indexedId = geckoId?.trim().toLowerCase();
   return Boolean(canonicalId && indexedId && canonicalId === indexedId);
+}
+var apexDomainsAgree = (left, right) => left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
+function protocolRecordMatchesOfficialIdentity(record5, subjectHandle, profile) {
+  const handle = subjectHandle.replace(/^@/, "").trim().toLowerCase();
+  const recordHandle = (record5.officialTwitter ?? "").replace(/^@/, "").trim().toLowerCase();
+  const handleMatches = Boolean(handle && recordHandle && handle === recordHandle);
+  const profileResolved = profile.profile_collection_state === "resolved" && profile.profile_provider === "twitterapi";
+  const subjectScope = profileResolved ? canonicalOfficialWebsite(profile.website) : null;
+  const recordScope = record5.officialUrl ? canonicalOfficialWebsite(record5.officialUrl) : null;
+  const domainsAgree = Boolean(
+    subjectScope && recordScope && apexDomainsAgree(subjectScope.domain, recordScope.domain)
+  );
+  if (recordHandle && handle && !handleMatches && domainsAgree) return false;
+  if (handleMatches && subjectScope && recordScope && !domainsAgree) return false;
+  return handleMatches || domainsAgree;
+}
+function indexedProtocolRecordMatch(evidence, record5) {
+  if (!record5) return false;
+  if (canonicalProtocolIndexMatch(evidence, record5.geckoId)) return true;
+  return protocolRecordMatchesOfficialIdentity(
+    { officialTwitter: record5.officialTwitter ?? null, officialUrl: record5.officialUrl ?? null },
+    evidence.profile.handle,
+    evidence.profile
+  );
+}
+function cryptoRankRecordMatch(evidence, record5) {
+  if (!record5) return false;
+  if (record5.binding.method === "canonical_token_address") {
+    const token = evidence.projectToken?.verified === true ? evidence.projectToken : void 0;
+    if (!token) return false;
+    const tokenAddress = token.address.trim();
+    const boundAddress = record5.binding.address.trim();
+    return tokenAddress.startsWith("0x") && boundAddress.startsWith("0x") ? tokenAddress.toLowerCase() === boundAddress.toLowerCase() : tokenAddress === boundAddress;
+  }
+  return protocolRecordMatchesOfficialIdentity(
+    { officialTwitter: record5.binding.officialTwitter, officialUrl: record5.binding.officialUrl },
+    evidence.profile.handle,
+    evidence.profile
+  );
 }
 function canonicalTokenAddressChainMatch(evidence, binding) {
   const token = evidence.projectToken?.verified === true ? evidence.projectToken : void 0;
@@ -31664,7 +33324,7 @@ function projectProviderBackedBasicFacts(evidence) {
       sourceClass: "regulatory_or_onchain"
     });
     projected.push(makeFact(evidence, "official_token", `$${token.symbol.toUpperCase()}`, [tokenSource], token.name));
-    const protocolFootprint = token.deployedChains?.length && evidence.protocolTvl?.sourceUrl && canonicalProtocolIndexMatch(evidence, evidence.protocolTvl.geckoId) ? evidence.protocolTvl : void 0;
+    const protocolFootprint = token.deployedChains?.length && evidence.protocolTvl?.sourceUrl && indexedProtocolRecordMatch(evidence, evidence.protocolTvl) ? evidence.protocolTvl : void 0;
     const chainFootprint = protocolFootprint ? `${protocolFootprint.chains.length} chains incl. ${protocolFootprint.chains.slice(0, 4).join(", ")}` : token.chain;
     const networkSources = protocolFootprint ? [source({
       url: protocolFootprint.sourceUrl,
@@ -31739,9 +33399,51 @@ function projectProviderBackedBasicFacts(evidence) {
       })]
     ));
   }
+  const hasVerifiedLegalEntity = (evidence.basicFacts ?? []).some((fact) => fact.predicate === "legal_entity" && (fact.status === "verified" || fact.status === "corroborated"));
+  const registry = evidence.companyRegistry;
+  if (!hasVerifiedLegalEntity && registry && (isProject || organizationAccount)) {
+    const registryFact = registry.sec ? {
+      value: `${registry.sec.entityName} (SEC CIK ${registry.sec.cik}${registry.sec.stateOfIncorporation ? `, incorporated in ${registry.sec.stateOfIncorporation}` : ""})`,
+      url: registry.sec.sourceUrl,
+      title: "SEC EDGAR registrant record",
+      excerpt: `SEC EDGAR lists ${registry.sec.entityName} as CIK ${registry.sec.cik}${registry.sec.stateOfIncorporation ? `, incorporated in ${registry.sec.stateOfIncorporation}` : ""}${registry.sec.lastAnnualReportAt ? `, latest annual report filed ${registry.sec.lastAnnualReportAt}` : ""}. Joined by the CIK of the verified public listing, never by name.`,
+      capturedAt: registry.sec.capturedAt,
+      provider: "sec-edgar"
+    } : registry.companiesHouse ? {
+      value: `${registry.companiesHouse.companyName} (Companies House No. ${registry.companiesHouse.companyNumber}${registry.companiesHouse.status ? `, ${registry.companiesHouse.status}` : ""})`,
+      url: registry.companiesHouse.sourceUrl,
+      title: "Companies House record",
+      excerpt: `Companies House lists ${registry.companiesHouse.companyName} under number ${registry.companiesHouse.companyNumber}${registry.companiesHouse.incorporatedOn ? `, incorporated ${registry.companiesHouse.incorporatedOn}` : ""}${registry.companiesHouse.status ? `, status ${registry.companiesHouse.status}` : ""}. Joined by the registration number the official site itself declares (${registry.companiesHouse.declaredOn}).`,
+      capturedAt: registry.companiesHouse.capturedAt,
+      provider: "companies-house"
+    } : registry.openCorporates ? {
+      value: `${registry.openCorporates.companyName} (${registry.openCorporates.jurisdiction.toUpperCase()} registry No. ${registry.openCorporates.companyNumber}${registry.openCorporates.status ? `, ${registry.openCorporates.status}` : ""})`,
+      url: registry.openCorporates.sourceUrl,
+      title: "OpenCorporates registry record",
+      excerpt: `OpenCorporates lists ${registry.openCorporates.companyName} under ${registry.openCorporates.jurisdiction.toUpperCase()} number ${registry.openCorporates.companyNumber}. Joined by the registration number the official site itself declares (${registry.openCorporates.declaredOn}).`,
+      capturedAt: registry.openCorporates.capturedAt,
+      provider: "opencorporates"
+    } : null;
+    if (registryFact) {
+      projected.push(makeFact(
+        evidence,
+        "legal_entity",
+        registryFact.value,
+        [source({
+          url: registryFact.url,
+          title: registryFact.title,
+          excerpt: registryFact.excerpt,
+          capturedAt: registryFact.capturedAt,
+          provider: registryFact.provider,
+          sourceClass: "regulatory_or_onchain"
+        })]
+      ));
+    }
+  }
   const enrichmentRecord = domainBoundEnrichment?.funding && domainBoundEnrichment.funding.rounds.length ? domainBoundEnrichment : void 0;
-  const hasStrongerFundingFact = (evidence.basicFacts ?? []).some((fact) => fact.predicate === "funding" && fact.providerProjection !== true && (fact.status === "verified" || fact.status === "corroborated") && fact.sources.some((candidate) => candidate.artifactVerified === true && candidate.provider !== "defillama" && candidate.provider !== "monid" && candidate.relation === "supports"));
-  const fundingFact = !hasStrongerFundingFact && isProject && evidence.protocolFunding && canonicalProtocolIndexMatch(evidence, evidence.protocolFunding.geckoId) && evidence.protocolFunding.rounds.length ? {
+  const hasStrongerFundingFact = (evidence.basicFacts ?? []).some((fact) => fact.predicate === "funding" && fact.providerProjection !== true && (fact.status === "verified" || fact.status === "corroborated") && fact.sources.some((candidate) => candidate.artifactVerified === true && candidate.provider !== "defillama" && candidate.provider !== "cryptorank" && candidate.provider !== "monid" && candidate.relation === "supports"));
+  const cryptoRankRecord = isProject && evidence.cryptoRankFunding && cryptoRankRecordMatch(evidence, evidence.cryptoRankFunding) ? evidence.cryptoRankFunding : void 0;
+  const fundingFact = !hasStrongerFundingFact && isProject && evidence.protocolFunding && indexedProtocolRecordMatch(evidence, evidence.protocolFunding) && evidence.protocolFunding.rounds.length ? {
     rounds: evidence.protocolFunding.rounds.length,
     totalRaisedUsd: evidence.protocolFunding.totalRaisedUsd,
     leadInvestors: evidence.protocolFunding.leadInvestors,
@@ -31749,6 +33451,16 @@ function projectProviderBackedBasicFacts(evidence) {
     capturedAt: evidence.protocolFunding.capturedAt,
     provider: "defillama",
     title: "DeFiLlama funding record",
+    ventureName: "",
+    subjectLabel: evidence.profile.display_name || "The project"
+  } : !hasStrongerFundingFact && cryptoRankRecord && cryptoRankRecord.rounds.length ? {
+    rounds: cryptoRankRecord.rounds.length,
+    totalRaisedUsd: cryptoRankRecord.totalRaisedUsd ?? 0,
+    leadInvestors: [...new Set(cryptoRankRecord.rounds.flatMap((round) => round.leadInvestors))],
+    sourceUrl: cryptoRankRecord.sourceUrl,
+    capturedAt: cryptoRankRecord.capturedAt,
+    provider: "cryptorank",
+    title: "CryptoRank funding record",
     ventureName: "",
     subjectLabel: evidence.profile.display_name || "The project"
   } : (isProject || isFounderSubject) && enrichmentRecord && enrichmentRecord.funding ? {
@@ -31783,7 +33495,52 @@ function projectProviderBackedBasicFacts(evidence) {
     projectedFundingFact.floorEligible = false;
     projected.push(projectedFundingFact);
   }
-  const indexedFunding = isProject && evidence.protocolFunding && canonicalProtocolIndexMatch(evidence, evidence.protocolFunding.geckoId) ? evidence.protocolFunding : void 0;
+  if (!fundingFact && !hasStrongerFundingFact && cryptoRankRecord && !cryptoRankRecord.rounds.length && cryptoRankRecord.hasFundingRounds && cryptoRankRecord.funds.length) {
+    const namedFunds = cryptoRankRecord.funds.slice().sort((a, b) => Number(b.isLead) - Number(a.isLead)).slice(0, 6).map((fund) => fund.name);
+    const partialFundingFact = makeFact(
+      evidence,
+      "funding",
+      `Funding rounds indexed \xB7 named backers include ${namedFunds.join(", ")}`,
+      [source({
+        url: cryptoRankRecord.sourceUrl,
+        title: "CryptoRank funding record",
+        excerpt: `CryptoRank's index confirms ${evidence.profile.display_name || "the project"} has recorded funding rounds and names backers including ${namedFunds.join(", ")}. Round-level amounts and dates are not in the index view available to this scan, so the total raised is unknown here, not zero.`,
+        capturedAt: cryptoRankRecord.capturedAt,
+        provider: "cryptorank",
+        sourceClass: "other_public"
+      })]
+    );
+    partialFundingFact.floorEligible = false;
+    projected.push(partialFundingFact);
+  }
+  const defiLlamaIndexedFunding = isProject && evidence.protocolFunding && indexedProtocolRecordMatch(evidence, evidence.protocolFunding) && evidence.protocolFunding.rounds.length ? evidence.protocolFunding : void 0;
+  const indexedFunding = defiLlamaIndexedFunding ? {
+    rounds: defiLlamaIndexedFunding.rounds.map((round) => ({
+      roundLabel: round.round,
+      date: round.date,
+      amountUsd: round.amountUsd,
+      leadInvestors: round.leadInvestors,
+      otherInvestors: round.otherInvestors
+    })),
+    sourceUrl: defiLlamaIndexedFunding.sourceUrl,
+    capturedAt: defiLlamaIndexedFunding.capturedAt,
+    provider: "defillama",
+    title: "DeFiLlama funding record",
+    indexName: "DeFiLlama's funding index"
+  } : cryptoRankRecord?.rounds.length ? {
+    rounds: cryptoRankRecord.rounds.map((round) => ({
+      roundLabel: round.stage,
+      date: round.date,
+      amountUsd: round.amountUsd,
+      leadInvestors: round.leadInvestors,
+      otherInvestors: round.otherInvestors
+    })),
+    sourceUrl: cryptoRankRecord.sourceUrl,
+    capturedAt: cryptoRankRecord.capturedAt,
+    provider: "cryptorank",
+    title: "CryptoRank funding record",
+    indexName: "CryptoRank's funding index"
+  } : void 0;
   if (indexedFunding?.rounds.length) {
     const backers = /* @__PURE__ */ new Map();
     for (const lead of [true, false]) {
@@ -31792,7 +33549,7 @@ function projectProviderBackedBasicFacts(evidence) {
           const name = named.trim();
           const key = normalizeValue(name);
           if (!name || !key || backers.has(key)) continue;
-          backers.set(key, { name, lead, round: round.round, date: round.date, amountUsd: round.amountUsd });
+          backers.set(key, { name, lead, round: round.roundLabel, date: round.date, amountUsd: round.amountUsd });
         }
       }
     }
@@ -31808,10 +33565,10 @@ function projectProviderBackedBasicFacts(evidence) {
         backer.name,
         [source({
           url: indexedFunding.sourceUrl,
-          title: "DeFiLlama funding record",
-          excerpt: `DeFiLlama's funding index names ${backer.name} as ${role} in ${backer.round}${dated}${sized}. One aggregator naming a backer is an attribution, not a verified investment, and this index is not an exhaustive cap table.${capped}`,
+          title: indexedFunding.title,
+          excerpt: `${indexedFunding.indexName} names ${backer.name} as ${role} in ${backer.round}${dated}${sized}. One aggregator naming a backer is an attribution, not a verified investment, and this index is not an exhaustive cap table.${capped}`,
           capturedAt: indexedFunding.capturedAt,
-          provider: "defillama",
+          provider: indexedFunding.provider,
           sourceClass: "other_public"
         })]
         // Deliberately no qualifier. The fact sheet merges same-predicate rows
@@ -31824,7 +33581,32 @@ function projectProviderBackedBasicFacts(evidence) {
       projected.push(investorFact);
     }
   }
-  const tvlSnapshot = isProject && evidence.protocolTvl && canonicalProtocolIndexMatch(evidence, evidence.protocolTvl.geckoId) ? evidence.protocolTvl : void 0;
+  if (isProject && evidence.siteBackers?.names.length) {
+    const alreadyNamed = new Set(
+      [...evidence.basicFacts ?? [], ...projected].filter((fact) => fact.predicate === "investor").map((fact) => normalizeValue(fact.value))
+    );
+    for (const name of evidence.siteBackers.names) {
+      const key = normalizeValue(name);
+      if (!key || alreadyNamed.has(key)) continue;
+      alreadyNamed.add(key);
+      const backerFact = makeFact(
+        evidence,
+        "investor",
+        name,
+        [source({
+          url: evidence.siteBackers.sourceUrl,
+          title: "Official site backer wall",
+          excerpt: `The project's own site ("${evidence.siteBackers.heading}") lists ${name} as a backer. Self-published by the subject; not independently confirmed, and never a substitute for a funding record.`,
+          capturedAt: evidence.siteBackers.capturedAt,
+          provider: "official-site",
+          sourceClass: "official_subject"
+        })]
+      );
+      backerFact.floorEligible = false;
+      projected.push(backerFact);
+    }
+  }
+  const tvlSnapshot = isProject && evidence.protocolTvl && indexedProtocolRecordMatch(evidence, evidence.protocolTvl) ? evidence.protocolTvl : void 0;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
     const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
     const tvlTrendPct = typeof tvlSnapshot.change30dPct === "number" ? tvlSnapshot.change30dPct : null;
@@ -31971,7 +33753,7 @@ function projectProviderBackedBasicFacts(evidence) {
       }
     }
   }
-  const protocolIndexIdentityMatched = canonicalProtocolIndexMatch(evidence, evidence.protocolTvl?.geckoId) || canonicalProtocolIndexMatch(evidence, evidence.protocolFunding?.geckoId);
+  const protocolIndexIdentityMatched = indexedProtocolRecordMatch(evidence, evidence.protocolTvl) || indexedProtocolRecordMatch(evidence, evidence.protocolFunding);
   const feesSnapshot = isProject && protocolIndexIdentityMatched && protocolFeesBindingMatches(evidence) ? evidence.protocolFees : void 0;
   if (feesSnapshot && typeof feesSnapshot.total30dUsd === "number" && feesSnapshot.total30dUsd > 0) {
     const trendPct = typeof feesSnapshot.change30dOver30dPct === "number" ? feesSnapshot.change30dOver30dPct : null;
@@ -32252,347 +34034,268 @@ function enforceProjectFactCoherence(evidence) {
   return { checked, rejected };
 }
 
-// src/lib/retry.ts
-async function retryFetch(input, init, attempts = 3, fetchImpl2 = fetch) {
-  let lastErr;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      init?.signal?.throwIfAborted();
-      const res = await fetchImpl2(input, init);
-      if (res.ok || res.status !== 429 && res.status < 500) return res;
-      lastErr = new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      lastErr = e;
-    }
-    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 300 * 2 ** i));
-  }
-  throw lastErr;
+// server/adapters/cryptoRank.ts
+var API_BASE3 = "https://api.cryptorank.io/v2";
+var MAX_CANDIDATE_DETAILS = 4;
+function cryptoRankConfigured() {
+  return Boolean(process.env.CRYPTORANK_API_KEY?.trim());
 }
-async function retryFetchWithFreshTimeout(input, timeoutMs, init = {}, attempts = 2, fetchImpl2 = fetch) {
-  let lastErr;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const response = await fetchImpl2(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
-      if (response.ok || response.status !== 429 && response.status < 500) return response;
-      lastErr = new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      lastErr = error;
-    }
-    if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 300 * 2 ** i));
-  }
-  throw lastErr;
-}
-
-// src/token/sources.ts
-var GOPLUS_CHAIN = {
-  ethereum: "1",
-  bsc: "56",
-  base: "8453",
-  polygon: "137",
-  arbitrum: "42161",
-  optimism: "10",
-  avalanche: "43114",
-  fantom: "250",
-  cronos: "25",
-  zksync: "324",
-  linea: "59144",
-  scroll: "534352",
-  // Robinhood Chain (Arbitrum stack, mainnet Jul 2026). GoPlus has covered it
-  // since launch; ARGUS simply never asked, which left every token on this
-  // chain with no safety data, no creator, and therefore no sanctions screen.
-  robinhood: "4663"
-};
-var GOPLUS_UNSORTED_HOLDER_CHAINS = /* @__PURE__ */ new Set(["robinhood"]);
-var BLOCKSCOUT_API = {
-  robinhood: "https://robinhoodchain.blockscout.com"
-};
-function blockscoutHolderSourceUrl(chain, address) {
-  const base = BLOCKSCOUT_API[chain.trim().toLowerCase()];
-  return base ? `${base}/api/v2/tokens/${encodeURIComponent(address)}/holders` : null;
-}
-async function blockscoutContractSource(chain, address, fetchImpl2 = fetch) {
-  const base = BLOCKSCOUT_API[chain];
-  if (!base) return null;
+async function getJson2(path, apiKey2, fetcher) {
   try {
-    const response = await fetchImpl2(`${base}/api/v2/smart-contracts/${address}`, { signal: AbortSignal.timeout(9e3) });
-    if (!response.ok) return null;
+    const response = await fetcher(`${API_BASE3}${path}`, {
+      headers: { "X-Api-Key": apiKey2, accept: "application/json" }
+    });
+    if (response.status === 403) return { ok: false, kind: "plan_gated", note: `plan does not include ${path.split("?")[0]}` };
+    if (response.status === 401) return { ok: false, kind: "unauthorized", note: "CryptoRank rejected the configured API key" };
+    if (response.status === 404) return { ok: false, kind: "not_found", note: `no CryptoRank record at ${path.split("?")[0]}` };
+    if (!response.ok) return { ok: false, kind: "error", note: `CryptoRank answered HTTP ${response.status}` };
     const body = await response.json();
-    const sourceCode = typeof body?.source_code === "string" ? body.source_code : "";
-    if (!sourceCode) return null;
-    return {
-      name: typeof body?.name === "string" ? body.name : null,
-      isVerified: body?.is_verified === true,
-      sourceCode: sourceCode.slice(0, 4e5)
-    };
-  } catch {
-    return null;
+    if (body?.data === void 0) return { ok: false, kind: "error", note: "CryptoRank answered without a data envelope" };
+    return { ok: true, data: body.data };
+  } catch (error) {
+    return { ok: false, kind: "error", note: `CryptoRank request failed: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
-async function blockscoutHolders(chain, address, fetchImpl2 = fetch) {
-  const chainKey = chain.trim().toLowerCase();
-  const base = BLOCKSCOUT_API[chainKey];
-  if (!base) return null;
-  const holderSourceUrl = blockscoutHolderSourceUrl(chainKey, address);
-  if (!holderSourceUrl) return null;
-  try {
-    const [tokenRes, holderRes] = await Promise.all([
-      fetchImpl2(`${base}/api/v2/tokens/${address}`, { signal: AbortSignal.timeout(9e3) }),
-      fetchImpl2(holderSourceUrl, { signal: AbortSignal.timeout(9e3) })
-    ]);
-    if (!tokenRes.ok || !holderRes.ok) return null;
-    const meta = await tokenRes.json();
-    const supply = Number(meta?.total_supply ?? 0);
-    if (!Number.isFinite(supply) || supply <= 0) return null;
-    const body = await holderRes.json();
-    const items = Array.isArray(body?.items) ? body.items : [];
-    const rows = [];
-    for (const item of items) {
-      const value = Number(item?.value ?? 0);
-      const hash3 = item?.address?.hash;
-      if (!hash3 || !Number.isFinite(value) || value <= 0) continue;
-      rows.push({ address: hash3, percent: value / supply * 100, isContract: item.address?.is_contract === true });
-      if (rows.length >= 10) break;
-    }
-    return rows;
-  } catch {
-    return null;
-  }
-}
-async function dexByTokenResult(address, fetchImpl2 = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
-  try {
-    const res = await request(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
-      signal: AbortSignal.timeout(8e3)
-    });
-    if (!res.ok) return { ok: false, pairs: [] };
-    const d = await res.json();
-    if (d.pairs !== null && !Array.isArray(d.pairs)) return { ok: false, pairs: [] };
-    if (d.pairs?.some((p) => !p || typeof p.chainId !== "string" || typeof p.baseToken?.address !== "string")) return { ok: false, pairs: [] };
-    return { ok: true, pairs: d.pairs ?? [] };
-  } catch {
-    return { ok: false, pairs: [] };
-  }
-}
-var CG_PLATFORM = {
-  ethereum: "ethereum",
-  eth: "ethereum",
-  base: "base",
-  solana: "solana",
-  bsc: "binance-smart-chain",
-  polygon: "polygon-pos",
-  arbitrum: "arbitrum-one",
-  optimism: "optimistic-ethereum",
-  avalanche: "avalanche",
-  fantom: "fantom"
+var asString = (value) => typeof value === "string" && value.trim() ? value.trim() : null;
+var asNumberId = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+var usdNumber = (value) => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  const text2 = asString(value);
+  if (!text2) return null;
+  const parsed = Number(text2);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
-var CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
-function cleanBlurb(raw) {
-  if (typeof raw !== "string" || !raw.trim()) return null;
-  let s = raw.replace(/<[^>]+>/g, " ").replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1").replace(/https?:\/\/\S+/g, "").replace(/[*_`>#]+/g, " ").replace(/&amp;/g, "&").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
-  if (!s) return null;
-  if (s.length > 1600) s = `${s.slice(0, 1597).replace(/\s+\S*$/, "").trim()}\u2026`;
-  return s;
+var usdFromString = (value) => {
+  const text2 = asString(value);
+  if (!text2) return null;
+  const parsed = Number(text2);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
+};
+var roundDateFromEpoch = (value) => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  const ms = value > 1e12 ? value : value * 1e3;
+  const iso2 = new Date(ms).toISOString().slice(0, 10);
+  return iso2.endsWith("-01-01") ? iso2.slice(0, 4) : iso2;
+};
+var normalizeChain2 = (value) => (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+var normalizeAddress3 = (value) => value.startsWith("0x") || value.startsWith("0X") ? value.toLowerCase() : value;
+function contractJoin(contracts, canonicalAddress, canonicalChain) {
+  const wanted = normalizeAddress3(canonicalAddress.trim());
+  if (!wanted) return null;
+  const wantedChain = normalizeChain2(canonicalChain);
+  for (const contract of contracts) {
+    const address = asString(contract.address);
+    if (!address || normalizeAddress3(address) !== wanted) continue;
+    const platform = asString(contract.platform?.name) ?? asString(contract.platform?.key);
+    const recordChain = normalizeChain2(platform);
+    if (wantedChain && recordChain && wantedChain !== recordChain) continue;
+    return { address, platform };
+  }
+  return null;
 }
-var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
-async function coingeckoToken(chain, address, fetchImpl2 = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
-  const plat = CG_PLATFORM[chain] ?? chain;
-  try {
-    const res = await request(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
-      signal: AbortSignal.timeout(8e3)
+function officialSurfacesFromLinks(links) {
+  let officialTwitter = null;
+  let officialUrl = null;
+  for (const link of links) {
+    const type = asString(link.type)?.toLowerCase();
+    const value = asString(link.value);
+    if (!type || !value) continue;
+    if (type === "web" && !officialUrl) officialUrl = value;
+    if (type === "twitter" && !officialTwitter) {
+      const handle = value.match(/(?:x\.com|twitter\.com)\/(@?[A-Za-z0-9_]{2,30})/)?.[1] ?? value;
+      officialTwitter = handle.replace(/^@/, "");
+    }
+  }
+  return { officialTwitter, officialUrl };
+}
+var mapRounds = (raw) => {
+  if (!Array.isArray(raw)) return [];
+  const rounds = [];
+  for (const entry of raw) {
+    const stage = asString(entry.stage);
+    const amountUsd = usdFromString(entry.raise);
+    const valuationUsd = usdFromString(entry.valuation);
+    if (!stage && !amountUsd && !valuationUsd) continue;
+    const funds = Array.isArray(entry.funds) ? entry.funds : [];
+    const tokenPrice = usdNumber(entry.priceUSD);
+    const tokensForSale = usdNumber(entry.tokensForSale);
+    const allocation = usdNumber(entry.allocationOfSupply);
+    rounds.push({
+      stage: stage ?? "Undisclosed",
+      date: roundDateFromEpoch(entry.announcementDate),
+      amountUsd,
+      valuationUsd,
+      ...tokenPrice !== null ? { tokenPriceUsd: tokenPrice } : {},
+      ...tokensForSale !== null ? { tokensForSale } : {},
+      ...allocation !== null ? { allocationOfSupplyPct: allocation } : {},
+      leadInvestors: funds.filter((fund) => fund.isLead === true).map((fund) => asString(fund.name)).filter((name) => !!name),
+      otherInvestors: funds.filter((fund) => fund.isLead !== true).map((fund) => asString(fund.name)).filter((name) => !!name),
+      announcementUrl: asString(entry.announcementLink)
     });
-    if (res.status === 404) return { listed: false, id: null, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null, categories: [] };
-    if (!res.ok) return null;
-    const d = await res.json();
-    const tickers = d.tickers ?? [];
-    const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
-    const cex = new Set(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean));
-    const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
-    const homepageValue = (d.links?.homepage ?? []).find((value) => typeof value === "string" && /^https?:\/\//i.test(value));
-    const homepage = typeof homepageValue === "string" ? homepageValue : null;
-    const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
-    const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
-    const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
-    const athPrice = d.market_data?.ath?.usd;
-    const athDate = d.market_data?.ath_date?.usd;
-    const athDrawdown = d.market_data?.ath_change_percentage?.usd;
-    const ath = athPrice != null || athDate != null || athDrawdown != null ? {
-      priceUsd: typeof athPrice === "number" && Number.isFinite(athPrice) ? athPrice : null,
-      date: typeof athDate === "string" && athDate.trim() ? athDate : null,
-      drawdownPct: typeof athDrawdown === "number" && Number.isFinite(athDrawdown) ? athDrawdown : null
-    } : null;
-    return {
-      listed: true,
-      id: typeof d.id === "string" && d.id ? d.id : null,
-      rank: d.market_cap_rank ?? null,
-      mcapUsd: d.market_data?.market_cap?.usd ?? null,
-      marketCount: markets.size,
-      cexCount: cex.size,
-      cexNames,
-      homepage,
-      twitter,
-      image,
-      description: cleanBlurb(d.description?.en),
-      categories: (d.categories ?? []).filter((c) => typeof c === "string" && c.trim().length > 0).slice(0, 12),
-      ath
-    };
-  } catch {
-    return null;
   }
-}
-async function dexByPairResult(chain, pair, fetchImpl2 = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
-  try {
-    const res = await request(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
-      signal: AbortSignal.timeout(8e3)
-    });
-    if (!res.ok) return { ok: false, pair: null };
-    const d = await res.json();
-    return { ok: true, pair: d.pair ?? d.pairs?.[0] ?? null };
-  } catch {
-    return { ok: false, pair: null };
+  return rounds.sort((a, b) => a.date && b.date ? a.date.localeCompare(b.date) : 0);
+};
+var normalizeName = (value) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+async function collectCryptoRankFunding(subject, options = {}) {
+  const apiKey2 = process.env.CRYPTORANK_API_KEY?.trim();
+  if (!apiKey2) return { available: false, reason: "not_configured", note: "CRYPTORANK_API_KEY is not configured." };
+  const fetcher = options.fetcher ?? deadlineFetch;
+  const candidates = /* @__PURE__ */ new Map();
+  const symbol = asString(subject.symbol);
+  if (symbol) {
+    const listed = await getJson2(`/currencies?symbol=${encodeURIComponent(symbol.toUpperCase())}&limit=100`, apiKey2, fetcher);
+    if (!listed.ok && (listed.kind === "unauthorized" || listed.kind === "error")) {
+      recordCall("cryptorank", "funding", 0, `discovery \xB7 ${listed.kind}`, "failed");
+      return { available: false, reason: "unavailable", note: listed.note };
+    }
+    if (listed.ok) {
+      for (const item of listed.data) {
+        const id = asNumberId(item.id);
+        if (id !== null) candidates.set(id, item);
+      }
+    }
   }
-}
-function pickPair(pairs, wantAddress) {
-  if (!pairs.length) return null;
-  const byLiq = [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
-  if (wantAddress) {
-    const exact = byLiq.find((p) => p.baseToken?.address === wantAddress);
-    if (exact) return exact;
-    const match = /^0x[0-9a-f]{40}$/i.test(wantAddress) ? byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase()) : void 0;
-    if (match) return match;
-    return null;
+  const wantedName = normalizeName(subject.name);
+  if (!candidates.size && wantedName) {
+    const mapped = await getJson2(`/currencies/map?include=type`, apiKey2, fetcher);
+    if (!mapped.ok) {
+      recordCall("cryptorank", "funding", 0, `map \xB7 ${mapped.kind}`, mapped.kind === "not_found" ? "succeeded" : "failed");
+      return mapped.kind === "not_found" ? { available: false, reason: "no_data", note: "CryptoRank has no matching record." } : { available: false, reason: "unavailable", note: mapped.note };
+    }
+    for (const item of mapped.data) {
+      const id = asNumberId(item.id);
+      if (id === null) continue;
+      const name = asString(item.name);
+      const key = asString(item.key);
+      if (name && normalizeName(name) === wantedName || key && normalizeName(key) === wantedName) {
+        candidates.set(id, item);
+      }
+    }
   }
-  return byLiq[0];
-}
-function hasCompleteGoplusTradeability(result) {
-  const reported = (value) => typeof value === "string" && value.trim().length > 0;
-  return result?.is_in_dex === "1" && reported(result.buy_tax) && reported(result.sell_tax) && reported(result.cannot_sell_all);
-}
-async function honeypotIs(chainId, address, fetchImpl2 = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
-  try {
-    const res = await request(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
-    if (!res.ok) return null;
-    const d = await res.json();
-    return {
-      isHoneypot: !!d.honeypotResult?.isHoneypot,
-      simSuccess: !!d.simulationSuccess,
-      buyTax: d.simulationResult?.buyTax ?? 0,
-      sellTax: d.simulationResult?.sellTax ?? 0,
-      flags: (d.flags ?? []).map((flag) => typeof flag === "string" ? flag : flag.description ?? flag.flag ?? String(flag))
-    };
-  } catch {
-    return null;
+  if (!candidates.size) {
+    recordCall("cryptorank", "funding", 0, "no_candidates", "succeeded");
+    return { available: false, reason: "no_data", note: `CryptoRank lists no candidate record for "${subject.name}".` };
   }
-}
-async function goplusSolana(mint, fetchImpl2 = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
-  try {
-    const res = await request(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
-    if (!res.ok) return null;
-    const d = await res.json();
-    const row = d.result?.[mint];
-    return row ?? null;
-  } catch {
-    return null;
-  }
-}
-var SOLANA_ADDRESS4 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-function supplySharePercent(amount, supply) {
-  const balance = Number(amount);
-  const total = Number(supply);
-  if (!Number.isFinite(balance) || balance < 0) return null;
-  if (!Number.isFinite(total) || total <= 0) return null;
-  const percent = balance / total * 100;
-  return percent >= 0 && percent <= 100 ? percent : null;
-}
-function lockedShare(lpLockedPct, markets) {
-  const percent = boundedPercent(lpLockedPct);
-  if (percent == null) return null;
-  if (percent > 0) return percent;
-  const marketsSeen = Array.isArray(markets) ? markets.length : 0;
-  return marketsSeen > 0 ? percent : null;
-}
-function boundedPercent(value) {
-  if (typeof value !== "number" && typeof value !== "string") return null;
-  if (typeof value === "string" && !value.trim()) return null;
-  const percent = Number(value);
-  if (!Number.isFinite(percent)) return null;
-  return percent >= 0 && percent <= 100 ? percent : null;
-}
-function finiteCount(value) {
-  if (typeof value !== "number" && typeof value !== "string") return null;
-  const count = Number(value);
-  return Number.isFinite(count) && count >= 0 ? count : null;
-}
-function parseKnownAccounts(value) {
-  const accounts = {};
-  if (!value || typeof value !== "object" || Array.isArray(value)) return accounts;
-  for (const [address, entry] of Object.entries(value)) {
-    if (!address.trim() || !entry || typeof entry !== "object") continue;
-    const record5 = entry;
-    accounts[address] = {
-      ...typeof record5.name === "string" ? { name: record5.name } : {},
-      ...typeof record5.type === "string" ? { type: record5.type } : {}
+  let bound = null;
+  let metadataGated = false;
+  const contractAddress = asString(subject.contractAddress);
+  for (const [id] of [...candidates].slice(0, MAX_CANDIDATE_DETAILS)) {
+    if (bound) break;
+    const detail = await getJson2(`/currencies/${id}`, apiKey2, fetcher);
+    if (!detail.ok) {
+      if (detail.kind === "unauthorized" || detail.kind === "error") {
+        recordCall("cryptorank", "funding", 0, `detail \xB7 ${detail.kind}`, "failed");
+        return { available: false, reason: "unavailable", note: detail.note };
+      }
+      continue;
+    }
+    const key = asString(detail.data.key) ?? String(id);
+    const name = asString(detail.data.name) ?? subject.name;
+    const recordSymbol = asString(detail.data.symbol);
+    const hasFundingRounds = detail.data.hasFundingRounds === true;
+    if (contractAddress) {
+      const contracts = Array.isArray(detail.data.contracts) ? detail.data.contracts : [];
+      const join = contractJoin(contracts, contractAddress, subject.chain);
+      if (join) {
+        bound = {
+          id,
+          key,
+          name,
+          symbol: recordSymbol,
+          hasFundingRounds,
+          binding: { method: "canonical_token_address", address: join.address, platform: join.platform },
+          metadataAccess: "not_needed",
+          funds: []
+        };
+        continue;
+      }
+    }
+    if (!subject.matchesOfficialIdentity) continue;
+    const metadata = await getJson2(`/currencies/${id}/full-metadata`, apiKey2, fetcher);
+    if (!metadata.ok) {
+      if (metadata.kind === "plan_gated") {
+        metadataGated = true;
+        continue;
+      }
+      if (metadata.kind === "unauthorized" || metadata.kind === "error") {
+        recordCall("cryptorank", "funding", 0, `full-metadata \xB7 ${metadata.kind}`, "failed");
+        return { available: false, reason: "unavailable", note: metadata.note };
+      }
+      continue;
+    }
+    const links = Array.isArray(metadata.data.links) ? metadata.data.links : [];
+    const surfaces = officialSurfacesFromLinks(links);
+    if (!subject.matchesOfficialIdentity(surfaces)) continue;
+    const fundItems = Array.isArray(metadata.data.funds) ? metadata.data.funds : [];
+    bound = {
+      id,
+      key,
+      name,
+      symbol: recordSymbol,
+      hasFundingRounds: metadata.data.hasFundingRounds === true || hasFundingRounds,
+      binding: { method: "official_identity", officialTwitter: surfaces.officialTwitter, officialUrl: surfaces.officialUrl },
+      metadataAccess: "ok",
+      funds: fundItems.map((fund) => ({ name: asString(fund.name), isLead: fund.isLead === true })).filter((fund) => !!fund.name)
     };
   }
-  return accounts;
-}
-function largestInsiderClusterPercent(networks) {
-  const measured = networks.map((network) => network.percent).filter((percent) => percent != null);
-  return measured.length ? Math.max(...measured) : null;
-}
-async function rugcheckReport(mint, fetchImpl2 = fetch) {
-  try {
-    const res = await retryFetchWithFreshTimeout(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, 15e3, {
-      headers: { accept: "application/json" }
-    }, 2, fetchImpl2);
-    if (!res.ok) return null;
-    const d = await res.json();
-    const creator = typeof d?.creator === "string" && SOLANA_ADDRESS4.test(d.creator.trim()) ? d.creator.trim() : null;
-    const supply = d?.token?.supply;
-    const networks = Array.isArray(d?.insiderNetworks) ? d.insiderNetworks : [];
-    return {
-      creator,
-      // With no creator there is nobody for a balance to belong to, and a bare
-      // zero would read as "the creator sold out" rather than "not measured".
-      creatorPercent: creator ? supplySharePercent(d?.creatorBalance, supply) : null,
-      lpLockedPct: lockedShare(d?.lpLockedPct, d?.markets),
-      rugged: d?.rugged === true,
-      knownAccounts: parseKnownAccounts(d?.knownAccounts),
-      insiderNetworks: networks.map((network) => ({
-        // Null, not zero. A cluster whose wallet count RugCheck did not report
-        // is not a cluster of nobody, and "0 linked wallets" is the reading that
-        // would talk a reader out of looking.
-        size: finiteCount(network?.size ?? network?.activeAccounts),
-        percent: supplySharePercent(network?.tokenAmount, supply)
-      })),
-      graphInsidersDetected: finiteCount(d?.graphInsidersDetected)
-    };
-  } catch {
-    return null;
+  if (!bound) {
+    if (metadataGated && !contractAddress) {
+      recordCall("cryptorank", "funding", 0, "identity_surfaces_plan_gated", "partial");
+      return {
+        available: false,
+        reason: "unavailable",
+        note: "CryptoRank has candidate records, but the configured plan does not expose the official-identity surfaces needed to bind one safely."
+      };
+    }
+    recordCall("cryptorank", "funding", 0, "no_identity_join", "succeeded");
+    return { available: false, reason: "no_data", note: `No CryptoRank record joined the verified identity for "${subject.name}".` };
   }
-}
-async function goplus(chainId, address, fetchImpl2 = fetch) {
-  const request = (url, init) => retryFetch(url, init, 3, fetchImpl2);
-  const once = async () => {
-    try {
-      const res = await request(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
-      if (!res.ok) return null;
-      const d = await res.json();
-      return d.result?.[address.toLowerCase()] ?? d.result?.[address] ?? null;
-    } catch {
-      return null;
+  let rounds = [];
+  let totalRaisedUsd = null;
+  let fundingRoundsAccess = "unavailable";
+  let metadataAccess = bound.metadataAccess;
+  let funds = bound.funds;
+  if (bound.hasFundingRounds) {
+    const detail = await getJson2(`/currencies/${bound.id}/funding-rounds`, apiKey2, fetcher);
+    if (detail.ok) {
+      fundingRoundsAccess = "ok";
+      rounds = mapRounds(detail.data.fundingRounds);
+      totalRaisedUsd = usdFromString(detail.data.totalFundingRaise) ?? (rounds.some((round) => round.amountUsd) ? rounds.reduce((sum, round) => sum + (round.amountUsd ?? 0), 0) : null);
+    } else if (detail.kind === "plan_gated") {
+      fundingRoundsAccess = "plan_gated";
+      if (metadataAccess === "not_needed") {
+        const metadata = await getJson2(`/currencies/${bound.id}/full-metadata`, apiKey2, fetcher);
+        if (metadata.ok) {
+          metadataAccess = "ok";
+          const fundItems = Array.isArray(metadata.data.funds) ? metadata.data.funds : [];
+          funds = fundItems.map((fund) => ({ name: asString(fund.name), isLead: fund.isLead === true })).filter((fund) => !!fund.name);
+        } else if (metadata.kind === "plan_gated") {
+          metadataAccess = "plan_gated";
+        }
+      }
+    }
+  } else {
+    fundingRoundsAccess = "ok";
+  }
+  const status = fundingRoundsAccess === "plan_gated" ? "partial" : "succeeded";
+  recordCall("cryptorank", "funding", 0, `${bound.key} \xB7 ${rounds.length}_rounds \xB7 ${bound.binding.method}${fundingRoundsAccess === "plan_gated" ? " \xB7 rounds_plan_gated" : ""}`, status);
+  return {
+    available: true,
+    value: {
+      currencyId: bound.id,
+      key: bound.key,
+      name: bound.name,
+      symbol: bound.symbol,
+      binding: bound.binding,
+      hasFundingRounds: bound.hasFundingRounds,
+      rounds,
+      totalRaisedUsd,
+      funds,
+      access: { fundingRounds: fundingRoundsAccess, fullMetadata: metadataAccess },
+      sourceUrl: `https://cryptorank.io/price/${bound.key}`,
+      capturedAt: captureTimestamp()
     }
   };
-  let row = await once();
-  if (row && !(row.holders && row.holders.length)) {
-    await new Promise((r) => setTimeout(r, 700));
-    const retry = await once();
-    if (retry?.holders?.length) row = retry;
-  }
-  return row;
 }
 
 // server/adapters/tokenHolders.ts
@@ -32756,25 +34459,623 @@ function readContractFlags(gp) {
   return flags;
 }
 
+// server/adapters/stockHealth.ts
+var CHART_BASE = "https://query1.finance.yahoo.com/v8/finance/chart";
+var USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
+var asString2 = (value) => typeof value === "string" && value.trim() ? value.trim() : null;
+var asNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+var LEGAL_SUFFIX_TOKENS = /* @__PURE__ */ new Set([
+  "co",
+  "company",
+  "corp",
+  "corporation",
+  "inc",
+  "incorporated",
+  "limited",
+  "llc",
+  "ltd",
+  "plc",
+  "the"
+]);
+var identityTokens = (name) => name.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length >= 2 && !LEGAL_SUFFIX_TOKENS.has(token));
+function issuerNamesAgree(claimedIssuer, feedLongName) {
+  const claimed = identityTokens(claimedIssuer);
+  const feed = identityTokens(feedLongName);
+  if (!claimed.length || !feed.length) return false;
+  const contains = (outer, inner) => inner.every((token) => outer.includes(token));
+  return contains(feed, claimed) || contains(claimed, feed);
+}
+var exchangesAgree = (registryExchange, feedExchange) => {
+  if (!registryExchange || !feedExchange) return false;
+  const registry = registryExchange.toLowerCase();
+  const feed = feedExchange.toLowerCase();
+  if (registry.includes("nasdaq")) return feed.includes("nasdaq");
+  if (registry.includes("nyse")) return feed.includes("nyse") || feed.includes("new york stock exchange");
+  return false;
+};
+var pctChange = (from, to) => from && to && from > 0 ? Math.round((to - from) / from * 1e3) / 10 : null;
+function computeSeriesHealth(points) {
+  const closes = points.map((point) => point.close);
+  const last = closes[closes.length - 1];
+  const at = (fromEnd) => closes.length > fromEnd ? closes[closes.length - 1 - fromEnd] : void 0;
+  let peak = -Infinity;
+  let maxDrawdown = 0;
+  for (const close of closes) {
+    peak = Math.max(peak, close);
+    if (peak > 0) maxDrawdown = Math.min(maxDrawdown, (close - peak) / peak);
+  }
+  const returns = [];
+  for (let i = 1; i < closes.length; i += 1) {
+    if (closes[i - 1] > 0) returns.push(Math.log(closes[i] / closes[i - 1]));
+  }
+  const mean = returns.length ? returns.reduce((sum, value) => sum + value, 0) / returns.length : 0;
+  const variance = returns.length > 1 ? returns.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (returns.length - 1) : 0;
+  const annualizedVolatilityPct = returns.length > 20 ? Math.round(Math.sqrt(variance) * Math.sqrt(252) * 1e3) / 10 : null;
+  const trend = [];
+  for (let i = 0; i < points.length; i += 5) trend.push(points[i]);
+  if (trend[trend.length - 1] !== points[points.length - 1]) trend.push(points[points.length - 1]);
+  return {
+    change30dPct: pctChange(at(21), last),
+    change90dPct: pctChange(at(63), last),
+    change1yPct: closes.length >= 200 ? pctChange(closes[0], last) : null,
+    maxDrawdown1yPct: maxDrawdown < 0 ? Math.round(maxDrawdown * 1e3) / 10 : 0,
+    annualizedVolatilityPct,
+    trend
+  };
+}
+async function readEquityRecord(ticker, fetcher = deadlineFetch) {
+  const clean4 = ticker.trim().toUpperCase();
+  if (!/^[A-Z0-9.-]{1,12}$/.test(clean4)) {
+    return { ok: false, reason: "no_data", note: `"${ticker}" is not a market-feed-safe ticker.` };
+  }
+  const sourceUrl2 = `${CHART_BASE}/${encodeURIComponent(clean4)}?range=1y&interval=1d`;
+  let body;
+  try {
+    const response = await fetcher(sourceUrl2, {
+      headers: { "user-agent": USER_AGENT, accept: "application/json" },
+      signal: AbortSignal.timeout(9e3)
+    });
+    if (response.status === 404) {
+      recordCall("market-feed", "equity-read", 0, `${clean4} \xB7 not_found`, "succeeded");
+      return { ok: false, reason: "no_data", note: `The market feed has no listing for ${clean4}.` };
+    }
+    if (!response.ok) {
+      recordCall("market-feed", "equity-read", 0, `${clean4} \xB7 http_${response.status}`, "failed");
+      return { ok: false, reason: "unavailable", note: `The market feed answered HTTP ${response.status} for ${clean4}.` };
+    }
+    body = await response.json();
+  } catch (error) {
+    recordCall("market-feed", "equity-read", 0, `${clean4} \xB7 error`, "failed");
+    return { ok: false, reason: "unavailable", note: `Market-feed read failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const result = body.chart?.result?.[0];
+  if (!result?.meta) {
+    const description = asString2(body.chart?.error?.description);
+    recordCall("market-feed", "equity-read", 0, `${clean4} \xB7 empty`, "succeeded");
+    return { ok: false, reason: "no_data", note: description ?? `The market feed returned no chart record for ${clean4}.` };
+  }
+  const meta = result.meta;
+  const price = asNumber(meta.regularMarketPrice);
+  if (price === null || price <= 0) {
+    recordCall("market-feed", "equity-read", 0, `${clean4} \xB7 no_price`, "succeeded");
+    return { ok: false, reason: "no_data", note: `The market feed carries no current price for ${clean4}.` };
+  }
+  const timestamps = Array.isArray(result.timestamp) ? result.timestamp : [];
+  const rawCloses = Array.isArray(result.indicators?.quote?.[0]?.close) ? result.indicators.quote[0].close : [];
+  const points = [];
+  for (let i = 0; i < rawCloses.length; i += 1) {
+    const close = asNumber(rawCloses[i]);
+    const stamp2 = asNumber(timestamps[i]);
+    if (close === null || close <= 0 || stamp2 === null) continue;
+    points.push({ date: new Date(stamp2 * 1e3).toISOString().slice(0, 10), close });
+  }
+  const series = computeSeriesHealth(points);
+  const high = asNumber(meta.fiftyTwoWeekHigh);
+  const low = asNumber(meta.fiftyTwoWeekLow);
+  const currency = asString2(meta.currency);
+  recordCall("market-feed", "equity-read", 0, `${clean4} \xB7 ${points.length}_closes`, "succeeded");
+  return {
+    ok: true,
+    record: {
+      ticker: clean4,
+      currency,
+      exchange: asString2(meta.fullExchangeName) ?? asString2(meta.exchangeName),
+      feedLongName: asString2(meta.longName),
+      instrumentType: asString2(meta.instrumentType),
+      price,
+      fiftyTwoWeekHigh: high,
+      fiftyTwoWeekLow: low,
+      fiftyTwoWeekPositionPct: high !== null && low !== null && high > low ? Math.round((price - low) / (high - low) * 100) : null,
+      ...series,
+      pennyStock: currency === "USD" ? price < 5 : null,
+      sourceUrl: sourceUrl2
+    }
+  };
+}
+async function collectStockHealth(listing, options = {}) {
+  const read2 = await readEquityRecord(listing.ticker, options.fetcher ?? deadlineFetch);
+  if (!read2.ok) return { available: false, reason: read2.reason, note: read2.note };
+  const record5 = read2.record;
+  if (record5.instrumentType !== "EQUITY") {
+    return {
+      available: false,
+      reason: "identity_mismatch",
+      note: `The market feed's record for ${record5.ticker} is ${record5.instrumentType ?? "an unknown instrument type"}, not an equity.`
+    };
+  }
+  const nameAgrees = record5.feedLongName ? issuerNamesAgree(listing.issuer, record5.feedLongName) : false;
+  const exchangeAgrees = exchangesAgree(listing.exchange, record5.exchange);
+  if (!nameAgrees && !exchangeAgrees) {
+    return {
+      available: false,
+      reason: "identity_mismatch",
+      note: `The market feed's record for ${record5.ticker} (${record5.feedLongName ?? "no issuer name"}, ${record5.exchange ?? "no exchange"}) does not corroborate the verified listing ${listing.issuer} (${listing.exchange ?? "exchange unknown"}).`
+    };
+  }
+  const { sourceUrl: sourceUrl2, instrumentType, feedLongName, ...health } = record5;
+  return {
+    available: true,
+    value: {
+      mode: "point_in_time",
+      scoringImpact: "none",
+      ...health,
+      exchange: record5.exchange ?? listing.exchange,
+      issuer: listing.issuer,
+      binding: {
+        registryFactId: listing.registryFactId,
+        registrySourceUrl: listing.registrySourceUrl,
+        feedLongName,
+        instrumentType
+      },
+      sourceUrl: sourceUrl2,
+      capturedAt: captureTimestamp()
+    }
+  };
+}
+var TOKENIZED_STOCK_NAME = /\b(?:xstocks?|dshares?|dinari|backed finance|tokeni[sz]ed (?:stock|share|equit\w*)|(?:stock|equity) token)\b/i;
+var TOKENIZED_NAME_NOISE = /* @__PURE__ */ new Set([
+  "xstock",
+  "xstocks",
+  "dshare",
+  "dshares",
+  "dinari",
+  "backed",
+  "finance",
+  "tokenized",
+  "tokenised",
+  "stock",
+  "stocks",
+  "share",
+  "shares",
+  "equity",
+  "token",
+  "tokens",
+  "wrapped",
+  "onchain",
+  "on",
+  "chain"
+]);
+function underlyingTickerCandidate(symbol) {
+  const clean4 = symbol.trim();
+  const xstocks = clean4.match(/^([A-Z]{1,6})[xX]$/);
+  if (xstocks) return { ticker: xstocks[1], pattern: "xstocks" };
+  const dinari = clean4.match(/^([A-Z]{1,6})\.[dD]$/);
+  if (dinari) return { ticker: dinari[1], pattern: "dinari" };
+  const backed = clean4.match(/^b([A-Z]{2,6})$/);
+  if (backed) return { ticker: backed[1], pattern: "backed" };
+  if (/^[A-Z]{1,5}$/.test(clean4)) return { ticker: clean4, pattern: "bare" };
+  return null;
+}
+var NATIVE_STOCK_TOKEN_CHAINS = /* @__PURE__ */ new Set(["robinhood"]);
+async function resolveTokenizedStockUnderlying(side, options = {}) {
+  const candidate = underlyingTickerCandidate(side.symbol.trim().toUpperCase());
+  const nameContext = Boolean(side.name && TOKENIZED_STOCK_NAME.test(side.name));
+  const chainContext = Boolean(side.chain && NATIVE_STOCK_TOKEN_CHAINS.has(side.chain.trim().toLowerCase()));
+  const patternContext = candidate !== null && candidate.pattern !== "bare";
+  if (!candidate || !patternContext && !nameContext && !chainContext) {
+    return {
+      resolved: false,
+      reason: "not_tokenized_stock",
+      note: `"${side.symbol}" carries no tokenized-stock context (no tokenized symbol pattern, no tokenized-stock language in its name, and not a native stock-token chain).`
+    };
+  }
+  const read2 = await readEquityRecord(candidate.ticker, options.fetcher ?? deadlineFetch);
+  if (!read2.ok) return { resolved: false, reason: read2.reason, note: read2.note };
+  const record5 = read2.record;
+  if (record5.instrumentType !== "EQUITY") {
+    return {
+      resolved: false,
+      reason: "identity_mismatch",
+      note: `The market feed's record for ${candidate.ticker} is ${record5.instrumentType ?? "an unknown instrument type"}, not an equity.`
+    };
+  }
+  const basis = [];
+  const declaredIssuer = side.name ? side.name.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length >= 2 && !TOKENIZED_NAME_NOISE.has(token)).join(" ") : "";
+  if (declaredIssuer) {
+    const claimedTokens = identityTokens(declaredIssuer);
+    const feedTokens = record5.feedLongName ? identityTokens(record5.feedLongName) : [];
+    const claimExplained = claimedTokens.length > 0 && feedTokens.length > 0 && claimedTokens.every((token) => feedTokens.includes(token));
+    if (!claimExplained) {
+      return {
+        resolved: false,
+        reason: "identity_mismatch",
+        note: `The token's own name points at "${declaredIssuer}", but the market feed's ${candidate.ticker} record is ${record5.feedLongName ?? "unnamed"}; the underlying was not resolved.`
+      };
+    }
+    basis.push(`The token's own name declares the issuer and the market feed's ${candidate.ticker} record (${record5.feedLongName}) agrees.`);
+  } else if (patternContext) {
+    basis.push(`The symbol follows the ${candidate.pattern === "xstocks" ? "xStocks" : candidate.pattern === "dinari" ? "Dinari dShares" : "Backed"} tokenized-stock pattern and the market feed confirms ${candidate.ticker} as a listed equity${record5.feedLongName ? ` (${record5.feedLongName})` : ""}.`);
+  } else if (chainContext) {
+    basis.push(`The pool lives on a native stock-token chain and the market feed confirms ${candidate.ticker} as a listed equity${record5.feedLongName ? ` (${record5.feedLongName})` : ""}.`);
+  } else {
+    return {
+      resolved: false,
+      reason: "identity_mismatch",
+      note: `"${side.symbol}" reads as a tokenized stock but names no issuer, and neither a symbol pattern nor a native stock-token chain binds it to ${candidate.ticker}.`
+    };
+  }
+  return { resolved: true, record: record5, basis };
+}
+function tokenizedStockPairingSnapshot(exposure, side, resolution) {
+  const { record: record5, basis } = resolution;
+  return {
+    mode: "point_in_time",
+    scoringImpact: "none",
+    exposure,
+    tokenizedSymbol: side.symbol,
+    tokenizedName: side.name,
+    underlying: {
+      ticker: record5.ticker,
+      feedLongName: record5.feedLongName,
+      exchange: record5.exchange,
+      currency: record5.currency,
+      price: record5.price,
+      fiftyTwoWeekPositionPct: record5.fiftyTwoWeekPositionPct,
+      change30dPct: record5.change30dPct,
+      change90dPct: record5.change90dPct,
+      change1yPct: record5.change1yPct,
+      maxDrawdown1yPct: record5.maxDrawdown1yPct,
+      annualizedVolatilityPct: record5.annualizedVolatilityPct,
+      pennyStock: record5.pennyStock
+    },
+    basis,
+    sourceUrl: record5.sourceUrl,
+    capturedAt: captureTimestamp()
+  };
+}
+
+// server/adapters/siteBackers.ts
+var USER_AGENT2 = "Mozilla/5.0 (compatible; ARGUS/1.0)";
+var SECTION_WINDOW = 7e3;
+var MAX_NAMES = 20;
+var BACKERS_HEADING = /\bbacked by\b[^<]{0,80}|\bour (?:investors|backers)\b|\binvestors\b[^<]{0,40}|\bour angels\b/i;
+var NAME_NOISE = /^(?:logo|icon|image|img|arrow|background|banner|avatar|photo|learn more|read more|x|twitter|discord|telegram|github|medium|linkedin|menu|close|open|backed by.*|our (?:investors|backers))$/i;
+var cleanName = (value) => {
+  const name = value.replace(/\s+/g, " ").replace(/\s*(?:logo|logotype|icon)$/i, "").trim();
+  if (name.length < 2 || name.length > 48) return null;
+  if (!/^[A-Za-z0-9][A-Za-z0-9 .,'&()/-]*$/.test(name)) return null;
+  if (NAME_NOISE.test(name)) return null;
+  if (!/[A-Za-z]{2}/.test(name)) return null;
+  return name;
+};
+function extractSiteBackers(html) {
+  const headingMatch = html.match(BACKERS_HEADING);
+  if (!headingMatch || headingMatch.index === void 0) return null;
+  const heading = headingMatch[0].replace(/\s+/g, " ").trim();
+  const window = html.slice(headingMatch.index, headingMatch.index + SECTION_WINDOW);
+  const names = [];
+  const push = (value) => {
+    const name = cleanName(value);
+    if (!name) return;
+    if (names.some((existing) => existing.toLowerCase() === name.toLowerCase())) return;
+    if (names.length < MAX_NAMES) names.push(name);
+  };
+  for (const match of window.matchAll(/\b(?:alt|aria-label|title)\s*=\s*["']([^"'<>]{2,60})["']/gi)) {
+    push(match[1]);
+  }
+  for (const match of window.matchAll(/<a\b[^>]*>\s*([^<>{}]{2,48}?)\s*<\/a>/gi)) {
+    push(match[1]);
+  }
+  if (!names.length) return null;
+  return {
+    heading,
+    names,
+    excerpt: `${heading} \xB7 ${names.join(", ")}`.slice(0, 500)
+  };
+}
+async function collectSiteBackers(officialWebsite, fetcher = deadlineFetch) {
+  let origin;
+  try {
+    origin = new URL(officialWebsite);
+  } catch {
+    return { available: false, note: "No usable official website." };
+  }
+  const apex = origin.hostname.toLowerCase().replace(/^www\./, "");
+  for (const url of [origin.toString(), new URL("about", origin).toString()]) {
+    try {
+      const response = await fetcher(url, {
+        headers: { "user-agent": USER_AGENT2, accept: "text/html" },
+        signal: AbortSignal.timeout(8e3),
+        redirect: "follow"
+      });
+      if (!response.ok) continue;
+      const landed = response.url ? new URL(response.url).hostname.toLowerCase().replace(/^www\./, "") : "";
+      if (landed && landed !== apex && !landed.endsWith(`.${apex}`)) continue;
+      const html = (await response.text()).slice(0, 9e5);
+      const section = extractSiteBackers(html);
+      if (section) {
+        recordCall("site-fetch", "backer-wall", 0, `${apex} \xB7 ${section.names.length}_names`, "succeeded");
+        return {
+          available: true,
+          value: { ...section, sourceUrl: url, capturedAt: captureTimestamp() }
+        };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return { available: false, note: "The official site publishes no readable backer section." };
+}
+
+// server/adapters/companyRegistries.ts
+var EDGAR_BASE = "https://data.sec.gov/submissions";
+var COMPANIES_HOUSE_BASE = "https://api.company-information.service.gov.uk";
+var OPENCORPORATES_BASE = "https://api.opencorporates.com/v0.4";
+var USER_AGENT3 = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
+var asString3 = (value) => typeof value === "string" && value.trim() ? value.trim() : null;
+var strArray2 = (value) => Array.isArray(value) ? value.map((entry) => asString3(entry)).filter((entry) => !!entry) : [];
+async function collectSecRegistrant(cik, options = {}) {
+  if (!Number.isSafeInteger(cik) || cik <= 0) {
+    return { available: false, reason: "no_data", note: `"${cik}" is not a usable CIK.` };
+  }
+  const fetcher = options.fetcher ?? deadlineFetch;
+  const sourceUrl2 = `${EDGAR_BASE}/CIK${String(cik).padStart(10, "0")}.json`;
+  let body;
+  try {
+    const response = await fetcher(sourceUrl2, {
+      headers: { "user-agent": USER_AGENT3, accept: "application/json" },
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (response.status === 404) {
+      recordCall("sec-edgar", "submissions", 0, `${cik} \xB7 not_found`, "succeeded");
+      return { available: false, reason: "no_data", note: `EDGAR has no submissions record for CIK ${cik}.` };
+    }
+    if (!response.ok) {
+      recordCall("sec-edgar", "submissions", 0, `${cik} \xB7 http_${response.status}`, "failed");
+      return { available: false, reason: "unavailable", note: `EDGAR answered HTTP ${response.status} for CIK ${cik}.` };
+    }
+    body = await response.json();
+  } catch (error) {
+    recordCall("sec-edgar", "submissions", 0, `${cik} \xB7 error`, "failed");
+    return { available: false, reason: "unavailable", note: `EDGAR read failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const entityName = asString3(body.name);
+  if (!entityName) {
+    recordCall("sec-edgar", "submissions", 0, `${cik} \xB7 empty`, "succeeded");
+    return { available: false, reason: "no_data", note: `EDGAR returned no registrant name for CIK ${cik}.` };
+  }
+  const forms = Array.isArray(body.filings?.recent?.form) ? body.filings.recent.form : [];
+  const dates = Array.isArray(body.filings?.recent?.filingDate) ? body.filings.recent.filingDate : [];
+  const filings = [];
+  for (let i = 0; i < forms.length && i < dates.length; i += 1) {
+    const form = asString3(forms[i]);
+    const filedAt = asString3(dates[i]);
+    if (form && filedAt) filings.push({ form, filedAt });
+  }
+  const latestOf = (matcher) => filings.find((filing) => matcher(filing.form))?.filedAt ?? null;
+  recordCall("sec-edgar", "submissions", 0, `${cik} \xB7 ${filings.length}_recent_filings`, "succeeded");
+  return {
+    available: true,
+    value: {
+      cik,
+      entityName,
+      tickers: strArray2(body.tickers),
+      exchanges: strArray2(body.exchanges),
+      sicDescription: asString3(body.sicDescription),
+      stateOfIncorporation: asString3(body.stateOfIncorporationDescription) ?? asString3(body.stateOfIncorporation),
+      ein: asString3(body.ein),
+      lei: asString3(body.lei),
+      registrantWebsite: asString3(body.website),
+      latestFilings: filings.slice(0, 8),
+      lastAnnualReportAt: latestOf((form) => form === "10-K" || form === "20-F" || form === "40-F"),
+      lastQuarterlyReportAt: latestOf((form) => form === "10-Q"),
+      lastFilingAt: filings[0]?.filedAt ?? null,
+      sourceUrl: sourceUrl2,
+      capturedAt: captureTimestamp()
+    }
+  };
+}
+var REGISTRATION_PATTERNS = [
+  // "registered in England and Wales ... (company) no. 12345678"
+  { pattern: /registered\s+in\s+england(?:\s+and\s+wales)?[^.]{0,80}?(?:no\.?|number)\s*[:\s]\s*([A-Z]{0,2}\d{6,8})/gi, jurisdiction: "gb" },
+  { pattern: /registered\s+in\s+scotland[^.]{0,80}?(?:no\.?|number)\s*[:\s]\s*([A-Z]{0,2}\d{6,8})/gi, jurisdiction: "gb" },
+  // "Companies House number 12345678"
+  { pattern: /companies\s+house[^.]{0,60}?(?:no\.?|number)\s*[:\s]\s*([A-Z]{0,2}\d{6,8})/gi, jurisdiction: "gb" },
+  // Generic "Company No. 12345678" / "Company registration number: 12345678"
+  { pattern: /company\s+(?:registration\s+)?(?:no\.?|number)\s*[:\s]\s*([A-Z]{0,2}\d{6,8})/gi, jurisdiction: null }
+];
+function siteDeclaredRegistrations(text2, sourceUrl2) {
+  const found = /* @__PURE__ */ new Map();
+  for (const { pattern, jurisdiction } of REGISTRATION_PATTERNS) {
+    for (const match of text2.matchAll(pattern)) {
+      const number = match[1].toUpperCase();
+      const start = Math.max(0, (match.index ?? 0) - 40);
+      const excerpt = text2.slice(start, (match.index ?? 0) + match[0].length + 20).replace(/\s+/g, " ").trim();
+      const existing = found.get(number);
+      if (!existing || !existing.jurisdiction && jurisdiction) {
+        found.set(number, { number, jurisdiction, sourceUrl: sourceUrl2, excerpt });
+      }
+    }
+  }
+  return [...found.values()];
+}
+var REGISTRATION_PAGE_PATHS = ["", "legal", "imprint", "terms", "privacy"];
+async function collectSiteDeclaredRegistrations(officialWebsite, fetcher = deadlineFetch) {
+  let origin;
+  try {
+    origin = new URL(officialWebsite);
+  } catch {
+    return [];
+  }
+  const apex = origin.hostname.replace(/^www\./, "");
+  const candidates = REGISTRATION_PAGE_PATHS.slice(0, 3).map((path) => new URL(path, origin).toString());
+  const out = [];
+  for (const url of candidates) {
+    try {
+      const response = await fetcher(url, {
+        headers: { "user-agent": USER_AGENT3, accept: "text/html" },
+        signal: AbortSignal.timeout(8e3)
+      });
+      if (!response.ok) continue;
+      const landedHost = new URL(response.url || url).hostname.replace(/^www\./, "");
+      if (landedHost !== apex && !landedHost.endsWith(`.${apex}`)) continue;
+      const body = (await response.text()).slice(0, 6e5);
+      for (const registration of siteDeclaredRegistrations(body, url)) {
+        if (!out.some((existing) => existing.number === registration.number)) out.push(registration);
+      }
+    } catch {
+      continue;
+    }
+  }
+  if (out.length) recordCall("site-fetch", "registration-numbers", 0, `${apex} \xB7 ${out.length}_numbers`, "succeeded");
+  return out;
+}
+function companiesHouseConfigured() {
+  return Boolean(process.env.COMPANIES_HOUSE_API_KEY?.trim());
+}
+async function collectCompaniesHouseRecord(companyNumber, options = {}) {
+  const apiKey2 = process.env.COMPANIES_HOUSE_API_KEY?.trim();
+  if (!apiKey2) return { available: false, reason: "not_configured", note: "COMPANIES_HOUSE_API_KEY is not configured." };
+  const clean4 = companyNumber.trim().toUpperCase();
+  if (!/^[A-Z]{0,2}\d{6,8}$/.test(clean4)) {
+    return { available: false, reason: "no_data", note: `"${companyNumber}" is not a Companies House number shape.` };
+  }
+  const fetcher = options.fetcher ?? deadlineFetch;
+  const sourceUrl2 = `${COMPANIES_HOUSE_BASE}/company/${encodeURIComponent(clean4)}`;
+  try {
+    const response = await fetcher(sourceUrl2, {
+      headers: {
+        authorization: `Basic ${Buffer.from(`${apiKey2}:`).toString("base64")}`,
+        accept: "application/json",
+        "user-agent": USER_AGENT3
+      },
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (response.status === 404) {
+      recordCall("companies-house", "company", 0, `${clean4} \xB7 not_found`, "succeeded");
+      return { available: false, reason: "no_data", note: `Companies House has no record for ${clean4}.` };
+    }
+    if (response.status === 401 || response.status === 403) {
+      recordCall("companies-house", "company", 0, `${clean4} \xB7 unauthorized`, "failed");
+      return { available: false, reason: "unavailable", note: "Companies House rejected the configured API key." };
+    }
+    if (!response.ok) {
+      recordCall("companies-house", "company", 0, `${clean4} \xB7 http_${response.status}`, "failed");
+      return { available: false, reason: "unavailable", note: `Companies House answered HTTP ${response.status}.` };
+    }
+    const body = await response.json();
+    const companyName = asString3(body.company_name);
+    if (!companyName) {
+      recordCall("companies-house", "company", 0, `${clean4} \xB7 empty`, "succeeded");
+      return { available: false, reason: "no_data", note: `Companies House returned no company name for ${clean4}.` };
+    }
+    const office = body.registered_office_address ? Object.values(body.registered_office_address).map((part) => asString3(part)).filter(Boolean).join(", ") : "";
+    recordCall("companies-house", "company", 0, `${clean4} \xB7 ok`, "succeeded");
+    return {
+      available: true,
+      value: {
+        companyNumber: asString3(body.company_number) ?? clean4,
+        companyName,
+        status: asString3(body.company_status),
+        type: asString3(body.type),
+        incorporatedOn: asString3(body.date_of_creation),
+        jurisdiction: asString3(body.jurisdiction),
+        registeredOffice: office || null,
+        sourceUrl: `https://find-and-update.company-information.service.gov.uk/company/${encodeURIComponent(clean4)}`,
+        capturedAt: captureTimestamp()
+      }
+    };
+  } catch (error) {
+    recordCall("companies-house", "company", 0, `${clean4} \xB7 error`, "failed");
+    return { available: false, reason: "unavailable", note: `Companies House read failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+function openCorporatesConfigured() {
+  return Boolean(process.env.OPENCORPORATES_API_TOKEN?.trim());
+}
+async function collectOpenCorporatesRecord(jurisdiction, companyNumber, options = {}) {
+  const token = process.env.OPENCORPORATES_API_TOKEN?.trim();
+  if (!token) return { available: false, reason: "not_configured", note: "OPENCORPORATES_API_TOKEN is not configured." };
+  const cleanJurisdiction = jurisdiction.trim().toLowerCase();
+  const clean4 = companyNumber.trim().toUpperCase();
+  if (!/^[a-z_]{2,8}$/.test(cleanJurisdiction) || !/^[A-Z0-9-]{4,16}$/.test(clean4)) {
+    return { available: false, reason: "no_data", note: "Jurisdiction or company number is not registry-shaped." };
+  }
+  const fetcher = options.fetcher ?? deadlineFetch;
+  const requestUrl = `${OPENCORPORATES_BASE}/companies/${encodeURIComponent(cleanJurisdiction)}/${encodeURIComponent(clean4)}?api_token=${encodeURIComponent(token)}`;
+  try {
+    const response = await fetcher(requestUrl, {
+      headers: { accept: "application/json", "user-agent": USER_AGENT3 },
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (response.status === 404) {
+      recordCall("opencorporates", "company", 0, `${cleanJurisdiction}/${clean4} \xB7 not_found`, "succeeded");
+      return { available: false, reason: "no_data", note: `OpenCorporates has no ${cleanJurisdiction} record for ${clean4}.` };
+    }
+    if (response.status === 401 || response.status === 403) {
+      recordCall("opencorporates", "company", 0, `${cleanJurisdiction}/${clean4} \xB7 unauthorized`, "failed");
+      return { available: false, reason: "unavailable", note: "OpenCorporates rejected the configured API token." };
+    }
+    if (!response.ok) {
+      recordCall("opencorporates", "company", 0, `${cleanJurisdiction}/${clean4} \xB7 http_${response.status}`, "failed");
+      return { available: false, reason: "unavailable", note: `OpenCorporates answered HTTP ${response.status}.` };
+    }
+    const body = await response.json();
+    const company = body.results?.company;
+    const companyName = company ? asString3(company.name) : null;
+    if (!company || !companyName) {
+      recordCall("opencorporates", "company", 0, `${cleanJurisdiction}/${clean4} \xB7 empty`, "succeeded");
+      return { available: false, reason: "no_data", note: "OpenCorporates returned no company record." };
+    }
+    recordCall("opencorporates", "company", 0, `${cleanJurisdiction}/${clean4} \xB7 ok`, "succeeded");
+    return {
+      available: true,
+      value: {
+        jurisdiction: cleanJurisdiction,
+        companyNumber: asString3(company.company_number) ?? clean4,
+        companyName,
+        status: asString3(company.current_status),
+        incorporatedOn: asString3(company.incorporation_date),
+        companyType: asString3(company.company_type),
+        sourceUrl: asString3(company.opencorporates_url) ?? `https://opencorporates.com/companies/${cleanJurisdiction}/${clean4}`,
+        capturedAt: captureTimestamp()
+      }
+    };
+  } catch (error) {
+    recordCall("opencorporates", "company", 0, `${cleanJurisdiction}/${clean4} \xB7 error`, "failed");
+    return { available: false, reason: "unavailable", note: `OpenCorporates read failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 // server/adapters/priorOutcome.ts
-function creds3() {
+function creds4() {
   const url = env("SUPABASE_URL");
   const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
   return url && key ? { url: url.replace(/\/$/, ""), key } : null;
 }
-var authHeaders2 = (key) => ({
+var authHeaders3 = (key) => ({
   apikey: key,
   ...!key.startsWith("sb_secret_") ? { authorization: `Bearer ${key}` } : {},
   "content-type": "application/json"
 });
 async function readPriorOutcome(organizationId, handle) {
-  const c = creds3();
+  const c = creds4();
   const ref = handle.trim().replace(/^@/, "").toLowerCase();
   if (!c || !organizationId || !ref) return null;
   try {
     const projectionUrl = `${c.url}/rest/v1/reports?organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.person&ref=in.(${encodeURIComponent(`"${ref}","@${ref}"`)})&select=report_version_id&order=ts.desc&limit=1`;
     const projectionRes = await deadlineFetch(projectionUrl, {
-      headers: authHeaders2(c.key),
+      headers: authHeaders3(c.key),
       signal: AbortSignal.timeout(5e3)
     });
     if (!projectionRes.ok) return null;
@@ -32782,7 +35083,7 @@ async function readPriorOutcome(organizationId, handle) {
     const reportVersionId = projectionRows?.[0]?.report_version_id;
     if (!reportVersionId) return null;
     const versionUrl = `${c.url}/rest/v1/report_versions?id=eq.${encodeURIComponent(reportVersionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=id,version,score,verdict,completeness_state,created_at,payload,methodology_version&limit=1`;
-    const versionRes = await deadlineFetch(versionUrl, { headers: authHeaders2(c.key), signal: AbortSignal.timeout(5e3) });
+    const versionRes = await deadlineFetch(versionUrl, { headers: authHeaders3(c.key), signal: AbortSignal.timeout(5e3) });
     if (!versionRes.ok) return null;
     const rows = await versionRes.json();
     const row = rows?.[0];
@@ -33048,12 +35349,12 @@ var AUDITOR_REGISTRY = [
 ];
 var FETCH_TIMEOUT_MS3 = 15e3;
 var MAX_AUDITOR_FETCHES = 4;
-var USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
+var USER_AGENT4 = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
 async function fetchPageText(url, fetcher) {
   let response;
   try {
     response = await fetcher(url, {
-      headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT },
+      headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT4 },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS3),
       redirect: "follow"
     });
@@ -33146,10 +35447,15 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
     try {
       const base = new URL(officialSite);
       conventionCandidates.push(new URL("/security", base).toString());
+      const apex = base.hostname.replace(/^www\./, "");
+      if (!apex.startsWith("docs.")) {
+        conventionCandidates.push(`https://docs.${apex}/docs/security`);
+        conventionCandidates.push(`https://docs.${apex}/security`);
+      }
     } catch {
     }
   }
-  const candidates = [.../* @__PURE__ */ new Set([...candidateUrls, ...conventionCandidates])].slice(0, 4);
+  const candidates = [.../* @__PURE__ */ new Set([...candidateUrls, ...conventionCandidates])].slice(0, 6);
   if (!candidates.length) return empty2("No candidate security pages.");
   const urlLeads = /* @__PURE__ */ new Map();
   for (const link of candidateUrls) {
@@ -33266,7 +35572,7 @@ var PUMPFUN_API = "https://frontend-api-v3.pump.fun";
 var DEXSCREENER_API = "https://api.dexscreener.com";
 var GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2";
 var REQUEST_TIMEOUT_MS = 12e3;
-async function getJson2(url) {
+async function getJson3(url) {
   try {
     const res = await deadlineFetch(url, {
       headers: { accept: "application/json", "user-agent": "argus-diligence" },
@@ -33328,7 +35634,7 @@ var GECKOTERMINAL_NETWORK2 = {
 async function fetchLaunchSeries(mint, chain) {
   const network = GECKOTERMINAL_NETWORK2[chain?.toLowerCase()] ?? chain?.toLowerCase();
   if (!network || !mint) return null;
-  const pools = asRecord5(await getJson2(
+  const pools = asRecord5(await getJson3(
     `${GECKOTERMINAL_API}/networks/${network}/tokens/${encodeURIComponent(mint)}/pools?page=1`
   ));
   const rows = Array.isArray(pools?.data) ? pools.data : [];
@@ -33338,7 +35644,7 @@ async function fetchLaunchSeries(mint, chain) {
   const pool = typeof address === "string" && address ? address : typeof id === "string" && id ? id.replace(`${network}_`, "") : "";
   if (!pool) return null;
   for (const timeframe of ["day", "hour"]) {
-    const data = asRecord5(await getJson2(
+    const data = asRecord5(await getJson3(
       `${GECKOTERMINAL_API}/networks/${network}/pools/${encodeURIComponent(pool)}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`
     ));
     const raw = asRecord5(asRecord5(data?.data)?.attributes)?.ohlcv_list;
@@ -33373,7 +35679,7 @@ function launchpadPeakClaim(coin) {
   };
 }
 async function pumpfunCoin(mint) {
-  const data = asRecord5(await getJson2(`${PUMPFUN_API}/coins/${encodeURIComponent(mint)}`));
+  const data = asRecord5(await getJson3(`${PUMPFUN_API}/coins/${encodeURIComponent(mint)}`));
   recordCall("pumpfun", "coin", 0, mint.slice(0, 8), data ? "succeeded" : "failed");
   if (!data || typeof data.creator !== "string" || !data.creator) return null;
   const handle = typeof data.twitter === "string" ? normalizeXHandle(data.twitter) : null;
@@ -33389,7 +35695,7 @@ async function pumpfunCoin(mint) {
   };
 }
 async function launchesBySameCreator(mint, creator) {
-  const data = await getJson2(`${PUMPFUN_API}/coins?creator=${encodeURIComponent(creator)}&offset=0&limit=50`);
+  const data = await getJson3(`${PUMPFUN_API}/coins?creator=${encodeURIComponent(creator)}&offset=0&limit=50`);
   recordCall("pumpfun", "creator-coins", 0, creator.slice(0, 8), Array.isArray(data) ? "succeeded" : "failed");
   if (!Array.isArray(data)) return [];
   const out = [];
@@ -33430,7 +35736,7 @@ async function launchForOperatorHandle(handle) {
   if (!wanted) return null;
   const pairs = [];
   for (const term of handleSearchTerms(wanted)) {
-    const data = asRecord5(await getJson2(`${DEXSCREENER_API}/latest/dex/search?q=${encodeURIComponent(term)}`));
+    const data = asRecord5(await getJson3(`${DEXSCREENER_API}/latest/dex/search?q=${encodeURIComponent(term)}`));
     recordCall("dexscreener", "search", 0, term, data ? "succeeded" : "failed");
     const found = Array.isArray(data?.pairs) ? data.pairs : [];
     pairs.push(...found);
@@ -33551,7 +35857,7 @@ async function operatorLaunchAnnouncements(handle) {
   return out.slice(0, 25);
 }
 async function launchForMint(mint) {
-  const data = asRecord5(await getJson2(`${DEXSCREENER_API}/latest/dex/tokens/${encodeURIComponent(mint)}`));
+  const data = asRecord5(await getJson3(`${DEXSCREENER_API}/latest/dex/tokens/${encodeURIComponent(mint)}`));
   recordCall("dexscreener", "token", 0, mint.slice(0, 8), data ? "succeeded" : "failed");
   const pairs = Array.isArray(data?.pairs) ? data.pairs : [];
   let best = null;
@@ -33583,7 +35889,7 @@ async function launchForMint(mint) {
 async function launchForClaimedTicker(ticker, announcedAt) {
   const claimedAt = announcedAt ? Date.parse(announcedAt) : NaN;
   if (!Number.isFinite(claimedAt)) return null;
-  const data = asRecord5(await getJson2(`${DEXSCREENER_API}/latest/dex/search?q=${encodeURIComponent(ticker)}`));
+  const data = asRecord5(await getJson3(`${DEXSCREENER_API}/latest/dex/search?q=${encodeURIComponent(ticker)}`));
   recordCall("dexscreener", "search", 0, ticker, data ? "succeeded" : "failed");
   const pairs = Array.isArray(data?.pairs) ? data.pairs : [];
   const WINDOW_MS = 30 * 24 * 3600 * 1e3;
@@ -33911,6 +36217,11 @@ var ADVERSE_PATTERNS = [
   { signal: "avoidance warning", pattern: /\b(?:don['’]?t buy|do not buy|stay away|beware|avoid)\b/i },
   { signal: "dump warning", pattern: /\b(?:dump(?:ed|ing)?|crash(?:ed|ing)?)\b/i }
 ];
+var NEGATION_BEFORE = /\b(?:no|not|never|zero|isn'?t|aren'?t|wasn'?t|without|nothing)\b[^.?!;,]{0,28}$/i;
+function adverseSignalIsNegated(text2, pattern) {
+  const match = new RegExp(pattern.source, pattern.flags.replace("g", "")).exec(text2);
+  return match ? NEGATION_BEFORE.test(text2.slice(0, match.index)) : false;
+}
 function adverseCategory(text2) {
   if (/\b(?:bundl(?:e|ed|ing)|fresh wallets?|fund(?:er|ing|ing source)|deployer|holders?|liquidity|pool)\b/i.test(text2)) {
     return "wallet_cluster";
@@ -33929,7 +36240,7 @@ function selectSocialAdverseMentions(posts, subjectHandle, limit = SOCIAL_ADVERS
     if (!handle || handle === subject) continue;
     const text2 = post.text?.replace(/\s+/g, " ").trim() ?? "";
     if (!text2) continue;
-    const signals = ADVERSE_PATTERNS.filter(({ pattern }) => pattern.test(text2)).map(({ signal: signal2 }) => signal2);
+    const signals = ADVERSE_PATTERNS.filter(({ pattern }) => pattern.test(text2) && !adverseSignalIsNegated(text2, pattern)).map(({ signal: signal2 }) => signal2);
     if (!signals.length) continue;
     const tweetUrl = tweetPermalink(handle, post.id, post.tweetUrl);
     if (!tweetUrl) continue;
@@ -34600,13 +36911,14 @@ var ADAPTERS = [
   dexscreenerAdapter,
   coingeckoAdapter,
   // redditAdapter retired: Reddit API access was not approved.
+  fomoscanAdapter,
   onchainAdapter,
   arkhamAdapter,
   basicFactsAdapter
 ];
 var IDENTITY_LANE = [xAdapter, githubAdapter, peopledatalabsAdapter, offchainAdapter];
 var TOKEN_LANE = [dexscreenerAdapter, coingeckoAdapter];
-var WALLET_LANE = [onchainAdapter, arkhamAdapter];
+var WALLET_LANE = [fomoscanAdapter, onchainAdapter, arkhamAdapter];
 var ADAPTER_PROVIDERS = {
   "x": ["twitterapi", "grok", "cache"],
   "github": ["github"],
@@ -34614,6 +36926,7 @@ var ADAPTER_PROVIDERS = {
   "offchain-diligence": ["google-news", "courtlistener", "opensanctions", "x-avatar", "claude", "cache"],
   "dexscreener": ["dexscreener"],
   "coingecko": ["coingecko"],
+  "fomoscan": ["fomoscan"],
   "onchain": ["helius"],
   "arkham": ["arkham", "public-evm-rpc"]
 };
@@ -34888,6 +37201,13 @@ function applySiteSubstanceOutcome(ctx, domain, site) {
   ctx.evidence.profile.website = site.url;
   ctx.evidence.profile.site_substance_status = site.status;
   const isProject = ctx.evidence.roles.includes("PROJECT" /* PROJECT */);
+  if (isProject && site.status === "live" && site.productDescription?.trim()) {
+    ctx.evidence.officialProductDescription = {
+      text: site.productDescription.trim().slice(0, 1200),
+      sourceUrl: site.url,
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
   const verifiedProjectToken = ctx.evidence.projectToken?.verified === true ? ctx.evidence.projectToken : void 0;
   const verifiedNotLive = site.status === "coming_soon" && (site.reason === "coming_soon" || site.reason === "parked");
   if (!isProject) {
@@ -35243,7 +37563,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
   const norm2 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
   const namedCorpus = [...posts, ...corpus.teamSignalPosts];
-  const officialOrgs = officialXNamedOrgs(namedCorpus).filter((org) => norm2(org.handle) && norm2(org.handle) !== norm2(ctx.handle));
+  const officialOrgs = officialXNamedOrgs(namedCorpus, ctx.evidence.profile.display_name).filter((org) => norm2(org.handle) && norm2(org.handle) !== norm2(ctx.handle));
   const orgKeys = new Set(officialOrgs.map((org) => norm2(org.handle)));
   const postRoleTeam = officialXNamedTeam(namedCorpus, ctx.evidence.profile.display_name, ctx.handle).filter((member) => {
     const h = norm2(member.handle);
@@ -35392,6 +37712,8 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         existing.linkedin = t.linkedin;
         existing.identity_link_evidence_origin = t.identity_link_evidence_origin;
       }
+      if (!existing.telegram && t.telegram) existing.telegram = t.telegram;
+      if (!existing.email && t.email) existing.email = t.email;
       if ((!existing.projects || !existing.projects.length) && t.projects?.length) {
         existing.projects = t.projects;
         existing.projects_evidence_origin = t.projects_evidence_origin;
@@ -35426,6 +37748,8 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       biography: t.biography,
       kind: "kind" in t && (t.kind === "org" || t.kind === "person") ? t.kind : "person",
       linkedin: t.linkedin,
+      telegram: t.telegram,
+      email: t.email,
       evidence: t.evidence,
       source: t.source ?? "X content",
       sourceUrl: t.sourceUrl,
@@ -35815,7 +38139,8 @@ function providerBackedRoles(evidence) {
   let investorBeyondBio = false;
   const profileDeclaredToken = evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(evidence.profile.profile_captured_at ?? "")) ? declaredTokenFromBio(evidence.profile.bio) : null;
   const projectBound = projectOrientationBound(evidence);
-  const canonicalTokenProjectBound = evidence.projectToken?.verified === true && Boolean(evidence.projectToken.officialX) && handlesMatch(evidence.projectToken.officialX ?? "", evidence.profile.handle) && !evidence.profile.resolved_name?.trim();
+  const individualHuman = Boolean(evidence.profile.identity_binding) || Boolean(evidence.profile.resolved_name?.trim()) || evidence.subjectOrientation?.kind === "FOUNDER" && orientationHandleBound(evidence);
+  const canonicalTokenProjectBound = evidence.projectToken?.verified === true && Boolean(evidence.projectToken.officialX) && handlesMatch(evidence.projectToken.officialX ?? "", evidence.profile.handle) && !evidence.profile.resolved_name?.trim() && subjectAdoptsCanonicalToken(evidence);
   const selfDescription = evidence.profile.bio.trim() || (evidence.profile.self_post_sample ?? "").trim();
   if (evidence.profile.profile_collection_state === "resolved" && selfDescription) {
     const classification = classifySubject(selfDescription);
@@ -35824,10 +38149,10 @@ function providerBackedRoles(evidence) {
     const officialSite = canonicalOfficialWebsite(evidence.profile.website);
     const projectProfileVerified = evidence.profile.profile_provider === "twitterapi" && Number.isFinite(providerCapturedAt) && (officialSite !== null || profileDeclaredToken !== null);
     verifiedOfficialProjectProfile = projectProfileVerified;
-    bioPrimaryProjectVerified = projectProfileVerified && classification.subject_class === "PROJECT" /* PROJECT */ && classification.scores["PROJECT" /* PROJECT */] > classification.scores["INVESTOR" /* INVESTOR */];
+    bioPrimaryProjectVerified = projectProfileVerified && !individualHuman && classification.subject_class === "PROJECT" /* PROJECT */ && classification.scores["PROJECT" /* PROJECT */] > classification.scores["INVESTOR" /* INVESTOR */];
     profileRoles.forEach((role) => {
       if (role === "FOUNDER" /* FOUNDER */ && projectBound) return;
-      if (role !== "PROJECT" /* PROJECT */ || projectProfileVerified) roles.add(role);
+      if (role !== "PROJECT" /* PROJECT */ || projectProfileVerified && !individualHuman) roles.add(role);
     });
     if (bioPrimaryProjectVerified) roles.delete("MEMBER" /* MEMBER */);
     if (profileDeclaredToken) roles.add("PROJECT" /* PROJECT */);
@@ -35864,14 +38189,14 @@ function providerBackedRoles(evidence) {
       roles.add("INVESTOR" /* INVESTOR */);
       investorBeyondBio = true;
     }
-    if (fact.predicate === "official_identity" && verifiedOfficialProjectIdentity(evidence, [fact]) !== null) {
+    if (fact.predicate === "official_identity" && !individualHuman && verifiedOfficialProjectIdentity(evidence, [fact]) !== null) {
       roles.add("PROJECT" /* PROJECT */);
     }
   }
   if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
     roles.add("AGENCY" /* AGENCY */);
   }
-  if (evidence.projectToken?.verified === true) {
+  if (evidence.projectToken?.verified === true && !individualHuman) {
     roles.add("PROJECT" /* PROJECT */);
   }
   if (roles.has("INVESTOR" /* INVESTOR */)) {
@@ -35881,7 +38206,7 @@ function providerBackedRoles(evidence) {
       roles.delete("PROJECT" /* PROJECT */);
     }
   }
-  if (roles.size === 0 && evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && canonicalOfficialWebsite(evidence.profile.website) !== null && evidence.profile.site_substance_status === "live") {
+  if (roles.size === 0 && !individualHuman && evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && canonicalOfficialWebsite(evidence.profile.website) !== null && evidence.profile.site_substance_status === "live") {
     roles.add("PROJECT" /* PROJECT */);
   }
   if (roles.size === 0 && evidence.subjectOrientation && evidence.subjectOrientation.kind !== "UNKNOWN" && orientationHandleBound(evidence)) {
@@ -35902,6 +38227,25 @@ function providerBackedRoles(evidence) {
   }
   return [...roles];
 }
+function subjectAdoptsCanonicalToken(evidence) {
+  const token = evidence.projectToken;
+  if (!token?.verified) return false;
+  if (token.verification === "official_domain") return true;
+  const ownText = `${evidence.profile.bio ?? ""}
+${evidence.profile.self_post_sample ?? ""}`;
+  const address = (token.address ?? "").trim();
+  if (address) {
+    const adoptsAddress = address.startsWith("0x") ? ownText.toLowerCase().includes(address.toLowerCase()) : ownText.includes(address);
+    if (adoptsAddress) return true;
+  }
+  const symbol = (token.symbol ?? "").trim();
+  if (symbol && /^[A-Za-z0-9]{2,15}$/.test(symbol)) {
+    const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\$${escaped}\\b`, "i").test(ownText)) return true;
+    if (symbol.length >= 4 && new RegExp(`\\b${escaped}\\b`, "i").test(ownText)) return true;
+  }
+  return false;
+}
 var LEGAL_ENTITY_LANGUAGE = /\b(?:incorporated|corporation|company|limited|llc|l\.l\.c\.?|ltd\.?|inc\.?|plc|llp|l\.p\.?|gmbh|s\.a\.?|foundation|association|registered)\b/i;
 function strictOrganizationLegalEntity(evidence) {
   if (!isOrganizationAccount(evidence)) return null;
@@ -35920,8 +38264,6 @@ function strictOrganizationLegalEntity(evidence) {
   const supporting = fact.sources.filter((source2) => source2.relation === "supports");
   return { name: fact.value.replace(/\s+/g, " ").trim(), fact, sourceCount: supporting.length };
 }
-var isRetainedSourceFact = (fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated");
-var isStrictlyVerifiedFact = (fact) => isRetainedSourceFact(fact) && fact.providerProjection !== true && fact.floorEligible !== false;
 var sameOfficialDomain2 = (candidateUrl, officialWebsite) => {
   const expected = canonicalOfficialWebsite(officialWebsite)?.domain;
   if (!candidateUrl || !expected) return false;
@@ -35934,10 +38276,8 @@ var sameOfficialDomain2 = (candidateUrl, officialWebsite) => {
 };
 function projectCompanyEnrichmentSections(evidence) {
   const sections = [];
-  const canonicalGeckoId = evidence.projectToken?.verified === true ? evidence.projectToken.coingeckoId?.trim().toLowerCase() : void 0;
-  const protocolGeckoId = evidence.protocolFunding?.geckoId?.trim().toLowerCase();
   const hasEquivalentFunding = Boolean(
-    canonicalGeckoId && protocolGeckoId && canonicalGeckoId === protocolGeckoId && evidence.protocolFunding?.rounds.length
+    evidence.protocolFunding?.rounds.length && indexedProtocolRecordMatch(evidence, evidence.protocolFunding)
   );
   if (!hasEquivalentFunding) sections.push("funding_detail");
   const officialWebsite = evidence.projectToken?.homepage ?? evidence.profile.website;
@@ -36294,7 +38634,7 @@ function collectFounderDecisionQuestionOutcomes(ctx) {
     });
   }
 }
-var PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
+var PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor|backed-by|vc|fund|incubator)\b/i;
 var PROJECT_BACKING_PROVIDERS = /* @__PURE__ */ new Set(["team-page", "twitterapi"]);
 var PROJECT_TRANSPARENCY_FACT_PREDICATES = /* @__PURE__ */ new Set([
   "legal_entity",
@@ -36469,13 +38809,348 @@ function recordProtocolSecurityIncidentFindings(evidence) {
   }
   return recorded;
 }
+async function collectTokenlessProtocolEvidence(ctx) {
+  const evidence = ctx.evidence;
+  if (evidence.projectToken?.verified) return;
+  const displayName = evidence.profile.display_name || ctx.handle.replace(/^@/, "");
+  const protocolLookupName = defiLlamaLookupName(displayName);
+  const protocolSlug = await resolveDefiLlamaSlug(defiLlamaSlugCandidates(
+    displayName,
+    evidence.profile.website,
+    ctx.handle
+  )) ?? void 0;
+  const [fundingOutcome, tvlOutcome] = await Promise.all([
+    evidence.protocolFunding ? Promise.resolve(null) : collectProtocolFunding(protocolLookupName, { slug: protocolSlug }),
+    evidence.protocolTvl ? Promise.resolve(null) : collectProtocolTvl(protocolLookupName, { slug: protocolSlug })
+  ]);
+  if (fundingOutcome?.available && protocolRecordMatchesOfficialIdentity(fundingOutcome.value, ctx.handle, evidence.profile)) {
+    evidence.protocolFunding = { ...fundingOutcome.value };
+    const rounds = fundingOutcome.value.rounds;
+    const leads = fundingOutcome.value.leadInvestors;
+    ctx.emit({
+      phase: "Token",
+      label: `Protocol financing indexed \xB7 ${rounds.length} round${rounds.length === 1 ? "" : "s"}`,
+      detail: `DeFiLlama's curated record for "${fundingOutcome.value.name}" is identity-bound to this account by its own X handle/site (no token required)${leads.length ? `; led by ${leads.slice(0, 3).join(", ")}` : ""}.`,
+      source: "defillama",
+      tone: "good"
+    });
+  }
+  if (tvlOutcome?.available && protocolRecordMatchesOfficialIdentity(tvlOutcome.value, ctx.handle, evidence.profile)) {
+    evidence.protocolTvl = { ...tvlOutcome.value };
+    const incidentCount = recordProtocolSecurityIncidentFindings(evidence);
+    if (incidentCount > 0) {
+      ctx.emit({
+        phase: "Token",
+        label: `${incidentCount} protocol security incident${incidentCount === 1 ? "" : "s"} recorded`,
+        detail: "Frozen as verified counter-evidence alongside the identity-bound protocol record.",
+        source: "defillama",
+        tone: "warn"
+      });
+    }
+  }
+  await collectCryptoRankFundingEvidence(ctx);
+  if (!evidence.securityAudits) {
+    const officialWebsite = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+    if (officialWebsite) {
+      const auditLinks = await collectProtocolAuditLinks(protocolLookupName, { slug: protocolSlug });
+      const auditsResult = await withWallClockBox(
+        (fetcher) => collectSecurityAudits(
+          displayName,
+          officialWebsite,
+          auditLinks.available ? auditLinks.value.auditLinks : [],
+          { fetcher }
+        ),
+        SECURITY_AUDITS_BUDGET_MS
+      );
+      if (auditsResult?.available) {
+        evidence.securityAudits = {
+          securityPageUrl: auditsResult.securityPageUrl,
+          selfAttested: auditsResult.selfAttested,
+          attestations: auditsResult.attestations.map((attestation) => ({ ...attestation })),
+          corroborated: auditsResult.corroborated.map((entry) => ({
+            ...entry,
+            matchedIdentityAnchor: { ...entry.matchedIdentityAnchor }
+          })),
+          capturedAt: auditsResult.capturedAt
+        };
+        ctx.emit({
+          phase: "Token",
+          label: auditsResult.corroborated.length ? `Independent audits confirmed \xB7 ${auditsResult.corroborated.map((entry) => entry.auditor).slice(0, 3).join(", ")}` : "Audit leads found \xB7 confirmation pending",
+          detail: auditsResult.corroborated.length ? `${auditsResult.corroborated.length} auditor-domain page${auditsResult.corroborated.length === 1 ? "" : "s"} carried explicit audit context plus a canonical identity anchor for ${displayName}; audits apply to the protocol whether or not a token exists.` : `${auditsResult.selfAttested.length} unverified auditor lead${auditsResult.selfAttested.length === 1 ? " came" : "s came"} from bounded first-party disclosures; confirmation is pending.`,
+          source: "security-audits",
+          tone: auditsResult.corroborated.length ? "good" : "neutral"
+        });
+      }
+    }
+  }
+}
+async function collectCryptoRankFundingEvidence(ctx) {
+  const evidence = ctx.evidence;
+  if (evidence.protocolFunding || evidence.cryptoRankFunding || !cryptoRankConfigured()) return;
+  const token = evidence.projectToken?.verified ? evidence.projectToken : void 0;
+  const subjectName3 = token?.name || evidence.profile.display_name || ctx.handle.replace(/^@/, "");
+  const outcome = await collectCryptoRankFunding({
+    name: subjectName3,
+    symbol: token?.symbol ?? null,
+    contractAddress: token?.address ?? null,
+    chain: token?.chain ?? null,
+    matchesOfficialIdentity: (record6) => protocolRecordMatchesOfficialIdentity(record6, ctx.handle, evidence.profile)
+  });
+  if (!outcome.available) {
+    if (outcome.reason === "unavailable") {
+      ctx.emit({
+        phase: "Token",
+        label: "CryptoRank funding index unavailable",
+        detail: `${outcome.note} A missing index is a coverage gap for this scan, never evidence that the project is unfunded.`,
+        source: "cryptorank",
+        tone: "warn"
+      });
+    }
+    return;
+  }
+  evidence.cryptoRankFunding = { ...outcome.value };
+  const record5 = outcome.value;
+  const boundBy = record5.binding.method === "canonical_token_address" ? "the verified token's exact contract address" : "its own official X handle/site";
+  if (record5.rounds.length) {
+    const leads = [...new Set(record5.rounds.flatMap((round) => round.leadInvestors))];
+    ctx.emit({
+      phase: "Token",
+      label: `Funding rounds indexed \xB7 ${record5.rounds.length} round${record5.rounds.length === 1 ? "" : "s"} (CryptoRank)`,
+      detail: `CryptoRank's record for "${record5.name}" is identity-bound by ${boundBy}${record5.totalRaisedUsd ? `; ${formatUsd(record5.totalRaisedUsd)} disclosed` : ""}${leads.length ? `; led by ${leads.slice(0, 3).join(", ")}` : ""}.`,
+      source: "cryptorank",
+      tone: "good"
+    });
+  } else if (record5.hasFundingRounds) {
+    const named = record5.funds.slice(0, 3).map((fund) => fund.name);
+    ctx.emit({
+      phase: "Token",
+      label: "Funding rounds exist on CryptoRank \xB7 round detail not available to this scan",
+      detail: `The identity-bound record (${boundBy}) confirms recorded funding rounds${named.length ? ` and names backers including ${named.join(", ")}` : ""}, but the round-by-round detail sits behind a CryptoRank plan this deployment does not hold. Treat the total raised as unknown here, not zero.`,
+      source: "cryptorank",
+      tone: "neutral"
+    });
+  } else {
+    ctx.emit({
+      phase: "Token",
+      label: "CryptoRank also lists no funding rounds",
+      detail: `The identity-bound record (${boundBy}) carries no funding rounds, corroborating the empty DeFiLlama read rather than contradicting it.`,
+      source: "cryptorank",
+      tone: "neutral"
+    });
+  }
+}
+function detectLaunchVenueSubject(ctx) {
+  const evidence = ctx.evidence;
+  if (evidence.launchVenueSubject) return;
+  if (!evidence.roles.includes("PROJECT" /* PROJECT */) && !isOrganizationAccount(evidence)) return;
+  const officialDomain = canonicalOfficialWebsite(evidence.profile.website)?.domain;
+  if (!officialDomain) return;
+  const venue = launchVenueForOfficialDomain(officialDomain);
+  if (!venue) return;
+  evidence.launchVenueSubject = {
+    venue: venue.name,
+    matchedDomain: venue.matchedDomain,
+    chains: venue.chains,
+    lpDisposition: venue.lpDisposition,
+    lpNote: venue.lpNote,
+    platformPaysCreator: venue.platformPaysCreator,
+    feeNote: venue.feeNote,
+    capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  ctx.emit({
+    phase: "Research",
+    label: `Subject recognized as a launch venue \xB7 ${venue.name}`,
+    detail: `The verified official domain ${venue.matchedDomain} is the ${venue.name} launchpad. Token metrics do not apply to the venue itself; its launch mechanics (liquidity ${venue.lpDisposition}; ${venue.platformPaysCreator ? "creators are paid ongoing fees" : "no ongoing creator fee stream"}) are frozen with the report, and each launched token carries its own provenance when scanned.`,
+    source: "launch-venues",
+    tone: "neutral"
+  });
+}
+async function collectListedSecurityHealth(ctx) {
+  const evidence = ctx.evidence;
+  if (evidence.stockHealth) return;
+  const listingFact = (evidence.basicFacts ?? []).find((fact) => fact.predicate === "public_security" && fact.status === "verified" && fact.security);
+  if (!listingFact?.security) return;
+  const outcome = await collectStockHealth({
+    ticker: listingFact.security.ticker,
+    issuer: listingFact.security.issuer,
+    exchange: listingFact.security.exchange,
+    registryFactId: listingFact.factId,
+    registrySourceUrl: listingFact.sources[0]?.url ?? ""
+  });
+  if (!outcome.available) {
+    ctx.emit({
+      phase: "Research",
+      label: outcome.reason === "identity_mismatch" ? "Listed-security health withheld \xB7 feed identity disagreed" : outcome.reason === "unavailable" ? "Listed-security health unavailable" : "Listed-security health \xB7 no market-feed record",
+      detail: `${outcome.note} The verified listing itself stands; only the market-health read is affected.`,
+      source: "market-feed",
+      tone: outcome.reason === "no_data" ? "neutral" : "warn"
+    });
+    return;
+  }
+  evidence.stockHealth = { ...outcome.value };
+  const value = outcome.value;
+  const position = value.fiftyTwoWeekPositionPct !== null ? `${value.fiftyTwoWeekPositionPct}% of its 52-week range` : "an unbounded 52-week range";
+  const yearMove = value.change1yPct !== null ? `${value.change1yPct > 0 ? "up" : "down"} ${Math.abs(value.change1yPct)}% over the year` : "with under a year of history";
+  ctx.emit({
+    phase: "Research",
+    label: `Listed-security health captured \xB7 ${value.ticker}${value.pennyStock ? " \xB7 penny-stock range" : ""}`,
+    detail: `${value.issuer} trades at ${value.price} ${value.currency ?? ""} on ${value.exchange ?? "an unconfirmed venue"}, at ${position}, ${yearMove}. Frozen as score-neutral context.`,
+    source: "market-feed",
+    tone: "neutral"
+  });
+}
+async function collectTokenizedStockExposure(ctx) {
+  const evidence = ctx.evidence;
+  const token = evidence.projectToken;
+  if (!token?.verified || evidence.tokenizedStockPairing) return;
+  const sides = [
+    { exposure: "token_is_tokenized_stock", side: { symbol: token.symbol, name: token.name, chain: token.chain } },
+    ...token.pairQuoteSymbol ? [{
+      exposure: "quote_is_tokenized_stock",
+      side: { symbol: token.pairQuoteSymbol, name: token.pairQuoteName ?? null, chain: token.chain }
+    }] : []
+  ];
+  for (const { exposure, side } of sides) {
+    const resolution = await resolveTokenizedStockUnderlying(side);
+    if (!resolution.resolved) {
+      if (resolution.reason === "not_tokenized_stock") continue;
+      ctx.emit({
+        phase: "Token",
+        label: resolution.reason === "identity_mismatch" ? "Tokenized-stock exposure withheld \xB7 underlying identity disagreed" : resolution.reason === "unavailable" ? "Tokenized-stock exposure check unavailable" : "Tokenized-stock exposure \xB7 no listed underlying",
+        detail: resolution.note,
+        source: "market-feed",
+        tone: resolution.reason === "unavailable" || resolution.reason === "identity_mismatch" ? "warn" : "neutral"
+      });
+      continue;
+    }
+    evidence.tokenizedStockPairing = tokenizedStockPairingSnapshot(exposure, side, resolution);
+    const underlying = evidence.tokenizedStockPairing.underlying;
+    ctx.emit({
+      phase: "Token",
+      label: exposure === "token_is_tokenized_stock" ? `Token is a tokenized stock \xB7 underlying ${underlying.ticker}${underlying.pennyStock ? " (penny-stock range)" : ""}` : `Pool quotes in a tokenized stock \xB7 underlying ${underlying.ticker}${underlying.pennyStock ? " (penny-stock range)" : ""}`,
+      detail: `${resolution.basis[0] ?? ""} The stock's health is frozen with the report as score-neutral context.`,
+      source: "market-feed",
+      tone: "neutral"
+    });
+    return;
+  }
+}
+async function collectCompanyRegistryEvidence(ctx) {
+  const evidence = ctx.evidence;
+  if (evidence.companyRegistry) return;
+  if (!evidence.roles.includes("PROJECT" /* PROJECT */) && !isOrganizationAccount(evidence)) return;
+  const snapshot = {
+    siteDeclaredRegistrations: [],
+    capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const listingFact = (evidence.basicFacts ?? []).find((fact) => fact.predicate === "public_security" && fact.status === "verified" && fact.security);
+  if (listingFact?.security) {
+    const outcome = await collectSecRegistrant(listingFact.security.cik);
+    if (outcome.available) {
+      const officialDomain = canonicalOfficialWebsite(evidence.profile.website)?.domain ?? null;
+      const registrantDomain = outcome.value.registrantWebsite ? canonicalOfficialWebsite(outcome.value.registrantWebsite)?.domain ?? null : null;
+      snapshot.sec = {
+        ...outcome.value,
+        websiteAgreesWithOfficialDomain: officialDomain && registrantDomain ? officialDomain === registrantDomain : null
+      };
+      ctx.emit({
+        phase: "Research",
+        label: `SEC registrant record joined \xB7 CIK ${outcome.value.cik}`,
+        detail: `${outcome.value.entityName}${outcome.value.stateOfIncorporation ? ` \xB7 incorporated in ${outcome.value.stateOfIncorporation}` : ""}${outcome.value.lastAnnualReportAt ? ` \xB7 latest annual report ${outcome.value.lastAnnualReportAt}` : ""}${snapshot.sec.websiteAgreesWithOfficialDomain === false ? " \xB7 NOTE: the registrant's declared website is a different domain than the subject's official site" : ""}.`,
+        source: "sec-edgar",
+        tone: snapshot.sec.websiteAgreesWithOfficialDomain === false ? "warn" : "neutral"
+      });
+    } else if (outcome.reason === "unavailable") {
+      ctx.emit({
+        phase: "Research",
+        label: "SEC registrant record unavailable",
+        detail: `${outcome.note} The verified listing itself stands.`,
+        source: "sec-edgar",
+        tone: "warn"
+      });
+    }
+  }
+  const officialWebsite = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+  if (officialWebsite) {
+    snapshot.siteDeclaredRegistrations = await collectSiteDeclaredRegistrations(officialWebsite);
+    for (const declared of snapshot.siteDeclaredRegistrations.slice(0, 2)) {
+      if (declared.jurisdiction === "gb" && companiesHouseConfigured() && !snapshot.companiesHouse) {
+        const record5 = await collectCompaniesHouseRecord(declared.number);
+        if (record5.available) {
+          snapshot.companiesHouse = { ...record5.value, declaredOn: declared.sourceUrl };
+          ctx.emit({
+            phase: "Research",
+            label: `Companies House record joined \xB7 No. ${record5.value.companyNumber}`,
+            detail: `${record5.value.companyName}${record5.value.status ? ` \xB7 ${record5.value.status}` : ""}${record5.value.incorporatedOn ? ` \xB7 incorporated ${record5.value.incorporatedOn}` : ""} \xB7 joined by the number the official site itself declares.`,
+            source: "companies-house",
+            tone: record5.value.status && record5.value.status !== "active" ? "warn" : "neutral"
+          });
+        } else if (record5.reason !== "not_configured") {
+          ctx.emit({
+            phase: "Research",
+            label: record5.reason === "no_data" ? `Companies House has no record for site-declared No. ${declared.number}` : "Companies House unavailable",
+            detail: `${record5.note} The site's own declaration is frozen either way.`,
+            source: "companies-house",
+            tone: record5.reason === "no_data" ? "warn" : "neutral"
+          });
+        }
+      } else if (declared.jurisdiction && openCorporatesConfigured() && !snapshot.companiesHouse && !snapshot.openCorporates) {
+        const record5 = await collectOpenCorporatesRecord(declared.jurisdiction, declared.number);
+        if (record5.available) {
+          snapshot.openCorporates = { ...record5.value, declaredOn: declared.sourceUrl };
+          ctx.emit({
+            phase: "Research",
+            label: `OpenCorporates record joined \xB7 ${record5.value.jurisdiction.toUpperCase()} ${record5.value.companyNumber}`,
+            detail: `${record5.value.companyName}${record5.value.status ? ` \xB7 ${record5.value.status}` : ""} \xB7 joined by the number the official site itself declares.`,
+            source: "opencorporates",
+            tone: "neutral"
+          });
+        }
+      }
+    }
+    if (snapshot.siteDeclaredRegistrations.length && !snapshot.companiesHouse && !snapshot.openCorporates && !companiesHouseConfigured() && !openCorporatesConfigured()) {
+      ctx.emit({
+        phase: "Research",
+        label: "Registration number found \xB7 no registry key configured",
+        detail: `The official site declares registration number${snapshot.siteDeclaredRegistrations.length === 1 ? "" : "s"} ${snapshot.siteDeclaredRegistrations.map((entry) => entry.number).join(", ")}, but neither Companies House nor OpenCorporates keys are configured, so the registry record was not read.`,
+        source: "site fetch",
+        tone: "neutral"
+      });
+    }
+  }
+  if (snapshot.sec || snapshot.companiesHouse || snapshot.openCorporates || snapshot.siteDeclaredRegistrations.length) {
+    evidence.companyRegistry = snapshot;
+  }
+}
+async function collectSiteBackersEvidence(ctx) {
+  const evidence = ctx.evidence;
+  if (evidence.siteBackers) return;
+  if (!evidence.roles.includes("PROJECT" /* PROJECT */) && !isOrganizationAccount(evidence)) return;
+  const officialWebsite = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+  if (!officialWebsite) return;
+  const outcome = await collectSiteBackers(officialWebsite);
+  if (!outcome.available || !outcome.value) return;
+  evidence.siteBackers = { ...outcome.value, names: [...outcome.value.names] };
+  ctx.emit({
+    phase: "Research",
+    label: `Self-published backers found \xB7 ${outcome.value.names.length} name${outcome.value.names.length === 1 ? "" : "s"}`,
+    detail: `The official site's "${outcome.value.heading}" section names ${outcome.value.names.slice(0, 5).join(", ")}${outcome.value.names.length > 5 ? " and more" : ""}. Self-published by the subject; recorded with that provenance and never treated as independent confirmation.`,
+    source: "site fetch",
+    tone: "neutral"
+  });
+}
 async function recoverProjectProtocolIncidentEvidence(ctx) {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
   const protocolLookupName = defiLlamaLookupName(token.name);
+  const protocolSlug = await resolveDefiLlamaSlug(defiLlamaSlugCandidates(
+    token.name,
+    token.homepage ?? ctx.evidence.profile.website,
+    ctx.handle
+  )) ?? void 0;
   const [outcome, fundingOutcome] = await Promise.all([
-    collectProtocolTvl(protocolLookupName),
-    ctx.evidence.protocolFunding ? Promise.resolve(null) : collectProtocolFunding(protocolLookupName)
+    collectProtocolTvl(protocolLookupName, { slug: protocolSlug }),
+    ctx.evidence.protocolFunding ? Promise.resolve(null) : collectProtocolFunding(protocolLookupName, { slug: protocolSlug })
   ]);
   if (fundingOutcome?.available && token.coingeckoId && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, token.coingeckoId)) {
     ctx.evidence.protocolFunding = { ...fundingOutcome.value };
@@ -36944,6 +39619,9 @@ var ADAPTER_DELEGATES = {
   "offchain-diligence": ["official-domain", "public-web", "independent-web", "adverse-search", "courtlistener", "opensanctions"],
   dexscreener: ["dexscreener"],
   coingecko: ["coingecko"],
+  // FomoScan is the wallet-graph lane that can ADD an attributed wallet, so a
+  // wallet-graph or x-profile scope may re-run it.
+  fomoscan: ["wallet-graph", "x-profile", "fomoscan"],
   onchain: ["direct-chain-rpc", "wallet-graph"],
   // Arkham had no entry, so a wallet-graph or person scope never re-collected
   // deployer attribution or exposure and the row read "outside the frozen
@@ -37249,7 +39927,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     evidence.evmControlReality = snapshot;
     const ledgerMeta = `${target.chain} \xB7 ${snapshot.state} \xB7 ${snapshot.collection.rpcCalls} RPC calls`;
     if (snapshot.state === "unavailable") {
-      for (let call = 0; call < snapshot.collection.rpcCalls; call += 1) {
+      for (let call2 = 0; call2 < snapshot.collection.rpcCalls; call2 += 1) {
         recordCall("public-evm-rpc", "control-reality", 0, ledgerMeta, "partial");
       }
     } else {
@@ -37309,11 +39987,16 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     if (evidence.projectToken?.verified && capabilityIsAuthorized("token_and_market", "project_fundamentals")) {
       const projectName2 = evidence.projectToken.name;
       const protocolLookupName = defiLlamaLookupName(projectName2);
+      const protocolSlug = await resolveDefiLlamaSlug(defiLlamaSlugCandidates(
+        projectName2,
+        evidence.projectToken.homepage ?? evidence.profile.website,
+        ctx.handle
+      )) ?? void 0;
       try {
         const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome] = await Promise.all([
-          collectProtocolTvl(protocolLookupName),
-          collectProtocolFunding(protocolLookupName),
-          collectProtocolFees(protocolLookupName),
+          collectProtocolTvl(protocolLookupName, { slug: protocolSlug }),
+          collectProtocolFunding(protocolLookupName, { slug: protocolSlug }),
+          collectProtocolFees(protocolLookupName, { slug: protocolSlug }),
           // Float control (free, keyless): who holds the supply, is the LP
           // locked. Answers the reader's dump/rug question for project tokens.
           evidence.projectToken.address ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address) : Promise.resolve({ available: false, note: "no canonical token address" })
@@ -37322,9 +40005,9 @@ async function runAuditWithLedger(inputHandle, emit, options) {
           evidence.holderProfile = { ...holdersOutcome.value, capturedAt: holdersOutcome.value.sourceCapturedAt };
         }
         const canonicalGeckoId = evidence.projectToken.coingeckoId;
-        const tvlIdentityMatched = canonicalGeckoId !== void 0 && tvlOutcome.available && protocolRecordMatchesCanonicalToken(tvlOutcome.value.geckoId, canonicalGeckoId);
-        const fundingIdentityMatched = canonicalGeckoId !== void 0 && fundingOutcome.available && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, canonicalGeckoId);
-        if (feesOutcome.available && (tvlIdentityMatched || fundingIdentityMatched)) {
+        const tvlIdentityMatched = tvlOutcome.available && (canonicalGeckoId !== void 0 && protocolRecordMatchesCanonicalToken(tvlOutcome.value.geckoId, canonicalGeckoId) || protocolRecordMatchesOfficialIdentity(tvlOutcome.value, evidence.profile.handle, evidence.profile));
+        const fundingIdentityMatched = fundingOutcome.available && (canonicalGeckoId !== void 0 && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, canonicalGeckoId) || protocolRecordMatchesOfficialIdentity(fundingOutcome.value, evidence.profile.handle, evidence.profile));
+        if (canonicalGeckoId !== void 0 && feesOutcome.available && (tvlIdentityMatched || fundingIdentityMatched)) {
           evidence.protocolFees = {
             ...feesOutcome.value,
             binding: {
@@ -37368,8 +40051,9 @@ async function runAuditWithLedger(inputHandle, emit, options) {
             tone: "warn"
           });
         }
+        await collectCryptoRankFundingEvidence(ctx);
         {
-          const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
+          const auditLinks = await collectProtocolAuditLinks(protocolLookupName, { slug: protocolSlug });
           const auditsResult = await withWallClockBox(
             (fetcher) => collectSecurityAudits(
               projectName2,
@@ -37568,6 +40252,11 @@ async function runAuditWithLedger(inputHandle, emit, options) {
       tone: "warn"
     });
   }
+  await collectListedSecurityHealth(ctx);
+  await collectTokenizedStockExposure(ctx);
+  await collectCompanyRegistryEvidence(ctx);
+  await collectSiteBackersEvidence(ctx);
+  detectLaunchVenueSubject(ctx);
   let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
   if (rolesAfterBasicFacts.includes("PROJECT" /* PROJECT */)) {
@@ -37690,6 +40379,19 @@ async function runAuditWithLedger(inputHandle, emit, options) {
       emit({
         phase: "Token",
         label: "Recovered protocol incident lookup failed",
+        detail: String(error),
+        source: "defillama",
+        tone: "warn"
+      });
+    }
+  }
+  if (!evidence.projectToken?.verified && evidence.roles.includes("PROJECT" /* PROJECT */) && (!evidence.protocolFunding || !evidence.protocolTvl) && capabilityIsAuthorized("token_and_market", "project_fundamentals")) {
+    try {
+      await collectTokenlessProtocolEvidence(ctx);
+    } catch (error) {
+      emit({
+        phase: "Token",
+        label: "Tokenless protocol lookup failed",
         detail: String(error),
         source: "defillama",
         tone: "warn"
@@ -38067,6 +40769,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     organizationSubject: isOrganizationAccount(evidence)
   });
   evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
+  evidence.subjectCategory = deriveSubjectCategory(evidence);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
     ventures: evidence.ventures,
@@ -38187,6 +40890,8 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     );
     const contradictionObserved = contradictionAttempts.total > 0;
     const scorerObserved = scorerAttempts.total > 0;
+    const accessFailure = !verdict && scorerCanRun && !providerFallbacksEnabled() ? grokAccessFailure(GROK_ANALYST_MODEL) : void 0;
+    const accessFailureDetail = accessFailure ? `Scoring is unavailable because Grok rejected access (HTTP ${accessFailure.httpStatus}). An administrator must restore provider access before retrying. Collected evidence remains available; this is not a finding about the subject.` : void 0;
     if (!decisionPacketUsable) {
       const detail = scoringPreflight.state === "packet_oversize" ? "Contradiction analysis was skipped because the bounded evidence packet could not preserve required coverage." : scoringPreflight.state === "no_axes" ? "Contradiction analysis was skipped because no provider-backed role selected a methodology." : scoringPreflight.state === "unsupported_axes" ? "Contradiction analysis was skipped because the requested methodology contains unsupported axes." : "Contradiction analysis was skipped because the frozen evidence catalog failed validation.";
       emit({ phase: "Contradictions", label: "Skipped", detail, tone: "warn" });
@@ -38215,6 +40920,9 @@ async function runAuditWithLedger(inputHandle, emit, options) {
         source: "AI analyst",
         tone: partialAxisScoring ? "warn" : "good"
       });
+    } else if (accessFailureDetail) {
+      evidence.headline = accessFailureDetail;
+      emit({ phase: "Analyst", label: "Provider access rejected", detail: accessFailureDetail, tone: "warn" });
     } else if (scoringPreflight.state === "packet_oversize") {
       evidence.headline = `Investigation incomplete: the analyst evidence packet could not preserve required coverage within ${ANALYST_EVIDENCE_MAX_CHARS.toLocaleString("en-US")} characters. No axis scores were inferred.`;
       emit({
@@ -38246,7 +40954,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
       emit({
         phase: "Analyst",
         label: "Coverage abstention",
-        detail: `Scoring did not run because these axes lack substantive eligible evidence: ${missingAxes}. Coverage-only gaps were preserved; no zero scores were inferred.`,
+        detail: `${scorerObserved ? "Scoring of the supported axes was attempted but did not return a valid result." : "No scoring request completed."} These additional axes lack substantive eligible evidence: ${missingAxes}. No zero scores were inferred.`,
         tone: "warn"
       });
     } else if (scoringPreflight.state === "invalid_catalog") {
@@ -38269,16 +40977,29 @@ async function runAuditWithLedger(inputHandle, emit, options) {
       evidence.headline = "Investigation incomplete: the analyst did not return one valid score for every required axis.";
       emit({ phase: "Analyst", label: "Invalid response", detail: "The scorer response was unavailable, partial, duplicated an axis, or contained an invalid score. No verdict score will be published.", tone: "warn" });
     }
-    const analystState = scoringPreflight.state === "packet_oversize" || scoringPreflight.state === "unsupported_axes" || scoringPreflight.state === "invalid_catalog" ? "failed" : !scorerCanRun || !scorerObserved ? "skipped" : verdict ? partialAxisScoring ? "partial" : "executed" : observedRunState(scorerAttempts) === "failed" ? "failed" : "partial";
-    const analystDetail = scoringPreflight.state === "packet_oversize" ? `scoring packet exceeded the ${ANALYST_EVIDENCE_MAX_CHARS}-character structural budget while preserving required axis coverage; no scorer call made` : scoringPreflight.state === "no_axes" ? "no provider-backed methodology axes were requested; no scorer call made" : scoringPreflight.state === "unsupported_axes" ? `unsupported methodology axes: ${scoringPreflight.unsupportedAxes.join(", ")}; no scorer call made` : scoringPreflight.state === "insufficient_evidence" ? verdict ? `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; scored ${verdict.axes.length} supported decision area${verdict.axes.length === 1 ? "" : "s"} and left ${scoringPreflight.missingSubstantiveAxes.map(axisLabel).join(" and ")} unmeasured` : `coverage preflight abstained; missing substantive evidence for ${scoringPreflight.missingSubstantiveAxes.join(", ")}; ${scoringAxes.length > 0 ? "supported-axis scorer did not return a valid result" : "no scorer call made"}` : scoringPreflight.state === "invalid_catalog" ? "scoring preflight rejected the frozen evidence or axis catalog; no scorer call made" : !scorerObserved ? "evidence preflight passed; no scorer provider attempt was observed" : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`;
+    const analystState = accessFailure ? "failed" : scoringPreflight.state === "packet_oversize" || scoringPreflight.state === "unsupported_axes" || scoringPreflight.state === "invalid_catalog" ? "failed" : !scorerCanRun || !scorerObserved ? "skipped" : verdict ? partialAxisScoring ? "partial" : "executed" : observedRunState(scorerAttempts) === "failed" ? "failed" : "partial";
+    const analystDetail = accessFailureDetail ?? (scoringPreflight.state === "packet_oversize" ? `scoring packet exceeded the ${ANALYST_EVIDENCE_MAX_CHARS}-character structural budget while preserving required axis coverage; no scorer call made` : scoringPreflight.state === "no_axes" ? "no provider-backed methodology axes were requested; no scorer call made" : scoringPreflight.state === "unsupported_axes" ? `unsupported methodology axes: ${scoringPreflight.unsupportedAxes.join(", ")}; no scorer call made` : scoringPreflight.state === "insufficient_evidence" ? verdict ? `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; scored ${verdict.axes.length} supported decision area${verdict.axes.length === 1 ? "" : "s"} and left ${scoringPreflight.missingSubstantiveAxes.map(axisLabel).join(" and ")} unmeasured` : `coverage preflight abstained; missing substantive evidence for ${scoringPreflight.missingSubstantiveAxes.join(", ")}; ${scoringAxes.length > 0 ? "supported-axis scorer did not return a valid result" : "no scorer call made"}` : scoringPreflight.state === "invalid_catalog" ? "scoring preflight rejected the frozen evidence or axis catalog; no scorer call made" : !scorerObserved ? "evidence preflight passed; no scorer provider attempt was observed" : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`);
     checkTracker.provider(
       "ai-analyst",
       "AI analyst",
       analystState,
       analystDetail
     );
+    evidence.scoringOutcome = {
+      state: analystState === "executed" || analystState === "partial" || analystState === "failed" ? analystState : "skipped",
+      detail: analystDetail,
+      missingAxes: [...scoringPreflight.missingSubstantiveAxes],
+      attemptedAxes: scorerObserved ? scoringAxes.map((row) => row.axis) : [],
+      ...accessFailure ? { failure: { kind: "provider_access", ...accessFailure } } : {},
+      capturedAt: captureTimestamp()
+    };
   } else {
     checkTracker.provider("ai-analyst", "AI analyst", "unavailable", "analyst provider is not configured");
+    evidence.scoringOutcome = {
+      state: "skipped",
+      detail: "the analyst provider is not configured, so no scorer call was made",
+      capturedAt: captureTimestamp()
+    };
   }
   finishRuntimeStage("analyst", analystStartedAt);
   if (!evidence.axes.length) {
@@ -38356,6 +41077,15 @@ async function runAuditWithLedger(inputHandle, emit, options) {
   }
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} calls, \u2248${cost.sources} search sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
   writeVerifiedEntityFacts(evidence, options);
+  if (options?.organizationId && !options.privateRun) {
+    const investorRows = investorObservationsFromEvidence(
+      options.organizationId,
+      evidence.profile.handle.replace(/^@/, "").toLowerCase(),
+      evidence.roles[0] ? String(evidence.roles[0]).toLowerCase() : "person",
+      { ...evidence, website: evidence.profile.website }
+    );
+    if (investorRows.length) void writeInvestorObservations(investorRows);
+  }
   finishRuntimeStage("pipeline", runtimeStartedAt);
   return dossier;
 }
@@ -38413,7 +41143,7 @@ function writeVerifiedEntityFacts(evidence, options) {
   return true;
 }
 function runAudit(rawHandle, emit, options) {
-  return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
+  return withProviderAccessScope(() => withCostLedger(() => runAuditWithLedger(rawHandle, emit, options)));
 }
 
 // src/lib/decisionBoundary.ts
@@ -38995,7 +41725,7 @@ function deployerWalletAddress(d) {
 }
 async function resolveEvmCreatorKind(chain, creator, fetchImpl2 = fetch) {
   const origin = globalThis.location?.origin;
-  if (!origin) return "unknown";
+  if (!origin && !hasThreatApiContext()) return "unknown";
   try {
     const r = await fetchImpl2(`/api/bytecode?address=${encodeURIComponent(creator)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(12e3) });
     if (!r.ok) return "unknown";
@@ -39010,7 +41740,7 @@ async function screenDeployerRisk(address, fetchImpl2 = fetch) {
   if (!arkhamProviderEnabled()) return void 0;
   if (!address || address.length < 8) return void 0;
   const origin = globalThis.location?.origin;
-  if (!origin) return void 0;
+  if (!origin && !hasThreatApiContext()) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
   try {
     const r = await fetchImpl2(`/api/deployer-risk?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(18e3) });
@@ -39030,7 +41760,7 @@ async function screenDeployerRisk(address, fetchImpl2 = fetch) {
 var SIGNED_THE_CREATION = /* @__PURE__ */ new Set(["mint feePayer", "creation-tx fee payer"]);
 async function resolveDeployerViaRoute(mint, fetchImpl2 = fetch) {
   const origin = globalThis.location?.origin;
-  if (!origin) return null;
+  if (!origin && !hasThreatApiContext()) return null;
   try {
     const r = await fetchImpl2(`/api/resolve-deployer?mint=${encodeURIComponent(mint)}`, { signal: AbortSignal.timeout(2e4) });
     if (!r.ok) return null;
@@ -39055,7 +41785,7 @@ async function screenAddressSanctions(chain, addresses, fetchImpl2 = fetch) {
     };
   }
   const origin = globalThis.location?.origin;
-  if (!origin) return void 0;
+  if (!origin && !hasThreatApiContext()) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
   try {
     const r = await fetchImpl2(
@@ -39696,14 +42426,14 @@ async function runTokenAudit(input, emit, opts) {
   if (s.creatorPercent >= 15) aT4 = clamp2(aT4 - 5, 0, 16);
   else if (s.creatorPercent >= 5) aT4 = clamp2(aT4 - 2, 0, 16);
   aT4 = clamp2(aT4, 0, 16);
-  const t4Note = !s.available ? "Holder data not verifiable keyless." : !holdersReliable ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.` : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
+  const t4Note = !s.available ? "Holder data not verifiable keyless." : !holdersReliable ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.` : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct < 10 ? topPct.toFixed(2) : topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
   if (washSignature) aT5 = 2;
   else if (total > 20 && sells / total > 0.8) aT5 = clamp2(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp2(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
     ...(pair.info?.socials ?? []).map((x) => ({ label: x.type, url: x.url }))
@@ -39768,7 +42498,12 @@ async function runTokenAudit(input, emit, opts) {
   if (githubOrg && opts?.collectShipping) {
     step({ phase: "Corroborate", label: "Development", detail: `Reading github.com/${githubOrg}: cadence, committers, substance, whether the code reaches production.`, tone: "neutral" });
     opts?.signal?.throwIfAborted();
-    shipping = await opts.collectShipping(githubOrg, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt, token: { address, chain, deployer: deployerAttribution?.address ?? null } }).catch(() => void 0);
+    shipping = await opts.collectShipping(githubOrg, {
+      fetchImpl: fetcher,
+      deadlineAt: opts?.deadlineAt,
+      token: { address, chain, deployer: deployerAttribution?.address ?? null },
+      sectorText: [pair.baseToken.name, cg?.description].filter(Boolean).join(" \xB7 ") || null
+    }).catch(() => void 0);
     if (shipping) {
       step({ phase: "Corroborate", label: "Development read", detail: shipping.headline, tone: shipping.grade === "stalled" ? "bad" : shipping.grade === "thin" ? "warn" : shipping.grade === "unknown" ? "neutral" : "good" });
       if (shipping.market === "price-without-shipping") findings.push({ claim: "The token's price rose over the last quarter while commits to the linked repositories fell: the move is not backed by visible development.", tone: "warn", source: "github" });
@@ -40666,7 +43401,77 @@ function summarizeShipping(a, capturedAt) {
     leadDeparted: a.committers.churn.departed,
     reposRead: a.coverage.reposRead,
     commitsRead: a.coverage.commitsRead,
-    releasesInWindow: a.cadence.releasesInWindow
+    releasesInWindow: a.cadence.releasesInWindow,
+    committers: a.committers.roster.slice(0, 12).map((c) => ({
+      name: c.name,
+      ...c.login ? { login: c.login } : {},
+      commits: c.commits,
+      sharePct: c.sharePct,
+      kind: c.kind,
+      freshAccount: c.freshAccount,
+      ...c.accountCreatedAt ? { accountCreatedAt: c.accountCreatedAt } : {},
+      last30: c.last30,
+      prior60: c.prior60,
+      ...c.twitter ? { twitter: c.twitter } : {},
+      ...c.company ? { company: c.company } : {},
+      ...c.orgs && c.orgs.length ? { orgs: c.orgs } : {}
+    })),
+    goneQuiet: a.committers.churn.goneQuiet,
+    churnDetail: a.committers.churn.detail,
+    license: a.health.license,
+    ...a.health.licenseId ? { licenseId: a.health.licenseId } : {},
+    ci: a.health.ci,
+    auditInTree: a.health.auditInTree,
+    ...a.health.lockfileAgeDays != null ? { lockfileAgeDays: a.health.lockfileAgeDays } : {},
+    ...a.substance.medianLinesChanged != null ? { medianLinesChanged: a.substance.medianLinesChanged } : {},
+    ...a.substance.medianFiles != null ? { medianFiles: a.substance.medianFiles } : {},
+    ...a.substance.trivialSharePct != null ? { trivialSharePct: a.substance.trivialSharePct } : {},
+    bulkDropCount: a.substance.bulkDropCount,
+    aiTrailerCount: a.authorship.aiTrailerCount,
+    ...a.authorship.genericMessageSharePct != null ? { genericMessageSharePct: a.authorship.genericMessageSharePct } : {},
+    mirrorSharePct: a.committers.mirrorSharePct,
+    starsTotal: a.stars.total,
+    ...a.stars.burstSharePct != null ? { starBurstSharePct: a.stars.burstSharePct } : {},
+    ...a.stars.burstWindowStart ? { starBurstWindowStart: a.stars.burstWindowStart } : {},
+    ...a.stars.launchBurst != null ? { starLaunchBurst: a.stars.launchBurst } : {},
+    starHistoryDays: a.coverage.starHistoryDays,
+    externalPrs: a.adoption.externalPrs,
+    externalIssues: a.adoption.externalIssues,
+    activeForks: a.adoption.activeForks,
+    ...a.adoption.packageDownloadsLastMonth != null ? { packageDownloadsLastMonth: a.adoption.packageDownloadsLastMonth } : {},
+    ...a.adoption.packages.length ? { packages: a.adoption.packages } : {},
+    deploysInWindow: a.live.deploysInWindow,
+    publishesInWindow: a.live.publishesInWindow,
+    codeToChain: a.live.codeToChain,
+    ...a.peers ? {
+      peerSector: a.peers.label,
+      peerPositionCommits: a.peers.position.commits,
+      peerPositionAuthors: a.peers.position.authors,
+      peerPositionStars: a.peers.position.stars
+    } : {},
+    ...a.cohort ? {
+      cohortLabel: a.cohort.label,
+      cohortSize: a.cohort.size,
+      ...a.cohort.percentileCommits != null ? { cohortPercentileCommits: a.cohort.percentileCommits } : {},
+      ...a.cohort.shippingSharePct != null ? { cohortShippingSharePct: a.cohort.shippingSharePct } : {}
+    } : {},
+    roadmapMet: a.roadmap.met,
+    roadmapMissed: a.roadmap.missed,
+    roadmapPending: a.roadmap.pending,
+    coverageNotes: a.coverage.notes,
+    ...a.coverage.reposTotal != null ? { reposTotal: a.coverage.reposTotal } : {},
+    commitsCounted: a.coverage.commitsCounted,
+    hygiene: a.hygiene.verdict,
+    trendWeeks: a.trend.weeks.slice(-52).map((week) => ({
+      weekStart: week.weekStart,
+      commits: week.commits,
+      releases: week.releases,
+      deploys: week.deploys,
+      ...week.price != null ? { price: week.price } : {}
+    })),
+    trendSource: a.trend.source,
+    top1SharePct: a.committers.top1SharePct,
+    botSharePct: a.committers.botSharePct
   };
 }
 function shippingGradeLabel(grade) {
@@ -41149,6 +43954,87 @@ async function collectShipping(opts) {
   };
 }
 
+// src/threat/shippingPeers.ts
+var PEER_SECTORS = [
+  {
+    id: "dex",
+    label: "leading decentralized exchanges",
+    keywords: /\b(dex|decentrali[sz]ed exchange|swap|amm|liquidity pool|router|aggregator|concentrated liquidity)\b/i,
+    repos: ["Uniswap/v4-core", "Uniswap/interface", "aerodrome-finance/contracts"]
+  },
+  {
+    id: "perps",
+    label: "leading perpetuals and derivatives venues",
+    keywords: /\b(perp(etual)?s?|derivatives?|leverage|futures|options?|margin trading)\b/i,
+    repos: ["gmx-io/gmx-synthetics", "dydxprotocol/v4-chain", "velocity-exchange/protocol-v2"]
+  },
+  {
+    id: "lending",
+    label: "leading lending protocols",
+    keywords: /\b(lend(ing)?|borrow(ing)?|money market|collateral|cdp|vault(s)? yield)\b/i,
+    repos: ["aave-dao/aave-v3-origin", "morpho-org/morpho-blue", "compound-finance/comet"]
+  },
+  {
+    id: "ai-agents",
+    label: "leading crypto AI-agent frameworks",
+    keywords: /\b(ai agents?|agentic|autonomous agents?|llm|virtuals|eliza|agent framework|ai[- ]powered)\b/i,
+    repos: ["elizaOS/eliza", "coinbase/agentkit", "Virtual-Protocol/protocol-contracts"]
+  },
+  {
+    id: "analytics",
+    label: "leading crypto analytics and research tooling",
+    keywords: /\b(analytics|research|intelligence|dashboard|screener|scanner|discovery|data platform|on-?chain data|builder[- ]intelligence)\b/i,
+    repos: ["santiment/sanbase2", "electric-capital/open-dev-data", "DefiLlama/defillama-server"]
+  },
+  {
+    id: "trading-tools",
+    label: "leading open trading bots and exchange libraries",
+    keywords: /\b(trading bot|market[- ]mak(er|ing)|sniper|copy[- ]trad(e|ing)|signals?|backtest|algo(rithmic)? trading|terminal)\b/i,
+    repos: ["hummingbot/hummingbot", "freqtrade/freqtrade", "ccxt/ccxt"]
+  },
+  {
+    id: "nft",
+    label: "leading NFT infrastructure",
+    keywords: /\b(nfts?|collectibles?|erc-?721|erc-?1155|marketplace|mint(ing)? pass|pfp)\b/i,
+    repos: ["ProjectOpenSea/seaport", "manifoldxyz/creator-core-solidity", "immutable/ts-immutable-sdk"]
+  },
+  {
+    id: "infra",
+    label: "leading chain and rollup infrastructure",
+    keywords: /\b(rollup|l2|layer[- ]?2|sequencer|node client|rpc|bridge|interop|infrastructure|chain)\b/i,
+    repos: ["OffchainLabs/nitro", "ethereum-optimism/optimism", "paradigmxyz/reth"]
+  },
+  {
+    id: "wallet",
+    label: "leading self-custody wallets",
+    keywords: /\b(wallets?|self[- ]custody|smart account|account abstraction|passkeys?)\b/i,
+    repos: ["rainbow-me/rainbow", "MetaMask/metamask-extension", "RabbyHub/Rabby"]
+  },
+  {
+    id: "stablecoin",
+    label: "leading stablecoin and payments issuers",
+    keywords: /\b(stablecoins?|payments?|remittance|usd-?pegged|fiat on-?ramp|synthetic dollar)\b/i,
+    repos: ["circlefin/stablecoin-evm", "sky-ecosystem/dss", "paxosglobal/pyusd-contract"]
+  },
+  {
+    id: "prediction",
+    label: "leading prediction-market protocols",
+    keywords: /\b(prediction markets?|binary options|outcome tokens?|betting|wager)\b/i,
+    repos: ["Polymarket/ctf-exchange", "gnosis/conditional-tokens-contracts", "Azuro-protocol/Azuro-v2-public"]
+  }
+];
+function detectPeerSector(text2) {
+  const hay = (text2 ?? "").slice(0, 4e3);
+  if (!hay.trim()) return null;
+  let best = null;
+  for (const sector of PEER_SECTORS) {
+    const re = new RegExp(sector.keywords.source, "gi");
+    const hits = hay.match(re)?.length ?? 0;
+    if (hits > 0 && (!best || hits > best.hits)) best = { sector, hits };
+  }
+  return best?.sector ?? null;
+}
+
 // src/threat/deployTrail.ts
 var ETHERSCAN = "https://api.etherscan.io/v2/api";
 var CHAINID = {
@@ -41215,7 +44101,7 @@ var collectShippingSummary = async (githubOrg, options) => {
   const token = options?.token;
   const etherscanKey = env("ETHERSCAN_API_KEY") || void 0;
   const [input, series, trail] = await Promise.all([
-    collectShipping({ target: githubOrg, kind: "org", key, usage, ...fetchImpl2 ? { fetchImpl: fetchImpl2 } : {} }),
+    collectShipping({ target: githubOrg, kind: "org", key, usage, sector: detectPeerSector(options?.sectorText ?? null), ...fetchImpl2 ? { fetchImpl: fetchImpl2 } : {} }),
     token?.address && token.chain ? fetchOhlcv(token.address, token.chain, void 0, "day").catch(() => null) : Promise.resolve(null),
     token?.deployer && token.chain && deployTrailReadable(token.chain, etherscanKey) ? readDeployTrail({ chain: token.chain, wallet: token.deployer, etherscanKey, ...fetchImpl2 ? { fetchImpl: fetchImpl2 } : {} }) : Promise.resolve(null)
   ]);

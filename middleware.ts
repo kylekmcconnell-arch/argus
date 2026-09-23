@@ -40,6 +40,83 @@ const VIEWER_GET_PATHS = new Set([
 ]);
 const OWNER_PATHS = new Set(["/api/reclassify", "/api/members", "/api/waitlist", "/api/threat-recheck"]);
 // Admission budget for bounded paid panels/chat; scan credits remain separate.
+// Paid panels: routes that spend provider money on an open report or a running
+// scan. Each one also attributes its cost through the same capability, so this
+// list must match the routes that resolve a panel token; a contract test
+// asserts that.
+const PAID_PANEL_PATHS = new Set([
+  "arkham", "arkham-counterparties", "arkham-holdings", "arkham-money-flow",
+  "arkham-risk-paths", "arkham-token-holders", "call-performance",
+  "challenge-verdict", "cluster", "deployer", "evm-cluster", "evm-deployer",
+  "evm-funder", "funder", "github-forensics", "github-shipping",
+  "identity-sweep", "kol-signals", "namesake", "pfp-check", "project-docs",
+  "recon-team", "resolve-github", "token-identity", "vc-portfolio", "x-find",
+  "x-posts",
+].map((route) => `/api/${route}`));
+
+/** A standalone ArrayBuffer copy: Web Crypto refuses a SharedArrayBuffer view. */
+const toBuffer = (bytes: Uint8Array): ArrayBuffer => {
+  const copy = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(copy).set(bytes);
+  return copy;
+};
+
+const base64UrlToBytes = (value: string): Uint8Array | null => {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/")
+    + "=".repeat((4 - (value.length % 4)) % 4);
+  try {
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Verify a panel capability here, at the one place every paid panel passes.
+ *
+ * The signing helper in api/_cache.js uses node:crypto, which the Edge runtime
+ * does not have, so this re-verifies the same HMAC with Web Crypto. It only
+ * decides ADMISSION: the handlers still resolve the token themselves to decide
+ * whether it also names a report version for cost attribution (#356).
+ */
+async function panelCapabilityValid(organizationId: string, token: string | null): Promise<boolean> {
+  const secret = process.env.PANEL_COST_TOKEN_SECRET;
+  if (!secret || !token || token.length > 2048) return false;
+  const parts = token.split(".");
+  if (parts.length !== 2 || !parts[0] || !/^[A-Za-z0-9_-]{43}$/.test(parts[1])) return false;
+  const signature = base64UrlToBytes(parts[1]);
+  const payloadBytes = base64UrlToBytes(parts[0]);
+  if (!signature || !payloadBytes) return false;
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    const signed = await crypto.subtle.verify("HMAC", key, toBuffer(signature), toBuffer(new TextEncoder().encode(parts[0])));
+    if (!signed) return false;
+    const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as {
+      v?: number; org?: string; report?: string; scan?: string; exp?: number;
+    };
+    if (!payload
+      || typeof payload.org !== "string"
+      || payload.org.toLowerCase() !== organizationId.toLowerCase()
+      || !Number.isSafeInteger(payload.exp)
+      || (payload.exp ?? 0) <= Math.floor(Date.now() / 1000)) return false;
+    // A version capability names a report; a scan capability names a run.
+    return (payload.v === 1 && typeof payload.report === "string" && !!payload.report)
+      || (payload.v === 2 && typeof payload.scan === "string" && !!payload.scan);
+  } catch {
+    return false;
+  }
+}
+
 const SUPPLEMENTAL_PATHS = new Set([
   "social-activity", "find-wallet", "x-authenticity",
   "ask", "arkham", "arkham-money-flow", "arkham-counterparties", "arkham-holdings", "arkham-token-holders", "arkham-risk-paths",
@@ -233,6 +310,31 @@ export default async function middleware(request: Request): Promise<Response> {
     return Response.json({ error: "insufficient_role", requiredRole }, { status: 403 });
   }
 
+  // Identity the handlers may trust: set after authentication, always
+  // overwriting whatever arrived, so a client-supplied value never reaches a
+  // handler. Panels gated here rather than calling requireArgusAuth need the
+  // workspace to attribute their provider spend (#356).
+  const authenticatedUserId: string = user.id;
+  const forwardAuthenticated = () => {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-argus-user-id", authenticatedUserId);
+    requestHeaders.set("x-argus-role", role);
+    requestHeaders.set("x-argus-organization-id", organizationId);
+    return next({ request: { headers: requestHeaders } });
+  };
+
+  // A paid panel must present a capability: one issued for the open report's
+  // version, or for the scan that is still running. Without this the whole
+  // paid surface ran on the analyst role alone (#356). Checked before any
+  // budget is reserved, so a refused panel costs nothing.
+  if (PAID_PANEL_PATHS.has(pathname)
+    && !(await panelCapabilityValid(organizationId, request.headers.get("x-argus-panel-token")))) {
+    return Response.json({
+      error: "panel_capability_required",
+      message: "Open this panel from a saved report or a running scan. Its capability is missing or has expired.",
+    }, { status: 409, headers: { "cache-control": "no-store" } });
+  }
+
   const scanKey = request.headers.get("x-argus-scan-key");
   if (scanKey && (pathname === "/api/social-activity" || pathname === "/api/x-authenticity")) {
     const body = request.method === "POST" ? await request.clone().json().catch(() => ({})) : {};
@@ -243,7 +345,7 @@ export default async function middleware(request: Request): Promise<Response> {
       signal: AbortSignal.timeout(8000),
     }).catch(() => null);
     if (!claim?.ok) return Response.json({ error: "scan_supplement_unavailable" }, { status: 503 });
-    if (await claim.json() === true) return next();
+    if (await claim.json() === true) return forwardAuthenticated();
     // Invalid/used scope cannot bypass the ordinary daily allowance.
   }
 
@@ -254,9 +356,18 @@ export default async function middleware(request: Request): Promise<Response> {
     if (!Number.isInteger(configuredLimit) || configuredLimit < 1 || configuredLimit > 100000) {
       return Response.json({ error: "supplemental_budget_not_configured" }, { status: 503 });
     }
+    // The workspace allowance is shared, so without a per-analyst share one
+    // session can lock every colleague out for the rest of the UTC day (#356).
+    // Unset means no per-user cap, which is the previous behaviour.
+    const rawUserLimit = process.env.ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT;
+    const configuredUserLimit = rawUserLimit == null || rawUserLimit === "" ? null : Number(rawUserLimit);
+    if (configuredUserLimit !== null
+      && (!Number.isInteger(configuredUserLimit) || configuredUserLimit < 1 || configuredUserLimit > 100000)) {
+      return Response.json({ error: "supplemental_budget_not_configured" }, { status: 503 });
+    }
     const reservation = await fetch(`${supabaseUrl}/rest/v1/rpc/reserve_supplemental_budget`, {
       method: "POST", headers: { ...serviceHeaders, "content-type": "application/json" },
-      body: JSON.stringify({ p_organization_id: organizationId, p_user_id: user.id, p_route: pathname, p_daily_limit: configuredLimit }),
+      body: JSON.stringify({ p_organization_id: organizationId, p_user_id: user.id, p_route: pathname, p_daily_limit: configuredLimit, p_user_daily_limit: configuredUserLimit }),
       signal: AbortSignal.timeout(8_000),
     }).catch(() => null);
     const rows: unknown = reservation?.ok ? await reservation.json().catch(() => null) : null;
@@ -265,14 +376,21 @@ export default async function middleware(request: Request): Promise<Response> {
       return Response.json({ error: "supplemental_budget_unavailable" }, { status: 503, headers: { "cache-control": "no-store" } });
     }
     if (!row.allowed) {
-      return Response.json({ error: "supplemental_daily_limit_reached", limit: configuredLimit,
-        message: "This workspace has reached its daily limit for supplemental checks and report chat." },
+      const perUser = row.reason === "user_daily_limit";
+      return Response.json(perUser
+        ? {
+          error: "supplemental_user_daily_limit_reached",
+          limit: configuredUserLimit,
+          message: "You have reached your own daily limit for supplemental checks and report chat. The workspace still has budget; it resets at 00:00 UTC.",
+        }
+        : {
+          error: "supplemental_daily_limit_reached",
+          limit: configuredLimit,
+          message: "This workspace has reached its daily limit for supplemental checks and report chat.",
+        },
         { status: 429, headers: { "cache-control": "no-store" } });
     }
   }
 
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-argus-user-id", user.id);
-  requestHeaders.set("x-argus-role", role);
-  return next({ request: { headers: requestHeaders } });
+  return forwardAuthenticated();
 }

@@ -1,3 +1,4 @@
+import { withProviderAccessScope, grokAccessFailure } from "./providerAccess";
 import { scoreComparisonNote } from "../src/lib/scoreComparison";
 import { withProviderDeadline } from "./providerDeadline.js";
 import { withWallClockBox } from "./boundedProvider";
@@ -14,7 +15,7 @@ import { withWallClockBox } from "./boundedProvider";
 // The engine always owns caps, banding and the composite verdict.
 
 import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEntityKey, repeatBackingSignal, type Finding, type Venture } from "../src/engine";
-import { env, providerFallbacksEnabled } from "./config";
+import { env, providerFallbacksEnabled, GROK_ANALYST_MODEL } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence, type AxisEvidenceRecord, type BasicFact, type ProjectStrengthBandRecord, type WebTeamMember } from "../src/data/evidence";
@@ -43,6 +44,7 @@ import { teamIdentityKeys } from "../src/lib/teamIdentity";
 import { teamCandidateSourceMatchesIdentity } from "../src/lib/teamCandidateIdentity";
 import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
+import { captureTimestamp } from "./captureTime";
 import { deriveTokenApplicability } from "./tokenApplicability";
 import { launchVenueForOfficialDomain } from "../src/threat/launch";
 import { deriveSubjectCategory } from "./subjectCategory";
@@ -147,6 +149,7 @@ import {
 } from "./adapters/monid";
 import { collectOperatorLaunches, describeLaunchHistory } from "./adapters/operatorLaunches";
 import { collectSocialActivity } from "./socialActivity";
+import { isRetainedSourceFact, isStrictlyVerifiedFact } from "../src/lib/evidenceTier.js";
 import {
   hydrateOfficialProjectIdentityFromFacts,
   verifiedOfficialProjectIdentity,
@@ -773,6 +776,13 @@ export function applySiteSubstanceOutcome(
   ctx.evidence.profile.website = site.url;
   ctx.evidence.profile.site_substance_status = site.status;
   const isProject = ctx.evidence.roles.includes(SubjectClass.PROJECT);
+  if (isProject && site.status === "live" && site.productDescription?.trim()) {
+    ctx.evidence.officialProductDescription = {
+      text: site.productDescription.trim().slice(0, 1200),
+      sourceUrl: site.url,
+      capturedAt: new Date().toISOString(),
+    };
+  }
   const verifiedProjectToken = ctx.evidence.projectToken?.verified === true
     ? ctx.evidence.projectToken
     : undefined;
@@ -2098,7 +2108,8 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   const canonicalTokenProjectBound = evidence.projectToken?.verified === true
     && Boolean(evidence.projectToken.officialX)
     && handlesMatch(evidence.projectToken.officialX ?? "", evidence.profile.handle)
-    && !evidence.profile.resolved_name?.trim();
+    && !evidence.profile.resolved_name?.trim()
+    && subjectAdoptsCanonicalToken(evidence);
   // The bio is the first-party self-description, but an empty bio is not an
   // absent subject: the account's own posts are the same kind of evidence from
   // the same provider, so they classify when the bio says nothing.
@@ -2281,6 +2292,49 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   return [...roles];
 }
 
+/**
+ * Does the SUBJECT claim this token, rather than merely being claimed by it?
+ *
+ * A registry row is written by whoever listed the coin. Letting it alone
+ * delete FOUNDER and install PROJECT meant a person who appeared in a namesake
+ * coin's registry links became that coin's project account (#359). The
+ * DexScreener fallback already refuses a candidate on exactly this ground, so
+ * this applies the same reciprocity test to the registry path.
+ *
+ * Two surfaces satisfy it, both first-party:
+ *  - "official_domain": the registry homepage sat on a domain the subject's
+ *    own provider-frozen profile declares, so the subject published the link.
+ *  - the exact contract appears in the subject's own bio or own posts.
+ *
+ * An official-X match is deliberately NOT enough on its own: that is the token
+ * naming the account, which is the direction of the attack.
+ */
+function subjectAdoptsCanonicalToken(evidence: CollectedEvidence): boolean {
+  const token = evidence.projectToken;
+  if (!token?.verified) return false;
+  if (token.verification === "official_domain") return true;
+  const ownText = `${evidence.profile.bio ?? ""}\n${evidence.profile.self_post_sample ?? ""}`;
+  const address = (token.address ?? "").trim();
+  if (address) {
+    const adoptsAddress = address.startsWith("0x")
+      ? ownText.toLowerCase().includes(address.toLowerCase())
+      : ownText.includes(address);
+    if (adoptsAddress) return true;
+  }
+  // The account's own text claiming the ticker is the other direction of the
+  // same bind: the registry names this account as the token's, and the account
+  // names the token as its own ("official account for $SUPERGEMMA"). Require
+  // the conventional $TICKER form, or a distinctive bare symbol, so a common
+  // word in a bio cannot adopt a token by coincidence.
+  const symbol = (token.symbol ?? "").trim();
+  if (symbol && /^[A-Za-z0-9]{2,15}$/.test(symbol)) {
+    const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\$${escaped}\\b`, "i").test(ownText)) return true;
+    if (symbol.length >= 4 && new RegExp(`\\b${escaped}\\b`, "i").test(ownText)) return true;
+  }
+  return false;
+}
+
 const LEGAL_ENTITY_LANGUAGE = /\b(?:incorporated|corporation|company|limited|llc|l\.l\.c\.?|ltd\.?|inc\.?|plc|llp|l\.p\.?|gmbh|s\.a\.?|foundation|association|registered)\b/i;
 
 /**
@@ -2333,17 +2387,9 @@ export function strictOrganizationLegalEntity(
  * roster. The search model only suggests candidates; every row admitted here
  * already passed an independent page fetch plus exact excerpt verification.
  */
-const isRetainedSourceFact = (fact: BasicFact): boolean =>
-  fact.artifact_verified === true
-  && (fact.status === "verified" || fact.status === "corroborated");
-
-// A provider projection or ceiling-only record is useful investigator context,
-// but it is deliberately ineligible to become ARGUS verification. Keep this
-// predicate shared by every project check that publishes the word "verified".
-const isStrictlyVerifiedFact = (fact: BasicFact): boolean =>
-  isRetainedSourceFact(fact)
-  && fact.providerProjection !== true
-  && fact.floorEligible !== false;
+// isRetainedSourceFact / isStrictlyVerifiedFact now live in
+// src/lib/evidenceTier.ts so the scoring bands, this check writer, the person
+// roster and the key-facts panel cannot drift apart again (#472, ARGUS-04/09).
 
 const sameOfficialDomain = (candidateUrl: string | undefined, officialWebsite: string | undefined): boolean => {
   const expected = canonicalOfficialWebsite(officialWebsite)?.domain;
@@ -6025,6 +6071,10 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     );
     const contradictionObserved = contradictionAttempts.total > 0;
     const scorerObserved = scorerAttempts.total > 0;
+    const accessFailure = !verdict && scorerCanRun && !providerFallbacksEnabled() ? grokAccessFailure(GROK_ANALYST_MODEL) : undefined;
+    const accessFailureDetail = accessFailure
+      ? `Scoring is unavailable because Grok rejected access (HTTP ${accessFailure.httpStatus}). An administrator must restore provider access before retrying. Collected evidence remains available; this is not a finding about the subject.`
+      : undefined;
     if (!decisionPacketUsable) {
       const detail = scoringPreflight.state === "packet_oversize"
         ? "Contradiction analysis was skipped because the bounded evidence packet could not preserve required coverage."
@@ -6063,6 +6113,9 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
         source: "AI analyst",
         tone: partialAxisScoring ? "warn" : "good",
       });
+    } else if (accessFailureDetail) {
+      evidence.headline = accessFailureDetail;
+      emit({ phase: "Analyst", label: "Provider access rejected", detail: accessFailureDetail, tone: "warn" });
     } else if (scoringPreflight.state === "packet_oversize") {
       evidence.headline = `Investigation incomplete: the analyst evidence packet could not preserve required coverage within ${ANALYST_EVIDENCE_MAX_CHARS.toLocaleString("en-US")} characters. No axis scores were inferred.`;
       emit({
@@ -6094,7 +6147,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
       emit({
         phase: "Analyst",
         label: "Coverage abstention",
-        detail: `Scoring did not run because these axes lack substantive eligible evidence: ${missingAxes}. Coverage-only gaps were preserved; no zero scores were inferred.`,
+        detail: `${scorerObserved ? "Scoring of the supported axes was attempted but did not return a valid result." : "No scoring request completed."} These additional axes lack substantive eligible evidence: ${missingAxes}. No zero scores were inferred.`,
         tone: "warn",
       });
     } else if (scoringPreflight.state === "invalid_catalog") {
@@ -6117,7 +6170,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
       evidence.headline = "Investigation incomplete: the analyst did not return one valid score for every required axis.";
       emit({ phase: "Analyst", label: "Invalid response", detail: "The scorer response was unavailable, partial, duplicated an axis, or contained an invalid score. No verdict score will be published.", tone: "warn" });
     }
-    const analystState: ProviderRunState = scoringPreflight.state === "packet_oversize"
+    const analystState: ProviderRunState = accessFailure ? "failed" : scoringPreflight.state === "packet_oversize"
       || scoringPreflight.state === "unsupported_axes"
       || scoringPreflight.state === "invalid_catalog"
       ? "failed"
@@ -6128,7 +6181,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
           : observedRunState(scorerAttempts) === "failed"
             ? "failed"
             : "partial";
-    const analystDetail = scoringPreflight.state === "packet_oversize"
+    const analystDetail = accessFailureDetail ?? (scoringPreflight.state === "packet_oversize"
       ? `scoring packet exceeded the ${ANALYST_EVIDENCE_MAX_CHARS}-character structural budget while preserving required axis coverage; no scorer call made`
       : scoringPreflight.state === "no_axes"
         ? "no provider-backed methodology axes were requested; no scorer call made"
@@ -6142,15 +6195,33 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
               ? "scoring preflight rejected the frozen evidence or axis catalog; no scorer call made"
               : !scorerObserved
                 ? "evidence preflight passed; no scorer provider attempt was observed"
-                : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`;
+                : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`);
     checkTracker.provider(
       "ai-analyst",
       "AI analyst",
       analystState,
       analystDetail,
     );
+    // Freeze the same sentence with the report. The provider snapshot lives
+    // only in memory, so without this the reason a score was withheld is gone
+    // by the time anyone opens the saved version.
+    evidence.scoringOutcome = {
+      state: analystState === "executed" || analystState === "partial" || analystState === "failed"
+        ? analystState
+        : "skipped",
+      detail: analystDetail,
+      missingAxes: [...scoringPreflight.missingSubstantiveAxes],
+      attemptedAxes: scorerObserved ? scoringAxes.map((row) => row.axis) : [],
+      ...(accessFailure ? { failure: { kind: "provider_access" as const, ...accessFailure } } : {}),
+      capturedAt: captureTimestamp(),
+    };
   } else {
     checkTracker.provider("ai-analyst", "AI analyst", "unavailable", "analyst provider is not configured");
+    evidence.scoringOutcome = {
+      state: "skipped",
+      detail: "the analyst provider is not configured, so no scorer call was made",
+      capturedAt: captureTimestamp(),
+    };
   }
   finishRuntimeStage("analyst", analystStartedAt);
 
@@ -6374,5 +6445,5 @@ export function writeVerifiedEntityFacts(evidence: CollectedEvidence, options: R
 }
 
 export function runAudit(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
-  return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
+  return withProviderAccessScope(() => withCostLedger(() => runAuditWithLedger(rawHandle, emit, options)));
 }

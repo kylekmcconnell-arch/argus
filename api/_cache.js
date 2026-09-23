@@ -54,6 +54,73 @@ export function issuePanelCostToken(organizationId, reportVersionId) {
   return `${payload}.${signature}`;
 }
 
+/**
+ * A panel capability for work that is still running.
+ *
+ * The version-bound token above can only be issued once a report is
+ * persisted, so panels opened DURING a scan had nothing to present and paid
+ * panel routes could not require a capability at all (#356). This binds the
+ * same short-lived capability to the scan's run key instead, so the whole
+ * paid surface can be gated without breaking live scanning. It never names a
+ * report version, so it can never nominate one for cost attribution.
+ */
+export function issueScanPanelToken(organizationId, scanRunKey) {
+  const secret = panelCostTokenSecret();
+  if (!secret || !UUID.test(organizationId || "")) return undefined;
+  const runKey = typeof scanRunKey === "string" ? scanRunKey.trim() : "";
+  if (!runKey || runKey.length > 200 || !/^[A-Za-z0-9:_-]+$/.test(runKey)) return undefined;
+
+  const payload = Buffer.from(JSON.stringify({
+    v: 2,
+    org: organizationId.toLowerCase(),
+    scan: runKey,
+    exp: Math.floor((Date.now() + PANEL_COST_TOKEN_TTL_MS) / 1000),
+  })).toString("base64url");
+  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+/** Verified payload of either capability, or null. Shared by both resolvers. */
+function panelTokenPayload(organizationId, token) {
+  const secret = panelCostTokenSecret();
+  if (!secret || !UUID.test(organizationId || "") || typeof token !== "string" || token.length > 2048) return null;
+
+  const parts = token.split(".");
+  if (parts.length !== 2 || !parts[0] || !/^[A-Za-z0-9_-]{43}$/.test(parts[1])) return null;
+
+  try {
+    const expected = createHmac("sha256", secret).update(parts[0]).digest();
+    const provided = Buffer.from(parts[1], "base64url");
+    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) return null;
+
+    const payload = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+    if (!payload
+      || !UUID.test(payload.org || "")
+      || payload.org.toLowerCase() !== organizationId.toLowerCase()
+      || !Number.isSafeInteger(payload.exp)
+      || payload.exp <= Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What this capability entitles the caller to, for admission checks.
+ * A version grant may also attribute cost; a scan grant may not.
+ */
+export function resolvePanelGrant(organizationId, token) {
+  const payload = panelTokenPayload(organizationId, token);
+  if (!payload) return null;
+  if (payload.v === 1 && UUID.test(payload.report || "")) {
+    return { reportVersionId: payload.report.toLowerCase() };
+  }
+  if (payload.v === 2 && typeof payload.scan === "string" && payload.scan) {
+    return { scanRunKey: payload.scan };
+  }
+  return null;
+}
+
 export function resolvePanelCostVersion(organizationId, token) {
   const secret = panelCostTokenSecret();
   if (!secret || !UUID.test(organizationId || "") || typeof token !== "string" || token.length > 2048) return undefined;

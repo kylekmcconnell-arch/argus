@@ -471,6 +471,16 @@ describe("App routing safety", () => {
     expect(harness.startPersonAudit).toHaveBeenCalledWith("existingfounder", false, "investment_due_diligence");
   });
 
+  it("reads server-completed metadata without creating another version or graph write", async () => {
+    await renderApp();
+    const d = { ...personResult({ state: "persisted", reportVersionId: "server-combined-version" }), tokenAssessment: { owner: "server", state: "complete", completedAt: "2026-09-23T00:00:00Z" } };
+    await act(async () => { await harness.personOnComplete?.(d); });
+    expect(harness.fetchReportVersion).toHaveBeenCalledWith("server-combined-version");
+    expect(harness.syncReport).not.toHaveBeenCalled();
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+  });
+
   it("keeps a failed person save session-only and out of shared audit surfaces", async () => {
     await renderApp();
     expect(harness.personOnComplete).not.toBeNull();
@@ -528,7 +538,7 @@ describe("App routing safety", () => {
     harness.syncReport.mockResolvedValue({ state: "failed", reason: "Report storage did not accept the save." });
 
     await act(async () => {
-      await harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: initialVersionId }));
+      await expect(harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: initialVersionId }))).rejects.toThrow("Report storage did not accept the save.");
     });
 
     await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledTimes(1));
@@ -1282,6 +1292,37 @@ describe("App routing safety", () => {
     await renderApp();
     await act(async () => {
       harness.scanOnComplete?.({ id: "scan-save-failed", kind: "token", priv: false, result: tokenResult(address, "unsaved token"), creditKey: "credit-save-failed", startedAt: Date.now() });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+  });
+
+  it("does not publish an investigation whose immutable save fails", async () => {
+    const address = "0x9999999999999999999999999999999999999999";
+    harness.syncReport.mockResolvedValue({ state: "failed", reason: "storage unavailable" });
+    await renderApp();
+    await act(async () => {
+      harness.scanOnComplete?.({
+        id: "scan-investigation-save-failed",
+        kind: "investigation",
+        priv: false,
+        result: {
+          rootRef: address,
+          token: tokenResult(address, "unsaved investigation"),
+          projectX: null,
+          siteUrl: null,
+          recon: { team: { names: [] }, socials: [] },
+          projectAccount: null,
+          founders: [],
+          founderNote: "Unsaved",
+          deployerTrail: null,
+          webTeam: [],
+        },
+        creditKey: "credit-investigation-save-failed",
+        startedAt: Date.now(),
+      });
       await Promise.resolve();
     });
     await settle();
@@ -2102,6 +2143,22 @@ describe("App routing safety", () => {
 
     expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull();
     expect(view.textContent).not.toContain("The scan didn't finish");
+  });
+
+  it("does not substitute a newer project-only report after exact-run completion fails", async () => {
+    servePersonVersion(4);
+    harness.getRun.mockReturnValue({ runKey: "exact-owned-run", status: "error", error: "The combined token assessment could not be saved." });
+    const view = await renderApp("/?s=persisted_person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='person-rescan']")?.click());
+    await settle();
+    servePersonVersion(5);
+    await failPersonRunAndSettle(view);
+    expect(view.querySelector("[data-testid='stored-person-report']")).toBeNull();
+    expect(view.textContent).toContain("The combined token assessment could not be saved.");
+    expect(view.textContent).toContain("could not confirm a complete saved report");
+    expect(view.textContent).not.toContain("produced no new report");
+    expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
   });
 
   /** A run whose only failure is the browser's stream: the server is still collecting. */

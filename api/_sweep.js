@@ -18,6 +18,13 @@ var GROK_ANALYST_MODEL = process.env.ARGUS_GROK_ANALYST_MODEL || process.env.ARG
 var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
+// src/threat/net.ts
+var legacyContext;
+var contextForRequest;
+function hasThreatApiContext() {
+  return !!(contextForRequest?.() ?? legacyContext)?.base;
+}
+
 // src/lib/officialXProfile.ts
 var X_RESERVED_PATHS = /* @__PURE__ */ new Set([
   "i",
@@ -1315,7 +1322,7 @@ function deployerWalletAddress(d) {
 }
 async function resolveEvmCreatorKind(chain, creator, fetchImpl2 = fetch) {
   const origin = globalThis.location?.origin;
-  if (!origin) return "unknown";
+  if (!origin && !hasThreatApiContext()) return "unknown";
   try {
     const r = await fetchImpl2(`/api/bytecode?address=${encodeURIComponent(creator)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(12e3) });
     if (!r.ok) return "unknown";
@@ -1330,7 +1337,7 @@ async function screenDeployerRisk(address, fetchImpl2 = fetch) {
   if (!arkhamProviderEnabled()) return void 0;
   if (!address || address.length < 8) return void 0;
   const origin = globalThis.location?.origin;
-  if (!origin) return void 0;
+  if (!origin && !hasThreatApiContext()) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
   try {
     const r = await fetchImpl2(`/api/deployer-risk?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(18e3) });
@@ -1350,7 +1357,7 @@ async function screenDeployerRisk(address, fetchImpl2 = fetch) {
 var SIGNED_THE_CREATION = /* @__PURE__ */ new Set(["mint feePayer", "creation-tx fee payer"]);
 async function resolveDeployerViaRoute(mint, fetchImpl2 = fetch) {
   const origin = globalThis.location?.origin;
-  if (!origin) return null;
+  if (!origin && !hasThreatApiContext()) return null;
   try {
     const r = await fetchImpl2(`/api/resolve-deployer?mint=${encodeURIComponent(mint)}`, { signal: AbortSignal.timeout(2e4) });
     if (!r.ok) return null;
@@ -1375,7 +1382,7 @@ async function screenAddressSanctions(chain, addresses, fetchImpl2 = fetch) {
     };
   }
   const origin = globalThis.location?.origin;
-  if (!origin) return void 0;
+  if (!origin && !hasThreatApiContext()) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
   try {
     const r = await fetchImpl2(
@@ -2016,14 +2023,14 @@ async function runTokenAudit(input, emit, opts) {
   if (s.creatorPercent >= 15) aT4 = clamp(aT4 - 5, 0, 16);
   else if (s.creatorPercent >= 5) aT4 = clamp(aT4 - 2, 0, 16);
   aT4 = clamp(aT4, 0, 16);
-  const t4Note = !s.available ? "Holder data not verifiable keyless." : !holdersReliable ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.` : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
+  const t4Note = !s.available ? "Holder data not verifiable keyless." : !holdersReliable ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.` : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct < 10 ? topPct.toFixed(2) : topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
   if (washSignature) aT5 = 2;
   else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
     ...(pair.info?.socials ?? []).map((x) => ({ label: x.type, url: x.url }))
@@ -2088,7 +2095,12 @@ async function runTokenAudit(input, emit, opts) {
   if (githubOrg && opts?.collectShipping) {
     step({ phase: "Corroborate", label: "Development", detail: `Reading github.com/${githubOrg}: cadence, committers, substance, whether the code reaches production.`, tone: "neutral" });
     opts?.signal?.throwIfAborted();
-    shipping = await opts.collectShipping(githubOrg, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt, token: { address, chain, deployer: deployerAttribution?.address ?? null } }).catch(() => void 0);
+    shipping = await opts.collectShipping(githubOrg, {
+      fetchImpl: fetcher,
+      deadlineAt: opts?.deadlineAt,
+      token: { address, chain, deployer: deployerAttribution?.address ?? null },
+      sectorText: [pair.baseToken.name, cg?.description].filter(Boolean).join(" \xB7 ") || null
+    }).catch(() => void 0);
     if (shipping) {
       step({ phase: "Corroborate", label: "Development read", detail: shipping.headline, tone: shipping.grade === "stalled" ? "bad" : shipping.grade === "thin" ? "warn" : shipping.grade === "unknown" ? "neutral" : "good" });
       if (shipping.market === "price-without-shipping") findings.push({ claim: "The token's price rose over the last quarter while commits to the linked repositories fell: the move is not backed by visible development.", tone: "warn", source: "github" });
@@ -2503,6 +2515,10 @@ var NEVER_WAIVE_CHECK_IDS = /* @__PURE__ */ new Set([
   "founder-asset-distinction"
 ]);
 var CLEARANCE_COVERAGE_FLOOR_PERCENT = 100;
+function coveragePercentOf(recorded, applicable) {
+  if (!(applicable > 0)) return 0;
+  return Math.floor(recorded / applicable * 1e3) / 10;
+}
 function clearanceCoverage(checks) {
   const governing = decisionCriticalChecks(checks);
   const applicableRows = governing.filter((check) => check.status !== "not-applicable");
@@ -2511,7 +2527,7 @@ function clearanceCoverage(checks) {
   const openNeverWaive = hasStableIds ? applicableRows.filter((check) => check.checkId && NEVER_WAIVE_CHECK_IDS.has(check.checkId) && !neverWaiveCheckRecorded(check.checkId, check.status)).map((check) => check.checkId) : [];
   const applicable = applicableRows.length;
   const recorded = recordedRows.length;
-  const recordedPercent = applicable > 0 ? Math.floor(recorded / applicable * 100) : 0;
+  const recordedPercent = coveragePercentOf(recorded, applicable);
   const sufficient = applicable > 0 && (hasStableIds ? openNeverWaive.length === 0 && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT : recorded === applicable);
   return { applicable, recorded, openNeverWaive, recordedPercent, sufficient };
 }
@@ -3515,7 +3531,77 @@ function summarizeShipping(a, capturedAt) {
     leadDeparted: a.committers.churn.departed,
     reposRead: a.coverage.reposRead,
     commitsRead: a.coverage.commitsRead,
-    releasesInWindow: a.cadence.releasesInWindow
+    releasesInWindow: a.cadence.releasesInWindow,
+    committers: a.committers.roster.slice(0, 12).map((c) => ({
+      name: c.name,
+      ...c.login ? { login: c.login } : {},
+      commits: c.commits,
+      sharePct: c.sharePct,
+      kind: c.kind,
+      freshAccount: c.freshAccount,
+      ...c.accountCreatedAt ? { accountCreatedAt: c.accountCreatedAt } : {},
+      last30: c.last30,
+      prior60: c.prior60,
+      ...c.twitter ? { twitter: c.twitter } : {},
+      ...c.company ? { company: c.company } : {},
+      ...c.orgs && c.orgs.length ? { orgs: c.orgs } : {}
+    })),
+    goneQuiet: a.committers.churn.goneQuiet,
+    churnDetail: a.committers.churn.detail,
+    license: a.health.license,
+    ...a.health.licenseId ? { licenseId: a.health.licenseId } : {},
+    ci: a.health.ci,
+    auditInTree: a.health.auditInTree,
+    ...a.health.lockfileAgeDays != null ? { lockfileAgeDays: a.health.lockfileAgeDays } : {},
+    ...a.substance.medianLinesChanged != null ? { medianLinesChanged: a.substance.medianLinesChanged } : {},
+    ...a.substance.medianFiles != null ? { medianFiles: a.substance.medianFiles } : {},
+    ...a.substance.trivialSharePct != null ? { trivialSharePct: a.substance.trivialSharePct } : {},
+    bulkDropCount: a.substance.bulkDropCount,
+    aiTrailerCount: a.authorship.aiTrailerCount,
+    ...a.authorship.genericMessageSharePct != null ? { genericMessageSharePct: a.authorship.genericMessageSharePct } : {},
+    mirrorSharePct: a.committers.mirrorSharePct,
+    starsTotal: a.stars.total,
+    ...a.stars.burstSharePct != null ? { starBurstSharePct: a.stars.burstSharePct } : {},
+    ...a.stars.burstWindowStart ? { starBurstWindowStart: a.stars.burstWindowStart } : {},
+    ...a.stars.launchBurst != null ? { starLaunchBurst: a.stars.launchBurst } : {},
+    starHistoryDays: a.coverage.starHistoryDays,
+    externalPrs: a.adoption.externalPrs,
+    externalIssues: a.adoption.externalIssues,
+    activeForks: a.adoption.activeForks,
+    ...a.adoption.packageDownloadsLastMonth != null ? { packageDownloadsLastMonth: a.adoption.packageDownloadsLastMonth } : {},
+    ...a.adoption.packages.length ? { packages: a.adoption.packages } : {},
+    deploysInWindow: a.live.deploysInWindow,
+    publishesInWindow: a.live.publishesInWindow,
+    codeToChain: a.live.codeToChain,
+    ...a.peers ? {
+      peerSector: a.peers.label,
+      peerPositionCommits: a.peers.position.commits,
+      peerPositionAuthors: a.peers.position.authors,
+      peerPositionStars: a.peers.position.stars
+    } : {},
+    ...a.cohort ? {
+      cohortLabel: a.cohort.label,
+      cohortSize: a.cohort.size,
+      ...a.cohort.percentileCommits != null ? { cohortPercentileCommits: a.cohort.percentileCommits } : {},
+      ...a.cohort.shippingSharePct != null ? { cohortShippingSharePct: a.cohort.shippingSharePct } : {}
+    } : {},
+    roadmapMet: a.roadmap.met,
+    roadmapMissed: a.roadmap.missed,
+    roadmapPending: a.roadmap.pending,
+    coverageNotes: a.coverage.notes,
+    ...a.coverage.reposTotal != null ? { reposTotal: a.coverage.reposTotal } : {},
+    commitsCounted: a.coverage.commitsCounted,
+    hygiene: a.hygiene.verdict,
+    trendWeeks: a.trend.weeks.slice(-52).map((week) => ({
+      weekStart: week.weekStart,
+      commits: week.commits,
+      releases: week.releases,
+      deploys: week.deploys,
+      ...week.price != null ? { price: week.price } : {}
+    })),
+    trendSource: a.trend.source,
+    top1SharePct: a.committers.top1SharePct,
+    botSharePct: a.committers.botSharePct
   };
 }
 function shippingGradeLabel(grade) {
@@ -3998,6 +4084,87 @@ async function collectShipping(opts) {
   };
 }
 
+// src/threat/shippingPeers.ts
+var PEER_SECTORS = [
+  {
+    id: "dex",
+    label: "leading decentralized exchanges",
+    keywords: /\b(dex|decentrali[sz]ed exchange|swap|amm|liquidity pool|router|aggregator|concentrated liquidity)\b/i,
+    repos: ["Uniswap/v4-core", "Uniswap/interface", "aerodrome-finance/contracts"]
+  },
+  {
+    id: "perps",
+    label: "leading perpetuals and derivatives venues",
+    keywords: /\b(perp(etual)?s?|derivatives?|leverage|futures|options?|margin trading)\b/i,
+    repos: ["gmx-io/gmx-synthetics", "dydxprotocol/v4-chain", "velocity-exchange/protocol-v2"]
+  },
+  {
+    id: "lending",
+    label: "leading lending protocols",
+    keywords: /\b(lend(ing)?|borrow(ing)?|money market|collateral|cdp|vault(s)? yield)\b/i,
+    repos: ["aave-dao/aave-v3-origin", "morpho-org/morpho-blue", "compound-finance/comet"]
+  },
+  {
+    id: "ai-agents",
+    label: "leading crypto AI-agent frameworks",
+    keywords: /\b(ai agents?|agentic|autonomous agents?|llm|virtuals|eliza|agent framework|ai[- ]powered)\b/i,
+    repos: ["elizaOS/eliza", "coinbase/agentkit", "Virtual-Protocol/protocol-contracts"]
+  },
+  {
+    id: "analytics",
+    label: "leading crypto analytics and research tooling",
+    keywords: /\b(analytics|research|intelligence|dashboard|screener|scanner|discovery|data platform|on-?chain data|builder[- ]intelligence)\b/i,
+    repos: ["santiment/sanbase2", "electric-capital/open-dev-data", "DefiLlama/defillama-server"]
+  },
+  {
+    id: "trading-tools",
+    label: "leading open trading bots and exchange libraries",
+    keywords: /\b(trading bot|market[- ]mak(er|ing)|sniper|copy[- ]trad(e|ing)|signals?|backtest|algo(rithmic)? trading|terminal)\b/i,
+    repos: ["hummingbot/hummingbot", "freqtrade/freqtrade", "ccxt/ccxt"]
+  },
+  {
+    id: "nft",
+    label: "leading NFT infrastructure",
+    keywords: /\b(nfts?|collectibles?|erc-?721|erc-?1155|marketplace|mint(ing)? pass|pfp)\b/i,
+    repos: ["ProjectOpenSea/seaport", "manifoldxyz/creator-core-solidity", "immutable/ts-immutable-sdk"]
+  },
+  {
+    id: "infra",
+    label: "leading chain and rollup infrastructure",
+    keywords: /\b(rollup|l2|layer[- ]?2|sequencer|node client|rpc|bridge|interop|infrastructure|chain)\b/i,
+    repos: ["OffchainLabs/nitro", "ethereum-optimism/optimism", "paradigmxyz/reth"]
+  },
+  {
+    id: "wallet",
+    label: "leading self-custody wallets",
+    keywords: /\b(wallets?|self[- ]custody|smart account|account abstraction|passkeys?)\b/i,
+    repos: ["rainbow-me/rainbow", "MetaMask/metamask-extension", "RabbyHub/Rabby"]
+  },
+  {
+    id: "stablecoin",
+    label: "leading stablecoin and payments issuers",
+    keywords: /\b(stablecoins?|payments?|remittance|usd-?pegged|fiat on-?ramp|synthetic dollar)\b/i,
+    repos: ["circlefin/stablecoin-evm", "sky-ecosystem/dss", "paxosglobal/pyusd-contract"]
+  },
+  {
+    id: "prediction",
+    label: "leading prediction-market protocols",
+    keywords: /\b(prediction markets?|binary options|outcome tokens?|betting|wager)\b/i,
+    repos: ["Polymarket/ctf-exchange", "gnosis/conditional-tokens-contracts", "Azuro-protocol/Azuro-v2-public"]
+  }
+];
+function detectPeerSector(text) {
+  const hay = (text ?? "").slice(0, 4e3);
+  if (!hay.trim()) return null;
+  let best = null;
+  for (const sector of PEER_SECTORS) {
+    const re = new RegExp(sector.keywords.source, "gi");
+    const hits = hay.match(re)?.length ?? 0;
+    if (hits > 0 && (!best || hits > best.hits)) best = { sector, hits };
+  }
+  return best?.sector ?? null;
+}
+
 // src/threat/deployTrail.ts
 var ETHERSCAN = "https://api.etherscan.io/v2/api";
 var CHAINID = {
@@ -4064,7 +4231,7 @@ var collectShippingSummary = async (githubOrg, options) => {
   const token = options?.token;
   const etherscanKey = env("ETHERSCAN_API_KEY") || void 0;
   const [input, series, trail] = await Promise.all([
-    collectShipping({ target: githubOrg, kind: "org", key, usage, ...fetchImpl2 ? { fetchImpl: fetchImpl2 } : {} }),
+    collectShipping({ target: githubOrg, kind: "org", key, usage, sector: detectPeerSector(options?.sectorText ?? null), ...fetchImpl2 ? { fetchImpl: fetchImpl2 } : {} }),
     token?.address && token.chain ? fetchOhlcv(token.address, token.chain, void 0, "day").catch(() => null) : Promise.resolve(null),
     token?.deployer && token.chain && deployTrailReadable(token.chain, etherscanKey) ? readDeployTrail({ chain: token.chain, wallet: token.deployer, etherscanKey, ...fetchImpl2 ? { fetchImpl: fetchImpl2 } : {} }) : Promise.resolve(null)
   ]);

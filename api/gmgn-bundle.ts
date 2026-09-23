@@ -16,6 +16,8 @@
 // GMGN is a free keyed API, so middleware's analyst budget is the abuse guard.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { describeGmgnBundle, fetchGmgnBundleReading } from "../server/adapters/gmgn.js";
+import { recordProviderUsageEvent } from "./_cache.js";
+import { panelIdentity } from "./_panelIdentity.js";
 
 export const config = { maxDuration: 20 };
 
@@ -32,6 +34,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (address.length > 128) return res.status(400).json({ error: "address is not a token address" });
 
   const reading = await fetchGmgnBundleReading(chain, address);
+  // GMGN is a keyed provider and was spending silently (#356).
+  const identity = panelIdentity(req);
+  if (identity && process.env.GMGN_API_KEY) {
+    await recordProviderUsageEvent(identity.organizationId, undefined, {
+      provider: "gmgn",
+      op: "panel:gmgn-bundle",
+      calls: 1,
+      usd: 0,
+      meta: "keyed provider, per-plan pricing not per-call",
+      ...(identity.userId ? { initiatedBy: identity.userId } : {}),
+      status: reading.available ? "succeeded" : "failed",
+    });
+  }
   const payload = { ...reading, claims: describeGmgnBundle(reading) };
 
   // Launch-pattern figures move with trading, so no day-long server cache; a

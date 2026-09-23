@@ -8,6 +8,8 @@
 // to the report on completion; the data-side logging (log + persist + graph) runs
 // via onComplete regardless of what the user is looking at, so a backgrounded
 // audit still appears in Recent audits and Dossiers.
+import { fetchPersonRun } from "./reports";
+import { setPanelToken } from "./panelToken";
 import { streamAudit, type LiveFailureKind } from "./live";
 import { DEEP_INVESTIGATION_MAX_DURATION_SECONDS } from "./investigationRuntime";
 import { threatScan } from "../threat/scan";
@@ -24,6 +26,7 @@ import type { ResearchIntent } from "./researchDirector";
 
 export interface BgRun {
   handle: string;   // display handle, with leading @
+  runKey?: string; // exact server receipt identity; absent only on legacy runs
   key: string;      // normalized (lowercase, no @) — the map key + cache key
   steps: TraceStep[];
   pct: number;
@@ -103,6 +106,7 @@ export function startPersonAudit(
   const run: BgRun = {
     handle: handle.startsWith("@") ? handle : "@" + key,
     key,
+    runKey: crypto.randomUUID(),
     steps: [],
     pct: 0,
     status: "running",
@@ -121,8 +125,14 @@ export function startPersonAudit(
   // rest of the collection, streaming into the same console. The dossier is
   // finalized only once both legs land, so a full-scan report always carries its
   // token verdict. The standalone Threat tab remains the cheap, token-only tier.
+  const recoveryController = new AbortController();
+  let recoveryStarted = false;
+  let finalizationStarted = false;
+  let serverOwnsToken = false;
   let threatLeg: Promise<ThreatScan | null> | null = null;
-  let threatCandidate: TokenCandidate | null = null;
+  /** Provenance is absent only when a stale server announced without it. */
+  type AnnouncedCandidate = Omit<TokenCandidate, "binding"> & { binding?: TokenCandidate["binding"] };
+  let threatCandidate: AnnouncedCandidate | null = null;
   let threatSettled = false;
   let threatNote = "";
   let threatFailure = "";
@@ -136,7 +146,10 @@ export function startPersonAudit(
     run.pct = Math.min(92, Math.max(run.pct, run.steps.length * 11));
     emit();
   };
-  const startThreatLeg = (cand: TokenCandidate) => {
+  // A stale server build can announce a token without the provenance field.
+  // Leaving it undefined renders the neutral legacy title; inferring
+  // "canonical" would relabel somebody else's token as the subject's (#371).
+  const startThreatLeg = (cand: AnnouncedCandidate) => {
     if (threatLeg) return;
     threatCandidate = cand;
     threatNote = `Token attributed via ${cand.source}.`;
@@ -157,13 +170,16 @@ export function startPersonAudit(
   };
 
   const finalize = async (d: Dossier) => {
+    if (finalizationStarted || runs.get(key) !== run) return;
+    finalizationStarted = true;
+    if (d.persistence?.panelCostToken) setPanelToken(d.persistence.panelCostToken);
     // Fallback attribution when the server never announced a token: the
     // verified project token, then the contract in the subject's own bio, then
     // a claimed promotion. Nothing else. A CoinGecko name match used to be the
     // last resort here; it is gone on purpose (#321): anyone can mint a token
     // in anyone's name, so a same-name listing is never evidence that the
     // token is the subject's, and the server rightly refused to save it.
-    if (!threatLeg) {
+    if (!threatLeg && d.tokenAssessment?.owner !== "server") {
       const cand = tokenFromVerifiedProjectToken(d.projectToken)
         ?? tokenFromBio(d.bio)
         ?? tokenFromPromotions(d.evidence?.promotions);
@@ -216,6 +232,8 @@ export function startPersonAudit(
         }
       }
       d.threat = scan;
+      // The scan is worthless to a reader without knowing whose token it is.
+      if (threatCandidate?.binding) d.threatBinding = threatCandidate.binding;
       threatNote = scan
         ? `${threatNote} $${scan.symbol}: ${scan.call.verdict} · ${scan.call.risk}/100 risk.`
         : `${threatNote} The token scan did not complete${threatFailure ? `: ${threatFailure}` : " (no DEX pair or no completed scanner result)"} - it can be rerun from the Threat tab.`;
@@ -250,28 +268,71 @@ export function startPersonAudit(
     emit();
   };
 
+  const recover = async () => {
+    if (recoveryStarted || finalizationStarted) return;
+    recoveryStarted = true;
+    pushStep({ phase: "ARGUS · Recovery", label: "Reconnecting to this scan", detail: "The connection was interrupted. Checking this scan's saved result without starting or charging for another investigation.", source: "argus", tone: "neutral" });
+    const deadline = streamDropRecoveryDeadline(run);
+    let attempt = 0;
+    let failure = "The saved result for this scan could not be confirmed within its collection deadline.";
+    while (runs.get(key) === run && !recoveryController.signal.aborted && Date.now() < deadline) {
+      const result = await fetchPersonRun(run.runKey!, run.handle, recoveryController.signal);
+      if (runs.get(key) !== run || recoveryController.signal.aborted || finalizationStarted) return;
+      if (result.state === "saved") {
+        pushStep({ phase: "ARGUS · Recovery", label: "Project evidence recovered", detail: result.dossier.tokenAssessment?.owner === "server"
+          ? "The server saved the project and linked-token assessment. Opening that exact version."
+          : "The exact saved result was recovered. Completing and saving its linked-token assessment.", source: "argus", tone: "good" });
+        await finalize(result.dossier);
+        return;
+      }
+      if (result.state === "failed") {
+        failure = "The server finished this scan without a saved report. The earlier report has not been substituted.";
+        break;
+      }
+      // Missing/unavailable receipts are not evidence that the server stopped.
+      const delay = Math.min(++attempt < 4 ? 1500 : 10_000, Math.max(0, deadline - Date.now()));
+      await new Promise<void>((resolve) => {
+        const finish = () => { clearTimeout(timer); recoveryController.signal.removeEventListener("abort", finish); resolve(); };
+        const timer = setTimeout(finish, delay);
+        recoveryController.signal.addEventListener("abort", finish, { once: true });
+      });
+    }
+    if (runs.get(key) !== run || recoveryController.signal.aborted || finalizationStarted) return;
+    threatController.abort();
+    run.status = "error";
+    run.error = failure;
+    aborts.delete(key);
+    emit();
+  };
+
   const abortStream = streamAudit(key, priv, {
     onStep: (s) => {
+      if (runs.get(key) !== run || finalizationStarted) return;
+      if (s.tokenExecution === "server") serverOwnsToken = true;
       run.steps = [...run.steps, s];
       // Open-ended progress: ramp asymptotically toward ~92% by step count.
       run.pct = Math.min(92, run.steps.length * 11);
       emit();
       // The server's mid-stream token announcement - start the parallel leg.
-      if (s.token) startThreatLeg(s.token);
+      if (s.token && !serverOwnsToken) startThreatLeg(s.token);
     },
     onDone: (d) => { void finalize(d); },
     onError: (e, failure) => {
+      if (runs.get(key) !== run || finalizationStarted) return;
+      if (!priv && failure?.kind === "stream_dropped") { void recover(); return; }
+      threatController.abort();
       run.status = "error";
       run.error = e;
       run.errorKind = failure?.kind;
       aborts.delete(key);
       emit();
     },
-  }, intent);
-  // Cancelling a run stops both legs: the SSE stream and any threat scan
-  // still spending on its behalf.
+  }, intent, undefined, run.runKey, !priv);
+  // Cancelling detaches this view and stops browser-owned work. An opted-in
+  // server investigation remains authorized and finishes its bounded save.
   aborts.set(key, () => {
     abortStream();
+    recoveryController.abort();
     threatController.abort();
     retryController?.abort();
   });

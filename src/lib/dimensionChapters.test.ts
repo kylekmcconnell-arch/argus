@@ -105,8 +105,46 @@ describe("personDimensionChapters", () => {
     const chapters = personDimensionChapters({
       P2_product_substance: { tier: "emerging" },
     });
-    expect(chapters[0].facts.some((f) => f.label === "Recorded range")).toBe(false);
+    expect(chapters[0].facts.some((f) => f.label === "Evidence band")).toBe(false);
     expect(chapters[0].lead).toBe("");
+  });
+
+  it("renders awarded points over the contract weight, never the band ceiling (ARGUS-01)", () => {
+    const chapters = personDimensionChapters(
+      { P1_team_and_identity: { tier: "solid", minScore: 10, maxScore: 16, reasons: ["Two first-party named operators."] } },
+      { P1_team_and_identity: { score: 15, weight: 16, rationale: "Two operators on the record.", role: "PROJECT" } },
+    );
+    expect(chapters[0]).toMatchObject({ score: 15, weight: 16 });
+    expect(chapters[0].facts).toContainEqual({ label: "Evidence band", value: "10–16 of 16 pts" });
+  });
+
+  it("sums the saved Altcoinist axes to the 49 headline, not the 63 band ceiling", () => {
+    // The audited report: composition 15/16, 12/24, 10/20, 3/14, 7/14, 2/12
+    // while the chapters printed 16/16, 16/16, 13/13, 5/5, 9/9, 4/4.
+    const axes = {
+      P1_team_and_identity: 15, P2_product_substance: 12, P3_token_conduct: 10,
+      P4_backing_and_partners: 3, P5_traction_and_liveness: 7, P6_transparency_integrity: 2,
+    };
+    const ceilings = { P1_team_and_identity: 16, P2_product_substance: 16, P3_token_conduct: 13,
+      P4_backing_and_partners: 5, P5_traction_and_liveness: 9, P6_transparency_integrity: 4 };
+    const chapters = personDimensionChapters(
+      Object.fromEntries(Object.entries(ceilings).map(([axis, max]) => [axis, { tier: "solid", minScore: max - 3, maxScore: max }])),
+      Object.fromEntries(Object.entries(axes).map(([axis, score]) => [axis, { score, weight: 0, rationale: "r", role: "PROJECT" }])),
+    );
+    // weight 0 in the record is not a contract weight: fall back to the profile.
+    expect(chapters.reduce((sum, c) => sum + (c.score ?? 0), 0)).toBe(49);
+    expect(chapters.reduce((sum, c) => sum + c.weight, 0)).toBe(100);
+    expect(chapters.map((c) => `${c.score}/${c.weight}`)).toEqual(["15/16", "12/24", "10/20", "3/14", "7/14", "2/12"]);
+  });
+
+  it("says when the saved report never scored an axis instead of inventing a number", () => {
+    const chapters = personDimensionChapters(
+      { P3_token_conduct: { tier: "emerging", minScore: 8, maxScore: 13 } },
+      {},
+    );
+    expect(chapters[0].score).toBeNull();
+    expect(chapters[0].weight).toBe(20);
+    expect(chapters[0].facts).toContainEqual({ label: "Evidence band", value: "8–13 of 20 pts" });
   });
 
   it("translates internal null bands into public language", () => {

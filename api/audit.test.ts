@@ -1,4 +1,8 @@
-vi.mock("./_scanReceipts.js", () => ({ claimScanReceipt: vi.fn(async () => "written"), recordScanReceipt: vi.fn(async () => true) }));
+vi.mock("@vercel/functions", () => ({ waitUntil: vi.fn() }));
+vi.mock("./_projectTokenCompletion.js", () => ({ completeProjectToken: vi.fn() }));
+import { waitUntil } from "@vercel/functions";
+import { completeProjectToken } from "./_projectTokenCompletion.js";
+vi.mock("./_scanReceipts.js", () => ({ claimScanReceipt: vi.fn(async () => "written"), recordScanReceipt: vi.fn(async () => true), describeClaimedRun: vi.fn(async () => "unknown") }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
@@ -14,7 +18,7 @@ const {
   persistReportVersionBundle: vi.fn(),
 }));
 
-vi.mock("./_cache.js", () => ({ issuePanelCostToken, recordProviderUsageBatch }));
+vi.mock("./_cache.js", () => ({ issuePanelCostToken, recordProviderUsageBatch, issueScanPanelToken: vi.fn(() => "scan-capability") }));
 
 vi.mock("./_collector.js", async () => {
   const { resolveInput } = await import("../src/lib/resolveInput");
@@ -47,7 +51,7 @@ vi.mock("./_graph.js", () => ({ activateReportVersionWithAuthoritativeGraph }));
 import { consumeInvestigationQuota, requireArgusAuth, serviceCredentials } from "./_auth.js";
 import { activateReportVersion } from "./_provenance.js";
 import { resolveInput, runAudit } from "./_collector.js";
-import { claimScanReceipt, recordScanReceipt } from "./_scanReceipts.js";
+import { claimScanReceipt, describeClaimedRun, recordScanReceipt } from "./_scanReceipts.js";
 import handler, { config } from "./audit";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
@@ -101,7 +105,53 @@ describe("person audit input guard", () => {
     vi.unstubAllGlobals();
   });
 
-  it.each(["argus", "different"])("rejects a replay for %s before a second collector starts", async (secondHandle) => {
+  it.each(["complete", "unavailable"] as const)("saves a %s server token outcome even after the browser disconnects", async state => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "test" });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("[]")));
+    vi.mocked(runAudit).mockResolvedValue({ handle: "@argus", live: true, report: { audit_id: "owned-run", composite_verdict: "CAUTION", governing_score: 50 }, cost: { schemaVersion: 1, calls: [] } } as never);
+    vi.mocked(completeProjectToken).mockImplementationOnce(async d => {
+      d.tokenAssessment = { owner: "server", state, completedAt: new Date().toISOString() };
+      d.threat = state === "complete" ? { address: "token", chain: "ethereum" } as never : null;
+    });
+    persistReportVersionBundle.mockResolvedValue({ caseId: "case", reportVersionId: "00000000-0000-4000-8000-000000000302", version: 1 });
+    const req = request("argus", { tokenExecution: "server" }); req.headers.authorization = "Bearer analyst-test";
+    const { res } = response(); res.write = (() => { throw new Error("browser closed"); }) as typeof res.write;
+    await handler(req, res);
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise));
+    expect(completeProjectToken).toHaveBeenCalledOnce();
+    expect(persistReportVersionBundle).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ payload: expect.objectContaining({ tokenAssessment: expect.objectContaining({ state }) }) }));
+    expect(persistReportVersionBundle).toHaveBeenCalledOnce();
+    expect(recordScanReceipt).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ status: state === "complete" ? "complete" : "degraded", reportVersionId: "00000000-0000-4000-8000-000000000302" }));
+  });
+
+  it.each<Record<string, string>>([{}, { private: "1", tokenExecution: "server" }])("keeps legacy and private scans out of server token completion", async query => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(runAudit).mockResolvedValue(null);
+    await handler(request("argus", query), response().res);
+    expect(completeProjectToken).not.toHaveBeenCalled();
+    expect(waitUntil).not.toHaveBeenCalled();
+  });
+
+  it("accepts an explicit POST launch with the same replay protection", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 0, used: 1 });
+    vi.mocked(claimScanReceipt).mockResolvedValueOnce("written").mockResolvedValueOnce("duplicate");
+    vi.mocked(runAudit).mockResolvedValue(null);
+    vi.mocked(describeClaimedRun).mockResolvedValue("same_subject");
+    const post = request("example", { creditKey: "post-launch-run" });
+    post.method = "POST";
+    await handler(post, response().res);
+    const replay = response();
+    await handler(post, replay.res);
+    expect(runAudit).toHaveBeenCalledOnce();
+    expect(replay.captured.statusCode).toBe(409);
+  });
+
+  it.each([
+    ["argus", "same_subject", "scan_run_already_claimed"],
+    ["different", "subject_mismatch", "idempotency_subject_mismatch"],
+  ] as const)("rejects a replay for %s before a second collector starts", async (secondHandle, prior, expectedError) => {
+    vi.mocked(describeClaimedRun).mockResolvedValue(prior);
     vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 0, used: 1 });
     vi.mocked(serviceCredentials).mockReturnValue({ url: "https://db.example", key: "test" });
     const actual = await vi.importActual<typeof import("./_scanReceipts.js")>("./_scanReceipts.js");
@@ -121,6 +171,8 @@ describe("person audit input guard", () => {
     await handler(request(secondHandle, { creditKey: "replay-key-123" }), second.res);
     expect(first.captured.statusCode).toBe(200);
     expect(second.captured.statusCode).toBe(409);
+    expect(second.captured.body).toMatchObject({ error: expectedError });
+    // The credit bought exactly one collector run.
     expect(runAudit).toHaveBeenCalledTimes(1);
   });
 

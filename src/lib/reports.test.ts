@@ -4,6 +4,7 @@ import type { Investigation } from "./investigation";
 import {
   changeReportLifecycle,
   fetchReport,
+  fetchPersonRun,
   fetchReportVersion,
   fetchReportState,
   groupReportsByEntity,
@@ -693,5 +694,24 @@ describe("stored case resolution", () => {
 
     await expect(resolveStoredCases("$BROKEN"))
       .resolves.toEqual({ status: "unavailable", subjects: [] });
+  });
+});
+
+describe("exact person run lookup", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it("rehydrates the exact persistence binding needed to save the combined report", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ state: "saved", panelToken: "bounded-capability", report: {
+      kind: "person", ref: "example", payload: { handle: "@Example", persistence: { state: "failed", reportVersionId: "stale" } },
+      versionContext: { reportVersionId: "exact-version" },
+    } })));
+    vi.stubGlobal("fetch", fetch);
+    await expect(fetchPersonRun("specific-run", "@example", new AbortController().signal)).resolves.toMatchObject({ state: "saved", dossier: {
+      persistence: { state: "persisted", reportVersionId: "exact-version", panelCostToken: "bounded-capability" },
+    } });
+    expect(fetch).toHaveBeenCalledWith("/api/report?runKey=specific-run&ref=%40example", expect.objectContaining({ cache: "no-store" }));
+  });
+  it("rejects a different subject payload even if the wrapper matches", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ state: "saved", report: { kind: "person", ref: "example", payload: { handle: "@other" }, versionContext: { reportVersionId: "version" } } }))));
+    await expect(fetchPersonRun("specific-run", "example", new AbortController().signal)).resolves.toEqual({ state: "not_found" });
   });
 });

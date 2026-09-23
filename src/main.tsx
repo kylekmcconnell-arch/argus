@@ -44,6 +44,8 @@ const EarnReportStyle2Preview = lazy(() => import('./components/EarnReportStyle2
 // eslint-disable-next-line react-refresh/only-export-components
 const DualScorePreview = lazy(() => import('./dev/DualScorePreview.tsx').then((module) => ({ default: module.DualScorePreview })))
 // eslint-disable-next-line react-refresh/only-export-components
+const ArgusReportPreview = lazy(() => import('./dev/ArgusReportPreview.tsx').then((module) => ({ default: module.ArgusReportPreview })))
+// eslint-disable-next-line react-refresh/only-export-components
 const KyleIntelligencePreview = lazy(() => import('./reports/kyle/KyleIntelligencePreview.tsx').then((module) => ({ default: module.KyleIntelligencePreview })))
 
 // Observe 401s from ARGUS API routes so an expired session is stated once
@@ -115,6 +117,8 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><EarnReportStyle2Preview /></Suspense>
       ) : designPreview === 'earn-dual-score' ? (
         <Suspense fallback={null}><DualScorePreview /></Suspense>
+      ) : designPreview === 'argus-report' ? (
+        <Suspense fallback={null}><ArgusReportPreview /></Suspense>
       ) : designPreview === 'kyle-intelligence' ? (
         <Suspense fallback={null}><KyleIntelligencePreview /></Suspense>
       ) : sharedReportToken ? (

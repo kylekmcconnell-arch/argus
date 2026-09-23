@@ -12,7 +12,7 @@ import type { ThreatScan } from "../threat/types";
 
 const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn(), trustGraph: vi.fn(), marketIntelligence: vi.fn() }));
 
-vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
+vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }), useOptionalArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
 // The promoted production lane renders the connection workspace, which needs
 // the real entity-key canonicalizer; only the connection lookup is stubbed.
@@ -135,25 +135,29 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    const nav = container.querySelector('nav[aria-label="Report table of contents"]');
-    const links = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])];
-    expect(links.slice(0, 4).map((link) => link.textContent?.trim())).toEqual([
+    // The report is nine chapters behind one sticky horizontal navigation.
+    const nav = container.querySelector('nav[aria-label="Report sections"]');
+    const tabs = [...(nav?.querySelectorAll("button") ?? [])];
+    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual([
       "Decision",
+      "Scores",
       "What the product is",
-      "Key developments",
+      "Code",
       "People",
+      "Market",
+      "Social",
+      "Connections",
+      "Evidence & method",
     ]);
-    expect(links.map((link) => link.textContent)).not.toContain("What changed");
-    expect(container.querySelector("#key-developments")?.textContent).toContain("The events that shaped this case");
+    expect(tabs.map((tab) => tab.textContent)).not.toContain("What changed");
+    expect(container.querySelector('[data-chapter="product"] #key-developments')?.textContent).toContain("The events that shaped this case");
     expect(container.textContent).not.toContain("Notable followers");
     expect(container.querySelector('a[href="https://x.com/legacywhale"]')).toBeNull();
 
-    const relationships = container.querySelector("#relationships");
-    const scoreEvidence = [...container.querySelectorAll("details")].find((detail) =>
-      detail.textContent?.includes("Evidence behind each score dimension"));
-    expect(relationships).not.toBeNull();
-    expect(scoreEvidence).not.toBeUndefined();
-    expect(relationships!.compareDocumentPosition(scoreEvidence!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Relationships live in Connections; the per-dimension evidence lives
+    // with the scores it explains.
+    expect(container.querySelector('[data-chapter="connections"] #relationships')).not.toBeNull();
+    expect(container.querySelector('[data-chapter="scores"]')?.textContent).toContain("Evidence behind each scoring area");
   });
 
   it("renders the launchpad-ecosystem panel for a venue subject, and nothing for others", () => {
@@ -257,7 +261,7 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    const chip = [...container.querySelectorAll("span.chip")].find((node) =>
+    const chip = [...container.querySelectorAll(".hero .eyebrow")].find((node) =>
       node.textContent?.includes("Web3 startup · no token"));
     expect(chip).not.toBeUndefined();
     expect(chip!.getAttribute("title")).toContain("found no token");
@@ -308,6 +312,71 @@ describe("private person report evidence boundary", () => {
     expect(container.querySelector('[data-testid="fundraising"]')).toBeNull();
   });
 
+  it("renders the frozen development read in the Code chapter and names who commits", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: { ...base.report, roles: [SubjectClass.PROJECT] },
+      threat: {
+        dossier: {
+          score: 70,
+          verdict: "PASS",
+          axes: [],
+          shipping: {
+            version: 1,
+            target: "example-org",
+            capturedAt: "2026-09-01T00:00:00.000Z",
+            windowDays: 90,
+            grade: "shipping-solo",
+            headline: "Shipping, one builder: 120 commits in 90 days",
+            cadenceStatus: "shipping",
+            totalCommits: 120,
+            activeWeeks: 10,
+            distinctHuman: 2,
+            concentration: "single-author",
+            authorship: "mixed",
+            origin: "original",
+            stars: "suspect",
+            market: "insufficient",
+            claimsSupported: 0,
+            claimsUnsupported: 0,
+            live: "live",
+            adoption: "unused",
+            health: "mixed",
+            leadDeparted: false,
+            reposRead: 3,
+            commitsRead: 120,
+            releasesInWindow: 2,
+            license: "none",
+            starsTotal: 700,
+            starBurstSharePct: 68,
+            committers: [
+              { name: "Unlisted Builder", login: "unlisted", commits: 100, sharePct: 83, kind: "human", freshAccount: true, last30: 40, prior60: 60 },
+            ],
+          },
+        },
+      } as unknown as ThreatScan,
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => undefined} onRescan={() => undefined} onAudit={() => undefined} />);
+    });
+    const codeTab = [...container.querySelectorAll('nav[aria-label="Report sections"] button')]
+      .find((tab) => tab.textContent?.trim() === "Code") as HTMLButtonElement;
+    act(() => { codeTab.click(); });
+
+    const chapter = container.querySelector('[data-chapter="code"]') as HTMLElement;
+    expect(chapter.textContent).toContain("Shipping, one builder: 120 commits in 90 days");
+    // This fixture publishes no roster, so the committer is not called
+    // unnamed: the chapter says there is nobody to match him against.
+    expect(chapter.textContent).toContain("Unlisted Builder");
+    expect(chapter.textContent).toContain("No roster to match");
+    expect(chapter.textContent).toContain("This report names no team");
+    // An unlicensed repository is not open source, and a star burst is named.
+    expect(chapter.textContent).toContain("Not open source");
+    expect(chapter.textContent).toContain("68%");
+  });
+
   it("uses the linked token scan as Style 2's separate second score", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
@@ -335,10 +404,14 @@ describe("private person report evidence boundary", () => {
 
     const dual = container.querySelector('[data-report-score="dual"]');
     expect(dual).not.toBeNull();
-    expect(dual?.textContent).toContain("Person diligence score54");
-    expect(dual?.textContent).toContain("Token safety score79");
-    expect(dual?.textContent).toContain("Liquidity");
-    expect(dual?.textContent).toContain("Code and security");
+    const cards = [...(dual?.querySelectorAll(".score-card") ?? [])].map((card) => card.textContent ?? "");
+    expect(cards[0]).toContain("Person diligence");
+    expect(cards[0]).toContain("54/100");
+    expect(cards[1]).toContain("Token safety");
+    expect(cards[1]).toContain("79/100");
+    const tokenTable = container.querySelector('[data-chapter="scores"]')?.textContent ?? "";
+    expect(tokenTable).toContain("Liquidity");
+    expect(tokenTable).toContain("Code and security");
     expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
   });
 
@@ -412,12 +485,12 @@ describe("private person report evidence boundary", () => {
 
     const brief = container.querySelector('[data-canonical-decision-brief="true"]')!;
     const openRail = brief.querySelector('aside[aria-label="Required report checks"]')!;
-    expect(openRail.textContent).toContain("6 finished, 1 open");
-    expect(openRail.textContent).toContain("What is still open");
+    expect(openRail.textContent).toContain("6/7 collection checks");
+    expect(openRail.textContent).toContain("Still open");
     expect(openRail.textContent).toContain("Product and website substance");
     expect(openRail.textContent).toContain("no saved official product or website outcome was recorded");
-    expect(openRail.textContent).toContain("1 open");
-    expect(openRail.textContent).not.toContain("7 finished");
+    expect(openRail.querySelectorAll("li")).toHaveLength(1);
+    expect(openRail.textContent).not.toContain("7/7");
   });
 
   it("finishes an EARN / earnonhood.com confirmed 403 as a required website check without calling the site live or raising the score", () => {
@@ -467,16 +540,16 @@ describe("private person report evidence boundary", () => {
 
     const brief = container.querySelector('[data-canonical-decision-brief="true"]')!;
     const openRail = brief.querySelector('aside[aria-label="Required report checks"]')!;
-    expect(openRail.textContent).toContain("7 finished, 0 open");
-    expect(openRail.textContent).toContain("No checks remain open.");
-    expect(openRail.textContent).toContain("Product and website substance");
-    expect(openRail.textContent).toContain("blocked the automated request");
-    expect(openRail.textContent).toContain("could not read the page");
-    expect(brief.textContent).toContain("7/7 required report checks complete");
-    expect(brief.textContent).not.toContain("7/7 required report checks complete · provisional");
-    expect(brief.textContent).toContain("51");
-    expect(brief.textContent).not.toMatch(/Website live|live site/i);
-    expect(container.textContent).not.toContain("6 finished, 1 open");
+    expect(openRail.textContent).toContain("7/7 collection checks");
+    expect(openRail.textContent).not.toContain("Still open");
+    // The finished check keeps its exact note where the website is described.
+    const website = [...container.querySelectorAll('[data-chapter="product"] .product-claim')]
+      .find((claim) => claim.textContent?.includes("Public website"))?.textContent ?? "";
+    expect(website).toContain("blocked the automated request");
+    expect(website).toContain("could not read the page");
+    expect(container.querySelector(".score-card .score-number")?.textContent).toContain("51");
+    expect(container.textContent).not.toMatch(/Website live|live site/i);
+    expect(container.textContent).not.toContain("6/7 collection checks");
   });
 
   it("keeps an official-site HTTP 429 as an open rate-limit gap, not a finished blocked-site finding", () => {
@@ -517,12 +590,12 @@ describe("private person report evidence boundary", () => {
 
     const brief = container.querySelector('[data-canonical-decision-brief="true"]')!;
     const openRail = brief.querySelector('aside[aria-label="Required report checks"]')!;
-    expect(openRail.textContent).toContain("6 finished, 1 open");
-    expect(openRail.textContent).toContain("What is still open");
+    expect(openRail.textContent).toContain("6/7 collection checks");
+    expect(openRail.textContent).toContain("Still open");
     expect(openRail.textContent).toContain("Product and website substance");
     expect(openRail.textContent).toMatch(/rate-limited|HTTP 429/i);
     expect(openRail.textContent).not.toContain("could not read the page");
-    expect(openRail.textContent).not.toContain("7 finished");
+    expect(openRail.textContent).not.toContain("7/7");
   });
 
   it("renders the SuperGemma regression fixture through one canonical report experience", () => {
@@ -538,13 +611,12 @@ describe("private person report evidence boundary", () => {
     });
 
     expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
-    expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-report-design="argus-2026-09"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
-    expect(container.textContent).toContain("SuperGemma");
-    expect(container.textContent).toContain("what the evidence tells us");
-    expect(container.querySelector('a[href="https://supergemma.example"]')).not.toBeNull();
-    expect(container.querySelector('a[href="https://x.com/0xsupergemma"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="Report result and check status"]')?.classList.contains("hidden")).toBe(true);
+    expect(container.querySelector(".hero h1")?.textContent).toBe("SuperGemma");
+    expect(container.textContent).toContain("The decision brief");
+    expect(container.querySelector('.hero a[href="https://supergemma.example/"]')).not.toBeNull();
+    expect(container.querySelector('.hero a[href="https://x.com/0xsupergemma"]')).not.toBeNull();
   });
 
   it("does not mistake a saved website value for the product narrative", () => {
@@ -572,9 +644,9 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    const brief = container.querySelector('[data-canonical-decision-brief="true"]');
-    expect(brief?.textContent).toContain("DeFi for real-world assets, live on Robinhood Chain.");
-    expect(brief?.textContent).not.toContain("What it does: earnonhood.com");
+    const hero = container.querySelector('[data-canonical-report-header="true"]');
+    expect(hero?.textContent).toContain("DeFi for real-world assets, live on Robinhood Chain.");
+    expect(container.textContent).not.toContain("What it does: earnonhood.com");
   });
 
   it("promotes a fully sourced official-claim conflict into the shared decision brief", () => {
@@ -625,6 +697,10 @@ describe("private person report evidence boundary", () => {
 
     const brief = container.querySelector('[data-canonical-decision-brief="true"]')!;
     expect(brief.textContent).toContain("The official launch date conflicts with a registry or blockchain record");
+    // The row's own disclosure opens the consequence and both records inline.
+    const compare = [...brief.querySelectorAll<HTMLButtonElement>(".signal-row > button")]
+      .find((button) => button.textContent === "Compare")!;
+    act(() => compare.click());
     expect(brief.textContent).toContain("ARGUS leaves the conflict unresolved");
     expect(brief.textContent).toContain("Open both records");
     expect(brief.querySelector('a[href="https://supergemma.example/history"]')).not.toBeNull();
@@ -782,12 +858,16 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    const verifyNext = container.querySelector(".kyle-verify-next")?.textContent ?? "";
-    expect(verifyNext).not.toContain("What exact project or company does this account represent");
-    expect(verifyNext).not.toContain("What live products or services does the project provide");
-    expect(verifyNext).not.toContain("Connection map connections");
-    expect(verifyNext).not.toContain("Team and leadership");
-    expect(container.textContent).toContain("does not affect the score or verdict");
+    // Neither the brief's follow-ups nor its open-check register re-ask a
+    // bound identity or surface graph version diagnostics.
+    const brief = container.querySelector('[data-canonical-decision-brief="true"]')?.textContent ?? "";
+    expect(brief).not.toContain("What exact project or company does this account represent");
+    expect(brief).not.toContain("What live products or services does the project provide");
+    expect(brief).not.toContain("Connection map connections");
+    // The methodology ledger still explains the excluded relationship plainly.
+    const methodologyToggle = container.querySelector<HTMLButtonElement>("#scan-methodology button");
+    act(() => methodologyToggle?.click());
+    expect(container.querySelector("#scan-methodology")?.textContent).toContain("does not affect the score or verdict");
     expect(container.textContent).not.toContain("linked immutable report is not the active case projection");
   });
 
@@ -806,28 +886,21 @@ describe("private person report evidence boundary", () => {
       );
     });
 
-    const overview = container.querySelector("#report-overview");
-    const profileDisclosure = [...(overview?.querySelectorAll("details") ?? [])]
-      .find((details) => details.textContent?.includes("Profile context"));
-    expect(profileDisclosure).toBeDefined();
-    expect(profileDisclosure?.hasAttribute("open")).toBe(false);
-
-    const result = overview?.querySelector<HTMLElement>('[aria-label="Report result and check status"]');
-    expect(result?.className).toBe("hidden");
-    expect(result?.getAttribute("aria-hidden")).toBe("true");
+    // One decision brief, and the toolbar order Watch, Export brief, Share.
     const decisionCanvas = container.querySelector("#report-summary");
-    expect(decisionCanvas?.textContent).toContain("what the evidence tells us");
-    expect(decisionCanvas?.textContent).toContain("Required report checks");
+    expect(decisionCanvas?.textContent).toContain("The decision brief");
+    expect(decisionCanvas?.querySelector('aside[aria-label="Required report checks"]')).not.toBeNull();
 
-    const toolbar = container.querySelector("header.sticky");
-    const caseBrief = [...(toolbar?.querySelectorAll("button") ?? [])]
-      .find((button) => button.textContent?.includes("Case brief"));
-    expect(caseBrief?.className).toContain("btn-primary");
-    const mobileActions = [...(toolbar?.querySelectorAll("details") ?? [])]
-      .find((details) => details.className.includes("sm:hidden"));
-    expect(mobileActions?.textContent).toContain("Rescan current evidence");
-    expect(mobileActions?.textContent).toContain("Add to watchlist");
-    expect(mobileActions?.textContent).toContain("New audit");
+    const toolbar = container.querySelector("header.topbar")!;
+    const labels = [...toolbar.querySelectorAll(".header-actions > button")].map((button) => button.textContent?.trim());
+    expect(labels.slice(0, 3)).toEqual(["☆Watch", "↓ Export brief", "Share"]);
+    // Workspace actions stay one tap away without crowding the toolbar.
+    const more = toolbar.querySelector<HTMLButtonElement>('button[aria-label="More report actions"]')!;
+    act(() => more.click());
+    const menu = toolbar.querySelector('[role="menu"]')?.textContent ?? "";
+    expect(menu).toContain("Case brief");
+    expect(menu).toContain("Rescan");
+    expect(menu).toContain("New audit");
   });
 
   it("surfaces a material protocol incident and suspended official X account beside the verdict", () => {
@@ -996,9 +1069,12 @@ describe("private person report evidence boundary", () => {
     });
 
     const ledgers = container.querySelector('[aria-label="Provider evidence ledgers"]');
-    expect(container.querySelector('a[href="https://dexscreener.com/search?q=0x5555555555555555555555555555555555555555"]')?.textContent)
-      .toBe("Dexscreener");
-    expect(container.querySelector('.project-identity-contract-button')?.textContent).toBe("0x5555…5555");
+    // Identity shortcuts sit beside the title; the contract stays whole and selectable.
+    expect(container.querySelector('.hero a[href="https://dexscreener.com/ethereum/0x5555555555555555555555555555555555555555"]')?.textContent)
+      .toContain("DexScreener");
+    expect(container.querySelector(".hero a[href=\"https://etherscan.io/token/0x5555555555555555555555555555555555555555\"]")).not.toBeNull();
+    expect(container.querySelector(".hero .contract-address")?.textContent).toBe("0x5555555555555555555555555555555555555555");
+    expect(container.querySelector('.hero button[aria-label="Copy Ethereum contract address"]')).not.toBeNull();
     expect(ledgers?.textContent).toContain("Fixture Labs");
     expect(ledgers?.textContent).toContain("Lead Capital");
     expect(ledgers?.textContent).toContain("Protocol incident ledger");
@@ -1129,34 +1205,36 @@ describe("private person report evidence boundary", () => {
 
     act(() => root.render(<Report dossier={dossier} onReset={() => {}} />));
 
-    expect(container.querySelector("#report-team-heading")?.textContent).toContain("One roster. Evidence first.");
-    expect(container.textContent).toContain("ARGUS found 1 source-grounded person");
-    expect(container.textContent).toContain("1 verified · 0 to verify");
+    const people = container.querySelector('[data-chapter="people"]')!;
+    expect(people.querySelector(".chapter-head h1")?.textContent).toBe("A named team is the start of diligence.");
+    expect(people.textContent).toContain("The roster below preserves all 1 reported person");
     expect(container.textContent).not.toContain("Probable");
-    expect(container.querySelector(".team-person-card")?.textContent).toContain("Ada Example");
+    expect(people.querySelector(".chapter-head")?.textContent).toContain("Identity link found");
+    const card = people.querySelector(".person")!;
     // The FULL evidenced title renders, compound roles included, and every
-    // evidenced contact is a working affordance: the handle links to the
-    // profile, Telegram links to the DM page, and the email carries a copy
-    // button plus a mailto button.
-    expect(container.querySelector(".team-person-card")?.textContent).toContain("Co-Founder & Chief Technology Officer");
-    expect(container.querySelector(".team-person-role .chip-wrap")).not.toBeNull();
-    const card = container.querySelector(".team-person-card")!;
-    expect(card.querySelector('a[href="https://x.com/ada_example"]')?.textContent).toBe("@ada_example");
-    expect(card.querySelector('a[href="https://t.me/ada_example"]')?.textContent).toBe("Telegram");
-    const emailBlock = card.querySelector('[data-testid="team-member-email"]')!;
-    expect(emailBlock.textContent).toContain("ada@fixture.example");
-    expect(emailBlock.querySelector('button[aria-label="Copy ada@fixture.example"]')).not.toBeNull();
-    expect(emailBlock.querySelector('a[href="mailto:ada%40fixture.example"]')).not.toBeNull();
-    expect(container.querySelector('img[src="https://pbs.twimg.com/profile_images/1/ada.jpg"]')).not.toBeNull();
-    expect(container.querySelector('a[href="https://fixture.example/team"]')?.textContent).toContain("Open role source");
-    expect(container.querySelector('a[href="https://github.com/ada-example"]')?.textContent).toContain("GitHub");
-    expect([...container.querySelectorAll('a[href="https://x.com/ada_example"]')]
-      .some((anchor) => anchor.textContent?.includes("profile link proof"))).toBe(true);
-    expect(container.querySelector(".team-person-card")?.textContent).toContain("current in provider record");
-    expect(container.textContent).toContain("Leadership records to reconcile");
-    expect(container.textContent).toContain("provider record ends Mar 1, 2024");
-    expect(container.textContent).toContain("provider record did not answer for this project");
-    expect(container.querySelector('a[href="https://linkedin.com/in/ada-example"]')).not.toBeNull();
+    // evidenced contact is a working affordance.
+    expect(card.textContent).toContain("Ada Example");
+    expect(card.textContent).toContain("Co-Founder & Chief Technology Officer");
+    expect(card.querySelector('a[href="https://x.com/ada_example"]')?.textContent).toContain("@ada_example");
+    expect(card.querySelector('a[href="https://t.me/ada_example"]')?.textContent).toContain("@ada_example");
+    expect(card.querySelector('a[href="mailto:ada@fixture.example"]')?.textContent).toContain("ada@fixture.example");
+    expect(card.querySelector('a[href="https://linkedin.com/in/ada-example"]')).not.toBeNull();
+    // Portrait preference: the project's own site, then LinkedIn, then X. This
+    // fixture has no site portrait, so LinkedIn is shown and the X photo is
+    // the fallback if it fails to load.
+    expect(card.querySelector('img[src^="https://unavatar.io/linkedin/ada-example"]')).not.toBeNull();
+    expect(card.textContent).toContain("The employment record lists this role as current.");
+    // The person's evidence opens inline: role source and developer profiles.
+    const review = [...card.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("Review evidence"))!;
+    act(() => review.click());
+    expect(people.querySelector('a[href="https://fixture.example/team"]')?.textContent).toContain("Open recorded role source");
+    expect(people.querySelector('a[href="https://github.com/ada-example"]')?.textContent).toContain("GitHub");
+    expect(people.querySelector('a[href="https://x.com/ada_example"][target="_blank"]')).not.toBeNull();
+    expect(people.textContent).toContain("profile link proof");
+    // Provider records that do not map to the roster stay beside it.
+    expect(people.textContent).toContain("Leadership records to reconcile");
+    expect(people.textContent).toContain("provider record ends Mar 1, 2024");
+    expect(people.textContent).toContain("provider record did not answer for this project");
   });
 
   it("renders a server-derived model-enriched lead once, not re-derived from the sanitized team copy", () => {
@@ -1787,7 +1865,7 @@ describe("private person report evidence boundary", () => {
     expect(snapshotLink?.textContent?.trim()).toBe("SAVED REPORT");
     expect(snapshotLink?.title).toContain("exact saved report");
     expect(snapshotLink?.target).toBe("_blank");
-    expect(container.textContent).toContain("report saved");
+    expect(container.querySelector(".report-meta")?.textContent).toContain("Report saved");
     expect(container.textContent).not.toContain("live collection");
     expect(container.textContent).toContain("Extra checks below run live");
     expect(container.textContent).toContain("do not change the saved score or the shared report");
@@ -1983,14 +2061,16 @@ describe("decision-safe person report presentation", () => {
 
     act(() => root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />));
 
-    const tokenSection = container.querySelector("#project-token");
-    const decisionSummary = container.querySelector("#decision-summary");
+    // An incomplete decision never hides verified token fundamentals: the
+    // decision chapter leads with them, and Market keeps the full record.
+    const decision = container.querySelector('[data-chapter="decision"]')!;
+    expect(decision.querySelector(".metric-strip")?.textContent).toContain("$620.00M");
+    expect(decision.querySelector(".hero")?.textContent).toContain("$JUP");
+    const tokenSection = container.querySelector('[data-chapter="market"] #project-token');
     expect(tokenSection).not.toBeNull();
-    expect(decisionSummary).not.toBeNull();
     expect(tokenSection?.textContent).toContain("$JUP");
     expect(tokenSection?.textContent).toContain("$620.00M");
     expect(tokenSection?.querySelector("svg polygon")).not.toBeNull();
-    expect(tokenSection!.compareDocumentPosition(decisionSummary!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("uses the stored project website for project intelligence when the bio has no domain", () => {
@@ -2067,7 +2147,7 @@ describe("decision-safe person report presentation", () => {
 
     expect(container.textContent).toContain("Project routing unresolved");
     expect(container.textContent).toContain("ARGUS collected intelligence, but did not select a scoring methodology");
-    expect(container.textContent).toContain("0% checked");
+    expect(container.querySelector(".score-card")?.textContent).toContain("Incomplete");
     expect(container.textContent).toContain("Resolve whether this account represents a project, organization, token, or person");
     expect(container.textContent).toContain("Source problems");
     expect(container.textContent).toContain("Identity check");
@@ -2122,7 +2202,7 @@ describe("decision-safe person report presentation", () => {
 
     expect(container.textContent).toContain("Score did not finish");
     expect(container.textContent).toContain("ARGUS resolved this subject to Project, but the scoring pass did not complete");
-    expect(container.textContent).toContain("0% checked");
+    expect(container.querySelector(".score-card")?.textContent).toContain("Incomplete");
     expect(container.textContent).toContain("What ARGUS found before the score failed");
     expect(container.textContent).toContain("Complete the Project scoring pass");
     expect(container.textContent).not.toContain("Project routing unresolved");
@@ -2163,6 +2243,8 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("3 of 5 decision areas were assessed");
     expect(container.textContent).toContain("Portfolio quality and Fund scale & tier remain unmeasured");
     expect(container.textContent).toContain("missing evidence was not treated as zero");
+    expect(container.textContent).toContain("Any displayed score covers the assessed areas only and remains provisional");
+    expect(container.textContent).not.toContain("no overall score was produced");
     expect(container.textContent).not.toContain("No decision areas scored");
     expect(container.textContent).not.toContain("the scoring pass did not complete");
     expect(container.textContent).not.toContain("No official token");
@@ -2414,7 +2496,8 @@ describe("decision-safe person report presentation", () => {
     expect(decisionBasis).not.toContain(originalAxisName);
     expect(decisionBasis).not.toMatch(/[A-Z]\d+_/);
     expect(verificationSection).not.toMatch(/[A-Z]\d+_/);
-    expect(container.textContent).toMatch(/Strong support|Some support|Limited support/);
+    // The decision brief itself never shows an internal axis key.
+    expect(container.querySelector('[data-chapter="decision"]')?.textContent).not.toMatch(/\b[A-Z]\d+_[a-z]/);
     // Provider diagnostics stay in the methodology ledger; they never leak
     // into the decision summary or the verification list.
     const summarySurfaces = `${container.querySelector("#decision-summary")?.textContent ?? ""}${verificationSection}`;
@@ -2440,24 +2523,20 @@ describe("decision-safe person report presentation", () => {
     });
 
     expect(dossier.report.composite_verdict).toBe("PASS");
-    expect(container.textContent).toContain("REPORT STATUS");
-    expect(container.textContent).toContain("INCOMPLETE");
-    expect(container.textContent).toContain("EARLY SCORE · PASS 100/100");
-    expect(container.textContent).toContain("score withheld");
-    expect(container.textContent).toContain("The final score is not ready");
-    expect(container.textContent).toContain("key checks are still open");
-    expect(container.textContent).toContain("Points before safety limits 95 + 5 bonus");
-    expect(container.textContent).toContain("Current score 100");
-    const decisionResult = container.querySelector<HTMLElement>('[aria-label="Report result and check status"]');
-    expect(decisionResult?.classList.contains("hidden")).toBe(true);
-    expect(decisionResult?.getAttribute("aria-hidden")).toBe("true");
+    // The headline withholds the score; the early PASS stays a labelled
+    // preliminary signal on the card, never the headline number.
+    const card = container.querySelector(".score-card")!;
+    expect(card.querySelector(".score-number")?.textContent).not.toContain("100");
+    expect(card.textContent).toContain("Incomplete");
+    expect(card.querySelector(".score-status")?.textContent).toContain("REPORT STATUS");
+    expect(card.querySelector(".score-status")?.textContent).toContain("EARLY SCORE · PASS 100/100");
+    expect(card.textContent).toContain("Some checks did not finish. Do not rely on the early score yet.");
+    const scores = container.querySelector('[data-chapter="scores"]')?.textContent ?? "";
+    expect(scores).toContain("Points before safety limits: 95 + 5 bonus");
+    expect(scores).toContain("Current score 100");
     const decisionCanvas = container.querySelector("#report-summary");
-    expect(decisionCanvas?.textContent).toContain("INCOMPLETE");
-    expect(decisionCanvas?.textContent).toContain("what the evidence tells us");
+    expect(decisionCanvas?.textContent).toContain("The decision brief");
     expect(decisionCanvas?.textContent).not.toContain("EARLY SCORE");
-    const preliminarySignal = [...container.querySelectorAll<HTMLElement>(".chip")]
-      .find((chip) => chip.textContent?.includes("EARLY SCORE"));
-    expect(preliminarySignal?.closest('[aria-hidden="true"]')).not.toBeNull();
   });
 
   it("keeps a supported 71 PASS signal provisional while a sanctions screen remains open (never-waive)", () => {
@@ -2521,17 +2600,19 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    expect([...container.querySelectorAll(".display")].some((node) => node.textContent?.trim() === "PROVISIONAL")).toBe(true);
-    expect(container.textContent).toContain("provisional score");
-    expect(container.textContent).toContain("PASS SIGNAL");
-    expect(container.textContent).toContain("76% checked");
-    expect(container.textContent).toContain("10/13");
-    expect(container.textContent).toContain("6 of 6 areas have sources");
-    expect(container.textContent).toContain("3 follow-up questions");
+    // The supported score stays visible, labelled provisional, while the
+    // open sanctions screen keeps it from reading as a final PASS.
+    const card = container.querySelector(".score-card")!;
+    expect(card.querySelector(".score-number")?.textContent).toContain("71");
+    expect(card.textContent).toContain("Provisional · saved verdict");
+    expect(card.querySelector(".score-status")?.textContent).toContain("PASS SIGNAL");
+    const status = container.querySelector('#report-summary aside[aria-label="Required report checks"]')?.textContent ?? "";
+    expect(status).toContain("The score may change as gaps are resolved");
+    expect(status).toContain("10/13 collection checks");
+    expect(status).toContain("(76.9%)");
+    expect(status).toContain("6 of 6 scored areas");
     expect(container.textContent).toContain("Follow up on: 3 important questions");
-    // The follow-up count is an in-place dropdown (the old #verification-next
-    // anchor targeted a section the current style hides), and every question
-    // carries its own input affordance routed to the report's assistant.
+    // Every open question carries its own input affordance.
     const followUp = container.querySelector<HTMLDetailsElement>("details#follow-up-questions");
     expect(followUp).toBeTruthy();
     const questionItems = followUp?.querySelectorAll('[aria-label="Open follow-up questions"] > li') ?? [];
@@ -2539,9 +2620,6 @@ describe("decision-safe person report presentation", () => {
     const inputButtons = [...(followUp?.querySelectorAll("button") ?? [])]
       .filter((button) => button.textContent?.includes("Give input"));
     expect(inputButtons.length).toBe(3);
-    expect(container.textContent).toContain("The score may change as gaps are resolved");
-    expect(container.textContent).toContain("This score uses the facts collected so far");
-    expect(container.textContent).toContain("Current score 71");
     expect(container.textContent).not.toContain("score withheld");
     const synthesis = container.querySelector('[aria-label="Case synthesis"]')?.textContent ?? "";
     expect(synthesis).toContain("What to check next");
@@ -2694,7 +2772,7 @@ describe("decision-safe person report presentation", () => {
     });
 
     const keyFacts = container.querySelector("#basic-facts");
-    const followUpPlan = container.querySelector("#verification-next")?.parentElement;
+    const followUpPlan = container.querySelector("#follow-up-questions");
     for (const section of [keyFacts, followUpPlan]) {
       expect(section?.textContent).toContain("Who founded the investment organization?");
       expect(section?.textContent).toContain("Who currently leads, manages, or makes investment decisions for the organization?");
@@ -3559,7 +3637,7 @@ describe("legacy person report coverage truth", () => {
     });
 
     expect(container.textContent).not.toContain("Coverage not captured");
-    expect(container.textContent).toContain("Checks1/1");
+    expect(container.querySelector('#report-summary aside[aria-label="Required report checks"]')?.textContent).toContain("1/1 collection checks");
     expect(container.querySelector('a[href="#scan-methodology"]')).not.toBeNull();
     expect(container.querySelector("#scan-methodology")).not.toBeNull();
   });
@@ -3721,7 +3799,9 @@ describe("legacy person report coverage truth", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    expect(container.querySelector("#verification-next")?.textContent)
+    expect(container.querySelector("#follow-up-questions")?.textContent ?? "")
+      .not.toContain("Promoted-token performance");
+    expect(container.querySelector("#report-summary")?.textContent ?? "")
       .not.toContain("Promoted-token performance");
   });
 });

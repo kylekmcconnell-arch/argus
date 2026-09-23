@@ -161,6 +161,9 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({
     available: true,
     mode: "configuration",
+    operationalStatus: "not_tested",
+    operationalNote: "Configured credentials do not confirm provider access, credit balance, or model availability.",
+    providerFallbacksEnabled: fallbacksOn,
     services,
     extraction,
     models,

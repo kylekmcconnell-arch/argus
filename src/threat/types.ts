@@ -154,6 +154,24 @@ export interface SiteSafety {
   // Authenticity: is the scanned CA in the project's official X bio? (Enigma's
   // impersonation-defense rule.) null when no X handle is linked.
   xBio: { handle: string; status: "verified" | "mismatch" | "absent" | "unreadable"; note: string } | null;
+  // Handle provenance: was the linked X account called something else before?
+  // A renamed account wears an age and a following it did not earn under this
+  // identity. "unknown" means the archive has no record, never that it is clean.
+  // null when no X handle is linked.
+  xHistory: {
+    handle: string;
+    status: "renamed" | "single" | "unknown";
+    priorHandles: string[];
+    handleReused: boolean;
+    currentSince: string | null;
+    lastRenameSeen: string | null;
+    // The dated timeline the archive actually holds, per account id: every
+    // screen name this account has worn and the window it was seen under each.
+    // Carried in full so the report can show the sequence rather than one
+    // sentence about it. More than one entry means the HANDLE changed hands.
+    accounts: { id: string; names: { handle: string; firstSeen: string | null; lastSeen: string | null }[] }[];
+    note: string;
+  } | null;
 }
 
 // ---- sell structure (who has actually been selling) ----

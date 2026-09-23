@@ -186,3 +186,32 @@ export async function readScanReceipt(auth: AuthContext, runKey: string): Promis
 export async function recordScanReceipt(auth: AuthContext, input: ScanReceiptWrite): Promise<boolean> {
   return (await writeScanReceipt(auth, input)) !== "unavailable";
 }
+
+/**
+ * A duplicate run key is two different failures wearing one error code. The
+ * same subject retried is a recoverable replay; a DIFFERENT subject on a key
+ * this organization already paid for is an attempt to spend one credit twice,
+ * and the caller should be told so rather than invited to open a saved result
+ * belonging to somebody else (#355).
+ */
+export async function describeClaimedRun(
+  auth: AuthContext,
+  runKey: string,
+  route: string,
+  canonicalRef: string,
+): Promise<"same_subject" | "subject_mismatch" | "unknown"> {
+  const credentials = serviceCredentials();
+  if (!credentials) return "unknown";
+  try {
+    const response = await fetch(
+      `${credentials.url}/rest/v1/scan_run_receipts?organization_id=eq.${encodeURIComponent(auth.organizationId)}&run_key=eq.${encodeURIComponent(runKey)}&select=route,canonical_ref&limit=1`,
+      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
+    );
+    if (!response.ok) return "unknown";
+    const prior = (await response.json() as { route?: string; canonical_ref?: string }[])[0];
+    if (!prior) return "unknown";
+    return prior.route === route && prior.canonical_ref === canonicalRef ? "same_subject" : "subject_mismatch";
+  } catch {
+    return "unknown";
+  }
+}

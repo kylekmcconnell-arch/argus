@@ -1,3 +1,4 @@
+import { grokAccessFailure, recordGrokAccessFailure } from "../providerAccess";
 import { deadlineFetch } from "../providerDeadline.js";
 // Grounded search: the ultimate decoupled discovery path. Instead of paying a
 // frontier model (Sonnet) to run web searches AND read whole pages into its
@@ -285,6 +286,7 @@ async function callGrokExtract(system: string, user: string, maxTokens: number, 
   const key = env("XAI_API_KEY");
   if (!key) return null;
   const model = GROK_EXTRACT_MODEL();
+  if (grokAccessFailure(model)) return null;
   let res: Response;
   try {
     res = await deadlineFetch(XAI_CHAT, {
@@ -302,6 +304,7 @@ async function callGrokExtract(system: string, user: string, maxTokens: number, 
     return null;
   }
   if (!res.ok) {
+    await recordGrokAccessFailure(res, model);
     addGrokUsage(undefined, 0, op, "failed", `http_${res.status}`);
     return null;
   }

@@ -1,3 +1,4 @@
+import { readScanReceipt } from "./_scanReceipts.js";
 import { payloadTokenIdentity } from "../src/lib/tokenIdentity.js";
 import { normalizeSubjectRef } from "../src/lib/subjectRef.js";
 // Organization-scoped report projections plus immutable case versions.
@@ -822,6 +823,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (req.method === "GET") {
+      if (query.has("runKey")) {
+        // Recover this owner's exact run, never whichever report happens to be
+        // active for the subject. This path cannot reserve credits or collect.
+        res.setHeader("cache-control", "private, no-store");
+        const runKey = queryString(query, "runKey");
+        const ref = normRef(queryString(query, "ref"));
+        if (!/^[A-Za-z0-9:_-]{8,180}$/.test(runKey) || !/^[a-z0-9_]{1,15}$/.test(ref)) {
+          res.status(400).json({ error: "valid_scan_identity_required" });
+          return;
+        }
+        const receipt = await readScanReceipt(auth, runKey);
+        if (receipt === "unavailable") {
+          res.status(503).json({ state: "unavailable" });
+          return;
+        }
+        if (!receipt || receipt.initiatedBy !== auth.userId || receipt.route !== "/api/audit"
+          || receipt.kind !== "person" || normRef(receipt.canonicalRef) !== ref) {
+          res.status(404).json({ state: "not_found" });
+          return;
+        }
+        if (receipt.status === "running") {
+          res.status(200).json({ state: "running" });
+          return;
+        }
+        if (!receipt.reportVersionId) {
+          res.status(200).json({ state: "failed" });
+          return;
+        }
+        const exact = await loadExactVersionReport(credentials, auth.organizationId, receipt.reportVersionId);
+        if (!exact || exact.caseStatus !== "open" || exact.report.kind !== "person"
+          || typeof exact.report.ref !== "string" || normRef(exact.report.ref) !== ref) {
+          res.status(404).json({ state: "not_found" });
+          return;
+        }
+        res.status(200).json({ state: "saved", ...exact, panelToken: issuePanelCostToken(auth.organizationId, receipt.reportVersionId) });
+        return;
+      }
       if (query.has("versionId")) {
         const reportVersionId = UUID.test(queryString(query, "versionId"))
           ? queryString(query, "versionId")
@@ -1004,10 +1042,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const versionContext = reportVersionId
         ? await loadVersionContext(credentials, auth.organizationId, reportVersionId)
         : null;
+      // Reopening a saved report must also carry a panel capability, or every
+      // paid panel on it is refused (#356). Bound to the version being
+      // returned, so it attributes cost to the report the analyst is reading.
+      const panelCostToken = reportVersionId
+        ? issuePanelCostToken(auth.organizationId, reportVersionId)
+        : undefined;
       res.status(200).json({
         available: true,
         caseStatus: "open",
         report: report && versionContext ? { ...report, versionContext } : report,
+        ...(panelCostToken ? { panelCostToken } : {}),
       });
       return;
     }

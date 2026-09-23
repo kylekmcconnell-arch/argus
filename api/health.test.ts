@@ -35,6 +35,8 @@ describe("provider readiness", () => {
     expect(captured.body).toMatchObject({
       available: true,
       mode: "configuration",
+      operationalStatus: "not_tested",
+      operationalNote: expect.stringContaining("do not confirm provider access"),
       down: 11, // unconfigured required lanes only; retired and optional fallbacks are listed but not counted down
       services: [
         { id: "xai", ok: true },

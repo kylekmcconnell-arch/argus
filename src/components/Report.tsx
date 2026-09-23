@@ -1,25 +1,14 @@
 import { evidenceRetryPlan, evidenceRetryReason } from "../lib/evidenceRetry";
+import { withheldScoreReason } from "../lib/withheldScore";
 import { useEffect, useState } from "react";
 import {
-  ArrowLeft,
-  ArrowsClockwise,
   Briefcase,
   WarningCircle,
   XCircle,
   Buildings,
-  CheckCircle,
   Cube,
-  Database,
-  DotsThree,
-  FileText,
-  Fingerprint,
-  Graph as GraphIcon,
   Handshake,
-  ListChecks,
-  MagnifyingGlassPlus,
   Megaphone,
-  ShareNetwork,
-  Star,
   UserCircle,
   UserFocus,
 } from "@phosphor-icons/react";
@@ -27,7 +16,12 @@ import { usdCompact } from "../lib/format";
 import { claimedTicker, deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { buildPublicClaimConflictDiscovery, buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
-import { NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
+import { VerdictArgumentBlock } from "./InvestigatorBrief";
+import { subjectCategoryLabel } from "../lib/subjectCategory";
+import { isOrganizationAccount } from "../lib/investorSubject";
+import { requestChallenge } from "../lib/challenge";
+import { scoringAccessFailure } from "../lib/scoringAccessFailure";
+import { DecisionBasis } from "./DecisionBasis";
 import type { DecisionLensId } from "../intelligence/types";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
@@ -36,23 +30,19 @@ import type { SourceArtifact } from "../data/evidence";
 import type { TokenDossier } from "../token/audit";
 import { getProfile, SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
-import { subjectCategoryLabel } from "../lib/subjectCategory";
 import { isWatched, toggleWatch } from "../lib/watchlist";
-import { CopyTldrButton, OutcomeDeltaStrip, ProviderFailureNotice, ScoreContextStrip } from "./ScoreContext";
+import { ProviderFailureNotice } from "./ScoreContext";
 import { UsageVisuals } from "./UsageVisuals";
 import { OperatorTrackRecord } from "./OperatorTrackRecord";
 import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
-import { Avatar } from "./Avatar";
-import { ProjectLinks } from "./ProjectLinks";
-import { personAvatar, trustedOfficialTeamPortraitUrl, trustedOfficialXAvatarUrl, xAvatar } from "../lib/avatars";
 import { explorer, shortAddr, walletBindingLabel, walletScreenView, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
+import { GithubShipping } from "./GithubShipping";
 import { GithubAssessment } from "./GithubAssessment";
 import { ThreatReport } from "./ThreatScanPage";
-import { ExportMenu } from "./ExportMenu";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { decisionCriticalChecks, isAdverseFinding, personChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
@@ -60,16 +50,12 @@ import { applyReportCheckContract, hasExplicitReportCheckContract } from "../lib
 import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
 import { reportIdentity } from "../lib/caseLabel";
 import { AddInfo } from "./AddInfo";
-import { ScoreComposition } from "./ScoreComposition";
 import { DimensionChapters } from "./DimensionChapters";
-import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel } from "../lib/dimensionChapters";
-import { DossierReport } from "./DossierReport";
+import { orderByPlainAxis, personDimensionChapters, plainAxisLabel, projectAxisScores } from "../lib/dimensionChapters";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
 import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
-import { ChallengeDialog } from "./ChallengeDialog";
 import { canonicalOfficialWebsite } from "../lib/fundScaleEvidence";
-import { TeamMemberEmail } from "./TeamMemberEmail";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
@@ -80,23 +66,18 @@ import { changeReportLifecycle } from "../lib/reports";
 import { LegalScreen } from "./LegalScreen";
 import { SanctionsNameScreen } from "./SanctionsNameScreen";
 import { RingAlert } from "./RingAlert";
-import { useArgusAuth } from "../auth-context";
+import { useOptionalArgusAuth } from "../auth-context";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
-import { DecisionBasis } from "./DecisionBasis";
 import { isStrictFundScaleArtifact } from "../lib/fundScaleEvidence";
 import { portfolioRelationshipBinding, type PortfolioBindingSubject } from "../lib/portfolioRelationshipBinding";
 import { buildDecisionBasis, verifiedDecisionPressureArtifact } from "../lib/decisionBasis";
 import {
   ReportCanvasNarrativeSection,
   ReportCanvasRailCard,
-  ReportStickyTableOfContents,
-  ReportExperienceLayout,
-  type ReportCanvasNavItem,
   type ReportCanvasNarrativeItem,
   type ReportCanvasRailItem,
 } from "./ReportCanvasPrimitives";
-import { ReportDisclaimer } from "./ReportDisclaimer";
-import { InvestigationDecisionCanvas, type DecisionCanvasItem } from "./InvestigationDecisionCanvas";
+import type { DecisionCanvasItem } from "./InvestigationDecisionCanvas";
 import {
   BasicFactsPanel,
   type BasicFactLeadView,
@@ -111,7 +92,7 @@ import {
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 import { isExactOfficialXProfile, projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 import { ExpandableText } from "./ExpandableText";
-import { formatRoleLabel, plainLanguageSummary, plainReportStatusLabel, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
+import { plainLanguageSummary, plainReportStatusLabel, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
 import { teamCandidateSourceMatchesIdentity } from "../lib/teamCandidateIdentity";
 import { publicFindingTitle, publicIntelligenceText, publicStrengthLabel } from "../lib/intelligencePresentation";
 import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
@@ -122,14 +103,30 @@ import { FundraisingPanel } from "./FundraisingPanel";
 import { LaunchVenuePanel } from "./LaunchVenuePanel";
 import { StockHealthPanel } from "./StockHealthPanel";
 import { TokenizedStockPairingPanel } from "./TokenizedStockPairingPanel";
-import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion, isProductDescriptionQuestion } from "../lib/intelligenceBrief";
 import { hasBoundProjectDescription, hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
-import { SocialActivityPanel } from "./SocialActivityPanel";
 import { reportOpeningNarrative } from "../lib/reportNarrative";
-import { requestChallenge } from "../lib/challenge";
 import { useReportLane } from "../reports/shared/ReportLaneContext";
+import { ArgusReportShell, type MoreAction } from "../reports/argus/ArgusReportShell";
+import { buildPersonReportView } from "../reports/argus/buildView";
+import { DecisionChapter } from "../reports/argus/chapters/DecisionChapter";
+import { ScoresChapter } from "../reports/argus/chapters/ScoresChapter";
+import { ProductChapter } from "../reports/argus/chapters/ProductChapter";
+import { CodeChapter } from "../reports/argus/chapters/CodeChapter";
+import { buildCodeView } from "../reports/argus/codeView";
+import { PeopleChapter } from "../reports/argus/chapters/PeopleChapter";
+import { MarketChapter } from "../reports/argus/chapters/MarketChapter";
+import { SocialChapter } from "../reports/argus/chapters/SocialChapter";
+import { ConnectionsChapter } from "../reports/argus/chapters/ConnectionsChapter";
+import { EvidenceChapter } from "../reports/argus/chapters/EvidenceChapter";
+import { HolderReconciliation } from "../reports/argus/chapters/HolderReconciliation";
+import { LegacySection } from "../reports/argus/primitives";
+import { linkedinIdentityMismatch, utcStamp } from "../reports/argus/model";
+import type { InvestigationDecisionCanvasProps } from "../reports/shared/reportLaneRendererTypes";
+import { printReportPdf, reportPdfFilename } from "../lib/printPdf";
+import { exportReportDoc } from "../lib/reportExport";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
+import { isSourceGroundedTeamMember } from "../lib/evidenceTier";
 import {
   SUBJECT_LEAD_RELATIONSHIP,
   actionableInvestigativeLead,
@@ -174,41 +171,6 @@ function VerdictPill({ verdict, size = "sm" }: { verdict: string; size?: "sm" | 
 
 // ScoreRing moved to src/components/ScoreRing.tsx — the shared idiom all
 // three report surfaces now use.
-
-/** Where a score sits inside its published rubric band, in investor words. */
-function scoreBandPosition(score: number, capApplied?: string | null): string {
-  if (capApplied) return "capped by a disqualifying finding";
-  const band = score >= 70 ? { lo: 70, hi: 100, name: "pass band" }
-    : score >= 40 ? { lo: 40, hi: 69, name: "caution band" }
-      : { lo: 0, hi: 39, name: "fail band" };
-  const t = (score - band.lo) / (band.hi - band.lo);
-  return `${t >= 0.67 ? "top" : t >= 0.34 ? "middle" : "low end"} of the ${band.name}`;
-}
-
-type HeroProofTone = "pass" | "caution" | "avoid" | "neutral";
-interface HeroProofChip { key: string; label: string; value?: string; tone: HeroProofTone; href: `#${string}`; title: string }
-
-const PROOF_TONE_CLASS: Record<HeroProofTone, string> = {
-  pass: "tint-pass", caution: "tint-caution", avoid: "tint-avoid font-medium", neutral: "",
-};
-
-function ProofChipStrip({ chips }: { chips: HeroProofChip[] }) {
-  if (chips.length === 0) return null;
-  return (
-    <div className="mt-3 flex flex-wrap gap-1.5" role="list" aria-label="Verification proof points">
-      {chips.map((chip) => (
-        <a key={chip.key} role="listitem" href={chip.href} title={chip.title}
-          className={`chip min-h-8 px-2 transition hover:brightness-125 ${PROOF_TONE_CLASS[chip.tone]}`}>
-          {chip.tone === "avoid" ? <XCircle aria-hidden="true" size={12} weight="fill" />
-            : chip.tone === "caution" ? <WarningCircle aria-hidden="true" size={12} weight="bold" />
-              : chip.tone === "pass" ? <CheckCircle aria-hidden="true" size={12} weight="fill" /> : null}
-          {chip.label}
-          {chip.value && <span className="tabular font-semibold normal-case">{chip.value}</span>}
-        </a>
-      ))}
-    </div>
-  );
-}
 
 function Section({ title, kicker, children }: { title: string; kicker?: string; children: React.ReactNode }) {
   return (
@@ -328,58 +290,6 @@ function CriticalSubjectAlerts({ dossier }: { dossier: Dossier }) {
         )}
       </div>
     </div>
-  );
-}
-
-function SubjectProfileContext({
-  dossier,
-  roles,
-  hasTerminalXState,
-  summary,
-  showSummary = true,
-}: {
-  dossier: Dossier;
-  roles: SubjectClass[];
-  hasTerminalXState: boolean;
-  summary: string;
-  showSummary?: boolean;
-}) {
-  return (
-    <>
-      {showSummary && <p className="mt-2 max-w-2xl break-words text-[13.5px] leading-relaxed text-ink-dim">{summary}</p>}
-      <ReportDisclaimer className="mt-2 max-w-2xl" />
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {roles.map((role) => (
-          <span key={role} className="chip">
-            <RoleIcon role={role} size={13} /> {ROLE_META[role].label}
-          </span>
-        ))}
-        {dossier.subjectCategory && (
-          <span className="chip" title={dossier.subjectCategory.basis.join(" ")}>
-            {subjectCategoryLabel(dossier.subjectCategory)}
-          </span>
-        )}
-        {hasTerminalXState ? (
-          <span className="text-[12.5px] font-medium text-avoid">X profile metrics unavailable</span>
-        ) : (
-          <>
-            <span className="text-[12.5px] text-ink-faint"><span className="text-ink-dim">{dossier.followers}</span> followers</span>
-            <span className="text-[12.5px] text-ink-faint">joined {dossier.joined}</span>
-          </>
-        )}
-        {typeof dossier.days_since_post === "number" && (
-          <span className={`text-[12.5px] ${dossier.days_since_post >= 21 ? "font-medium text-avoid" : "text-ink-faint"}`}>
-            {hasTerminalXState
-              ? `last observed post ${dossier.days_since_post}d ago`
-              : dossier.days_since_post === 0
-                ? "posted today"
-                : dossier.days_since_post === 1
-                  ? "posted yesterday"
-                  : `last posted ${dossier.days_since_post}d ago`}
-          </span>
-        )}
-      </div>
-    </>
   );
 }
 
@@ -742,7 +652,13 @@ function CorroborationTable({
               <div className="min-w-0 text-[12.5px] leading-relaxed text-ink-dim">
                 <div>{relationshipSignalLabel(r.follows, r.ack)}</div>
                 {acknowledgmentSource && (
-                  <a href={acknowledgmentSource.href} target="_blank" rel="noopener noreferrer" className="link-ext mt-1.5 inline-flex">Open acknowledgment</a>
+                  <a href={acknowledgmentSource.href} target="_blank" rel="noopener noreferrer" className="link-ext mt-1.5 inline-flex">
+                    {/* A row that says acknowledgment was never checked cannot
+                        offer a confirmed acknowledgment (ARGUS-10). */}
+                    {["endorsement", "thanks", "mention"].includes((r.ack ?? "").toLowerCase())
+                      ? "Open acknowledgment"
+                      : "Open the candidate source (acknowledgment not reviewed)"}
+                  </a>
                 )}
               </div>
               <div className="max-w-[14rem] sm:max-w-[11rem] sm:text-right">
@@ -1253,7 +1169,10 @@ function FrozenTrustGraphPanel({
       : "NO CONCERNING CONNECTION FOUND";
 
   return (
-    <Section title="Known connections" kicker="checked against every case your team has audited">
+    <Section
+      title="Known connections"
+      kicker={`${screen.qualifiedContributionCount} qualified record${screen.qualifiedContributionCount === 1 ? "" : "s"} screened of ${screen.contributionCount} case${screen.contributionCount === 1 ? "" : "s"} on record`}
+    >
       <Card className="overflow-hidden">
         <div className="p-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -1449,9 +1368,7 @@ function meaningfulTeamMember(member: ReportTeamMember): boolean {
 }
 
 function groundedTeamMember(member: ReportTeamMember): boolean {
-  return meaningfulTeamMember(member)
-    && member.evidence_origin !== "model_lead"
-    && member.artifact_verified === true;
+  return meaningfulTeamMember(member) && isSourceGroundedTeamMember(member);
 }
 
 function sanitizedGroundedTeamMember(member: ReportTeamMember): ReportTeamMember {
@@ -1684,7 +1601,9 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const reportLane = useReportLane();
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("general_diligence");
   const reportStyle = reportLane.definition.presentationStyle;
-  const { role } = useArgusAuth();
+  // Null on the public share route (no AuthGate); every workspace action is
+  // already absent there, so an anonymous reader is simply a viewer.
+  const role = useOptionalArgusAuth()?.role ?? "viewer";
   const f = dossier;
   const hasTerminalXState = f.x_account_status === "suspended" || f.x_account_status === "unavailable";
   const { report, graph, founderSummary, evidence } = dossier;
@@ -1717,9 +1636,12 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const leadershipRows = report.governing_role === "PROJECT" ? (dossier.leaderDepartures ?? []) : [];
   const leadershipForMember = (member: ReportTeamMember) => {
     const memberKeys = new Set(teamIdentityKeys(member));
+    // Match on the name only. Matching on a saved LinkedIn URL let one
+    // mis-bound profile attach another person's employment record as this
+    // person's role continuity (ARGUS-05).
     return leadershipRows.find((row) => {
-      const rowKeys = [row.name, row.linkedin].map(normalizedTeamIdentity).filter(Boolean);
-      return rowKeys.some((key) => memberKeys.has(key));
+      const nameKey = normalizedTeamIdentity(row.name);
+      return Boolean(nameKey) && memberKeys.has(nameKey);
     });
   };
   const unmatchedLeadershipRows = leadershipRows.filter((row) =>
@@ -1834,15 +1756,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const unmatchedPortfolioLeadCount = portfolioLeads.filter((lead) =>
     !verifiedPortfolioProjectKeys.has(lead.projectName.trim().toLowerCase())).length;
   const roles = report.roles as SubjectClass[];
-  const organizationAccount = isOrganizationAccount({
-    roles,
-    profile: {
-      handle: f.handle,
-      display_name: f.display_name,
-      resolved_name: f.resolved_name,
-      bio: f.bio,
-    },
-  });
   const ledgerAudience = f.basicFactQuestionLedger?.[0]?.audience;
   const basicFactsAudience = ledgerAudience === "project"
     ? "project" as const
@@ -1902,6 +1815,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         bio: f.bio,
         ...(f.website ? { website: f.website } : {}),
         ...(f.subjectOrientation ? { subjectOrientation: f.subjectOrientation } : {}),
+        ...(f.officialProductDescription ? { officialProductDescription: f.officialProductDescription } : {}),
         ...(basicFacts.length ? { basicFacts } : {}),
         ...(f.projectToken ? { projectToken: f.projectToken } : {}),
       })
@@ -1970,7 +1884,11 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       label: "Token safety score",
       score: linkedTokenDossier?.score ?? null,
       verdictLabel: linkedTokenDossier?.verdict ?? "Not measured",
-      context: "Contract, tradeability, liquidity, holders, market data and sanctions.",
+      // Two engines answer different questions on opposite polarities: this
+      // one is quality out of 100 (higher is better), the market-mechanics
+      // lens below reports risk points (higher is worse). A report that
+      // published 95 PASS above 46 DANGER named neither scale (ARGUS-02).
+      context: "Out of 100, higher is safer. Contract, tradeability, liquidity, holders, market data and sanctions. The market-mechanics lens reports risk points on the opposite scale.",
       composition: linkedTokenCompositionRows,
       unavailableCopy: f.threatNote
         ?? "A project token is linked, but this saved project report does not contain a completed token-safety score.",
@@ -2004,6 +1922,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const routingUnresolved = roles.length === 0;
   const scoringOutputIncomplete = roles.length > 0 && governingAxes.length === 0;
   const decisionFrameworkUnavailable = routingUnresolved || scoringOutputIncomplete;
+  const scoringAccessError = scoringAccessFailure(f, scoringOutputIncomplete);
   const resolvedRoleLabel = report.governing_role
     ? ROLE_META[report.governing_role as SubjectClass]?.label ?? report.governing_role
     : roles[0]
@@ -2012,7 +1931,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const versionContext = f.versionContext ?? f.viewVersionContext;
   const identity = reportIdentity({ caseId: versionContext?.caseId, auditId: report.audit_id });
   const caseLabel = identity.caseLabel;
-  const slashLabel = caseLabel ?? identity.reportId;
   const frozenDiligenceChecks = versionContext?.checks ?? f.checkRuns ?? [];
   const identityResolutionCheck = frozenDiligenceChecks.find((check) => check.checkId === "identity-resolution");
   const fullResolvedName = (f.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2;
@@ -2044,7 +1962,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   // Screens that completed and explicitly found nothing: the honest content
   // of a favorable "what could break the thesis" section when no adverse
   // finding exists.
-  const cleanScreens = diligenceChecks.filter((check) => check.status === "checked-empty");
   const readiness = deriveDecisionReadiness(
     diligenceChecks,
     versionContext?.attestationState === "legacy_unattested"
@@ -2086,40 +2003,18 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         : "No open evidence checks remain.",
     },
   });
-  const readinessTitle = legacyCoverageNotCaptured ? "Older report: check details unavailable" : readiness.title;
   const readinessGuidance = legacyCoverageNotCaptured
     ? "This report was saved before ARGUS recorded every check separately. The old score is kept for history, but it does not prove that every current check ran."
     : readiness.guidance;
   const presentedVerdict = presentation.displayVerdict === "UNVERIFIABLE"
     ? "UNVERIFIABLE_IDENTITY"
     : presentation.displayVerdict;
-  const prioritizeDecisionIntelligence = Boolean(f.intelligence && (
-    f.intelligence.rulesetVersion === "argus-entity-point-in-time-v1"
-    || (
-      f.intelligence.subject.forms.some((form) => form.form === "company")
-      && !f.intelligence.subject.forms.some((form) => form.form === "token" || form.form === "protocol")
-    )
-  ));
   const roleScoreState: RoleScoreState = presentation.final
     ? "final"
     : presentation.displayVerdict === "PROVISIONAL"
       ? "provisional"
       : "incomplete";
   const m = verdictMeta(presentedVerdict);
-  const verdictTextClass = presentedVerdict === "PASS"
-    ? "text-pass"
-    : presentedVerdict === "CAUTION" || presentedVerdict === "PROVISIONAL"
-      ? "text-caution"
-      : presentedVerdict === "FAIL"
-        ? "text-fail"
-        : presentedVerdict === "AVOID"
-          ? "text-avoid"
-          // Only a suspected-impersonation verdict is "unverifiable" (purple);
-          // INCOMPLETE means insufficient evidence, which is neutral, not a
-          // finding about identity — never borrow the impersonation color.
-          : presentedVerdict === "UNVERIFIABLE_IDENTITY"
-            ? "text-unverifiable"
-            : "text-ink-dim";
   const embeddedFacet = Boolean(f.viewVersionContext || f.viewPersistence);
   const livePersistence = f.viewPersistence ?? f.persistence;
   const panelCostToken = !versionContext && livePersistence?.state === "persisted"
@@ -2130,13 +2025,13 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const liveCoreSnapshotSaved = !versionContext
     && livePersistence?.state === "persisted"
     && Boolean(livePersistence.reportVersionId);
-  const immutableReviewHref = liveCoreSnapshotSaved && livePersistence?.reportVersionId
-    ? exactReportPath(livePersistence.reportVersionId)
-    : null;
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
   );
+  const immutableReviewHref = liveCoreSnapshotSaved && livePersistence?.reportVersionId
+    ? exactReportPath(livePersistence.reportVersionId)
+    : null;
   const persistencePending = !versionContext && livePersistence?.state === "pending";
   const persistenceFailed = !versionContext && livePersistence?.state === "failed";
   const persistenceMissingCapability = !versionContext
@@ -2186,13 +2081,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     f.versionContext?.reportVersionId
     || (f.persistence?.state === "persisted" && f.persistence.reportVersionId),
   );
-  const attestationLabel = versionContext?.attestationState === "server_collected"
-    ? "server-collected snapshot"
-    : versionContext?.attestationState === "analyst_submitted"
-      ? "analyst-submitted snapshot"
-      : versionContext
-        ? "legacy snapshot"
-        : null;
   const capturedLabel = versionContext?.createdAt
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : null;
@@ -2228,7 +2116,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const [watched, setWatched] = useState(() => isWatched(report.handle));
   // The compounding web: who else (from your past audits) this subject is tied to.
   const connections = subjectConnections(report.handle, getContributions());
-  const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
   const [archiveState, setArchiveState] = useState<"idle" | "archiving" | "error">("idle");
   // A collapsed list must not hide open questions from a printed or exported
   // copy of a favorable report.
@@ -2253,59 +2140,14 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       setArchiveState("error");
     }
   };
-  const share = async () => {
-    if (shareState === "creating") return;
-    setShareState("creating");
-    try {
-      const response = await fetch("/api/share", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          kind: "person",
-          ref: report.handle,
-          reportVersionId: f.versionContext?.reportVersionId
-            ?? (f.persistence?.state === "persisted" ? f.persistence.reportVersionId : undefined),
-        }),
-      });
-      const body = (await response.json().catch(() => ({}))) as { url?: unknown; message?: unknown };
-      if (!response.ok || typeof body.url !== "string") {
-        throw new Error(typeof body.message === "string" ? body.message : "Secure share link creation failed.");
-      }
-      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable.");
-      await navigator.clipboard.writeText(new URL(body.url, location.origin).toString());
-      setShareState("copied");
-      setTimeout(() => setShareState("idle"), 1800);
-    } catch (error) {
-      console.error("[share] principal report failed", error);
-      setShareState("error");
-      setTimeout(() => setShareState("idle"), 3000);
-    }
-  };
   // Same mint as the Share button, but returning the URL for composition (the
   // TLDR copy) instead of writing it to the clipboard directly. Null on any
   // failure so callers can fall back to the app URL.
-  const mintShareUrl = async (): Promise<string | null> => {
-    if (!canShare) return null;
-    try {
-      const response = await fetch("/api/share", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          kind: "person",
-          ref: report.handle,
-          reportVersionId: f.versionContext?.reportVersionId
-            ?? (f.persistence?.state === "persisted" ? f.persistence.reportVersionId : undefined),
-        }),
-      });
-      const body = (await response.json().catch(() => ({}))) as { url?: unknown };
-      if (!response.ok || typeof body.url !== "string") return null;
-      return new URL(body.url, location.origin).toString();
-    } catch {
-      return null;
-    }
-  };
+  // Watching writes the workspace watchlist with this version's result; it
+  // never mutates the frozen report, so saved versions can be watched too.
+  const canWatch = !shareView && !privateSession && !embeddedFacet;
   const watch = () => {
-    if (!canMutateWorkspace) return;
+    if (!canWatch) return;
     const watchVerdict = presentation.displayVerdict === "UNVERIFIABLE"
       ? "UNVERIFIABLE_IDENTITY"
       : presentation.displayVerdict;
@@ -2346,11 +2188,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const unresolvedChecks = decisionCriticalChecks(diligenceChecks).filter((check) =>
     check.status === "unknown" || check.status === "unavailable" || check.status === "stale",
   );
-  const unresolvedCheckNames = unresolvedChecks.slice(0, 3).map((check) => publicCheckLabel(check.label));
-  const unresolvedCheckRemainder = Math.max(0, unresolvedChecks.length - unresolvedCheckNames.length);
-  const noCleanScreenCopy = unresolvedChecks.length > 0
-    ? `${unresolvedChecks.length} decision-critical ${unresolvedChecks.length === 1 ? "check remains" : "checks remain"} open or unrecorded: ${unresolvedCheckNames.join(", ")}${unresolvedCheckRemainder > 0 ? `, and ${unresolvedCheckRemainder} more` : ""}. No completed clean screen is recorded, so this report does not support an all-clear.`
-    : "No completed clean screen is recorded, so this report does not support an all-clear.";
   const investorOpenChecks = unresolvedChecks.filter((check) => {
     const diagnostic = [check.label, check.note, check.provider].filter(Boolean).join(" ").toLowerCase();
     const optionalSource = /\b(?:crunchbase|reddit|people data labs|pdl|grok|twitterapi(?:\.io)?|x provider)\b/.test(diagnostic);
@@ -2454,6 +2291,10 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     // deliberately does NOT render here: it lives in the verdict header chip
     // and the methodology rail. A verdict section leads with findings about
     // the subject, never with our own process status.
+    // These rows carry no artifact references, which the evidence ledger
+    // already says out loud. Republishing the model's self-assigned
+    // confidence as ARGUS provenance turned a review lead into
+    // high-confidence adverse evidence (ARGUS-07).
     ...visibleContradictions.slice(0, 2).map((contradiction, index) => ({
       id: `contradiction-${index}`,
       title: plainLanguageSummary(contradiction.claim),
@@ -2621,7 +2462,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     ) === index;
   });
   const verificationNext = allVerificationQuestions.slice(0, 3);
-  const remainingVerificationQuestions = allVerificationQuestions.slice(3);
   const decisionQuestionCount = allVerificationQuestions.length;
 
   // Real countervailing signals only. Open-question pressure renders as a
@@ -2655,54 +2495,9 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     });
   // Investigator rail: deterministic anomalies from the frozen stats, so the
   // few numbers that change a decision stop hiding inside stat grids.
-  const noticedSignals = deriveNoticedSignals({
-    lpLockedPct: f.holderProfile?.lpLockedOrBurnedPct,
-    largestHolderPct: f.holderProfile?.topHolderPct,
-    top10HolderPct: f.holderProfile?.top10Pct,
-    assessedWalletCount: f.holderProfile?.assessedWalletCount,
-    top10HolderPctIsFloor: f.holderProfile?.top10PctIsFloor,
-    circulatingPct: (() => {
-      const circulating = f.projectToken?.circulatingSupply;
-      const denominator = f.projectToken?.maxSupply ?? f.projectToken?.totalSupply;
-      return circulating != null && denominator != null && denominator > 0
-        ? (circulating / denominator) * 100
-        : null;
-    })(),
-    fdvUsd: f.projectToken?.fdvUsd,
-    marketCapUsd: f.projectToken?.marketCapUsd,
-    volume24hUsd: f.projectToken?.volume24hUsd,
-    nextUnlock: f.tokenUnlocks
-      ? { date: f.tokenUnlocks.nextUnlockDate, amountUsd: f.tokenUnlocks.unlockValueUsd, pctSupply: f.tokenUnlocks.percentOfSupply }
-      : null,
-    tvlChange30dPct: f.protocolTvl?.change30dPct,
-    feesChange30dPct: f.protocolFees?.change30dOver30dPct,
-    athDrawdownPct: f.projectToken?.ath?.drawdownPct,
-    accountSuspended: f.x_account_status === "suspended",
-    daysSinceLastPost: f.days_since_post,
-    verifiedTeamCount: f.projectToken ? webTeam.length : null,
-    namedTeamCount: webTeam.length + webTeamLeads.length,
-    anchors: { market: "#project-token", team: "#identity-evidence", account: "#report-overview" },
-  });
-  const decisionDiscovery = deriveDecisionDiscovery(noticedSignals);
-  const materialChangeDiscovery = materialDeltaDiscovery(
-    f.reportDelta,
-    f.versionContext?.reportVersionId
-      ?? f.viewVersionContext?.reportVersionId
-      ?? (f.persistence?.state === "persisted" ? f.persistence.reportVersionId : null),
-  );
-  const controlPathDiscovery = buildPublicControlPathDiscovery([f.graph], "#relationships");
-  const claimConflictDiscovery = buildPublicClaimConflictDiscovery(f.basicFacts ?? [], "#basic-facts");
   // One paste, whole verdict: composed for group chats and IC memos alike.
   // The link is appended at copy time (share link when mintable, app URL else).
-  const tldrBase = [
-    `ARGUS · ${f.display_name || f.handle} · ${presentedVerdict} ${report.governing_score ?? "N/A"}/100`,
-    plainLanguageSummary(f.headline),
-    remainingPointsItems[0] ? `Top open item: ${remainingPointsItems[0].title}.` : "",
-  ].filter(Boolean).join("\n");
   const confidenceLimits: ReportCanvasNarrativeItem[] = confidenceLimitsBase.slice(0, 6);
-  const adverseVerdictNarrative = [...confidenceLimits]
-    .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
-    .slice(0, 6);
   // An unverified lead is not a finding: it never enters the findings ledger and
   // it never moves the score. What it does do is stop the risk section from
   // saying "no adverse findings" while the same page carries an accusation
@@ -2719,10 +2514,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         ? `No source ARGUS could check corroborated ${oneSubjectLead ? "it" : "them"}, so ${oneSubjectLead ? "it is" : "they are"} not recorded as ${oneSubjectLead ? "a finding" : "findings"} and ${oneSubjectLead ? "does" : "do"} not change the score.`
         : `${oneSubjectLead ? "It is" : "They are"} not recorded as ${oneSubjectLead ? "a finding" : "findings"} about ${report.handle} and ${oneSubjectLead ? "does" : "do"} not change the score.`
     }`;
-  const verdictNarrative = favorableVerdict ? supportNarrative : adverseVerdictNarrative;
-  const countervailingNarrative = favorableVerdict
-    ? confidenceLimits
-    : supportNarrative;
   const caseArgument = deriveVerdictArgument({
     verdict: presentedVerdict,
     supports: [
@@ -2780,35 +2571,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       || check.status === "checked-empty")
     .map((check) => ({ label: publicCheckLabel(check.label), ...(check.note ? { detail: publicCheckNote(check.note) } : {}) }));
 
-  const unscoredIntelNarrative: ReportCanvasNarrativeItem[] = [
-    ...(f.projectToken ? [{
-      id: "intel-project-token",
-      title: `$${f.projectToken.symbol} is the verified project token.`,
-      detail: [
-        f.projectToken.rank != null ? `Market rank #${f.projectToken.rank}` : null,
-        f.projectToken.marketCapUsd != null ? `market cap ${usdCompact(f.projectToken.marketCapUsd)}` : null,
-        f.projectToken.chain,
-      ].filter(Boolean).join(" · "),
-      provenance: `Official token · confirmed through ${f.projectToken.verification === "official_x" ? "official X" : "official website"}`,
-      href: "#project-token" as `#${string}`,
-    }] : []),
-    ...(f.sourceArtifacts ?? []).map((artifact, index) => ({
-      id: `intel-artifact-${artifact.contentHash || index}`,
-      title: publicFindingTitle(artifact.title),
-      detail: publicIntelligenceText(artifact.excerpt),
-      provenance: artifact.match.replace(/_/g, " "),
-      href: "#evidence-ledger" as `#${string}`,
-    })),
-    ...publishableSubjectFindings.map((finding, index) => ({
-      id: `intel-finding-${index}`,
-      title: finding.claim,
-      detail: `${finding.verification_status} finding with ${finding.independent_source_count} recorded source${finding.independent_source_count === 1 ? "" : "s"}.`,
-      provenance: routingUnresolved
-        ? "Verified finding · not scored until ARGUS confirms the report type"
-        : "Verified finding · not scored because the scoring step did not finish",
-      href: "#publishable-findings" as `#${string}`,
-    })),
-  ].filter((item, index, items) => items.findIndex((candidate) => candidate.title === item.title) === index).slice(0, 8);
   const visibleIntelligenceCount = (f.projectToken ? 1 : 0)
     + (f.sourceArtifacts?.length ?? 0)
     + publishableSubjectFindings.length
@@ -2859,1830 +2621,773 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     { label: "Still to check", value: decisionQuestionCount, detail: "important open questions" },
   ] as const;
 
-  // Hero proof chips: every chip is a projection of recorded check outcomes,
-  // verified facts, or frozen snapshots, deep-linking to its evidence.
-  // Adverse findings always outrank proof in the sort; a missing screen shows
-  // as caution, never silence.
-  const findCheck = (id: string) => diligenceChecks.find((check) => check.checkId === id);
-  const heroLedgerEntry = (predicate: string) => (f.basicFactQuestionLedger ?? []).find((entry) =>
-    canonicalBasicFactPredicate(entry.predicate) === predicate);
-  const heroProofChips: HeroProofChip[] = [];
-  {
-    const ic = displayIdentityConfidence;
-    heroProofChips.push(
-      ic === "SuspectedImpersonation"
-        ? { key: "identity", label: "Impersonation suspected", tone: "avoid", href: "#identity-evidence", title: "Identity screen flagged suspected impersonation. Review before anything else." }
-        : ic === "Confirmed"
-          ? { key: "identity", label: "Identity verified", tone: "pass", href: "#identity-evidence", title: findCheck("identity-resolution")?.note ?? "Official identity resolved and confirmed." }
-          : ic === "Probable"
-            ? { key: "identity", label: "Identity link found", tone: "caution", href: "#identity-evidence", title: "ARGUS found a public identity link, but it is not independently confirmed." }
-            : organizationAccount
-              ? { key: "identity", label: "Organization unverified", tone: "caution", href: "#identity-evidence", title: "The public brand account was identified, but its legal entity and operators were not confirmed." }
-              : { key: "identity", label: "Identity unresolved", tone: "caution", href: "#identity-evidence", title: "No confirmed identity resolution is recorded." },
-    );
-  }
-  if (!legacyCoverageNotCaptured) {
-    const sanctionsCheck = findCheck("ofac-sanctions-name");
-    const sanctionsNames = sanctionsCheck?.note?.match(/against ([\d,]+) OFAC SDN names/)?.[1];
-    heroProofChips.push(
-      sanctionsCheck?.status === "checked-empty"
-        ? { key: "sanctions", label: "Sanctions clear", value: sanctionsNames ? `${sanctionsNames} names` : undefined, tone: "pass", href: "#identity-evidence", title: sanctionsCheck.note ?? "Exact-name sanctions screen completed with no match." }
-        : sanctionsCheck?.status === "finding"
-          ? { key: "sanctions", label: "Sanctions match", tone: "avoid", href: "#identity-evidence", title: sanctionsCheck.note ?? "An exact-name sanctions match requires identity review." }
-          : sanctionsCheck?.status === "not-applicable"
-            ? organizationAccount
-              ? { key: "sanctions", label: "Person sanctions n/a", tone: "neutral", href: "#identity-evidence", title: "This is an organization account. Person-name screening requires verified operator names; entity screening requires a verified legal entity." }
-              : { key: "sanctions", label: "Sanctions n/a", tone: "neutral", href: "#identity-evidence", title: sanctionsCheck.note ?? "The sanctions screen needs a resolved real name." }
-            : { key: "sanctions", label: "Sanctions not screened", tone: "caution", href: "#scan-methodology", title: sanctionsCheck?.note ?? "No sanctions-screen outcome is recorded in this snapshot." },
-    );
-  }
-  {
-    const auditFacts = basicFacts.filter((fact) =>
-      canonicalBasicFactPredicate(fact.predicate) === "audit"
-      && (fact.status === "verified" || fact.status === "corroborated"));
-    const conflictedAudit = basicFacts.some((fact) =>
-      canonicalBasicFactPredicate(fact.predicate) === "audit" && fact.status === "conflicted");
-    const auditorConfirmed = auditFacts.filter((fact) =>
-      (fact.sources ?? []).some((candidate) => candidate.sourceClass === "official_counterparty")).length;
-    const auditQuestion = heroLedgerEntry("audit");
-    if (conflictedAudit) {
-      heroProofChips.push({ key: "audits", label: "Audit claim conflicted", tone: "avoid", href: "#basic-facts", title: "An audit claim is contradicted by a source. Read both before relying on either." });
-    } else if (auditorConfirmed > 0) {
-      heroProofChips.push({ key: "audits", label: "Audits confirmed", value: `x${auditorConfirmed}`, tone: "pass", href: "#basic-facts", title: `${auditorConfirmed} audit ${auditorConfirmed === 1 ? "claim" : "claims"} confirmed on the auditor's own site, not just the project's.` });
-    } else if (auditFacts.length > 0) {
-      heroProofChips.push({ key: "audits", label: "Audits cited", value: `x${auditFacts.length}`, tone: "neutral", href: "#basic-facts", title: "Audit claims verified on project materials; auditor-site confirmation not recorded." });
-    } else if (auditQuestion && basicFactQuestionOutcome(auditQuestion) !== "checked_empty") {
-      heroProofChips.push({ key: "audits", label: "No audit on record", tone: "caution", href: "#follow-up-questions", title: "No security audit could be verified for this project. This is a finding about the project, not a scan error; the audit search did not fully finish, so a rescan may still surface one." });
-    } else if (auditQuestion) {
-      heroProofChips.push({ key: "audits", label: "No audit published", tone: "caution", href: "#basic-facts", title: "A completed search found no independent security audit for this project." });
-    }
-  }
-  {
-    const tokenQuestion = heroLedgerEntry("official_token");
-    const tokenClaimObserved = Boolean(
-      f.projectToken
-      || basicFacts.some((fact) => canonicalBasicFactPredicate(fact.predicate) === "official_token"),
-    );
-    const tokenAbsenceIsMaterial = tokenClaimObserved || roles.some((role) =>
-      role === SubjectClass.PROJECT
-      || role === SubjectClass.FOUNDER
-      || role === SubjectClass.KOL);
-    if (f.projectToken) {
-      heroProofChips.push({ key: "token", label: "Token verified", value: `$${f.projectToken.symbol}`, tone: "pass", href: "#project-token", title: `Confirmed through ${f.projectToken.verification === "official_x" ? "the official X account" : "the official website"}, not just the token name.` });
-    } else if (tokenQuestion && tokenAbsenceIsMaterial && basicFactQuestionOutcome(tokenQuestion) === "checked_empty") {
-      heroProofChips.push({ key: "token", label: "No official token", tone: "neutral", href: "#basic-facts", title: "A completed search found no verified official token." });
-    } else if (tokenQuestion && tokenClaimObserved) {
-      const claimedSymbol = claimedTicker(f.bio);
-      heroProofChips.push({
-        key: "token",
-        label: "Token claim unproven",
-        ...(claimedSymbol ? { value: `$${claimedSymbol}` } : {}),
-        tone: "caution",
-        href: "#follow-up-questions",
-        title: `This account claims a token${claimedSymbol ? ` ($${claimedSymbol})` : ""} that no official site or registry record links to it. Anything sold under that name is unproven; this is the core scam vector, so verify before capital moves.`,
-      });
-    }
-  }
-  {
-    // Scale reads pass tone only from sources a subject cannot self-publish;
-    // an official-subject-only usage claim stays labeled as self-reported.
-    const HARD_SCALE_CLASSES = new Set(["regulatory_or_onchain", "independent_press", "official_counterparty"]);
-    const tractionFacts = basicFacts.filter((fact) =>
-      canonicalBasicFactPredicate(fact.predicate) === "traction"
-      && (fact.status === "verified" || fact.status === "corroborated"));
-    const tvlFact = tractionFacts.find((fact) => /total value locked|TVL/i.test(String(fact.value ?? "")));
-    const scaleFact = tvlFact ?? tractionFacts[0];
-    if (scaleFact) {
-      const hardScale = (scaleFact.sources ?? []).some((candidate) => HARD_SCALE_CLASSES.has(candidate.sourceClass ?? ""));
-      const raw = String(scaleFact.value ?? "");
-      const tvlMatch = raw.match(/\$\s?([\d.,]+)\s*(billion|bn|b|million|mn|m)\b/i);
-      const compact = tvlMatch && tvlFact === scaleFact
-        ? `$${tvlMatch[1].replace(/,/g, "")}${/^b/i.test(tvlMatch[2]) ? "B" : "M"} TVL`
-        : undefined;
-      heroProofChips.push(hardScale
-        ? { key: "scale", label: compact ? "Verified" : "Usage verified", value: compact, tone: "pass", href: "#basic-facts", title: raw.slice(0, 160) }
-        : { key: "scale", label: "Self-reported usage", value: compact, tone: "neutral", href: "#basic-facts", title: `${raw.slice(0, 140)} (source: the project's own materials)` });
-    }
-  }
-  {
-    const foundedFact = basicFacts.find((fact) =>
-      canonicalBasicFactPredicate(fact.predicate) === "founded"
-      && (fact.status === "verified" || fact.status === "corroborated"));
-    const foundedYear = foundedFact ? String(foundedFact.value ?? "").match(/(?:19|20)\d{2}/)?.[0] : undefined;
-    if (foundedYear) {
-      heroProofChips.push({ key: "age", label: "since", value: foundedYear, tone: "neutral", href: "#basic-facts", title: `Founded ${foundedYear}, verified against fetched sources.` });
-    }
-  }
-  if (!legacyCoverageNotCaptured) {
-    heroProofChips.push(
-      readiness.status === "ready"
-        ? { key: "coverage", label: "Checks", value: `${readiness.successful}/${readiness.applicable}`, tone: "pass", href: "#scan-methodology", title: `${readiness.coveragePercent}% of required checks finished.` }
-        : { key: "coverage", label: `${readiness.coveragePercent}% checked`, value: `${readiness.successful}/${readiness.applicable}`, tone: "caution", href: "#scan-methodology", title: readinessGuidance },
-    );
-  }
-  // Findings lead, then what we FOUND. Absence-class caution chips stay
-  // visible but trail the proof: a report never leads with what it did not
-  // find, while an actual adverse finding still outranks everything.
-  const PROOF_TONE_RANK: Record<HeroProofTone, number> = { avoid: 0, pass: 1, neutral: 2, caution: 3 };
-  heroProofChips.sort((a, b) => PROOF_TONE_RANK[a.tone] - PROOF_TONE_RANK[b.tone]);
 
   // Fundamentals we verified, as headline numbers. Every tile derives from a
   // frozen snapshot and is omitted when absent; nothing renders a dash.
-  const fundamentalTiles: Array<{ key: string; label: string; value: string; sub: string }> = [
-    ...(f.protocolTvl && f.protocolTvl.tvlUsd > 0 ? [{
-      key: "tvl",
-      label: "Value locked",
-      value: usdCompact(f.protocolTvl.tvlUsd),
-      sub: `DeFiLlama · ${f.protocolTvl.capturedAt.slice(0, 10)}`,
-    }] : []),
-    ...(f.projectToken?.rank != null ? [{
-      key: "rank",
-      label: "Market rank",
-      value: `#${f.projectToken.rank}`,
-      sub: "CoinGecko, all crypto assets",
-    }] : []),
-    ...(f.protocolTvl?.firstRecordedAt ? [{
-      key: "history",
-      label: "TVL history",
-      value: `since ${f.protocolTvl.firstRecordedAt.slice(0, 4)}`,
-      sub: "series start, bounds age",
-    }] : []),
-    ...(fundingEvidence.totalKnownUsd > 0 ? [{
-      key: "raised",
-      label: fundingEvidence.independentRoundCount > 0 ? "Confirmed funding" : "Funding record",
-      value: `${fundingEvidence.independentRoundCount > 0 ? "≥" : ""}${usdCompact(fundingEvidence.totalKnownUsd)}`,
-      sub: fundingEvidence.independentRoundCount > 0
-        ? `${fundingEvidence.rounds.length} sourced round${fundingEvidence.rounds.length === 1 ? "" : "s"} · minimum known total`
-        : `${fundingEvidence.rounds.length} reported round${fundingEvidence.rounds.length === 1 ? "" : "s"} · third-party database`,
-    }] : []),
-    ...(f.projectToken?.deployedChains?.length ? [{
-      key: "chains",
-      label: "Chains",
-      value: String(f.projectToken.deployedChains.length),
-      sub: "Matched through CoinGecko",
-    }] : []),
-  ];
-  const reportNavItems: ReportCanvasNavItem[] = [
-    { href: "#report-summary", label: "Decision", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
-    ...(presentation.primaryScore && governingAxes.length > 0 ? [{ href: "#composition" as const, label: "Score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" /> }] : []),
-    ...(roles.includes(SubjectClass.PROJECT)
-      ? [{ href: "#basic-facts" as const, label: "What the product is", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]
-      : [{ href: "#report-summary" as const, label: "Summary", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]),
-    ...(f.entityContinuity?.events.length ? [{ href: "#key-developments" as const, label: "Key developments", icon: <ArrowsClockwise aria-hidden="true" size={15} weight="bold" /> }] : []),
-    { href: "#identity-evidence", label: "People", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
-    ...(f.projectToken ? [{ href: "#project-token" as const, label: "Market", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
-    ...(f.socialActivity && roles.includes(SubjectClass.PROJECT) ? [{ href: "#social-activity" as const, label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> }] : []),
-    { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
-    { href: "#evidence-ledger", label: "Evidence & method", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount },
-  ];
 
-  return (
-    <div className="relative min-h-full pb-24">
-      <div className="grid-bg absolute inset-0 top-0 -z-10 h-72" />
+  // Decision inputs retained from the saved-report derivations above.
+  const organizationAccount = isOrganizationAccount({
+    roles,
+    profile: {
+      handle: f.handle,
+      display_name: f.display_name,
+      resolved_name: f.resolved_name,
+      bio: f.bio,
+    },
+  });
+  const cleanScreens = diligenceChecks.filter((check) => check.status === "checked-empty");
+  const unresolvedCheckNames = unresolvedChecks.slice(0, 3).map((check) => publicCheckLabel(check.label));
+  const unresolvedCheckRemainder = Math.max(0, unresolvedChecks.length - unresolvedCheckNames.length);
+  const noCleanScreenCopy = unresolvedChecks.length > 0
+    ? `${unresolvedChecks.length} decision-critical ${unresolvedChecks.length === 1 ? "check remains" : "checks remain"} open or unrecorded: ${unresolvedCheckNames.join(", ")}${unresolvedCheckRemainder > 0 ? `, and ${unresolvedCheckRemainder} more` : ""}. No completed clean screen is recorded, so this report does not support an all-clear.`
+    : "No completed clean screen is recorded, so this report does not support an all-clear.";
+  const noticedSignals = deriveNoticedSignals({
+    lpLockedPct: f.holderProfile?.lpLockedOrBurnedPct,
+    largestHolderPct: f.holderProfile?.topHolderPct,
+    top10HolderPct: f.holderProfile?.top10Pct,
+    assessedWalletCount: f.holderProfile?.assessedWalletCount,
+    top10HolderPctIsFloor: f.holderProfile?.top10PctIsFloor,
+    circulatingPct: (() => {
+      const circulating = f.projectToken?.circulatingSupply;
+      const denominator = f.projectToken?.maxSupply ?? f.projectToken?.totalSupply;
+      return circulating != null && denominator != null && denominator > 0
+        ? (circulating / denominator) * 100
+        : null;
+    })(),
+    fdvUsd: f.projectToken?.fdvUsd,
+    marketCapUsd: f.projectToken?.marketCapUsd,
+    volume24hUsd: f.projectToken?.volume24hUsd,
+    nextUnlock: f.tokenUnlocks
+      ? { date: f.tokenUnlocks.nextUnlockDate, amountUsd: f.tokenUnlocks.unlockValueUsd, pctSupply: f.tokenUnlocks.percentOfSupply }
+      : null,
+    tvlChange30dPct: f.protocolTvl?.change30dPct,
+    feesChange30dPct: f.protocolFees?.change30dOver30dPct,
+    athDrawdownPct: f.projectToken?.ath?.drawdownPct,
+    accountSuspended: f.x_account_status === "suspended",
+    daysSinceLastPost: f.days_since_post,
+    verifiedTeamCount: f.projectToken ? webTeam.length : null,
+    namedTeamCount: webTeam.length + webTeamLeads.length,
+    anchors: { market: "#project-token", team: "#identity-evidence", account: "#report-overview" },
+  });
+  const decisionDiscovery = deriveDecisionDiscovery(noticedSignals);
+  const materialChangeDiscovery = materialDeltaDiscovery(
+    f.reportDelta,
+    f.versionContext?.reportVersionId
+      ?? f.viewVersionContext?.reportVersionId
+      ?? (f.persistence?.state === "persisted" ? f.persistence.reportVersionId : null),
+  );
+  const controlPathDiscovery = buildPublicControlPathDiscovery([f.graph], "#relationships");
+  const claimConflictDiscovery = buildPublicClaimConflictDiscovery(f.basicFacts ?? [], "#basic-facts");
+  const adverseVerdictNarrative = [...confidenceLimits]
+    .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
+    .slice(0, 6);
+  const verdictNarrative = favorableVerdict ? supportNarrative : adverseVerdictNarrative;
+  const countervailingNarrative = favorableVerdict
+    ? confidenceLimits
+    : supportNarrative;
+  const unscoredIntelNarrative: ReportCanvasNarrativeItem[] = [
+    ...(f.projectToken ? [{
+      id: "intel-project-token",
+      title: `$${f.projectToken.symbol} is the verified project token.`,
+      detail: [
+        f.projectToken.rank != null ? `Market rank #${f.projectToken.rank}` : null,
+        f.projectToken.marketCapUsd != null ? `market cap ${usdCompact(f.projectToken.marketCapUsd)}` : null,
+        f.projectToken.chain,
+      ].filter(Boolean).join(" · "),
+      provenance: `Official token · confirmed through ${f.projectToken.verification === "official_x" ? "official X" : "official website"}`,
+      href: "#project-token" as `#${string}`,
+    }] : []),
+    ...(f.sourceArtifacts ?? []).map((artifact, index) => ({
+      id: `intel-artifact-${artifact.contentHash || index}`,
+      title: publicFindingTitle(artifact.title),
+      detail: publicIntelligenceText(artifact.excerpt),
+      provenance: artifact.match.replace(/_/g, " "),
+      href: "#evidence-ledger" as `#${string}`,
+    })),
+    ...publishableSubjectFindings.map((finding, index) => ({
+      id: `intel-finding-${index}`,
+      title: finding.claim,
+      detail: `${finding.verification_status} finding with ${finding.independent_source_count} recorded source${finding.independent_source_count === 1 ? "" : "s"}.`,
+      provenance: routingUnresolved
+        ? "Verified finding · not scored until ARGUS confirms the report type"
+        : "Verified finding · not scored because the scoring step did not finish",
+      href: "#publishable-findings" as `#${string}`,
+    })),
+  ].filter((item, index, items) => items.findIndex((candidate) => candidate.title === item.title) === index).slice(0, 8);
 
-      {/* top bar */}
-      <header className="sticky top-0 z-30 border-b border-line bg-void/85 backdrop-blur">
-        <div className="report-frame flex flex-nowrap items-center gap-2 py-2.5 sm:py-3">
-          <button type="button" onClick={onReset} className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-[13.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink sm:min-w-0 sm:justify-start">
-            <ArrowLeft aria-hidden="true" size={15} weight="bold" />
-            <span className="max-sm:sr-only">New investigation</span>
-          </button>
-          {slashLabel && (
-            <span className="mono hidden text-[11px] text-ink-faint md:inline" aria-label={caseLabel ? `Case ${caseLabel}` : `Report ${slashLabel}`}>
-              / {slashLabel}
-            </span>
-          )}
-          {immutableReviewHref ? (
-            <a
-              className="chip tint-signal"
-              href={immutableReviewHref}
-              target="_blank"
-              rel="noreferrer"
-              title="Open the exact saved report. New checks shown later do not change its score."
-            >
-              SAVED REPORT
-            </a>
-          ) : (
-            <span
-              className={`chip ${!versionContext && f.live ? "tint-signal" : ""}`}
-              title={versionContext ? `Saved report version ${versionContext.version}` : f.live ? "Collected in a new scan" : "Saved example report"}
-            >
-              {versionContext ? `VERSION ${versionContext.version}` : f.live ? "● LIVE SCAN" : "CURATED"}
-            </span>
-          )}
-          <div className="ml-auto flex min-w-0 items-center gap-2">
-            {onOpenBrief && (
-              <button
-                type="button"
-                onClick={onOpenBrief}
-                title="Open the analyst decision brief anchored to this exact person case"
-                className="btn-primary btn-brand min-h-11 shrink-0 gap-1.5 px-3 text-[12.5px] font-medium"
-              >
-                <Briefcase aria-hidden="true" size={14} weight="bold" />
-                Case brief
-              </button>
-            )}
-            <div className="hidden items-center gap-2 sm:flex">
-            {onRescan && (
-              <button type="button" onClick={onRescan} title="Run this audit again, fresh" className="btn-chip tint-signal min-h-11 gap-1.5 px-3">
-                <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
-                Rescan
-              </button>
-            )}
-            <ExportMenu dossier={dossier} />
-            {canShare && (
-              <button
-                type="button"
-                onClick={() => void share()}
-                disabled={shareState === "creating"}
-                aria-live="polite"
-                title={shareState === "error" ? "Share link could not be created or copied. Try again." : "Copy a report link that works for 30 days"}
-                className="btn-secondary min-h-11 gap-1.5 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60"
-              >
-                <ShareNetwork aria-hidden="true" size={14} weight="bold" />
-                {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share"}
-              </button>
-            )}
-            {canMutateWorkspace && (
-              <button type="button" onClick={watch} aria-pressed={watched} className={`inline-flex min-h-11 items-center gap-1.5 rounded-md border px-3 text-[12.5px] transition ${watched ? "tint-signal" : "btn-secondary"}`}>
-                <Star aria-hidden="true" size={14} weight={watched ? "fill" : "regular"} />
-                {watched ? "Watching" : "Watch"}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onReset}
-              className="btn-secondary min-h-11 gap-1.5 px-3 text-[12.5px]"
-            >
-              <MagnifyingGlassPlus aria-hidden="true" size={14} weight="bold" />
-              New audit
-            </button>
-            </div>
-            {canArchive && (
-              <details className="relative hidden sm:block">
-                <summary aria-label="More report actions" className="btn-secondary min-h-11 list-none cursor-pointer gap-1.5 px-3 text-[12.5px] [&::-webkit-details-marker]:hidden">
-                  <DotsThree aria-hidden="true" size={17} weight="bold" />
-                  More
-                </summary>
-                <div className="panel absolute right-0 top-full z-30 mt-1.5 w-56 p-1.5 shadow-xl">
-                  <button
-                    type="button"
-                    onClick={() => void archive()}
-                    disabled={archiveState === "archiving"}
-                    title="Remove this case from active work while keeping its saved report and history"
-                    className="w-full rounded-lg px-3 py-2 text-left text-[12.5px] text-ink-dim transition hover:bg-signal/10 hover:text-signal-lift disabled:cursor-wait disabled:opacity-60"
-                  >
-                    {archiveState === "archiving" ? "Archiving case…" : archiveState === "error" ? "Archive failed · retry" : "Archive case"}
-                  </button>
-                </div>
-              </details>
-            )}
-            <details className="relative sm:hidden">
-              <summary aria-label="More report actions" className="btn-secondary min-h-11 min-w-11 list-none cursor-pointer justify-center px-2.5 [&::-webkit-details-marker]:hidden">
-                <DotsThree aria-hidden="true" size={17} weight="bold" />
-                <span className="sr-only">More report actions</span>
-              </summary>
-              <div className="panel absolute right-0 top-full z-30 mt-1.5 w-56 p-1.5 shadow-xl">
-                {onRescan && (
-                  <button type="button" onClick={onRescan} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
-                    <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
-                    Rescan current evidence
-                  </button>
-                )}
-                {canShare && (
-                  <button
-                    type="button"
-                    onClick={() => void share()}
-                    disabled={shareState === "creating"}
-                    aria-live="polite"
-                    className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink disabled:cursor-wait disabled:opacity-60"
-                  >
-                    <ShareNetwork aria-hidden="true" size={14} weight="bold" />
-                    {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share report"}
-                  </button>
-                )}
-                {canMutateWorkspace && (
-                  <button type="button" onClick={watch} aria-pressed={watched} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
-                    <Star aria-hidden="true" size={14} weight={watched ? "fill" : "regular"} />
-                    {watched ? "Watching report" : "Add to watchlist"}
-                  </button>
-                )}
-                <button type="button" onClick={onReset} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
-                  <MagnifyingGlassPlus aria-hidden="true" size={14} weight="bold" />
-                  New audit
-                </button>
-                {canArchive && (
-                  <button
-                    type="button"
-                    onClick={() => void archive()}
-                    disabled={archiveState === "archiving"}
-                    className="flex min-h-11 w-full items-center rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-signal/10 hover:text-signal-lift disabled:cursor-wait disabled:opacity-60"
-                  >
-                    {archiveState === "archiving" ? "Archiving case…" : archiveState === "error" ? "Archive failed · retry" : "Archive case"}
-                  </button>
-                )}
-              </div>
-            </details>
+  // ── The ARGUS report (approved interactive design, Sept 2026) ──
+  // One frozen version, eight chapters. Every figure below is read from the
+  // derivations above; the view layer never rescored or rewrites evidence.
+  const tokenAxisTreatment = f.tokenApplicability?.axisTreatment ?? tokenAxisApplicability?.axisTreatment ?? null;
+  const reportView = buildPersonReportView({
+    dossier: f,
+    isProject: roles.includes(SubjectClass.PROJECT),
+    presentedVerdict,
+    scoreFinal: presentation.final,
+    publishedScore: presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null,
+    // A withheld score names the step that fell short (the frozen scoring
+    // outcome, the routing state, the axis coverage) before falling back to
+    // generic readiness guidance, which never told the reader what to do.
+    withheldNote: withheldScoreReason(f)
+      ?? (legacyCoverageNotCaptured ? readinessGuidance : plainLanguageSummary(presentation.note ?? readinessGuidance)),
+    compositionRows: presentation.primaryScore ? compositionRows : [],
+    decisionRows: decisionBasisSummary.rows,
+    capNote: report.cap_applied ? `limited by ${capLabel(report.cap_applied)}` : null,
+    statusLine: [
+      plainReportStatusLabel(presentation.resultLabel),
+      presentation.displayVerdict !== "PROVISIONAL" ? presentation.displayVerdict : null,
+      presentation.secondarySignal,
+    ].filter(Boolean).join(" · "),
+    tokenScore: linkedTokenScore
+      ? {
+        score: linkedTokenScore.score,
+        verdict: linkedTokenDossier?.verdict ?? null,
+        rows: (linkedTokenDossier?.axes ?? []).map((axis) => ({ axis: axis.key, label: axis.label, score: axis.score, weight: axis.weight, rationale: axis.rationale })),
+        unavailableCopy: linkedTokenScore.unavailableCopy,
+      }
+      : null,
+    tokenTreatment: tokenAxisTreatment,
+    tokenTreatmentReason: f.tokenApplicability?.reason ?? tokenAxisApplicability?.reason ?? null,
+    openingSummary: plainLanguageSummary(openingSubjectSummary || f.bio || ""),
+    basicFacts,
+    fundingEvidence,
+    webTeam,
+    readiness: { successful: readiness.successful, applicable: readiness.applicable },
+    verificationQuestions: allVerificationQuestions,
+    supports: supportNarrative,
+    concerns: confidenceLimits,
+    remainingPoints: remainingPointsItems,
+    caseLabel: caseLabel ?? null,
+    auditId: report.audit_id,
+    ...(versionContext?.version ? { version: versionContext.version } : {}),
+    savedAt: versionContext?.createdAt ?? (liveCoreSnapshotSaved ? report.finalized_at : null) ?? report.finalized_at ?? null,
+    attestation: versionContext?.attestationState ?? null,
+    relatedLeadCount: relatedEntityLeads.length,
+    liveSaved: liveCoreSnapshotSaved,
+    contradictions: visibleContradictions,
+    provisionalNote: !presentation.final && presentation.primaryScore ? plainLanguageSummary(presentation.note) : null,
+    sourcedAreas: readiness.decisionAxisTotal != null && readiness.decisionAxisTotal > 0 && readiness.evidenceBackedAxes != null
+      ? { backed: readiness.evidenceBackedAxes, total: readiness.decisionAxisTotal }
+      : null,
+    discovery: materialChangeDiscovery ?? controlPathDiscovery ?? claimConflictDiscovery ?? decisionDiscovery,
+    openChecks: unresolvedRequiredNextSteps.map((item) => ({ label: item.title, ...(item.detail ? { note: item.detail } : {}) })),
+    legacyCoverageNote: legacyCoverageNotCaptured ? `Older report: check details unavailable. ${readinessGuidance}` : null,
+    favorable: favorableVerdict,
+    subjectLeadSummary,
+    subjectLeadCount: subjectAdverseLeads.length,
+    cleanScreenLabels: cleanScreens.map((check) => check.label),
+    noCleanScreenCopy,
+    capLabel: report.cap_applied ? capLabel(report.cap_applied) : null,
+    identityLabel: displayIdentityConfidence === "SuspectedImpersonation"
+      ? { label: "Possible impersonation", tone: "red" }
+      : displayIdentityConfidence === "Confirmed"
+        ? { label: "Identity verified", tone: "green" }
+        : displayIdentityConfidence === "Probable"
+          ? { label: "Identity link found", tone: "amber" }
+          : organizationAccount
+            ? { label: "Organization unverified", tone: "amber" }
+            : { label: "Identity not verified", tone: "neutral" },
+    categoryLabel: f.subjectCategory
+      ? { label: subjectCategoryLabel(f.subjectCategory), basis: (f.subjectCategory.basis ?? []).join(" ") }
+      : null,
+    isStaleQuestion: (item) => Boolean(
+      (f.projectToken?.verified && isOfficialTokenQuestion(item))
+      || (boundProjectIdentity && isOfficialIdentityQuestion(item))
+      || (boundProjectDescription && isProductDescriptionQuestion(item)),
+    ),
+  });
+  const exportBrief = async () => {
+    const { downloadBriefPdf } = await import("../reports/argus/downloadBrief");
+    await downloadBriefPdf(reportView, `${reportPdfFilename(f.display_name || f.handle)}.pdf`);
+  };
+  // The Code chapter reads the development summary the scan froze onto the
+  // token dossier, the saved account assessment, and this report's own roster
+  // so committers can be matched against the people it names.
+  const codeView = buildCodeView({
+    shipping: f.threat?.dossier?.shipping ?? null,
+    github: f.githubAssessment ?? null,
+    people: reportView.people.cards,
+    linkedOrg: f.githubAssessment?.login ?? null,
+    absentReason: f.threat?.dossier
+      ? "This saved report carries a token scan without a development read: no repository was linked from a site the project controls, or the GitHub lane was unavailable when it ran."
+      : "No token scan with a development read is saved with this report.",
+  });
+
+  const moreActions: MoreAction[] = [
+    ...(onOpenBrief ? [{ label: "Case brief", detail: "Analyst decision brief for this case", onClick: onOpenBrief }] : []),
+    ...(onRescan ? [{ label: "Rescan", detail: "Run this audit again, fresh", onClick: onRescan }] : []),
+    { label: "Print the full report", detail: "Every chapter, through your browser", onClick: () => printReportPdf(f.handle) },
+    { label: "Google Doc", detail: ".doc to open from Drive or Word", onClick: () => exportReportDoc(dossier) },
+    { label: "New audit", onClick: onReset },
+    ...(canArchive ? [{ label: archiveState === "error" ? "Archive failed · retry" : "Archive case", detail: "Keeps the saved report; revokes share links", onClick: () => void archive() }] : []),
+  ];
+  const shareVersionId = f.versionContext?.reportVersionId
+    ?? (f.persistence?.state === "persisted" ? f.persistence.reportVersionId : undefined);
+  const holderReconciliation = (
+    <HolderReconciliation
+      holder={f.holderProfile}
+      largestPct={(f.threat as { tokenomics?: { realHolderTopPct?: number } } | null | undefined)?.tokenomics?.realHolderTopPct ?? null}
+      largestAddress={(linkedTokenDossier as unknown as { topHolders?: Array<{ address: string; percent: number }> } | undefined)?.topHolders
+        ?.find((holder) => Math.abs(holder.percent - ((f.threat as { tokenomics?: { realHolderTopPct?: number } } | null | undefined)?.tokenomics?.realHolderTopPct ?? -1)) < 0.0001)?.address ?? null}
+      riskVerdict={(f.threat as { call?: { verdict?: string } } | null | undefined)?.call?.verdict ?? null}
+    />
+  );
+  const developerCanvasProps: InvestigationDecisionCanvasProps = {
+    presentationStyle: reportStyle,
+    subjectName: f.display_name || f.handle,
+    subjectSummary: openingSubjectSummary,
+    reportSummary: f.headline,
+    verdictLabel: m.label,
+    score: presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null,
+    favorable: favorableVerdict,
+    verdictTone: decisionNarrativeTone,
+    argument: caseArgument,
+    supports: decisionCanvasSupports,
+    concerns: decisionCanvasConcerns,
+    context: decisionCanvasContext,
+    nextSteps: decisionCanvasNextSteps,
+    verified: decisionCanvasVerified,
+    coveragePercent: readiness.coveragePercent,
+    successful: readiness.successful,
+    applicable: readiness.applicable,
+    checkScopeLabel: "Required report checks",
+    ...(presentation.primaryScore && compositionRows.length > 0 ? { composition: compositionRows } : {}),
+    secondaryScore: linkedTokenScore,
+  };
+
+  const decisionBefore = (
+    <>
+      {!versionContext && (showCurrentIntelligence || privateSession) && (
+        <div className="rd-legacy" style={{ marginTop: 0, marginBottom: 18 }}>
+          <LiveSupplementalNotice private={privateSession} persisted={livePersistence?.state === "persisted"} />
+        </div>
+      )}
+      {persistencePending && (
+        <div className="status-box" role="status" style={{ marginTop: 0, marginBottom: 18 }}>Saving this report before running extra checks…</div>
+      )}
+      {(persistenceFailed || persistenceMissingCapability) && (
+        <div className="review-banner" role="alert">
+          <span className="review-icon" aria-hidden="true">△</span>
+          <div>
+            <strong>Extra checks are paused because this report was not saved correctly.</strong>
+            <p>Run a new scan before trying them again.{f.persistence?.state === "failed" && f.persistence.reason ? ` Save error: ${f.persistence.reason}` : ""}</p>
           </div>
         </div>
-      </header>
-
-      <div className={`report-frame report-style-${reportStyle}`} data-report-style={reportStyle}>
-        {versionContext && (
-          <div className="mt-4">
-            <SnapshotEvidenceControl
-              snapshotVersion={versionContext.version}
-              capturedAt={versionContext.createdAt}
-              subjectKind="person"
-              currentIntelligenceEnabled={currentIntelligenceEnabled}
-              onLoadCurrentIntelligence={() => setCurrentIntelligenceVersionId(versionContext.reportVersionId)}
-            />
+      )}
+      {showTrustGraphSupplemental && <div className="rd-legacy" style={{ marginTop: 0 }}><RingAlert handle={report.handle} onAudit={onAudit} snapshotVersion={versionContext?.version} /></div>}
+      {(f.protocolTvl?.hacks?.length || hasTerminalXState) ? <div className="rd-legacy" style={{ marginTop: 0, marginBottom: 18 }}><CriticalSubjectAlerts dossier={f} /></div> : null}
+      {decisionFrameworkUnavailable && (
+        <div className="review-banner" aria-label={routingUnresolved ? "Project routing unresolved" : "Scoring output incomplete"}>
+          <span className="review-icon" aria-hidden="true">△</span>
+          <div>
+            <strong>
+              {scoringAccessError ? "Provider access needs attention" : routingUnresolved
+                ? "Project routing unresolved: ARGUS collected intelligence, but did not select a scoring methodology."
+                : `Scoring output incomplete: ARGUS resolved this subject to ${resolvedRoleLabel}, but the scoring pass did not complete.`}
+            </strong>
+            <p>
+              {scoringAccessError ?? (routingUnresolved
+                ? "ARGUS could not confirm whether this is a project, organization, token, or person. The sources remain available, but this report does not have a usable result."
+                : `The scoring step did not finish. The sources remain available, but this report does not have a usable result.`)}
+              {` ${readiness.successful} checks completed; ${visibleIntelligenceCount} sources and possible leads saved.`}
+            </p>
           </div>
-        )}
-        {!versionContext && (showCurrentIntelligence || privateSession) && (
-          <div className="mt-4">
-            <LiveSupplementalNotice private={privateSession} persisted={livePersistence?.state === "persisted"} />
-          </div>
-        )}
-        {persistencePending && (
-          <div className="panel mt-4 px-4 py-3 text-[12.5px] text-ink-dim" role="status">
-            Saving this report before running extra checks…
-          </div>
-        )}
-        {(persistenceFailed || persistenceMissingCapability) && (
-          <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
-            Extra checks are paused because this report was not saved correctly. Run a new scan before trying them again.
-            {f.persistence?.state === "failed" && f.persistence.reason && (
-              <span className="mono mt-1 block text-[11px] text-ink-faint">save error: {f.persistence.reason}</span>
-            )}
-          </div>
-        )}
-        {showTrustGraphSupplemental && <RingAlert handle={report.handle} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
-        {/* Subject identity and decision state are intentionally one hierarchy:
-            who is being assessed, what ARGUS concluded, and whether the frozen
-            evidence is complete enough to act on. */}
-        <section id="report-overview" className="investigation-story-cover mt-6 scroll-mt-28" data-canonical-report-header="true" aria-labelledby="report-subject-title">
-          <div className="flex flex-wrap items-end gap-3">
-            <Avatar src={f.avatar_url || xAvatar(f.handle)} letter={f.avatar} size={44} rounded="rounded-xl" letterClass="text-lg" />
-            <div className="min-w-0 flex-1">
-              <p className="eyebrow">{roles.includes(SubjectClass.PROJECT) ? "Project investigation" : "Person investigation"}</p>
-              <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                <h1 id="report-subject-title" className="display-sm text-[30px] leading-none text-ink sm:text-[34px]">{f.display_name}</h1>
-                <span className="mono text-[13px] text-ink-faint">{f.handle}</span>
-              </div>
-            </div>
-            <CopyTldrButton
-              base={tldrBase}
-              {...(canShare ? { mint: mintShareUrl } : {})}
-              className="mb-0.5 ml-auto"
-            />
-          </div>
-
-          <div className="mt-2 hidden sm:block">
-            <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} summary={openingSubjectSummary} showSummary={reportStyle !== 2} />
-          </div>
-          <details className="mt-3 border-t border-line/60 pt-1 sm:hidden">
-            <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 text-[11.5px] text-ink-dim [&::-webkit-details-marker]:hidden">
-              <span>{roles.map((role) => ROLE_META[role].label).join(" · ") || "Subject"}</span>
-              <span className="mono text-[10px] uppercase tracking-wide text-signal-lift">Profile context</span>
-            </summary>
-            <div className="pb-1">
-              <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} summary={openingSubjectSummary} showSummary={reportStyle !== 2} />
-            </div>
-          </details>
-
-          <ProjectLinks
-            className="mt-3"
-            website={f.website}
-            xHandle={f.handle}
-            contractAddress={f.projectToken?.address}
-            chain={f.projectToken?.chain}
-            links={f.githubAssessment?.login
-              ? [{ label: "GitHub", url: `https://github.com/${f.githubAssessment.login}` }]
-              : undefined}
-          />
-
-          <details className="mt-3 border-t border-line/60 pt-3 text-[11px]">
-            <summary className="cursor-pointer select-none text-[12px] font-medium text-ink-dim">Report details</summary>
-            <dl className="mt-3 grid gap-3 sm:grid-cols-3" aria-label="Saved report details">
-              {caseLabel && (
-                <div>
-                  <dt className="stat-label">Case</dt>
-                  <dd className="mono mt-1 break-all text-ink-dim">{caseLabel}</dd>
-                </div>
-              )}
-              <div>
-                <dt className="stat-label">Report ID</dt>
-                <dd className="mono mt-1 break-all text-ink-dim">{report.audit_id}</dd>
-              </div>
-              <div>
-                <dt className="stat-label">Report state</dt>
-                <dd className="mono mt-1 text-signal-lift">
-                  {versionContext
-                    ? `saved report v${versionContext.version}`
-                    : liveCoreSnapshotSaved
-                      ? "report saved"
-                      : f.live
-                        ? "new scan"
-                        : "saved report"}
-                </dd>
-              </div>
-              {(capturedLabel || finalizedLabel) && (
-                <div>
-                <dt className="stat-label">Saved</dt>
-                <dd className="mt-1 text-ink-dim">{capturedLabel ?? finalizedLabel}</dd>
-                </div>
-              )}
-            </dl>
-          </details>
-
-          <CriticalSubjectAlerts dossier={f} />
-
-          <div
-            className="hidden"
-            aria-hidden="true"
-            aria-label="Report result and check status"
-          >
-            <div className="shrink-0 text-center max-sm:order-2 max-sm:flex max-sm:items-center max-sm:gap-3 max-sm:text-left">
-              <ScoreRing
-                score={presentation.primaryScore ? report.governing_score : null}
-                verdict={presentedVerdict}
-                size={92}
-                bands={Boolean(presentation.primaryScore)}
-              />
-              <div className="mono mt-1 max-w-[9.5rem] text-[11px] uppercase tracking-wider text-ink-faint">
-                {presentation.scoreLabel?.toLowerCase() ?? "score withheld"}
-                {presentation.primaryScore && report.governing_score != null && (
-                  <span className="block normal-case tracking-normal text-ink-dim">
-                    {scoreBandPosition(report.governing_score, report.cap_applied)}
-                  </span>
-                )}
-              </div>
-              <ScoreContextStrip
-                subjectRef={f.handle || f.display_name}
-                score={presentation.primaryScore ? report.governing_score : null}
-              />
-              {!shareView && <CopyTldrButton base={tldrBase} {...(canShare ? { mint: mintShareUrl } : {})} />}
-            </div>
-            <div className="min-w-0 flex-1 max-sm:order-1">
-              <div className="eyebrow mb-1.5">{plainReportStatusLabel(presentation.resultLabel)}</div>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <span className={`display text-[44px] uppercase leading-none max-sm:text-[32px] ${verdictTextClass}`}>
-                  {m.label}
-                </span>
-                {presentation.secondarySignal && <span className="chip chip-wrap text-ink-faint">{presentation.secondarySignal}</span>}
-                {presentation.displayVerdict !== "PROVISIONAL"
-                  // Suppress the readiness chip when it merely repeats the verdict
-                  // word (e.g. an INCOMPLETE verdict already reads "INCOMPLETE").
-                  // "decision-ready" always adds information next to PASS/CAUTION/etc.
-                  && !(readiness.status !== "ready" && m.label.toUpperCase() === readiness.status.toUpperCase()) && (
-                  <span
-                    className={`chip ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`}
-                    title={readiness.status === "ready"
-                  ? "Every required safety check finished. Read the sources before relying on this result."
-                      : "Some checks are still open. The report lists what is missing."}
-                  >
-                    {readiness.status === "ready" ? "ready to review" : readiness.status}
-                  </span>
-                )}
-                {report.governing_role && (
-                  <span
-                    className="mono text-[11px] text-ink-dim"
-                    title="ARGUS scores each role separately. The lowest role score becomes the overall result."
-                  >
-                    {ROLE_META[report.governing_role as SubjectClass].label.toLowerCase()} role set the final score
-                  </span>
-                )}
-                {!presentation.final && f.intelligence && (
-                  <a
-                    href="#decision-intelligence"
-                    className="chip tint-signal min-h-8 font-medium text-signal-lift underline-offset-2 hover:underline"
-                  >
-                    Deep dive ready · {f.intelligence.measurements.length} evidence points
-                  </a>
-                )}
-              </div>
-              <ExpandableText
-                text={plainLanguageSummary(presentation.final ? f.headline : legacyCoverageNotCaptured ? readinessGuidance : presentation.note)}
-                collapsedLength={240}
-                className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim"
-              />
-              {presentation.final && !legacyCoverageNotCaptured && (
-                <p className="mono mt-2 text-[11px] text-ink-faint" aria-label="Verdict support summary">
-                  {verifiedDecisionFactCount > 0 && (
-                    <>
-                      <span className="tabular">{verifiedDecisionFactCount}</span> facts confirmed
-                      <span aria-hidden="true"> · </span>
-                    </>
-                  )}
-                  <span className="tabular">{cleanScreens.length}</span> screens clean
-                  <span aria-hidden="true"> · </span>
-                  {(() => {
-                    // A neutral assessment null (e.g. "no repeat backing on record")
-                    // is recorded as a substantive "finding" so it can cover + score
-                    // its axis, but an absent positive signal is never counter-evidence.
-                    // Visual profile-photo triage is also only a review lead.
-                    // isAdverseFinding excludes both from the adverse tally.
-                    const adverseSignals = diligenceChecks.filter(isAdverseFinding).length
-                      + visibleContradictions.length;
-                    if (adverseSignals > 0) {
-                      return <span className="text-avoid">{adverseSignals} warning {adverseSignals === 1 ? "sign" : "signs"}</span>;
-                    }
-                    // Never assert a zero under an adverse verdict; route to the basis instead.
-                    if (!favorableVerdict) {
-                      return <a href="#decision-basis" className="text-avoid underline-offset-2 hover:underline">see why this scored this way</a>;
-                    }
-                    // No confirmed warning sign is not the same as nothing
-                    // found. An uncorroborated lead naming the subject is still
-                    // on this page, so report it rather than a zero.
-                    if (subjectAdverseLeads.length > 0) {
-                      return (
-                        <a href="#subject-leads" className="text-caution underline-offset-2 hover:underline">
-                          {subjectAdverseLeads.length} unverified {subjectAdverseLeads.length === 1 ? "lead" : "leads"} about this subject
-                        </a>
-                      );
-                    }
-                    return <span>0 warning signs</span>;
-                  })()}
-                </p>
-              )}
-              {!presentation.final && f.headline && (
-                <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-                  <span className="text-ink-dim">This score uses the facts ARGUS saved. It is not an approval or recommendation.</span> {f.headline}
-                </p>
-              )}
-              {!presentation.final && f.intelligence && (
-                <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">
-                  The score remains withheld, but the saved report still contains a role-specific decision map with exact evidence states, source lineage, critical unknowns, and four diligence lenses.
-                </p>
-              )}
-              {report.cap_applied && (
-                <div className="chip tint-avoid mt-3 font-medium">
-                  Score limited · {capLabel(report.cap_applied)}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* A lone tile reads as a broken empty band; two or more justify the
-              strip, and the column count tracks the tile count so no cell is
-              ever an empty grey box. */}
-          {fundamentalTiles.length >= 2 && (
-            <dl
-              className="hidden"
-              aria-hidden="true"
-              style={{ "--tile-count": Math.min(fundamentalTiles.length, 5) } as React.CSSProperties}
-              aria-label="Verified fundamentals"
-            >
-              {fundamentalTiles.map((tile) => (
-                <div key={tile.key} className="bg-panel px-5 py-3.5">
-                  <dt className="stat-label">{tile.label}</dt>
-                  <dd className="stat-value mt-1 text-[19px] font-semibold tabular-nums">{tile.value}</dd>
-                  <dd className="mono mt-0.5 text-[10px] leading-snug text-ink-faint">{tile.sub}</dd>
-                </div>
-              ))}
-            </dl>
+          {onRescan && !shareView && !scoringAccessError && (
+            <button type="button" className="textbtn" onClick={onRescan}>{routingUnresolved ? "Run corrected investigation →" : "Retry scoring investigation →"}</button>
           )}
-
-          <div className="hidden" aria-hidden="true">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">{readinessTitle}</span>
-              <span className="text-[11px] text-ink-faint">
-                {legacyCoverageNotCaptured ? "this older report does not show every check" : "required checks are shown below"}
-              </span>
-              {!legacyCoverageNotCaptured && diligenceChecks.length > 0 && (
-                <a
-                  href={decisionQuestionCount > 0 ? "#follow-up-questions" : "#scan-methodology"}
-                  className="ml-auto inline-flex min-h-8 items-center text-[11px] text-signal-lift underline-offset-2 hover:underline"
-                >
-                  {decisionQuestionCount > 0
-                    ? `${decisionQuestionCount} follow-up ${decisionQuestionCount === 1 ? "question" : "questions"}`
-                    : "Review checks"}
-                </a>
-              )}
-            </div>
-            {versionContext && (
-              <details className="mt-2 text-[11px] text-ink-faint">
-                <summary className="cursor-pointer select-none">Saved report details</summary>
-                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
-                  <span className="mono uppercase tracking-wide">{versionContext.completenessState} report</span>
-                  {attestationLabel && <span>{attestationLabel}</span>}
-                  {capturedLabel && <span>saved {capturedLabel}</span>}
-                  {versionContext.methodologyVersion && <span className="mono">checks version {versionContext.methodologyVersion}</span>}
-                </div>
-              </details>
-            )}
-            {legacyCoverageNotCaptured ? (
-              <div className="panel-inset mt-3 flex flex-wrap items-center gap-3 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <div className="text-[12.5px] font-medium text-ink">Check details unavailable</div>
-                  <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
-                </div>
-                {onRescan && (
-                  <button type="button" onClick={onRescan} className="btn-chip tint-signal min-h-11 shrink-0 gap-1.5 font-medium">
-                    <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
-                    Rescan to record every check
-                  </button>
-                )}
-              </div>
-            ) : (
-              <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
-            )}
-            {governingRoleReport?.score_coverage && <p className="mt-2 text-sm text-ink-dim">
-              Governing role coverage: {governingRoleReport.score_coverage.assessedAxes}/{governingRoleReport.score_coverage.totalAxes} areas · {governingRoleReport.score_coverage.assessedWeight}/{governingRoleReport.score_coverage.totalWeight} scoring weight assessed.
-            </p>}
-            <ProofChipStrip chips={heroProofChips} />
-            {f.priorOutcome && (
-              <OutcomeDeltaStrip
-                prior={f.priorOutcome}
-                score={typeof report.governing_score === "number" ? report.governing_score : null}
-                verdict={report.composite_verdict ?? null}
-                coverage={f.completeness_state}
-              />
-            )}
-            {noticedSignals.length > 0 && (
-              <div className="mt-4 border-t border-line/70 pt-4">
-                <NoticedRail signals={noticedSignals} />
-              </div>
-            )}
+        </div>
+      )}
+      {partialAxisAssessment && (
+        <div className="review-banner" aria-label="Partial decision assessment">
+          <span className="review-icon" aria-hidden="true">△</span>
+          <div>
+            <strong>Partial decision assessment: {governingAxes.length} of {expectedGoverningAxes.length} decision areas were assessed.</strong>
+            <p>{unmeasuredGoverningAxes.map(axisLabel).join(" and ")} remain unmeasured. Any displayed score covers the assessed areas only and remains provisional; missing evidence was not treated as zero.</p>
           </div>
-        </section>
+          {onRescan && !shareView && <button type="button" className="textbtn" onClick={onRescan}>Run a fresh assessment →</button>}
+        </div>
+      )}
+    </>
+  );
 
-        {reportLane.definition.navigation === "sticky" && (
-          <ReportStickyTableOfContents items={reportNavItems} />
-        )}
+  const adverseSignalCount = diligenceChecks.filter(isAdverseFinding).length + visibleContradictions.length;
+  const decisionAfter = (
+    <>
+    {presentation.final && !legacyCoverageNotCaptured && (
+      <p className="subtle-note" aria-label="Verdict support summary">
+        {verifiedDecisionFactCount > 0 && <>{verifiedDecisionFactCount} facts confirmed · </>}
+        {cleanScreens.length} screens clean · {" "}
+        {adverseSignalCount > 0
+          // A neutral assessment null or a profile-photo triage lead is never
+          // counter-evidence; isAdverseFinding excludes both from the tally.
+          ? <span>{adverseSignalCount} warning {adverseSignalCount === 1 ? "sign" : "signs"}</span>
+          // Never assert a zero under an adverse verdict; route to the basis instead.
+          : !favorableVerdict
+            ? <a href="#decision-basis">see why this scored this way</a>
+            // An uncorroborated lead naming the subject is not a zero.
+            : subjectAdverseLeads.length > 0
+              ? <a href="#subject-leads">{subjectAdverseLeads.length} unverified {subjectAdverseLeads.length === 1 ? "lead" : "leads"} about this subject</a>
+              : <span>0 warning signs</span>}
+      </p>
+    )}
+    <details className="disclosure rd-case-detail" open={printExpanded || undefined}>
+      <summary>The full case behind this decision</summary>
+      <div className="rd-legacy" id="decision-summary">
+        <div className="panel px-5">
+          <div className="border-b border-line/70 py-4" aria-label="Case synthesis">
+            <VerdictArgumentBlock argument={caseArgument} />
+          </div>
+          <ReportCanvasNarrativeSection
+            id="verdict-rationale"
+            title={decisionFrameworkUnavailable ? "What ARGUS found before the score failed" : favorableVerdict ? "Why it scored well" : "Main concerns"}
+            description={decisionFrameworkUnavailable
+              ? routingUnresolved
+                ? "Confirmed facts and possible leads are still shown while ARGUS works out what kind of subject this is."
+                : "Confirmed facts and possible leads are still shown even though the score did not finish."
+              : favorableVerdict
+                ? "The strongest source-backed reasons this result holds up."
+                : "The findings, conflicts, and weak areas driving the result."}
+            tone={decisionNarrativeTone}
+            items={decisionFrameworkUnavailable ? unscoredIntelNarrative : verdictNarrative}
+            emptyCopy={decisionFrameworkUnavailable
+              ? routingUnresolved
+                ? "No usable sources were saved. Confirm what this subject is, review which sources were available, and run the investigation again."
+                : "No usable sources were saved. Review which sources were available and try the investigation again."
+              : favorableVerdict
+                ? "This saved report does not explain the score. Review the sources before relying on it."
+                : "No verified adverse finding was recorded. Lower-scoring areas reflect limited demonstrated evidence or maturity; review the score breakdown and Verify next."}
+          />
+          <ReportCanvasNarrativeSection
+            id="confidence-limits"
+            title={decisionFrameworkUnavailable ? "Why there is no score" : favorableVerdict ? "Main concerns" : "What looks credible"}
+            description={decisionFrameworkUnavailable
+              ? routingUnresolved
+                ? "ARGUS needs to confirm what this subject is before it can score it."
+                : "ARGUS identified the subject, but the decision review did not finish."
+              : favorableVerdict
+                ? subjectLeadSummary
+                  ? `${subjectLeadSummary} Any verified risk or conflicting source is listed here too.`
+                  : "Verified risks and conflicting sources. Unanswered questions are listed separately below."
+                : "Verified positive findings stay visible so a negative result is shown in context."}
+            tone={decisionFrameworkUnavailable ? "caution" : favorableVerdict ? (report.cap_applied ? "avoid" : "caution") : "pass"}
+            items={decisionFrameworkUnavailable ? confidenceLimits : countervailingNarrative}
+            emptyCopy={decisionFrameworkUnavailable
+              ? routingUnresolved
+                ? "ARGUS could not confirm what this subject is, so it withheld the score."
+                : "The subject was identified, but the review did not finish, so ARGUS withheld the score."
+              : favorableVerdict
+                // The all-clear sentence must not even be constructible while
+                // an adverse lead names the subject.
+                ? subjectLeadSummary
+                  ? subjectLeadSummary
+                  : cleanScreens.length
+                    ? `No adverse findings in ${cleanScreens.length} completed clean ${cleanScreens.length === 1 ? "screen" : "screens"}: ${cleanScreens.slice(0, 3).map((check) => check.label.toLowerCase()).join(", ")}${cleanScreens.length > 3 ? `, and ${cleanScreens.length - 3} more` : ""}.`
+                    : noCleanScreenCopy
+                : "No confirmed positive finding is recorded in this report."}
+          />
+          {intelligenceContextNarrative.length > 0 && (
+            <ReportCanvasNarrativeSection
+              id="important-context"
+              title="Other useful context"
+              description="Facts worth knowing that do not raise or lower the result on their own."
+              tone="neutral"
+              items={intelligenceContextNarrative}
+              emptyCopy=""
+            />
+          )}
+        </div>
+      </div>
+    </details>
+    </>
+  );
 
-        <InvestigationDecisionCanvas
-          presentationStyle={reportStyle}
-          subjectName={f.display_name || f.handle}
-          subjectSummary={openingSubjectSummary}
-          reportSummary={f.headline}
-          verdictLabel={m.label}
-          score={presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null}
-          scoreLabel={roles.includes(SubjectClass.PROJECT) ? "Project diligence score" : "Person diligence score"}
-          scoreContext={roles.includes(SubjectClass.PROJECT)
-            ? tokenAxisExcluded
-              ? `Token conduct is ${tokenAxisApplicability.axisTreatment === "deferred" ? "deferred until launch" : "not applicable"}; the score is normalized across team, product, backers, traction and transparency.`
-              : "Who runs the project, what it has built, and what evidence supports its claims about backing and use."
-            : "Who this person is, what they have done, and which relationships and concerns can be supported by evidence."}
-          scoreIsProvisional={!presentation.final}
-          favorable={favorableVerdict}
-          verdictTone={decisionNarrativeTone}
-          argument={caseArgument}
-          discovery={materialChangeDiscovery ?? controlPathDiscovery ?? claimConflictDiscovery ?? decisionDiscovery}
-          decisionLensId={f.intelligence ? decisionLensId : undefined}
-          onDecisionLensChange={f.intelligence ? setDecisionLensId : undefined}
-          supports={decisionCanvasSupports}
-          concerns={decisionCanvasConcerns}
-          context={decisionCanvasContext}
-          nextSteps={decisionCanvasNextSteps}
-          verified={decisionCanvasVerified}
-          coveragePercent={readiness.coveragePercent}
-          successful={readiness.successful}
-          applicable={readiness.applicable}
-          checkScopeLabel="Required report checks"
-          capturedAt={capturedLabel ?? finalizedLabel ?? undefined}
-          evidenceHref="#evidence-ledger"
-          methodologyHref="#scan-methodology"
-          challengeAnchorId={shareView ? null : "ask-report"}
-          composition={presentation.primaryScore && compositionRows.length > 0 ? compositionRows : undefined}
-          secondaryScore={linkedTokenScore}
+  const otherRoleReports = report.role_reports.filter((rr) => rr.role !== report.governing_role);
+  const scoresLegacy = (
+    <LegacySection title="Evidence behind each scoring area" note="The saved chapter for every scored dimension, with its evidence band, sources and open questions.">
+      <div id="decision-basis" className="scroll-mt-28">
+        <DecisionBasis
+          roleReport={governingRoleReport}
+          catalog={f.axisEvidenceCatalog}
+          lineageVersion={f.axisCitationVersion}
+          unavailableReason={routingUnresolved ? "routing" : scoringOutputIncomplete ? "scoring" : undefined}
+          operationalFailure={scoringAccessError}
+          onRescan={shareView || scoringAccessError ? undefined : onRescan}
         />
+      </div>
+      {f.projectStrengthBands && (
+        <DimensionChapters
+          chapters={personDimensionChapters(f.projectStrengthBands, projectAxisScores(report))}
+          checksHref="#scan-methodology"
+        />
+      )}
+      {otherRoleReports.length > 0 && (
+        <div id="role-breakdown" className="mt-5 grid gap-3 sm:grid-cols-2">
+          {otherRoleReports.map((rr) => <RoleCard key={rr.role} rr={rr} governing={false} scoreState={roleScoreState} />)}
+        </div>
+      )}
+    </LegacySection>
+  );
 
-        <ProviderFailureNotice failures={f.providerFailures} />
-
-        {/* the composition strip: the governing role's weighted dimensions as
-            readable rows — expand for the why, jump to the evidence, or
-            challenge the score */}
-        {presentation.primaryScore && governingAxes.length > 0 && (
-          <section id="composition" className={reportStyle === 2 ? "af-doc mt-10 scroll-mt-28" : ""}>
-            {reportStyle === 2 && (
-              <>
-                <p className="af-sec-label">The composition</p>
-                <h2 className="af-h2 mt-3">{compositionHeadline(compositionRows.length)}</h2>
-                <p className="af-prose">Each row is a section of this file. The weight is how much it counts; the points are what it drove into the result. Open a row for the short version, or go straight to the evidence.</p>
-              </>
-            )}
-            <ScoreComposition
-              rows={compositionRows}
-              totalScore={report.governing_score}
-              capNote={report.cap_applied ? `limited to ${report.governing_score} · ${capLabel(report.cap_applied)}` : null}
-              challengeAnchor={shareView ? null : "#ask-report"}
-            />
-          </section>
-        )}
-
-        <ReportExperienceLayout
-          items={reportNavItems}
-          showGuideNavigation={reportLane.definition.navigation === "guide"}
-        >
-        {reportStyle === 2 && (
-          <>
-            <DossierReport
-              payload={f as unknown as Record<string, unknown>}
-              includeBeats={roles.includes(SubjectClass.PROJECT) ? ["product"] : undefined}
-              includeSources={false}
-              subjectSummary={openingSubjectSummary}
-            />
-
-            {f.entityContinuity && <EntityContinuityTimeline snapshot={f.entityContinuity} />}
-
-            <section id="identity-evidence" className="canonical-people-section story-chapter report-section scroll-mt-28" aria-labelledby="report-team-heading">
-              <header className="report-section-heading">
-                <div>
-                  <p className="eyebrow text-signal-lift">People &amp; control</p>
-                  <h2 id="report-team-heading" className="story-chapter-title mt-2 text-ink">
-                    {webTeam.length > 0
-                      ? "One roster. Evidence first."
-                      : "The people behind this project remain unresolved."}
-                  </h2>
-                  <p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">
-                    {webTeam.length > 0
-                      ? `ARGUS found ${webTeam.length} source-grounded ${webTeam.length === 1 ? "person" : "people"}. Leadership continuity and unresolved team leads stay attached to this roster instead of repeating elsewhere.`
-                      : f.identity_note}
-                  </p>
-                </div>
-                {(webTeam.length > 0 || webTeamLeads.length > 0) && (
-                  <span className="verdict-pill tint-signal">
-                    {webTeam.length} verified · {webTeamLeads.length} to verify
-                  </span>
-                )}
-              </header>
-              {webTeam.length > 0 && (
-                <div className={`grid gap-3 ${webTeam.length > 1 ? "xl:grid-cols-2" : ""}`}>
-                  {webTeam.map((person, index) => {
-                    const roleProof = safeSourceLink(person.sourceUrl ?? person.source);
-                    const continuity = leadershipForMember(person);
-                    const continuityProfile = safeSourceLink(continuity?.linkedin
-                      ? /^https?:\/\//i.test(continuity.linkedin) ? continuity.linkedin : `https://${continuity.linkedin}`
-                      : undefined);
-                    const continuityLabel = continuity?.state === "current"
-                      ? "current in provider record"
-                      : continuity?.state === "departed"
-                        ? continuity.ended
-                          ? `provider record ends ${frozenDateLabel(continuity.ended)}`
-                          : "provider record marks role ended"
-                        : continuity?.state === "absent"
-                          ? "continuity not established"
-                          : null;
-                    return (
-                      <article key={`${person.name}:${person.handle ?? ""}:${index}`} className="team-person-card panel">
-                        <span className="team-person-main">
-                          <Avatar
-                            src={trustedOfficialTeamPortraitUrl(person.officialPortraitUrl, person.officialPortraitSourceUrl) ?? trustedOfficialXAvatarUrl(person.avatarUrl) ?? personAvatar(person.handle, person.linkedin)}
-                            letter={(person.name.replace(/^@/, "")[0] ?? "?").toUpperCase()}
-                            size={person.officialPortraitUrl ? 60 : 52}
-                            rounded={person.officialPortraitUrl ? "rounded-xl" : "rounded-full"}
-                            letterClass="text-[13px]"
-                          />
-                          <span className="text-[16px] font-semibold text-ink">{person.name}</span>
-                          {person.handle && (
-                            <a
-                              href={`https://x.com/${encodeURIComponent(person.handle.replace(/^@/, ""))}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="mono text-[12px] text-ink-faint underline-offset-2 hover:underline"
-                            >
-                              {person.handle}
-                            </a>
-                          )}
-                          <span className="team-person-role">
-                            <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(person.role)}</span>
-                          </span>
-                          {person.biography && <span className="team-person-evidence text-[13px] leading-relaxed text-ink-dim">{person.biography}</span>}
-                          {person.linkedin && (
-                            <a href={`https://${person.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[12px]">LinkedIn</a>
-                          )}
-                          {person.telegram && (
-                            <a href={`https://t.me/${encodeURIComponent(person.telegram)}`} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Telegram</a>
-                          )}
-                          {person.email && <TeamMemberEmail email={person.email} />}
-                          {roleProof && <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Open role source</a>}
-                          {continuityLabel && (
-                            <span className={`chip ${continuity?.state === "current" ? "tint-pass" : continuity?.state === "departed" ? "tint-caution" : ""}`}>
-                              {continuityLabel}
-                            </span>
-                          )}
-                          {continuityProfile && <a href={continuityProfile.href} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Confirm continuity</a>}
-                          <span className="team-person-evidence text-[13px] leading-relaxed">
-                            {person.evidence ? `${plainLanguageSummary(person.evidence)} ` : ""}
-                            <span className="mono">Source: {sourceProviderLabel(person.provider ?? person.source)}.</span>
-                          </span>
-                        </span>
-                        {person.handle && onAudit && (
-                          <button onClick={() => onAudit(person.handle!)} className="btn-secondary min-h-10 shrink-0 px-3 text-[12px]">Review</button>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-              {webTeamLeads.length > 0 && (
-                <div className="mt-6 border-t border-line/70 pt-5">
-                  <div className="mb-3 flex flex-wrap items-center gap-2">
-                    <h3 className="text-[16px] font-semibold text-ink">Needs verification</h3>
-                    <span className="chip tint-caution">{webTeamLeads.length} team {webTeamLeads.length === 1 ? "lead" : "leads"}</span>
-                    <span className="text-[11.5px] text-ink-faint">not identity proof · not scored</span>
-                  </div>
-                  <Card className="divide-y divide-line/60 border-caution/25">
-                    {webTeamLeads.map((member, index) => (
-                      <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-[12.5px]">
-                        <span className="font-medium text-ink-dim">{member.name}</span>
-                        <span className="chip">{member.role}</span>
-                        {member.handle && <span className="mono text-[11px] text-caution">candidate {member.handle}</span>}
-                        <span className="text-[11px] text-ink-faint">{sourceProviderLabel(member.provider ?? member.source)}</span>
-                        {member.evidence && <span className="min-w-full text-[11px] leading-relaxed text-ink-faint">{member.evidence}</span>}
-                        {member.handle && onAudit && <button type="button" onClick={() => onAudit(member.handle!)} className="btn-chip tint-caution ml-auto min-h-11">Verify →</button>}
-                      </div>
-                    ))}
-                  </Card>
-                </div>
-              )}
-              {unmatchedLeadershipRows.length > 0 && (
-                <div className="mt-6 border-t border-line/70 pt-5">
-                  <h3 className="text-[16px] font-semibold text-ink">Leadership records to reconcile</h3>
-                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">Provider records that do not map to a verified roster card. They are context, not additional team members.</p>
-                  <ol className="mt-3 divide-y divide-line/60 rounded-xl border border-line/70">
-                    {unmatchedLeadershipRows.map((row, index) => {
-                      const profile = safeSourceLink(row.linkedin ? /^https?:\/\//i.test(row.linkedin) ? row.linkedin : `https://${row.linkedin}` : undefined);
-                      const stateLabel = row.state === "current"
-                        ? "provider record lists project"
-                        : row.state === "departed"
-                          ? row.ended ? `provider record ends ${frozenDateLabel(row.ended)}` : "provider record marks role ended"
-                          : "provider record did not answer for this project";
-                      return (
-                        <li key={`${row.name}:${row.role}:${index}`} className="flex flex-wrap items-center gap-1.5 px-4 py-3 text-[12px]">
-                          <span className="font-medium text-ink">{row.name}</span>
-                          <span className="text-ink-faint">{row.role}</span>
-                          <span className={`chip ${row.state === "current" ? "tint-pass" : row.state === "departed" ? "tint-caution" : ""}`}>{stateLabel}</span>
-                          {profile && <a href={profile.href} target="_blank" rel="noreferrer" className="link-ext ml-auto text-[11px]">Confirm on LinkedIn</a>}
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </div>
-              )}
-            </section>
-
-            {f.projectToken && (
-              <div className="canonical-market-section py-5">
-                <ProjectTokenCard
-                  token={f.projectToken}
-                  chains={f.projectToken.deployedChains}
-                  threat={f.threat ?? undefined}
-                  threatNote={f.threatNote}
-                  showCurrentIntelligence={showCurrentIntelligence}
-                  refreshCurrentMarket={currentIntelligenceEnabled}
-                  onOpenReport={linkedTokenDossier && onOpenTokenReport
-                    ? () => onOpenTokenReport(linkedTokenDossier)
-                    : undefined}
-                  onLoadCurrentIntelligence={versionContext
-                    ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
-                    : undefined}
-                />
-              </div>
-            )}
-
-            {f.socialActivity && roles.includes(SubjectClass.PROJECT) && (
-              <SocialActivityPanel
-                snapshot={f.socialActivity}
-                className="canonical-social-section mt-3"
-                panelCostToken={panelCostToken}
-                afterActivity={subjectAdverseLeads.length > 0 || (f.socialActivity.adverseMentions?.length ?? 0) > 0 ? (
-                  <div id="subject-leads" className="scroll-mt-28">
-                    <SubjectAccusationStage
-                      leads={subjectAdverseLeads}
-                      socialLeads={f.socialActivity?.adverseMentions}
-                      subject={report.handle}
-                      summary={subjectLeadSummary}
-                      panelCostToken={panelCostToken}
-                    />
-                  </div>
-                ) : undefined}
-              />
-            )}
-          </>
-        )}
-
-        {reportStyle !== 2 && (
-          <>
-            <DossierReport
-              payload={f as unknown as Record<string, unknown>}
-              subjectSummary={openingSubjectSummary}
-            />
-            {f.entityContinuity && <EntityContinuityTimeline snapshot={f.entityContinuity} />}
-          </>
-        )}
-
-        <div id="relationships" className="scroll-mt-28" />
-        {reportLane.renderers.connectionWorkspace?.({
-          dossier: f,
-          nodes: visibleGraphNodes,
-          edges: visibleGraphEdges,
-          connections: showTrustGraphSupplemental ? connections : [],
-          onAudit: onResearchAudit ?? onAudit,
-          onOpenSavedReport: onOpenSavedResearch,
-          onOpenProject: onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined,
-          shareView,
-        })}
-        {/* connections — the compounding web: other audited subjects tied to this one */}
-        {!reportLane.renderers.connectionWorkspace && showTrustGraphSupplemental && connections.length > 0 && (
-          <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
+  const productLegacy = (
+    <LegacySection title="Facts, history and code on record" note="The saved fact ledger, contradictions, lineage and code assessment behind this chapter.">
+      {showBasicFacts && (
+        <div id="basic-facts" className="scroll-mt-28">
+          <BasicFactsPanel
+            facts={basicFacts}
+            leads={basicFactLeads}
+            fillRequired={fillDecisionFacts}
+            audience={basicFactsAudience}
+            questionLedger={f.basicFactQuestionLedger}
+            fundingRounds={fundingEvidence.rounds}
+            supportingAffiliationCount={evidence.ventures.filter((venture) =>
+              venture.evidence_origin !== "model_lead" && venture.artifact_verified === true).length}
+          />
+        </div>
+      )}
+      {visibleContradictions.length > 0 && (
+        <div id="contradictions" className="scroll-mt-28">
+          <Section title="Contradictions" kicker="claims that do not match the collected evidence">
             <Card className="divide-y divide-line/60">
-              {connections.map((c) => {
-                const vm = c.otherVerdict ? verdictMeta(c.otherVerdict) : null;
+              {visibleContradictions.map((c, i) => {
+                const sc = c.severity === "high" ? "var(--color-avoid)" : c.severity === "medium" ? "var(--color-caution)" : "var(--color-ink-faint)";
                 return (
-                  <div key={c.other} className="flex items-start justify-between gap-3 px-4 py-2.5">
-                    <div className="flex min-w-0 items-start gap-2">
-                      <Avatar src={/^@[A-Za-z0-9_]{2,30}$/.test(c.other) ? xAvatar(c.other) : null} letter={(c.other.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
-                      <div className="min-w-0">
-                      <span className="mono text-[12.5px] text-ink">{c.other}</span>
-                      {vm && <span className={`verdict-pill ml-2 ${c.otherVerdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={c.otherVerdict === "FAIL" ? undefined : ({ "--tint": vm.color } as React.CSSProperties)}>{vm.label}</span>}
-                      <div className="mt-0.5 text-[12.5px] leading-snug text-ink-dim">
-                        {c.direct && <span>directly linked{c.ties.length > 0 ? " · " : ""}</span>}
-                        {c.ties.length > 0 && (
-                          <span>via {c.ties.map((t, ti) => (
-                            <span key={t.key}>
-                              {ti > 0 && ", "}
-                              {onOpenProject && t.type === "Company" ? (
-                                <button onClick={() => onOpenProject(t.label, undefined, panelCostToken)} className="text-ink underline-offset-2 transition hover:text-signal-lift hover:underline">{t.label}</button>
-                              ) : (
-                                <span className="text-ink">{t.label}</span>
-                              )}
-                            </span>
-                          ))}</span>
-                        )}
-                      </div>
-                      </div>
+                  <div key={i} className="flex items-start gap-2.5 px-4 py-3">
+                    <span className="chip tint-var mt-0.5 shrink-0" style={{ "--tint": sc } as React.CSSProperties}>{c.severity}</span>
+                    <div className="min-w-0 text-[12.5px] leading-snug">
+                      <span className="text-ink">{c.claim.replace(/[.!?]\s*$/, "")}</span>
+                      <span className="text-ink-faint">. Conflicting evidence: </span>
+                      <span className="text-ink-dim">{c.conflict}</span>
+                      {c.confidence === "low" && <span className="ml-1.5 text-[11px] text-ink-faint">(low confidence)</span>}
                     </div>
-                    {onAudit && (
-                      <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">open →</button>
-                    )}
                   </div>
                 );
               })}
             </Card>
           </Section>
-        )}
-
-        {f.projectStrengthBands && (
-          reportStyle === 2 ? (
-            <details className="canonical-evidence-disclosure panel mt-7 scroll-mt-28">
-              <summary>
-                <span>
-                  <strong>Evidence behind each score dimension</strong>
-                  <small>Open the six detailed chapters and their source-backed reasons.</small>
-                </span>
-                <span className="mono">{Object.keys(f.projectStrengthBands).length} chapters</span>
-              </summary>
-              <DimensionChapters
-                chapters={personDimensionChapters(f.projectStrengthBands)}
-                checksHref="#scan-methodology"
-              />
-            </details>
-          ) : (
-            <DimensionChapters
-              chapters={personDimensionChapters(f.projectStrengthBands)}
-              checksHref="#scan-methodology"
-            />
-          )
-        )}
-
-        {reportStyle === 2 ? (
-          (f.intelligence || f.researchPlan || showBasicFacts) && (
-            <details id="evidence-questions" className="canonical-evidence-disclosure panel mt-5 scroll-mt-28">
-              <summary>
-                <span>
-                  <strong>Research coverage and open questions</strong>
-                  <small>The full question ledger, source coverage, and refresh triggers.</small>
-                </span>
-                <span className="mono">Evidence detail</span>
-              </summary>
-              <div className="canonical-evidence-disclosure-body">
-                {f.intelligence && (
-                  <PointInTimeIntelligencePanel
-                    snapshot={f.intelligence}
-                    thesisEligible={presentation.final && !decisionFrameworkUnavailable}
-                    governingVerdict={presentedVerdict}
-                    selectedLensId={decisionLensId}
-                    onSelectedLensChange={setDecisionLensId}
-                  />
-                )}
-                {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
-                {showBasicFacts && (
-                  <div id="basic-facts" className="mt-5 scroll-mt-28">
-                    <BasicFactsPanel
-                      facts={basicFacts}
-                      leads={basicFactLeads}
-                      fillRequired={fillDecisionFacts}
-                      audience={basicFactsAudience}
-                      questionLedger={f.basicFactQuestionLedger}
-                      fundingRounds={fundingEvidence.rounds}
-                      supportingAffiliationCount={evidence.ventures.filter((venture) =>
-                        venture.evidence_origin !== "model_lead" && venture.artifact_verified === true).length}
-                    />
-                  </div>
-                )}
-              </div>
-            </details>
-          )
-        ) : (
-          <>
-            {prioritizeDecisionIntelligence && f.intelligence && (
-              <PointInTimeIntelligencePanel
-                snapshot={f.intelligence}
-                thesisEligible={presentation.final && !decisionFrameworkUnavailable}
-                governingVerdict={presentedVerdict}
-                selectedLensId={decisionLensId}
-                onSelectedLensChange={setDecisionLensId}
-              />
-            )}
-            {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
-            {showBasicFacts && (
-              <div id="basic-facts" className="mt-5 scroll-mt-28">
-                <BasicFactsPanel
-                  facts={basicFacts}
-                  leads={basicFactLeads}
-                  fillRequired={fillDecisionFacts}
-                  audience={basicFactsAudience}
-                  questionLedger={f.basicFactQuestionLedger}
-                  fundingRounds={fundingEvidence.rounds}
-                  supportingAffiliationCount={evidence.ventures.filter((venture) =>
-                    venture.evidence_origin !== "model_lead" && venture.artifact_verified === true).length}
-                />
-              </div>
-            )}
-          </>
-        )}
-
-        {reportStyle === 2 ? (
-          (f.operatorLaunches || f.protocolTvl || f.protocolFees || f.holderProfile || f.companyEnrichment || f.website || f.protocolFunding) && (
-            <details className="canonical-evidence-disclosure panel mt-5 scroll-mt-28">
-              <summary>
-                <span>
-                  <strong>Operating history, usage and capital evidence</strong>
-                  <small>Track record, adoption signals and the underlying company and funding ledgers.</small>
-                </span>
-                <span className="mono">Evidence detail</span>
-              </summary>
-              <div className="canonical-evidence-disclosure-body">
-                {f.operatorLaunches && (
-                  <div className="mt-3">
-                    <OperatorTrackRecord
-                      history={f.operatorLaunches}
-                      operatorHandle={operatorHandleForDossier}
-                      creatorWallet={f.operatorLaunches.creatorWallet}
-                    />
-                  </div>
-                )}
-                {(f.protocolTvl || f.protocolFees || f.holderProfile) && (
-                  <div className="mt-3">
-                    <UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} />
-                  </div>
-                )}
-                <DiligenceEvidenceLedgers
-                  className="mt-3"
-                  company={f.companyEnrichment}
-                  officialWebsite={f.website}
-                  protocolFunding={f.protocolFunding}
-                  protocolTvl={f.protocolTvl}
-                  canonicalGeckoId={f.projectToken?.coingeckoId}
-                />
-              </div>
-            </details>
-          )
-        ) : (
-          <>
-            {f.operatorLaunches && (
-              <div className="mt-3">
-                <OperatorTrackRecord
-                  history={f.operatorLaunches}
-                  operatorHandle={operatorHandleForDossier}
-                  creatorWallet={f.operatorLaunches.creatorWallet}
-                />
-              </div>
-            )}
-            {(f.protocolTvl || f.protocolFees || f.holderProfile) && (
-              <div className="mt-3">
-                <UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} />
-              </div>
-            )}
-            <DiligenceEvidenceLedgers
-              className="mt-3"
-              company={f.companyEnrichment}
-              officialWebsite={f.website}
-              protocolFunding={f.protocolFunding}
-              protocolTvl={f.protocolTvl}
-              canonicalGeckoId={f.projectToken?.coingeckoId}
-            />
-          </>
-        )}
-
-        {reportStyle !== 2 && f.socialActivity && roles.includes(SubjectClass.PROJECT) && (
-          <SocialActivityPanel
-            snapshot={f.socialActivity}
-            className="mt-3"
-            panelCostToken={panelCostToken}
-            afterActivity={subjectAdverseLeads.length > 0 || (f.socialActivity.adverseMentions?.length ?? 0) > 0 ? (
-              <div id="subject-leads" className="scroll-mt-28">
-                <SubjectAccusationStage
-                  leads={subjectAdverseLeads}
-                  socialLeads={f.socialActivity?.adverseMentions}
-                  subject={report.handle}
-                  summary={subjectLeadSummary}
-                  panelCostToken={panelCostToken}
-                />
-              </div>
-            ) : undefined}
-          />
-        )}
-
-        {reportStyle !== 2 && f.projectToken && (
-          <div className="py-5">
-            <ProjectTokenCard
-              token={f.projectToken}
-              chains={f.projectToken.deployedChains}
-              threat={f.threat ?? undefined}
-              threatNote={f.threatNote}
-              showCurrentIntelligence={showCurrentIntelligence}
-              refreshCurrentMarket={currentIntelligenceEnabled}
-              onOpenReport={linkedTokenDossier && onOpenTokenReport
-                ? () => onOpenTokenReport(linkedTokenDossier)
-                : undefined}
-              onLoadCurrentIntelligence={versionContext
-                ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
-                : undefined}
-            />
-          </div>
-        )}
-
-        <div id="decision-summary" className="legacy-reading-duplicate grid scroll-mt-28 gap-4 py-5">
-          {partialAxisAssessment && (
-            <section className="finding tint-caution px-5 py-4" aria-label="Partial decision assessment">
-              <div className="flex flex-wrap items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="eyebrow text-caution">Partial decision assessment</div>
-                  <h2 className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
-                    {governingAxes.length} of {expectedGoverningAxes.length} decision areas were assessed
-                  </h2>
-                  <p className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">
-                    ARGUS preserved the areas supported by substantive evidence. {unmeasuredGoverningAxes.map(axisLabel).join(" and ")} remain unmeasured, so no overall score was produced and missing evidence was not treated as zero.
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <span className="chip tint-signal">{governingAxes.length} assessed</span>
-                    <span className="chip tint-caution">{unmeasuredGoverningAxes.length} unmeasured</span>
-                  </div>
-                </div>
-                {onRescan && (
-                  <button type="button" onClick={onRescan} className="btn-chip tint-signal min-h-11 shrink-0 gap-1.5 font-medium">
-                    <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
-                    Run a fresh assessment
-                  </button>
-                )}
-              </div>
-            </section>
-          )}
-          {decisionFrameworkUnavailable && (
-            <section
-              className="finding tint-caution px-5 py-4"
-              aria-label={routingUnresolved ? "Project routing unresolved" : "Scoring output incomplete"}
-            >
-              <div className="flex flex-wrap items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="eyebrow text-caution">
-                    {routingUnresolved ? "Project routing unresolved" : "Scoring output incomplete"}
-                  </div>
-                  <h2 className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
-                    {routingUnresolved
-                      ? "ARGUS collected intelligence, but did not select a scoring methodology"
-                      : `ARGUS resolved this subject to ${resolvedRoleLabel}, but the scoring pass did not complete`}
-                  </h2>
-                  <p className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">
-                    {routingUnresolved
-                      ? "ARGUS could not confirm whether this is a project, organization, token, or person. The sources below may still help, but this report does not have a usable result."
-                      : `ARGUS identified this as a ${resolvedRoleLabel.toLowerCase()}, but the scoring step did not finish. The sources below may still help, but this report does not have a usable result.`}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <span className="chip tint-caution">No decision areas scored</span>
-                    <span className="chip">{readiness.successful} checks completed</span>
-                    <span className="chip">{visibleIntelligenceCount} sources and possible leads</span>
-                    {providerGaps.length > 0 && <span className="chip tint-caution">{providerGaps.length} source checks did not finish</span>}
-                  </div>
-                </div>
-                {onRescan && (
-                  <button type="button" onClick={onRescan} className="btn-chip tint-signal min-h-11 shrink-0 gap-1.5 font-medium">
-                    <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
-                    {routingUnresolved ? "Run corrected investigation" : "Retry scoring investigation"}
-                  </button>
-                )}
-              </div>
-            </section>
-          )}
-          <div className="panel px-5">
-            <div className="border-b border-line/70 py-4" aria-label="Case synthesis">
-              <VerdictArgumentBlock argument={caseArgument} />
-            </div>
-            <ReportCanvasNarrativeSection
-              id="verdict-rationale"
-              title={decisionFrameworkUnavailable ? "What ARGUS found before the score failed" : favorableVerdict ? "Why it scored well" : "Main concerns"}
-              description={decisionFrameworkUnavailable
-                ? routingUnresolved
-                  ? "Confirmed facts and possible leads are still shown while ARGUS works out what kind of subject this is."
-                  : "Confirmed facts and possible leads are still shown even though the score did not finish."
-                : favorableVerdict
-                  ? "The strongest source-backed reasons this result holds up."
-                  : "The findings, conflicts, and weak areas driving the result."}
-              tone={decisionNarrativeTone}
-              items={decisionFrameworkUnavailable ? unscoredIntelNarrative : verdictNarrative}
-              emptyCopy={decisionFrameworkUnavailable
-                ? routingUnresolved
-                  ? "No usable sources were saved. Confirm what this subject is, review which sources were available, and run the investigation again."
-                  : "No usable sources were saved. Review which sources were available and try the investigation again."
-                : favorableVerdict
-                  ? "This saved report does not explain the score. Review the sources before relying on it."
-                  : "No verified adverse finding was recorded. Lower-scoring areas reflect limited demonstrated evidence or maturity; review the score breakdown and Verify next."}
-            />
-            <ReportCanvasNarrativeSection
-              id="confidence-limits"
-              title={decisionFrameworkUnavailable ? "Why there is no score" : favorableVerdict ? "Main concerns" : "What looks credible"}
-              description={decisionFrameworkUnavailable
-                ? routingUnresolved
-                  ? "ARGUS needs to confirm what this subject is before it can score it."
-                  : "ARGUS identified the subject, but the decision review did not finish."
-                : favorableVerdict
-                  ? subjectLeadSummary
-                    ? `${subjectLeadSummary} Any verified risk or conflicting source is listed here too.`
-                    : "Verified risks and conflicting sources. Unanswered questions are listed separately below."
-                  : "Verified positive findings stay visible so a negative result is shown in context."}
-              tone={decisionFrameworkUnavailable ? "caution" : favorableVerdict ? (report.cap_applied ? "avoid" : "caution") : "pass"}
-              items={decisionFrameworkUnavailable ? confidenceLimits : countervailingNarrative}
-              emptyCopy={decisionFrameworkUnavailable
-                ? routingUnresolved
-                  ? "ARGUS could not confirm what this subject is, so it withheld the score."
-                  : "The subject was identified, but the review did not finish, so ARGUS withheld the score."
-                : favorableVerdict
-                  // Belt and braces. The lead items above already displace this
-                  // copy, but the all-clear sentence must not even be
-                  // constructible while an adverse lead names the subject.
-                  ? subjectLeadSummary
-                    ? subjectLeadSummary
-                    : cleanScreens.length
-                      ? `No adverse findings in ${cleanScreens.length} completed clean ${cleanScreens.length === 1 ? "screen" : "screens"}: ${cleanScreens.slice(0, 3).map((check) => check.label.toLowerCase()).join(", ")}${cleanScreens.length > 3 ? `, and ${cleanScreens.length - 3} more` : ""}.`
-                      : noCleanScreenCopy
-                  : "No confirmed positive finding is recorded in this report."}
-            />
-            {intelligenceContextNarrative.length > 0 && (
-              <ReportCanvasNarrativeSection
-                id="important-context"
-                title="Other useful context"
-                description="Facts worth knowing that do not raise or lower the result on their own."
-                tone="neutral"
-                items={intelligenceContextNarrative}
-                emptyCopy=""
-              />
-            )}
-            {/* Inline dropdown, not an anchor: the old link targeted
-                #verification-next, which the current presentation style hides
-                (display:none via legacy-reading-duplicate), so clicking it did
-                nothing. The questions now open in place, and every one carries
-                its own way to give input through the report's Eye. */}
-            {!decisionFrameworkUnavailable && decisionQuestionCount > 0 && (
-              <details id="follow-up-questions" className="group scroll-mt-28 border-t border-line/60 py-3">
-                <summary className="flex cursor-pointer list-none flex-wrap items-center gap-1.5 text-[11.5px] text-ink-faint [&::-webkit-details-marker]:hidden">
-                  <span>
-                    Follow up on: <span className="text-caution underline-offset-2 group-hover:underline">{decisionQuestionCount} important {decisionQuestionCount === 1 ? "question" : "questions"}</span>.
-                  </span>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-caution)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="transition-transform group-open:rotate-180"><path d="M6 9l6 6 6-6" /></svg>
-                  <span className="group-open:hidden">Open the list to read and address each one.</span>
-                </summary>
-                <ul className="mt-3 space-y-2.5" aria-label="Open follow-up questions">
-                  {allVerificationQuestions.map((item) => (
-                    <li key={item.id} className="text-[12.5px] leading-relaxed text-ink-dim">
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <span className="min-w-0 text-ink">{item.title}</span>
-                        {item.provenance && <span className="mono text-[10px] uppercase tracking-[0.08em] text-ink-faint">{item.provenance}</span>}
-                        <button
-                          type="button"
-                          onClick={() => requestChallenge(`Open question: ${item.title}`)}
-                          className="btn-chip ml-auto shrink-0"
-                        >
-                          Give input
-                        </button>
-                      </div>
-                      {item.detail && <p className="mt-0.5 text-[11.5px] leading-snug text-ink-faint">{item.detail}</p>}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-3 text-[11px] leading-snug text-ink-faint">
-                  "Give input" opens this report's assistant with the question attached: state what you know and it is weighed against the report's frozen evidence. A verifiable link (GitHub, website, X account, contract) can also be added under "Add missing info".
-                </p>
-              </details>
-            )}
-          </div>
         </div>
+      )}
+      {f.entityContinuity && <div id="key-developments" className="scroll-mt-28"><EntityContinuityTimeline snapshot={f.entityContinuity} /></div>}
+      {(() => {
+        // PROJECT accounts: domain age + audit-claim check from the bio link.
+        const dom = (() => {
+          try {
+            return f.website ? new URL(f.website).hostname.replace(/^www\./i, "").toLowerCase() : "";
+          } catch {
+            return (f.bio.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1] ?? "").toLowerCase();
+          }
+        })();
+        return showCurrentIntelligence && roles.some((r) => r === "PROJECT") && dom ? (
+          <Section title="Project intelligence" kicker="domain age + claimed security audits; an established brand on a fresh domain is a contradiction">
+            <ProjectIntel domain={dom} />
+          </Section>
+        ) : null;
+      })()}
+    </LegacySection>
+  );
 
-        {reportStyle !== 2 && f.intelligence && !prioritizeDecisionIntelligence && (
-          <PointInTimeIntelligencePanel
-            snapshot={f.intelligence}
-            thesisEligible={presentation.final && !decisionFrameworkUnavailable}
-            governingVerdict={presentedVerdict}
-            selectedLensId={decisionLensId}
-            onSelectedLensChange={setDecisionLensId}
-          />
-        )}
+  // Code chapter: the frozen development read is rendered by the chapter; the
+  // live tools (account assessment, the paid shipping panel with the roster
+  // chart, the person-level GitHub read) stay the existing components.
+  const codeLegacy = (
+    <LegacySection title="Code panels on record" note="The saved account assessment and the deeper live reads. The live panels charge a panel cost and read GitHub now, not at scan time.">
+      {f.githubAssessment && (
+        <Section title="GitHub assessment" kicker="quality of work · account history · bio claims vs GitHub reality">
+          <Card className="p-4">
+            {reportLane.renderers.githubSynthesis?.(f.githubAssessment)}
+            <GithubAssessment a={f.githubAssessment} />
+          </Card>
+        </Section>
+      )}
+      {showCurrentIntelligence && panelCostToken && f.githubAssessment?.login && (
+        <GithubShipping
+          org={f.githubAssessment.login}
+          sectorText={[f.display_name, f.headline, f.bio].filter(Boolean).join(" · ")}
+          projectHandle={report.handle}
+          panelCostToken={panelCostToken}
+        />
+      )}
+      {showCurrentIntelligence && panelCostToken && <PersonGithub className="min-w-0" handle={report.handle} name={f.display_name} bio={f.bio} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />}
+    </LegacySection>
+  );
 
-        {f.evmControlReality && (
-          <EvmControlSurfacePanel snapshot={f.evmControlReality} />
-        )}
-
-        <FundraisingPanel dossier={f} />
-
-        {f.stockHealth && (
-          <StockHealthPanel snapshot={f.stockHealth} />
-        )}
-
-        {f.tokenizedStockPairing && (
-          <TokenizedStockPairingPanel snapshot={f.tokenizedStockPairing} />
-        )}
-
-        {f.launchVenueSubject && (
-          <LaunchVenuePanel snapshot={f.launchVenueSubject} />
-        )}
-
-        <div id="decision-basis" className="legacy-reading-duplicate scroll-mt-28">
-          <DecisionBasis
-            roleReport={governingRoleReport}
-            catalog={f.axisEvidenceCatalog}
-            lineageVersion={f.axisCitationVersion}
-            unavailableReason={routingUnresolved ? "routing" : scoringOutputIncomplete ? "scoring" : undefined}
-            onRescan={onRescan}
-          />
-        </div>
-
-        <div className="legacy-reading-duplicate panel mt-5 px-5">
-          <ReportCanvasNarrativeSection
-            id="verification-next"
-            title="What to check next"
-            description="The three unanswered questions most likely to change the result."
-            tone="signal"
-            items={verificationNext}
-            emptyCopy={legacyCoverageNotCaptured
-              ? "This report predates per-check outcome records. Rescan to establish a current verification plan."
-              : "No unresolved decision question was recorded. Review the cited evidence and any findings before making an investment decision."}
-          />
-          {remainingVerificationQuestions.length > 0 && (
-            <details className="border-t border-line/60 py-4" open={printExpanded || undefined}>
-              <summary className="cursor-pointer text-[13px] font-medium text-ink-dim hover:text-ink">
-                More follow-up questions · {remainingVerificationQuestions.length}
-              </summary>
-              <ul className="mt-3 space-y-2">
-                {remainingVerificationQuestions.map((item) => (
-                  <li key={item.id} className="text-[12.5px] leading-relaxed text-ink-dim">
-                    {item.href ? <a href={item.href} className="hover:text-ink hover:underline">{item.title}</a> : item.title}
-                    <span className="ml-2 text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">{item.provenance}</span>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-
-        {favorableVerdict && remainingPointsItems.length > 0 && (
-          <div className="panel mt-5 px-5">
-            <ReportCanvasNarrativeSection
-              id="remaining-points"
-              title="What would improve the score"
-              description={`This score is ${report.governing_score} of 100. These are the areas where stronger evidence could change it.`}
-              tone="signal"
-              items={remainingPointsItems}
-              emptyCopy=""
-            />
+  const peopleLegacy = (
+    <LegacySection title="Identity, roles and track record on record" note="Unverified team leads, provider records, ventures and wallet links. Leads are not identity proof and are not scored.">
+      {webTeamLeads.length > 0 && (
+        <div id="team-leads" className="scroll-mt-28">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h3 className="text-[16px] font-semibold text-ink">Needs verification</h3>
+            <span className="chip tint-caution">{webTeamLeads.length} team {webTeamLeads.length === 1 ? "lead" : "leads"}</span>
+            <span className="text-[11.5px] text-ink-faint">not identity proof · not scored</span>
           </div>
-        )}
-
-        <div id={reportStyle === 2 ? "identity-evidence-detail" : "identity-evidence"} className="scroll-mt-28">
-        {/* Supplemental live checks are deliberately separated from the frozen
-            score. They self-gate on a resolved real name and never imply broad
-            legal or sanctions clearance. */}
-        {showOffchainSupplemental && (
-          <div className="mt-3 space-y-2">
-            <SanctionsNameScreen name={f.display_name} resolved={displayIdentityConfidence === "Confirmed" || displayIdentityConfidence === "Probable"} />
-            <LegalScreen name={f.display_name} resolved={displayIdentityConfidence === "Confirmed" || displayIdentityConfidence === "Probable"} />
-          </div>
-        )}
-
-        {/* identity: when a named team resolved it, SHOW the team here (the note
-            would just narrate the same names); otherwise show the note.
-            NOT for KOLs: a KOL's display name colliding with a real project (e.g.
-            "@KaminoCrypto" vs the Kamino protocol) pulled that project's team in by
-            NAME and wrongly presented it as this handle's identity. A KOL is a
-            pseudonymous individual, not a project team — the name-search team is a
-            collision, and the contradictions section already explains it. */}
-        {report.governing_role !== "KOL" && (webTeam.length > 0 || webTeamLeads.length > 0 || leadershipRows.length > 0) ? (
-          <section className="legacy-reading-duplicate team-diligence-card panel mt-3" aria-labelledby="report-team-heading">
-            <header className="team-diligence-header">
-              <div>
-                <div className="eyebrow">People & control</div>
-                <h3 id="report-team-heading" className="mt-1 text-[clamp(22px,2.2vw,30px)] font-medium leading-tight tracking-[-0.025em] text-ink">
-                  One roster. Evidence first.
-                </h3>
-                <p className="mt-2 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim">
-                  {webTeam.length > 0
-                    ? `ARGUS found ${webTeam.length} source-grounded ${webTeam.length === 1 ? "person" : "people"}. Leadership continuity and unresolved candidates are attached here instead of repeated in separate team sections.`
-                    : "No source-grounded team member is published yet. The identities below still require verification."}
-                </p>
-              </div>
-              <span className="verdict-pill tint-signal">
-                {webTeam.length} verified · {webTeamLeads.length} to verify
-              </span>
-            </header>
-            {webTeam.length > 0 && <div className={`mt-5 grid gap-3 ${webTeam.length > 1 ? "xl:grid-cols-2" : ""}`}>
-              {webTeam.map((p, i) => {
-                const roleProof = safeSourceLink(p.sourceUrl ?? p.source);
-                const continuity = leadershipForMember(p);
-                const continuityProfile = safeSourceLink(continuity?.linkedin
-                  ? /^https?:\/\//i.test(continuity.linkedin) ? continuity.linkedin : `https://${continuity.linkedin}`
-                  : undefined);
-                const continuityLabel = continuity?.state === "current"
-                  ? "current in provider record"
-                  : continuity?.state === "departed"
-                    ? continuity.ended
-                      ? `provider record ends ${frozenDateLabel(continuity.ended)}`
-                      : "provider record marks role ended"
-                    : continuity?.state === "absent"
-                      ? "continuity not established"
-                      : null;
-                return (
-                <article key={`${p.name}:${p.handle ?? ""}:${i}`} className="team-person-card">
-                    <span className="team-person-main">
-                      <Avatar
-                        src={trustedOfficialTeamPortraitUrl(p.officialPortraitUrl, p.officialPortraitSourceUrl) ?? trustedOfficialXAvatarUrl(p.avatarUrl) ?? personAvatar(p.handle, p.linkedin)}
-                        letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()}
-                        size={p.officialPortraitUrl ? 56 : 48}
-                        rounded={p.officialPortraitUrl ? "rounded-xl" : "rounded-full"}
-                        letterClass="text-[13px]"
-                      />
-                      <span className="text-[15.5px] font-medium text-ink">{p.name}</span>
-                      {p.handle && (
-                        <a
-                          href={`https://x.com/${encodeURIComponent(p.handle.replace(/^@/, ""))}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mono text-[11.5px] text-ink-faint underline-offset-2 hover:underline"
-                        >
-                          {p.handle}
-                        </a>
-                      )}
-                      <span className="team-person-role">
-                        <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(p.role)}</span>
-                      </span>
-                      {p.biography && <span className="team-person-evidence text-[13px] leading-relaxed text-ink-dim">{p.biography}</span>}
-                      {p.linkedin && (
-                        <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
-                      )}
-                      {p.telegram && (
-                        <a href={`https://t.me/${encodeURIComponent(p.telegram)}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">Telegram</a>
-                      )}
-                      {p.email && <TeamMemberEmail email={p.email} />}
-                      {roleProof && (
-                        <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">Open role source</a>
-                      )}
-                      {continuityLabel && (
-                        <span className={`chip ${continuity?.state === "current" ? "tint-pass" : continuity?.state === "departed" ? "tint-caution" : ""}`}>
-                          {continuityLabel}
-                        </span>
-                      )}
-                      {continuityProfile && (
-                        <a href={continuityProfile.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">Confirm continuity</a>
-                      )}
-                      {p.developerProfiles?.map((profile) => {
-                        const profileLink = safeSourceLink(profile.url);
-                        const profileProof = safeSourceLink(profile.sourceUrl);
-                        if (!profileLink) return null;
-                        return (
-                          <span key={`${profile.provider}:${profile.url}`} className="inline-flex items-center gap-1">
-                            <a href={profileLink.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">
-                              {profile.provider === "github" ? "GitHub" : "Hugging Face"}
-                            </a>
-                            {profileProof && (
-                              <a href={profileProof.href} target="_blank" rel="noreferrer" className="text-[10px] text-ink-faint underline-offset-2 hover:underline">
-                                profile link proof
-                              </a>
-                            )}
-                          </span>
-                        );
-                      })}
-                      <span className="team-person-evidence">
-                        {p.evidence ? `${plainLanguageSummary(p.evidence)} ` : ""}
-                        <span className="mono">Source: {sourceProviderLabel(p.provider ?? p.source)}.</span>
-                      </span>
-                    </span>
-                    {p.handle && onAudit ? (
-                      <button onClick={() => onAudit(p.handle!)} className="btn-secondary min-h-9 shrink-0 px-3 text-[11.5px]">Review</button>
-                    ) : (
-                      <span className="shrink-0 text-[11px] text-ink-faint">No X profile</span>
-                    )}
-                  {p.projects && p.projects.length > 0 && (
-                    <div className="mt-3 flex min-w-full flex-wrap items-center gap-1.5 pl-[48px] text-[11px] text-ink-faint">
-                      <span>also:</span>
-                      {p.projects.map((pr, j) => (
-                        onOpenProject ? (
-                          <button key={j} onClick={() => onOpenProject(pr.name, undefined, panelCostToken)} title="Dig everyone on this project" className="btn-chip tint-signal normal-case">
-                            {pr.name}{pr.role ? <span className="text-ink-faint"> · {pr.role}</span> : null}
-                          </button>
-                        ) : (
-                          <span key={j} className="chip normal-case">{pr.name}{pr.role ? ` · ${pr.role}` : ""}</span>
-                        )
-                      ))}
-                    </div>
-                  )}
-                </article>
-                );
-              })}
-            </div>}
-            {webTeamLeads.length > 0 && (
-              <div className="mt-5 border-t border-line/70 pt-4">
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <h4 className="text-[14px] font-medium text-ink">Needs verification</h4>
-                  <span className="chip tint-caution">{webTeamLeads.length} team {webTeamLeads.length === 1 ? "lead" : "leads"}</span>
-                  <span className="text-[11px] text-ink-faint">not identity proof · not scored</span>
-                </div>
-                <Card className="divide-y divide-line/60 border-caution/25">
-                  {webTeamLeads.map((member, index) => (
-                    <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-[12.5px]">
-                      <span className="font-medium text-ink-dim">{member.name}</span>
-                      <span className="chip">{member.role}</span>
-                      {member.handle && <span className="mono text-[11px] text-caution">candidate {member.handle}</span>}
-                      {member.linkedin && <span className="text-[11px] text-ink-faint">LinkedIn candidate recorded</span>}
-                      <span className="text-[11px] text-ink-faint">{sourceProviderLabel(member.provider ?? member.source)}</span>
-                      {member.evidence && <span className="min-w-full text-[11px] leading-relaxed text-ink-faint">{member.evidence}</span>}
-                      {member.handle && onAudit && (
-                        <button
-                          type="button"
-                          onClick={() => onAudit(member.handle!)}
-                          className="btn-chip tint-caution ml-auto min-h-11"
-                        >
-                          verify →
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </Card>
-              </div>
-            )}
-            {unmatchedLeadershipRows.length > 0 && (
-              <div className="mt-5 border-t border-line/70 pt-4">
-                <h4 className="text-[14px] font-medium text-ink">Leadership records to reconcile</h4>
-                <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
-                  Provider records that do not map to a source-grounded roster card. They are context, not additional team members.
-                </p>
-                <ol className="mt-2 divide-y divide-line/60 rounded-xl border border-line/70">
-                  {unmatchedLeadershipRows.map((row, index) => {
-                    const profile = safeSourceLink(row.linkedin
-                      ? /^https?:\/\//i.test(row.linkedin) ? row.linkedin : `https://${row.linkedin}`
-                      : undefined);
-                    const stateLabel = row.state === "current"
-                      ? "provider record lists project"
-                      : row.state === "departed"
-                        ? row.ended
-                          ? `provider record ends ${frozenDateLabel(row.ended)}`
-                          : "provider record marks role ended"
-                        : "provider record did not answer for this project";
-                    return (
-                      <li key={`${row.name}:${row.role}:${index}`} className="flex flex-wrap items-center gap-1.5 px-4 py-3 text-[12px]">
-                        <span className="font-medium text-ink">{row.name}</span>
-                        <span className="text-ink-faint">{row.role}</span>
-                        <span className={`chip ${row.state === "current" ? "tint-pass" : row.state === "departed" ? "tint-caution" : ""}`}>{stateLabel}</span>
-                        {profile && <a href={profile.href} target="_blank" rel="noreferrer" className="link-ext ml-auto text-[11px]">Confirm on LinkedIn</a>}
-                      </li>
-                    );
-                  })}
-                </ol>
-              </div>
-            )}
-            {f.prior_handles && f.prior_handles.length > 0 && (
-              <p className="mt-4 text-[12.5px] leading-relaxed text-caution">
-                ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
-              </p>
-            )}
-          </section>
-        ) : (
-          <div className="legacy-reading-duplicate panel mt-3 flex items-start gap-3 px-4 py-3">
-            <span className={`chip normal-case mt-0.5 ${displayIdentityConfidence === "SuspectedImpersonation" ? "tint-unverifiable" : ""}`}>
-              {displayIdentityConfidence === "Confirmed"
-                ? "Identity verified"
-                : displayIdentityConfidence === "Probable"
-                  ? "Identity link found"
-                  : displayIdentityConfidence === "SuspectedImpersonation"
-                    ? "Possible impersonation"
-                    : "Identity not verified"}
-            </span>
-            <div className="min-w-0">
-              <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.identity_note}</p>
-              {f.prior_handles && f.prior_handles.length > 0 && (
-                <p className="mt-1.5 text-[12.5px] leading-relaxed text-caution">
-                  ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-
-        </div>
-
-        {/* contradictions — claims that do not match the evidence */}
-        {visibleContradictions.length > 0 && (
-          <div id="contradictions" className="scroll-mt-28">
-            <Section title="Contradictions" kicker="claims that do not match the collected evidence">
-              <Card className="divide-y divide-line/60">
-                {visibleContradictions.map((c, i) => {
-                  const sc = c.severity === "high" ? "var(--color-avoid)" : c.severity === "medium" ? "var(--color-caution)" : "var(--color-ink-faint)";
-                  return (
-                    <div key={i} className="flex items-start gap-2.5 px-4 py-3">
-                      <span className="chip tint-var mt-0.5 shrink-0" style={{ "--tint": sc } as React.CSSProperties}>{c.severity}</span>
-                      <div className="min-w-0 text-[12.5px] leading-snug">
-                        <span className="text-ink">{c.claim.replace(/[.!?]\s*$/, "")}</span>
-                        <span className="text-ink-faint">. Conflicting evidence: </span>
-                        <span className="text-ink-dim">{c.conflict}</span>
-                        {c.confidence === "low" && <span className="ml-1.5 text-[11px] text-ink-faint">(low confidence)</span>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </Card>
-            </Section>
-          </div>
-        )}
-
-        <details id="evidence-ledger" className="canonical-evidence-disclosure panel mt-5 scroll-mt-28">
-          <summary>
-            <span>
-              <strong>Sources, provenance and frozen evidence</strong>
-              <small>The complete source ledger, report date, graph screen and profile-authenticity evidence.</small>
-            </span>
-            <span className="mono">Evidence appendix</span>
-          </summary>
-          <div className="canonical-evidence-disclosure-body">
-        <section className="panel px-5 py-5" aria-label="Where this evidence came from">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <div>
-              <p className="eyebrow text-signal-lift">Sources</p>
-              <h2 className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Evidence saved with this report</h2>
-            </div>
-            <span className="mono text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">
-              SAVED WITH REPORT
-            </span>
-          </div>
-          <dl className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-            {argusEdgeMetrics.map((metric) => (
-              <div key={metric.label} className="panel-inset px-3 py-3">
-                <dt className="text-[10.5px] text-ink-faint">{metric.label}</dt>
-                <dd className="stat-value mt-1 text-[20px] font-semibold">{metric.value}</dd>
-                <dd className="mt-1 text-[10.5px] leading-snug text-ink-faint">{metric.detail}</dd>
+          <Card className="divide-y divide-line/60 border-caution/25">
+            {webTeamLeads.map((member, index) => (
+              <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-[12.5px]">
+                <span className="font-medium text-ink-dim">{member.name}</span>
+                <span className="chip">{member.role}</span>
+                {member.handle && <span className="mono text-[11px] text-caution">candidate {member.handle}</span>}
+                {member.linkedin && <span className="text-[11px] text-ink-faint">LinkedIn candidate recorded</span>}
+                <span className="text-[11px] text-ink-faint">{sourceProviderLabel(member.provider ?? member.source)}</span>
+                {member.evidence && <span className="min-w-full text-[11px] leading-relaxed text-ink-faint">{member.evidence}</span>}
+                {member.handle && onAudit && !shareView && <button type="button" onClick={() => onAudit(member.handle!)} className="btn-chip tint-caution ml-auto min-h-11">Verify →</button>}
               </div>
             ))}
-          </dl>
-          <div className="mt-4 grid gap-3 lg:grid-cols-2">
-            <ReportCanvasRailCard
-              title="Saved sources"
-              tone="signal"
-              count={`${visibleIntelligenceCount} sources and leads`}
-              items={provenanceRail}
-              footer={(f.sourceArtifacts?.length ?? 0) > 0 ? <a href="#frozen-source-ledger" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">View source details</a> : undefined}
-            />
-            <ReportCanvasRailCard title="Report date" tone="neutral" items={freshnessRail} />
-          </div>
-        </section>
-        {f.profileAuthenticity && (
-          <FrozenProfileAuthenticityPanel
-            result={f.profileAuthenticity}
-            artifact={profilePhotoArtifact}
-            reportVersionId={evidenceReportVersionId}
-            version={versionContext?.version}
-          />
-        )}
-
-        {f.trustGraphScreen && (
-          <FrozenTrustGraphPanel
-            screen={f.trustGraphScreen}
-            reportVersionId={evidenceReportVersionId}
-            version={versionContext?.version}
-          />
-        )}
-
-        <FrozenSourceLedger artifacts={f.sourceArtifacts ?? []} subjectHandle={report.handle} profile={fundScaleProfile} roles={roles} />
-          </div>
-        </details>
-
-        {/* role breakdown — governing role full-width and expanded, the rest below */}
-        <div id="role-breakdown" className="legacy-reading-duplicate scroll-mt-28">
-          <Section title="Score breakdown" kicker="Each role is checked separately. The lowest role score is used.">
-            {(() => {
-              const gov = report.role_reports.find((rr) => rr.role === report.governing_role);
-              const others = report.role_reports.filter((rr) => rr.role !== report.governing_role);
+          </Card>
+        </div>
+      )}
+      {unmatchedLeadershipRows.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-[16px] font-semibold text-ink">Leadership records to reconcile</h3>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">Provider records that do not map to a roster card. They are context, not additional team members.</p>
+          <ol className="mt-3 divide-y divide-line/60 rounded-xl border border-line/70">
+            {unmatchedLeadershipRows.map((row, index) => {
+              const profile = safeSourceLink(row.linkedin ? /^https?:\/\//i.test(row.linkedin) ? row.linkedin : `https://${row.linkedin}` : undefined);
+              const mismatch = linkedinIdentityMismatch(row.name, row.linkedin);
+              const stateLabel = row.state === "current"
+                ? "provider record lists project"
+                : row.state === "departed"
+                  ? row.ended ? `provider record ends ${frozenDateLabel(row.ended)}` : "provider record marks role ended"
+                  : "provider record did not answer for this project";
               return (
-                <div className="space-y-3">
-                  {gov && <RoleCard key={gov.role} rr={gov} governing scoreState={roleScoreState} />}
-                  {others.length > 0 && (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {others.map((rr) => (
-                        <RoleCard key={rr.role} rr={rr} governing={false} scoreState={roleScoreState} />
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <li key={`${row.name}:${row.role}:${index}`} className="flex flex-wrap items-center gap-1.5 px-4 py-3 text-[12px]">
+                  <span className="font-medium text-ink">{row.name}</span>
+                  <span className="text-ink-faint">{row.role}</span>
+                  <span className={`chip ${row.state === "current" ? "tint-pass" : row.state === "departed" ? "tint-caution" : ""}`}>{stateLabel}</span>
+                  {profile && !mismatch && <a href={profile.href} target="_blank" rel="noreferrer" className="link-ext ml-auto text-[11px]">Confirm on LinkedIn</a>}
+                  {mismatch && <span className="ml-auto text-[11px] text-caution">Linked profile needs correction: apparent identity mismatch</span>}
+                </li>
               );
-            })()}
+            })}
+          </ol>
+        </div>
+      )}
+      {f.prior_handles && f.prior_handles.length > 0 && (
+        <p className="mt-4 text-[12.5px] leading-relaxed text-caution">
+          ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
+        </p>
+      )}
+      {f.operatorLaunches && (
+        <OperatorTrackRecord
+          history={f.operatorLaunches}
+          operatorHandle={operatorHandleForDossier}
+          creatorWallet={f.operatorLaunches.creatorWallet}
+        />
+      )}
+      {evidence.ventures.length > 0 && (
+        <Section title="Ventures & affiliations" kicker="founding, employment and operating ties · separate from investments">
+          <Clamp itemCount={evidence.ventures.length} label="ventures">
+            <Card className="divide-y divide-line/60">
+              {evidence.ventures.map((v, i) => {
+                const sourceBacked = v.artifact_verified === true;
+                const isLead = v.evidence_origin === "model_lead" || v.artifact_verified === false;
+                const evidenceState = sourceBacked ? "source-backed" : isLead ? "unverified lead" : "legacy curated";
+                return (
+                  <div key={i} className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-[12.5px]">
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: v.outcome === "Rug" ? "var(--color-avoid)" : v.outcome === "Acquisition" || v.outcome === "IPO" ? "var(--color-pass)" : "var(--color-ink-faint)" }}
+                    />
+                    {onOpenProject && !shareView ? (
+                      <button onClick={() => onOpenProject(v.project_name, undefined, panelCostToken)} className="truncate text-left text-ink underline-offset-2 transition hover:text-signal-lift hover:underline" title="See everyone who worked on this">{v.project_name}</button>
+                    ) : (
+                      <span className="truncate text-ink">{v.project_name}</span>
+                    )}
+                    <span className="chip shrink-0">{v.role}</span>
+                    {v.period && <span className="shrink-0 text-[11px] text-ink-faint">{v.period}</span>}
+                    {v.evidence_url && (
+                      <a href={v.evidence_url} target="_blank" rel="noreferrer" className="link-ext shrink-0 text-[11px]">source</a>
+                    )}
+                    <span className={`mono ml-auto shrink-0 text-[11px] ${sourceBacked ? "text-pass" : "text-ink-faint"}`}>
+                      {evidenceState}
+                    </span>
+                  </div>
+                );
+              })}
+            </Card>
+          </Clamp>
+        </Section>
+      )}
+      {displayFounderSummary && (
+        <Section title="Founder pattern" kicker="outcomes + repeat backing">
+          <Card className="p-4">
+            <div className="flex items-center gap-4">
+              <div>
+                <div className="eyebrow">Pattern</div>
+                <div className="mono text-[15px] font-medium text-ink">{displayFounderSummary.pattern}</div>
+              </div>
+              <div className="h-8 w-px bg-line" />
+              <div>
+                <div className="eyebrow">Repeat backing</div>
+                <div className="mono text-[15px] font-medium">{displayFounderSummary.repeat_backing.strength}</div>
+              </div>
+            </div>
+            {displayFounderSummary.repeat_backing.repeat_backers.length > 0 && (
+              <p className="mt-2 text-[12.5px] text-ink-faint">
+                Returning backers: <span className="text-ink-dim">{displayFounderSummary.repeat_backing.repeat_backers.join(", ")}</span>
+              </p>
+            )}
+          </Card>
+        </Section>
+      )}
+      {advisedRows.length > 0 && (
+        <Section title="Advisory graveyard" kicker="projects lent their name to">
+          <Card className="divide-y divide-line/60">
+            {advisedRows.map((p, i) => (
+              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                <span className="h-1.5 w-1.5 rounded-full" style={{ background: p.project_outcome === "Rug" ? "var(--color-avoid)" : "var(--color-ink-faint)" }} />
+                <span className="text-[12.5px] text-ink">{p.project_name}</span>
+                {p.paid_or_allocated && <span className="chip tint-caution">allocation</span>}
+                <span className="mono ml-auto text-[11px]" style={{ color: p.project_outcome === "Rug" ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>{p.project_outcome}</span>
+                <span className="mono text-[11px]" style={{ color: TV_TONE[p.corroboration_verdict ?? "Unconfirmed"] }}>{TV_SHORT[p.corroboration_verdict ?? "Unconfirmed"]}</span>
+              </div>
+            ))}
+          </Card>
+        </Section>
+      )}
+      {showOffchainSupplemental && (
+        <div className="mt-3 space-y-2">
+          <SanctionsNameScreen name={f.display_name} resolved={displayIdentityConfidence === "Confirmed" || displayIdentityConfidence === "Probable"} />
+          <LegalScreen name={f.display_name} resolved={displayIdentityConfidence === "Confirmed" || displayIdentityConfidence === "Probable"} />
+        </div>
+      )}
+      {showCurrentIntelligence && panelCostToken && (
+        <Section title="Identity continuity" kicker="current supplemental search · not part of the stored score">
+          <IdentitySweep handle={report.handle} auto panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
+        </Section>
+      )}
+      {showProfilePhotoSupplemental && panelCostToken && (
+        <Section title="Profile photo" kicker="current supplemental overlay · outside the frozen core evidence and stored verdict">
+          <PfpCheck handle={report.handle} brand={roles.some((role) => String(role) === "PROJECT") && !roles.some((role) => String(role) === "FOUNDER")} panelCostToken={panelCostToken} />
+        </Section>
+      )}
+      {f.profileAuthenticity && (
+        <FrozenProfileAuthenticityPanel
+          result={f.profileAuthenticity}
+          artifact={profilePhotoArtifact}
+          reportVersionId={evidenceReportVersionId}
+          version={versionContext?.version}
+        />
+      )}
+    </LegacySection>
+  );
+
+  const marketLegacy = (
+    <LegacySection title="Complete market record" note="The saved token and market panels, contract-control receipt and usage series behind this chapter.">
+      {f.projectToken && (
+        <ProjectTokenCard
+          token={f.projectToken}
+          chains={f.projectToken.deployedChains}
+          threat={f.threat ?? undefined}
+          threatNote={f.threatNote}
+          showCurrentIntelligence={showCurrentIntelligence}
+          refreshCurrentMarket={currentIntelligenceEnabled}
+          onOpenReport={linkedTokenDossier && onOpenTokenReport && !shareView
+            ? () => onOpenTokenReport(linkedTokenDossier)
+            : undefined}
+          onLoadCurrentIntelligence={versionContext && !shareView
+            ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
+            : undefined}
+        />
+      )}
+      {!f.projectToken && (f.threat || f.threatNote) && (
+        <div id="project-token-threat" className="scroll-mt-28">
+          {/* A promoted contract is somebody else's token the subject talked
+              about, and a bio address is an unverified self-claim. Only a
+              canonical binding is the subject's own asset, so only it may be
+              titled "Project token" (#371). */}
+          <Section
+            title={f.threatBinding === "promotion"
+              ? "Promoted token · threat scan"
+              : f.threatBinding === "bio"
+                ? "Contract named in the bio · threat scan"
+                : "Project token · threat scan"}
+            kicker={f.threatBinding === "promotion"
+              ? "a contract this account promoted; ARGUS has not established it as the subject's own token"
+              : f.threatBinding === "bio"
+                ? "a contract this account names in its own bio, self-claimed and not independently bound"
+                : f.threatNote ?? "the token threat leg of this audit"}
+          >
+            {f.threat ? (
+              <Card className="p-2"><ThreatReport scan={f.threat} /></Card>
+            ) : (
+              <Card className="p-4"><p className="text-[12.5px] leading-relaxed text-ink-dim">{f.threatNote}</p></Card>
+            )}
           </Section>
         </div>
+      )}
+      {(f.protocolTvl || f.protocolFees || f.holderProfile) && (
+        <div className="mt-3"><UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} /></div>
+      )}
+      {f.evmControlReality && <EvmControlSurfacePanel snapshot={f.evmControlReality} />}
+      {f.stockHealth && <StockHealthPanel snapshot={f.stockHealth} />}
+      {f.tokenizedStockPairing && <TokenizedStockPairingPanel snapshot={f.tokenizedStockPairing} />}
+      {f.launchVenueSubject && <LaunchVenuePanel snapshot={f.launchVenueSubject} />}
+    </LegacySection>
+  );
 
+  const socialLegacy = (
+    <LegacySection title="Adverse conversation, news and promotion" note="Direct-subject leads are never counted in the score; they are shown so a quiet page is never read as an all-clear.">
+      {(subjectAdverseLeads.length > 0 || (f.socialActivity?.adverseMentions?.length ?? 0) > 0) && (
+        <div id="subject-leads" className="scroll-mt-28">
+          <Section title="Adverse conversation" kicker="direct-subject leads · never counted in this score">
+            <SubjectAccusationStage
+              leads={subjectAdverseLeads}
+              socialLeads={f.socialActivity?.adverseMentions}
+              subject={report.handle}
+              summary={subjectLeadSummary}
+              panelCostToken={panelCostToken}
+            />
+          </Section>
+        </div>
+      )}
+      {showCurrentIntelligence && panelCostToken && roles.some((r) => r === "KOL") && (
+        <Section title="KOL report" kicker="a promoter's threat model: did their shilled tokens rug, and is their reach real?">
+          <KolReport handle={report.handle} promotions={evidence.promotions ?? []} associates={evidence.associates ?? []} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} onAudit={onAudit} />
+        </Section>
+      )}
+      {showOffchainSupplemental && (
+        <Section title="In the news" kicker="current supplemental search · not part of the stored score">
+          <NewsSection query={f.display_name || report.handle} handle={report.handle} />
+        </Section>
+      )}
+    </LegacySection>
+  );
 
-        {/* signature modules */}
-        <div className="2xl:columns-2 2xl:gap-3">
-          {evidence.wallets.length > 0 && (
-            <div className="mb-3 min-w-0 break-inside-avoid">
-              <Section title="Wallets and blockchain links" kicker="addresses tied to them · strongest links shown first">
-                <Clamp itemCount={evidence.wallets.length} label="wallets">
-                <Card className="divide-y divide-line/60">
-                  {[...evidence.wallets]
-                    .sort((a, b) => walletTier(a).rank - walletTier(b).rank)
-                    .map((w, i) => {
-                      const t = walletTier(w);
-                      const flags = [
-                        w.sold_into_own_promo ? "sold into own promo" : "",
-                        w.scam_adjacent_flow ? "scam-adjacent flow" : "",
-                      ].filter(Boolean);
-                      return (
-                        <div key={i} className="px-4 py-2.5 text-[12.5px]">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="chip shrink-0">
-                              {w.chain === "solana" ? "SOL" : "EVM"}
-                            </span>
-                            <a href={explorer(w)} target="_blank" rel="noreferrer" className="mono link-ext truncate">{shortAddr(w.address)}</a>
-                            <CopyAddr text={w.address} />
-                            {w.link_evidence_url && (
-                              <a href={w.link_evidence_url} target="_blank" rel="noreferrer" className="link-ext shrink-0 text-[11px]">proof</a>
-                            )}
-                            <span className="chip tint-var ml-auto shrink-0" style={{ "--tint": t.color } as React.CSSProperties}>
-                              {t.label}
-                            </span>
-                          </div>
-                          {(w.notes || w.activity_summary) && (
-                            <div className="mt-1 text-[11px] leading-snug text-ink-faint">
-                              {[w.notes, w.activity_summary].filter(Boolean).join(" · ")}
-                            </div>
-                          )}
-                          {(flags.length > 0 || w.positive_signals) && (
-                            <div className="mt-1.5 flex flex-wrap gap-1">
-                              {flags.map((fl) => (
-                                <span key={fl} className="chip tint-avoid">{fl}</span>
-                              ))}
-                              {w.positive_signals && (
-                                <span className="chip tint-pass">{w.positive_signals}</span>
-                              )}
-                            </div>
-                          )}
-                          {w.screen && (() => {
-                            const view = walletScreenView(w.screen.status);
-                            const risk = w.screen.risk;
-                            return (
-                              <div className="mt-1.5">
-                                <div className="flex flex-wrap gap-1">
-                                  <span className={`chip ${view.tint}`}>{view.label}</span>
-                                  {w.screen.entity?.name && (
-                                    <span className="chip">
-                                      {w.screen.entity.name}{w.screen.entity.type ? ` · ${w.screen.entity.type}` : ""}
-                                    </span>
-                                  )}
-                                  {risk && (
-                                    <span className="chip tint-avoid">
-                                      {risk.level} {risk.score}/100{risk.greatestCategory ? ` · ${risk.greatestCategory}` : ""}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="mt-1 text-[11px] leading-snug text-ink-faint">{w.screen.detail}</p>
-                                {risk?.topSources.slice(0, 3).map((source) => (
-                                  <p key={source.seed} className="mt-0.5 text-[11px] leading-snug text-ink-faint">
-                                    {source.direction === "backward" ? "Funded from" : "Sent to"} {source.seedName || shortAddr(source.seed)}
-                                    {source.category ? ` (${source.category})` : ""} · {source.hops} hop{source.hops === 1 ? "" : "s"}
-                                    {source.usd > 0 ? ` · $${Math.round(source.usd).toLocaleString()}` : ""}
-                                  </p>
-                                ))}
-                                <p className="mt-1 text-[10.5px] leading-snug text-ink-faint">
-                                  Arkham · address {walletBindingLabel(w.screen.binding)} · checked {new Date(w.screen.capturedAt).toLocaleString()}
-                                </p>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      );
-                    })}
-                </Card>
-                </Clamp>
-              </Section>
-            </div>
-          )}
-
+  const connectionsLegacy = (
+    <LegacySection title="Relationship records" note="The connection workspace, funding and investor ledgers, claimed relationships and wallet links saved with this report.">
+      <div id="relationships" className="scroll-mt-28" />
+      {reportLane.renderers.connectionWorkspace?.({
+        dossier: f,
+        nodes: visibleGraphNodes,
+        edges: visibleGraphEdges,
+        connections: showTrustGraphSupplemental ? connections : [],
+        onAudit: shareView ? undefined : onResearchAudit ?? onAudit,
+        onOpenSavedReport: shareView ? undefined : onOpenSavedResearch,
+        onOpenProject: onOpenProject && !shareView ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined,
+        shareView,
+      })}
+      {!reportLane.renderers.connectionWorkspace && (visibleGraphEdges.length > 0 || (showTrustGraphSupplemental && connections.length > 0)) && (
+        <Section title="Connection web" kicker="select a node to inspect it · subject → projects → the people behind them">
+          <Card className="p-2">
+            <TrustGraph nodes={visibleGraphNodes} edges={visibleGraphEdges} connections={showTrustGraphSupplemental ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} panelCostToken={panelCostToken} />
+          </Card>
+        </Section>
+      )}
+      <FundraisingPanel dossier={f} />
+      <DiligenceEvidenceLedgers
+        className="mt-3"
+        company={f.companyEnrichment}
+        officialWebsite={f.website}
+        protocolFunding={f.protocolFunding}
+        protocolTvl={f.protocolTvl}
+        canonicalGeckoId={f.projectToken?.coingeckoId}
+      />
+      {corroborationRows.length > 0 && (
+        <Section title="Claimed relationships" kicker="project claims checked against public evidence">
+          <Clamp itemCount={corroborationRows.length} label="relationships">
+            <CorroborationTable rows={corroborationRows} subjectHandle={report.handle} />
+          </Clamp>
+        </Section>
+      )}
           {(fundScaleArtifactGroups.length > 0 || portfolioArtifactGroups.length > 0 || (roles.some((role) => role === "INVESTOR") && portfolioLeads.length > 0)) && (
             <div className="min-w-0 lg:col-span-2">
               <Section
@@ -4855,363 +3560,347 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
             </div>
           )}
 
-          {evidence.ventures.length > 0 && (
+      {showCurrentIntelligence && panelCostToken && roles.some((r) => r === "INVESTOR") && (
+        <Section title="VC portfolio leads" kicker="paid current supplemental search · unverified candidates · excluded from graph and verdict">
+          <VcReport key={`${report.handle}:${panelCostToken}`} handle={report.handle} name={f.display_name || report.handle} verifiedProjects={verifiedPortfolioProjects} panelCostToken={panelCostToken} onAudit={onAudit} />
+        </Section>
+      )}
+          {evidence.wallets.length > 0 && (
             <div className="mb-3 min-w-0 break-inside-avoid">
-              <Section title="Ventures & affiliations" kicker="founding, employment and operating ties · separate from investments">
-                <Clamp itemCount={evidence.ventures.length} label="ventures">
+              <Section title="Wallets and blockchain links" kicker="addresses tied to them · strongest links shown first">
+                <Clamp itemCount={evidence.wallets.length} label="wallets">
                 <Card className="divide-y divide-line/60">
-                  {evidence.ventures.map((v, i) => {
-                    // Discovered-by-model, verified-by-fetch is the standard leads pattern:
-                    // a first-party source naming the venture makes it source-backed.
-                    const sourceBacked = v.artifact_verified === true;
-                    const isLead = v.evidence_origin === "model_lead" || v.artifact_verified === false;
-                    const evidenceState = sourceBacked ? "source-backed" : isLead ? "unverified lead" : "legacy curated";
-                    return (
-                      <div key={i} className="flex items-center gap-2 px-4 py-2.5 text-[12.5px]">
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full"
-                          style={{ background: v.outcome === "Rug" ? "var(--color-avoid)" : v.outcome === "Acquisition" || v.outcome === "IPO" ? "var(--color-pass)" : "var(--color-ink-faint)" }}
-                        />
-                        {onOpenProject ? (
-                          <button onClick={() => onOpenProject(v.project_name, undefined, panelCostToken)} className="truncate text-left text-ink underline-offset-2 transition hover:text-signal-lift hover:underline" title="See everyone who worked on this">{v.project_name}</button>
-                        ) : (
-                          <span className="truncate text-ink">{v.project_name}</span>
-                        )}
-                        <span className="chip shrink-0">{v.role}</span>
-                        {v.period && <span className="shrink-0 text-[11px] text-ink-faint">{v.period}</span>}
-                        {v.evidence_url && (
-                          <a href={v.evidence_url} target="_blank" rel="noreferrer" className="link-ext shrink-0 text-[11px]">source</a>
-                        )}
-                        <span className={`mono ml-auto shrink-0 text-[11px] ${sourceBacked ? "text-pass" : "text-ink-faint"}`}>
-                          {evidenceState}
-                        </span>
-                      </div>
-                    );
-                  })}
+                  {[...evidence.wallets]
+                    .sort((a, b) => walletTier(a).rank - walletTier(b).rank)
+                    .map((w, i) => {
+                      const t = walletTier(w);
+                      const flags = [
+                        w.sold_into_own_promo ? "sold into own promo" : "",
+                        w.scam_adjacent_flow ? "scam-adjacent flow" : "",
+                      ].filter(Boolean);
+                      return (
+                        <div key={i} className="px-4 py-2.5 text-[12.5px]">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="chip shrink-0">
+                              {w.chain === "solana" ? "SOL" : "EVM"}
+                            </span>
+                            <a href={explorer(w)} target="_blank" rel="noreferrer" className="mono link-ext truncate">{shortAddr(w.address)}</a>
+                            <CopyAddr text={w.address} />
+                            {w.link_evidence_url && (
+                              <a href={w.link_evidence_url} target="_blank" rel="noreferrer" className="link-ext shrink-0 text-[11px]">proof</a>
+                            )}
+                            <span className="chip tint-var ml-auto shrink-0" style={{ "--tint": t.color } as React.CSSProperties}>
+                              {t.label}
+                            </span>
+                          </div>
+                          {(w.notes || w.activity_summary) && (
+                            <div className="mt-1 text-[11px] leading-snug text-ink-faint">
+                              {[w.notes, w.activity_summary].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
+                          {(flags.length > 0 || w.positive_signals) && (
+                            <div className="mt-1.5 flex flex-wrap gap-1">
+                              {flags.map((fl) => (
+                                <span key={fl} className="chip tint-avoid">{fl}</span>
+                              ))}
+                              {w.positive_signals && (
+                                <span className="chip tint-pass">{w.positive_signals}</span>
+                              )}
+                            </div>
+                          )}
+                          {w.screen && (() => {
+                            const view = walletScreenView(w.screen.status);
+                            const risk = w.screen.risk;
+                            return (
+                              <div className="mt-1.5">
+                                <div className="flex flex-wrap gap-1">
+                                  <span className={`chip ${view.tint}`}>{view.label}</span>
+                                  {w.screen.entity?.name && (
+                                    <span className="chip">
+                                      {w.screen.entity.name}{w.screen.entity.type ? ` · ${w.screen.entity.type}` : ""}
+                                    </span>
+                                  )}
+                                  {risk && (
+                                    <span className="chip tint-avoid">
+                                      {risk.level} {risk.score}/100{risk.greatestCategory ? ` · ${risk.greatestCategory}` : ""}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="mt-1 text-[11px] leading-snug text-ink-faint">{w.screen.detail}</p>
+                                {risk?.topSources.slice(0, 3).map((source) => (
+                                  <p key={source.seed} className="mt-0.5 text-[11px] leading-snug text-ink-faint">
+                                    {source.direction === "backward" ? "Funded from" : "Sent to"} {source.seedName || shortAddr(source.seed)}
+                                    {source.category ? ` (${source.category})` : ""} · {source.hops} hop{source.hops === 1 ? "" : "s"}
+                                    {source.usd > 0 ? ` · $${Math.round(source.usd).toLocaleString()}` : ""}
+                                  </p>
+                                ))}
+                                <p className="mt-1 text-[10.5px] leading-snug text-ink-faint">
+                                  Arkham · address {walletBindingLabel(w.screen.binding)} · checked {new Date(w.screen.capturedAt).toLocaleString()}
+                                </p>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })}
                 </Card>
                 </Clamp>
               </Section>
             </div>
           )}
 
-          {corroborationRows.length > 0 && (
-            <div className="mb-3 min-w-0 break-inside-avoid">
-              <Section title="Claimed relationships" kicker="project claims checked against public evidence">
-                <Clamp itemCount={corroborationRows.length} label="relationships">
-                <CorroborationTable rows={corroborationRows} subjectHandle={report.handle} />
-                </Clamp>
-              </Section>
-            </div>
-          )}
-
-          {displayFounderSummary && (
-            <div className="mb-3 min-w-0 break-inside-avoid">
-              <Section title="Founder pattern" kicker="outcomes + repeat backing">
-                <Card className="p-4">
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <div className="eyebrow">Pattern</div>
-                      <div className="mono text-[15px] font-medium text-ink">{displayFounderSummary.pattern}</div>
-                    </div>
-                    <div className="h-8 w-px bg-line" />
-                    <div>
-                      <div className="eyebrow">Repeat backing</div>
-                      <div
-                        className="mono text-[15px] font-medium"
-                        style={{
-                          color:
-                            displayFounderSummary.repeat_backing.strength === "strong"
-                              ? "var(--color-pass)"
-                              : displayFounderSummary.repeat_backing.strength === "weak"
-                              ? "var(--color-caution)"
-                              : "var(--color-ink-faint)",
-                        }}
-                      >
-                        {displayFounderSummary.repeat_backing.strength}
-                      </div>
-                    </div>
-                  </div>
-                  {displayFounderSummary.repeat_backing.repeat_backers.length > 0 && (
-                    <p className="mt-2 text-[12.5px] text-ink-faint">
-                      Returning backers: <span className="text-ink-dim">{displayFounderSummary.repeat_backing.repeat_backers.join(", ")}</span>
-                    </p>
-                  )}
-                </Card>
-              </Section>
-            </div>
-          )}
-
-          {advisedRows.length > 0 && (
-            <div className="mb-3 min-w-0 break-inside-avoid">
-              <Section title="Advisory graveyard" kicker="projects lent their name to">
-                <Card className="divide-y divide-line/60">
-                  {advisedRows.map((p, i) => (
-                    <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                      <span
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ background: p.project_outcome === "Rug" ? "var(--color-avoid)" : "var(--color-ink-faint)" }}
-                      />
-                      <span className="text-[12.5px] text-ink">{p.project_name}</span>
-                      {p.paid_or_allocated && (
-                        <span className="chip tint-caution">allocation</span>
-                      )}
-                      <span className="mono ml-auto text-[11px]" style={{ color: p.project_outcome === "Rug" ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>
-                        {p.project_outcome}
-                      </span>
-                      <span className="mono text-[11px]" style={{ color: TV_TONE[p.corroboration_verdict ?? "Unconfirmed"] }}>
-                        {TV_SHORT[p.corroboration_verdict ?? "Unconfirmed"]}
-                      </span>
-                    </div>
-                  ))}
-                </Card>
-              </Section>
-            </div>
-          )}
-
-          {showProfilePhotoSupplemental && panelCostToken && (
-            <div className="min-w-0 lg:col-span-2">
-              <Section title="Profile photo" kicker="current supplemental overlay · outside the frozen core evidence and stored verdict">
-                <PfpCheck handle={report.handle} brand={roles.some((role) => String(role) === "PROJECT") && !roles.some((role) => String(role) === "FOUNDER")} panelCostToken={panelCostToken} />
-              </Section>
-            </div>
-          )}
-
-          {/* GitHub assessment — quality of work · account history · bio claims vs
-              GitHub reality (resolved + frozen during the audit; self-hides when
-              no account was matched) */}
-          {f.githubAssessment && (
-            <div className="min-w-0 lg:col-span-2">
-              <Section title="GitHub assessment" kicker="quality of work · account history · bio claims vs GitHub reality">
-                <Card className="p-4">
-                  {reportLane.renderers.githubSynthesis?.(f.githubAssessment)}
-                  <GithubAssessment a={f.githubAssessment} />
-                </Card>
-              </Section>
-            </div>
-          )}
-
-          {/* the token threat leg of the FULL scan — the subject's own token,
-              scanned by the complete threat pipeline in the same run. Absent
-              field = older report from before the fold-in; a note without a
-              scan = the leg was skipped or failed, and says why. */}
-          {!f.projectToken && (f.threat || f.threatNote) && (
-            <div id="project-token-threat" className="min-w-0 scroll-mt-28 lg:col-span-2">
-              <Section title="Project token · threat scan" kicker={f.threatNote ?? "the token threat leg of this audit"}>
-                {f.threat ? (
-                  <Card className="p-2">
-                    <ThreatReport scan={f.threat} />
-                  </Card>
-                ) : (
-                  <Card className="p-4">
-                    <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.threatNote}</p>
-                  </Card>
-                )}
-              </Section>
-            </div>
-          )}
-
-          {/* code footprint — resolve the subject's GitHub from their handle/name/bio
-              and analyse it (self-hides when no account is confidently matched) */}
-          {showCurrentIntelligence && panelCostToken && <PersonGithub className="min-w-0 lg:col-span-2" handle={report.handle} name={f.display_name} bio={f.bio} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />}
-
-          {/* The old "On-chain reality check" (a single promoted token → deployer)
-              was removed: for KOLs the KOL report below is the richer superset, for
-              funds a portfolio token isn't a promotion, and for everyone else it
-              duplicated the token's own audit. Deployer/funder forensics live on
-              each token's audit page. */}
-
-          {showCurrentIntelligence && panelCostToken && roles.some((r) => r === "INVESTOR") && (
-            <div className="min-w-0 lg:col-span-2">
-              <Section title="VC portfolio leads" kicker="paid current supplemental search · unverified candidates · excluded from graph and verdict">
-                <VcReport key={`${report.handle}:${panelCostToken}`} handle={report.handle} name={f.display_name || report.handle} verifiedProjects={verifiedPortfolioProjects} panelCostToken={panelCostToken} onAudit={onAudit} />
-              </Section>
-            </div>
-          )}
-
-          {showCurrentIntelligence && panelCostToken && roles.some((r) => r === "KOL") && (
-            <div className="min-w-0 lg:col-span-2">
-              <Section title="KOL report" kicker="a promoter's threat model: did their shilled tokens rug, and is their reach real?">
-                <KolReport handle={report.handle} promotions={evidence.promotions ?? []} associates={evidence.associates ?? []} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} onAudit={onAudit} />
-              </Section>
-            </div>
-          )}
-
-          {(() => {
-            // PROJECT accounts: domain age + audit-claim check from the bio link.
-            const dom = (() => {
-              try {
-                return f.website ? new URL(f.website).hostname.replace(/^www\./i, "").toLowerCase() : "";
-              } catch {
-                return (f.bio.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1] ?? "").toLowerCase();
-              }
-            })();
-            return showCurrentIntelligence && roles.some((r) => r === "PROJECT") && dom ? (
-              <div className="min-w-0 lg:col-span-2">
-                <Section title="Project intelligence" kicker="domain age + claimed security audits; an established brand on a fresh domain is a contradiction">
-                  <ProjectIntel domain={dom} />
-                </Section>
+      {relatedEntityLeads.length > 0 && (
+        <div id="investigative-leads" className="scroll-mt-28">
+          <Section title="Worth a second look" kicker="items about related people and companies · never counted in this score">
+            <details className="panel px-4 py-3">
+              <summary className="cursor-pointer text-[12.5px] font-medium text-ink-dim">
+                Review {relatedEntityLeads.length} unverified follow-up lead{relatedEntityLeads.length === 1 ? "" : "s"}
+              </summary>
+              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+                These leads are excluded from the verdict. Expand them only when you want to continue the investigation.
+              </p>
+              <div className="mt-3">
+                <InvestigativeLeadsLedger leads={relatedEntityLeads} subject={report.handle} />
               </div>
-            ) : null;
-          })()}
+            </details>
+          </Section>
+        </div>
+      )}
+    </LegacySection>
+  );
 
-          {showOffchainSupplemental && (
-            <div className="min-w-0 lg:col-span-2">
-              <Section title="In the news" kicker="current supplemental search · not part of the stored score">
-                <NewsSection query={f.display_name || report.handle} handle={report.handle} />
-              </Section>
-            </div>
+  const evidenceCurrent = versionContext && !shareView ? (
+    <div className="rd-legacy">
+      <SnapshotEvidenceControl
+        snapshotVersion={versionContext.version}
+        capturedAt={versionContext.createdAt}
+        subjectKind="person"
+        currentIntelligenceEnabled={currentIntelligenceEnabled}
+        onLoadCurrentIntelligence={() => setCurrentIntelligenceVersionId(versionContext.reportVersionId)}
+      />
+    </div>
+  ) : null;
+
+  const evidenceLegacy = (
+    <LegacySection title="Complete evidence record" note="Checks, the intelligence ledger, the research plan, frozen sources and the tools to question or add to this report.">
+      {(diligenceChecks.length > 0 || providerGaps.length > 0) && (
+        <div className="min-w-0">
+          {f.evidenceAttempts?.length ? <details className="panel mb-2 p-3">
+            <summary className="cursor-pointer font-medium">Evidence gaps and targeted next checks</summary>
+            <p className="mt-2 text-sm">{f.evidenceAttempts.filter(a => a.outcome === "accepted").length} source verification attempts accepted out of {f.evidenceAttempts.length} recorded attempts. These are attempts, not unique facts.</p>
+            <ul className="mt-2 space-y-2">{evidenceRetryPlan(f.evidenceAttempts).map(item => <li key={item.questionId} className="text-sm">
+              <strong>{item.questionId.replace(/[._]/g, " ")}</strong>: {item.action.replace(/_/g, " ")}. {item.reasons.map(evidenceRetryReason).join("; ")}.
+            </li>)}</ul>
+          </details> : null}
+          {diligenceChecks.length > 0 && <MethodologyChecklist id="scan-methodology" checks={diligenceChecks} />}
+          {providerGaps.length > 0 && (
+            <details id={diligenceChecks.length > 0 ? "provider-data-coverage" : "scan-methodology"} className="panel mt-2 px-4 py-3">
+              <summary className="cursor-pointer text-[12.5px] font-medium text-ink-dim">
+                Source problems · {providerGaps.length}
+              </summary>
+              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+                These notes explain which sources did not work. They are not warnings about the subject.
+              </p>
+              <ul className="mt-2 divide-y divide-line/60">
+                {providerGaps.map((run) => (
+                  <li key={run.id} className="flex flex-wrap items-start justify-between gap-2 py-2 text-[11.5px]">
+                    <span className="text-ink-dim">{plainLanguageSummary(run.label)}</span>
+                    <span className="text-ink-faint">{run.state}</span>
+                    {run.detail && <span className="w-full leading-relaxed text-ink-faint">{run.detail}</span>}
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
-
-          {showCurrentIntelligence && panelCostToken && (
-            <div className="min-w-0 lg:col-span-2">
-              <Section title="Identity continuity" kicker="current supplemental search · not part of the stored score">
-                <IdentitySweep handle={report.handle} auto panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
-              </Section>
-            </div>
-          )}
-
-          {/* transparent scan methodology — what ARGUS checked on this person */}
-          {(diligenceChecks.length > 0 || providerGaps.length > 0) && (
-            <div className="min-w-0 lg:col-span-2">
-              {f.evidenceAttempts?.length ? <details className="panel mb-2 p-3">
-                <summary className="cursor-pointer font-medium">Evidence gaps and targeted next checks</summary>
-                <p className="mt-2 text-sm">{f.evidenceAttempts.filter(a => a.outcome === "accepted").length} source verification attempts accepted out of {f.evidenceAttempts.length} recorded attempts. These are attempts, not unique facts.</p>
-                <ul className="mt-2 space-y-2">{evidenceRetryPlan(f.evidenceAttempts).map(item => <li key={item.questionId} className="text-sm">
-                  <strong>{item.questionId.replace(/[._]/g, " ")}</strong>: {item.action.replace(/_/g, " ")}. {item.reasons.map(evidenceRetryReason).join("; ")}.
-                </li>)}</ul>
-              </details> : null}
-              {diligenceChecks.length > 0 && <MethodologyChecklist id="scan-methodology" checks={diligenceChecks} />}
-              {providerGaps.length > 0 && (
-                <details id={diligenceChecks.length > 0 ? "provider-data-coverage" : "scan-methodology"} className="panel mt-2 px-4 py-3">
-                  <summary className="cursor-pointer text-[12.5px] font-medium text-ink-dim">
-                    Source problems · {providerGaps.length}
-                  </summary>
-                  <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
-                    These notes explain which sources did not work. They are not warnings about the subject.
-                  </p>
-                  <ul className="mt-2 divide-y divide-line/60">
-                    {providerGaps.map((run) => (
-                      <li key={run.id} className="flex flex-wrap items-start justify-between gap-2 py-2 text-[11.5px]">
-                        <span className="text-ink-dim">{plainLanguageSummary(run.label)}</span>
-                        <span className="text-ink-faint">{run.state}</span>
-                        {run.detail && <span className="w-full leading-relaxed text-ink-faint">{run.detail}</span>}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </div>
-          )}
-
-          {!reportLane.renderers.connectionWorkspace && (visibleGraphEdges.length > 0 || (showTrustGraphSupplemental && connections.length > 0)) && (
-            <div className="min-w-0 lg:col-span-2">
-              <Section title="Connection web" kicker="select a node to inspect it · subject → projects → the people behind them">
-                <Card className="p-2">
-                  <TrustGraph nodes={visibleGraphNodes} edges={visibleGraphEdges} connections={showTrustGraphSupplemental ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} panelCostToken={panelCostToken} />
-                </Card>
-              </Section>
-            </div>
-          )}
-
-          {/* ask-the-report chat — grounded in this person's own evidence.
-              Also the landing point for the composition strip's "Challenge
-              this" affordance. Absent from the share view. */}
-          {!shareView && (
-            <div id="ask-report" className="min-w-0 scroll-mt-28 lg:col-span-2">
-              <ArgusEyeAssistant
-                subject={report.handle}
-                reportVersionId={evidenceReportVersionId}
+        </div>
+      )}
+      <ProviderFailureNotice failures={f.providerFailures} />
+      {f.intelligence && (
+        <div id="decision-intelligence" className="scroll-mt-28">
+          <PointInTimeIntelligencePanel
+            snapshot={f.intelligence}
+            thesisEligible={presentation.final && !decisionFrameworkUnavailable}
+            governingVerdict={presentedVerdict}
+            selectedLensId={decisionLensId}
+            onSelectedLensChange={setDecisionLensId}
+          />
+        </div>
+      )}
+      {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
+      {!allVerificationQuestions.length ? null : (
+        <details id="follow-up-questions" className="panel mt-3 px-4 py-3" open={printExpanded || undefined}>
+          <summary className="cursor-pointer text-[12.5px] font-medium text-ink-dim">Follow up on: {allVerificationQuestions.length} important {allVerificationQuestions.length === 1 ? "question" : "questions"}</summary>
+          <ul className="mt-3 space-y-2.5" aria-label="Open follow-up questions">
+            {allVerificationQuestions.map((item) => (
+              <li key={item.id} className="text-[12.5px] leading-relaxed text-ink-dim">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <span className="min-w-0 text-ink">{item.title}</span>
+                  {item.provenance && <span className="mono text-[10px] uppercase tracking-[0.08em] text-ink-faint">{item.provenance}</span>}
+                  {!shareView && (
+                    <button type="button" onClick={() => requestChallenge(`Open question: ${item.title}`)} className="btn-chip ml-auto shrink-0">
+                      Give input
+                    </button>
+                  )}
+                </div>
+                {item.detail && <p className="mt-0.5 text-[11.5px] leading-snug text-ink-faint">{item.detail}</p>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {publishableSubjectFindings.length > 0 && (
+        <div id="publishable-findings" className="scroll-mt-28">
+          <Section title="Confirmed findings" kicker="sources and dates included · checked against other records">
+            <FindingsLedger findings={publishableSubjectFindings} />
+          </Section>
+        </div>
+      )}
+      <details id="evidence-ledger" className="canonical-evidence-disclosure panel mt-5 scroll-mt-28">
+        <summary>
+          <span>
+            <strong>Sources, provenance and frozen evidence</strong>
+            <small>The complete source ledger, report date and graph screen.</small>
+          </span>
+          <span className="mono">Evidence appendix</span>
+        </summary>
+        <div className="canonical-evidence-disclosure-body">
+          <section className="panel px-5 py-5" aria-label="Where this evidence came from">
+            <dl className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+              {argusEdgeMetrics.map((metric) => (
+                <div key={metric.label} className="panel-inset px-3 py-3">
+                  <dt className="text-[10.5px] text-ink-faint">{metric.label}</dt>
+                  <dd className="stat-value mt-1 text-[20px] font-semibold">{metric.value}</dd>
+                  <dd className="mt-1 text-[10.5px] leading-snug text-ink-faint">{metric.detail}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              <ReportCanvasRailCard
+                title="Saved sources"
+                tone="signal"
+                count={`${visibleIntelligenceCount} sources and leads`}
+                items={provenanceRail}
+                footer={(f.sourceArtifacts?.length ?? 0) > 0 ? <a href="#frozen-source-ledger" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">View source details</a> : undefined}
               />
+              <ReportCanvasRailCard title="Report date" tone="neutral" items={freshnessRail} />
             </div>
-          )}
-
-          {/* structured challenge dialog: who is challenging (team-verified by
-              company-domain email, or community), the correction, evidence
-              files, and the system-learning note. Opens on the shared
-              challenge event from any "Challenge"/"Give input" affordance. */}
-          {!shareView && (
-            <ChallengeDialog
-              subject={report.handle}
+          </section>
+          {f.trustGraphScreen && (
+            <FrozenTrustGraphPanel
+              screen={f.trustGraphScreen}
               reportVersionId={evidenceReportVersionId}
-              officialDomain={canonicalOfficialWebsite(f.website)?.domain ?? null}
+              version={versionContext?.version}
             />
           )}
-
-          {/* analyst augmentation — add a piece the scan missed (verified
-              before publish). The console's "Attach a document" chip lands
-              here. */}
-          {showCurrentIntelligence && canMutateWorkspace && (
-            <div id="add-info" className="min-w-0 scroll-mt-28 lg:col-span-2">
-              <AddInfo subject={report.handle} subjectKind="person" canonicalRef={report.handle} subjectGraphKey={report.handle} />
-            </div>
-          )}
-
-          {/* hard link — manually bridge this person to another entity in the graph */}
-          {showCurrentIntelligence && canMutateWorkspace && (
-            <div className="min-w-0 lg:col-span-2">
-              <LinkEntity subject={report.handle} subjectKind="person" canonicalRef={report.handle} graphSubjectKey={report.handle} />
-            </div>
-          )}
+          <FrozenSourceLedger artifacts={f.sourceArtifacts ?? []} subjectHandle={report.handle} profile={fundScaleProfile} roles={roles} />
         </div>
-
-        {/* findings ledger */}
-        {publishableSubjectFindings.length > 0 && (
-          <div id="publishable-findings" className="scroll-mt-28">
-            <Section title="Confirmed findings" kicker="sources and dates included · checked against other records">
-              <FindingsLedger findings={publishableSubjectFindings} />
-            </Section>
-          </div>
-        )}
-
-        {/* Leads that name the subject themselves are never filed behind a
-            disclosure the reader has to open: a reader who sees only the
-            collapsed related-entity list would read this page as clean. */}
-        {subjectAdverseLeads.length > 0 && !(f.socialActivity && roles.includes(SubjectClass.PROJECT)) && (
-          <div id="subject-leads" className="scroll-mt-28">
-            <Section title="Adverse conversation" kicker="direct-subject leads · never counted in this score">
-              <SubjectAccusationStage
-                leads={subjectAdverseLeads}
-                socialLeads={f.socialActivity?.adverseMentions}
-                subject={report.handle}
-                summary={subjectLeadSummary}
-                panelCostToken={panelCostToken}
-              />
-            </Section>
-          </div>
-        )}
-
-        {relatedEntityLeads.length > 0 && (
-          <div id="investigative-leads" className="scroll-mt-28">
-            <Section title="Worth a second look" kicker="items about related people and companies · never counted in this score">
-              <details className="panel px-4 py-3">
-                <summary className="cursor-pointer text-[12.5px] font-medium text-ink-dim">
-                  Review {relatedEntityLeads.length} unverified follow-up lead{relatedEntityLeads.length === 1 ? "" : "s"}
-                </summary>
-                <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
-                  These leads are excluded from the verdict. Expand them only when you want to continue the investigation.
-                </p>
-                <div className="mt-3">
-                  <InvestigativeLeadsLedger leads={relatedEntityLeads} subject={report.handle} />
-                </div>
-              </details>
-            </Section>
-          </div>
-        )}
-
-        {/* methodology footer */}
-        <div className="panel mt-8 p-5">
-          <div className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-dim">
-            <ArgusMark size={16} /> How this verdict was reached
-          </div>
-          <p className="text-[12.5px] leading-relaxed text-ink-faint">
-            ARGUS checks each role separately and uses the lowest result. Serious findings can limit
-            the score. A missing public identity does not count as wrongdoing. This report is research,
-            not financial advice.
-          </p>
-          <RunCostLine cost={dossier.cost} />
+      </details>
+      {reportLane.renderers.developerTools?.(developerCanvasProps)}
+      {!shareView && (
+        <div id="ask-report" className="mt-5 min-w-0 scroll-mt-28">
+          <ArgusEyeAssistant subject={report.handle} reportVersionId={evidenceReportVersionId} />
         </div>
-        </ReportExperienceLayout>
+      )}
+      {showCurrentIntelligence && canMutateWorkspace && !shareView && (
+        <div id="add-info" className="mt-3 min-w-0 scroll-mt-28">
+          <AddInfo subject={report.handle} subjectKind="person" canonicalRef={report.handle} subjectGraphKey={report.handle} />
+        </div>
+      )}
+      {showCurrentIntelligence && canMutateWorkspace && !shareView && (
+        <div className="mt-3 min-w-0">
+          <LinkEntity subject={report.handle} subjectKind="person" canonicalRef={report.handle} graphSubjectKey={report.handle} />
+        </div>
+      )}
+      <div className="panel mt-8 p-5">
+        <div className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-dim">
+          <ArgusMark size={16} /> How this verdict was reached
+        </div>
+        <p className="text-[12.5px] leading-relaxed text-ink-faint">
+          ARGUS checks each role separately and uses the lowest result. Serious findings can limit
+          the score. A missing public identity does not count as wrongdoing. This report is research,
+          not financial advice.
+        </p>
+        <RunCostLine cost={dossier.cost} />
       </div>
+    </LegacySection>
+  );
+
+  const topScores = [
+    ...(reportView.primary ? [{ label: reportView.primary.id === "company" ? "Company" : "Person", value: reportView.primary.score != null ? String(reportView.primary.score) : "–" }] : []),
+    ...(reportView.tokenScore ? [{ label: "Token", value: reportView.tokenScore.score != null ? String(reportView.tokenScore.score) : reportView.tokenScore.verdictWord }] : []),
+  ];
+
+  return (
+    <div className="relative min-h-full">
+      <ArgusReportShell
+        runtime={{
+          subjectName: f.display_name || f.handle,
+          subjectRef: report.handle,
+          caseLabel: caseLabel ?? null,
+          auditId: report.audit_id,
+          ...(evidenceReportVersionId ? { reportVersionId: evidenceReportVersionId } : {}),
+          ...(versionContext?.version ? { version: versionContext.version } : {}),
+          ...(reportView.savedAt ? { savedAt: reportView.savedAt } : {}),
+          officialDomain: canonicalOfficialWebsite(f.website)?.domain ?? null,
+        }}
+        shareView={shareView}
+        breadcrumbName={f.display_name || f.handle}
+        versionLabel={versionContext ? `v${versionContext.version}` : f.live ? "live" : null}
+        topScores={topScores}
+        savedLine={reportView.savedLine}
+        savedHref={immutableReviewHref}
+        issues={reportView.issues}
+        watch={canWatch ? { watched, toggle: watch } : null}
+        exportBrief={exportBrief}
+        share={shareView ? null : {
+          ...(canShare ? {
+            create: async () => {
+              const response = await fetch("/api/share", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ kind: "person", ref: report.handle, reportVersionId: shareVersionId }),
+              });
+              const body = (await response.json().catch(() => null)) as { url?: unknown; message?: unknown } | null;
+              if (!body) throw new Error("The sharing service could not be reached. Please try again.");
+              if (!response.ok || typeof body.url !== "string") {
+                throw new Error(typeof body.message === "string" ? body.message : "Secure share link creation failed.");
+              }
+              return new URL(body.url, location.origin).toString();
+            },
+          } : {
+            unavailableReason: embeddedFacet
+              ? "Share the parent investigation to share this facet."
+              : "This report has not been saved as an immutable version yet, so a share link cannot be created.",
+          }),
+          subjectLabel: f.display_name || f.handle,
+          versionLabel: versionContext ? `Version ${versionContext.version}` : "Saved version",
+        }}
+        more={shareView ? [] : moreActions}
+        chapters={{
+          decision: () => <DecisionChapter view={reportView} before={decisionBefore} after={decisionAfter} onRescan={shareView || scoringAccessError ? undefined : onRescan} />,
+          scores: () => <ScoresChapter view={reportView} legacy={scoresLegacy} />,
+          product: () => <ProductChapter view={reportView} legacy={productLegacy} />,
+          code: () => <CodeChapter subjectKind={reportView.subjectKind} code={codeView} legacy={codeLegacy} />,
+          people: () => <PeopleChapter view={reportView} legacy={peopleLegacy} onAudit={shareView ? undefined : onAudit} />,
+          market: ({ active }) => <MarketChapter view={reportView} active={active} reconciliation={holderReconciliation} legacy={marketLegacy} />,
+          social: () => <SocialChapter view={reportView} legacy={socialLegacy} />,
+          connections: () => <ConnectionsChapter view={reportView} legacy={connectionsLegacy} />,
+          evidence: () => <EvidenceChapter view={reportView} current={evidenceCurrent} legacy={evidenceLegacy} />,
+        }}
+        footerNote={`Snapshot ${versionContext ? `v${versionContext.version}` : "live"}${caseLabel ? ` · Case ${caseLabel}` : ""} · Report ${report.audit_id}`}
+        scope={(
+          <>
+            <h2 className="dialog-title">A decision brief grounded in one saved report.</h2>
+            <p className="dialog-body">
+              This view presents {versionContext ? `version ${versionContext.version} of the ` : "the "}{f.display_name || f.handle} report{reportView.savedAt ? `, saved ${utcStamp(reportView.savedAt)}` : ""}. Scores, verdicts and evidence are the saved record. Review warnings, reconciliation notes and the newer market snapshot never change them.
+            </p>
+            <p className="dialog-body">
+              Source links can show newer content than the frozen artifacts. Missing evidence is shown as missing, never as zero, clean or adverse. Your checklist and watchlist stay in your browser and workspace; they are not part of shared links or the PDF brief.
+            </p>
+            <p className="dialog-body">ARGUS is research, not financial advice. No trade, scan or external message is performed from this view.</p>
+          </>
+        )}
+      />
     </div>
   );
 }

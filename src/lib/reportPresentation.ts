@@ -2,6 +2,7 @@ import type { ScoreCoverage } from "../engine/audit.js";
 // NOTE: this module is loaded as native ESM by the api/ functions — every
 // runtime import here MUST carry an explicit .js extension.
 import {
+  coveragePercentOf,
   CLEARANCE_COVERAGE_FLOOR_PERCENT,
   NEVER_WAIVE_CHECK_IDS,
   POST_SCAN_ENRICHMENT_CHECK_IDS,
@@ -170,7 +171,7 @@ export function coverageQualifiedCompleteness(input: {
   const recordedCount = rows.filter((row) => row.recorded).length;
   const openNeverWaive = hasStableIds
     && rows.some((row) => row.id && NEVER_WAIVE_CHECK_IDS.has(row.id) && !row.neverWaiveRecorded);
-  const recordedPercent = Math.floor((recordedCount / rows.length) * 100);
+  const recordedPercent = coveragePercentOf(recordedCount, rows.length);
   const coverageSufficient = hasStableIds
     ? !openNeverWaive && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT
     : recordedCount === rows.length;

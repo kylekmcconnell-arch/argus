@@ -11,6 +11,7 @@ import type { ResolvedInput } from "../lib/resolveInput";
 import { printReportPdf } from "../lib/printPdf";
 import type { TraceStep } from "../data/evidence";
 import type { CodeFlag, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat/types";
+import { launchMs } from "../threat/launchTime";
 import { threatScan } from "../threat/scan";
 import { projectLinks } from "../threat/links";
 import { aiCodeRead } from "../threat/codereview";
@@ -496,10 +497,85 @@ function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]["launc
 // insider clusters (who is POSITIONED to dump) cannot: realized behaviour.
 function shortWallet(a: string) { return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a; }
 
+// Handle provenance: the dated timeline behind the linked X account. A profile
+// shows a join date and never a rename, so this is the only place a reader sees
+// that the identity is younger than the account wearing it - and the only place
+// the last sighting of an old name is set against the token's own launch.
+export function HandleProvenance({ h, launchedAt }: { // exported for unit tests only
+  h: NonNullable<NonNullable<ThreatScan["deep"]["site"]>["xHistory"]>;
+  launchedAt: number | null;
+}) {
+  // Scans frozen before this lane carried the timeline have no accounts array.
+  const accounts = h.accounts ?? [];
+  const tone = h.handleReused ? "var(--color-avoid)" : h.status === "renamed" ? "var(--color-caution)" : "var(--color-ink-dim)";
+  const seenWindow = (n: { firstSeen: string | null; lastSeen: string | null }) =>
+    n.firstSeen && n.lastSeen && n.firstSeen !== n.lastSeen
+      ? `${n.firstSeen} → ${n.lastSeen}`
+      : n.firstSeen ?? n.lastSeen ?? "no dated sighting";
+
+  // The last sighting of an OLD name bounds when the rename happened. Against
+  // the token's launch it answers the question a reader actually has: was this
+  // account wearing a different identity shortly before the launch it fronts?
+  let proximity: { text: string; near: boolean } | null = null;
+  if (h.lastRenameSeen && launchedAt != null) {
+    const seen = Date.parse(`${h.lastRenameSeen}T00:00:00Z`);
+    if (Number.isFinite(seen)) {
+      const days = Math.round((launchedAt - seen) / 86400000);
+      const plural = Math.abs(days) === 1 ? "" : "s";
+      proximity = days >= 0
+        ? { text: `Still answering to a prior name on ${h.lastRenameSeen}, ${days} day${plural} before this token launched.`, near: days <= 90 }
+        : { text: `Still answering to a prior name on ${h.lastRenameSeen}, ${Math.abs(days)} day${plural} AFTER this token launched.`, near: true };
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-line/50 pt-2">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="mono text-[10.5px] uppercase tracking-widest" style={{ color: tone }}>Handle provenance</span>
+        <span className="mono text-[10.5px] text-ink-faint">
+          {h.status === "renamed"
+            ? `${h.priorHandles.length} prior name${h.priorHandles.length === 1 ? "" : "s"}`
+            : h.status === "single" ? "no rename observed" : "no archive record"}
+        </span>
+      </div>
+      {accounts.map((acct, i) => (
+        <div key={acct.id || `acct-${i}`} className="mt-1.5">
+          {accounts.length > 1 && (
+            <div className="mono text-[10.5px] text-ink-faint">account id {acct.id || "unknown"}</div>
+          )}
+          {acct.names.map((n) => {
+            const current = n.handle.toLowerCase() === h.handle.toLowerCase();
+            return (
+              <div key={`${acct.id}-${n.handle}`} className="flex items-baseline justify-between gap-3 text-[11.5px]">
+                <span className="mono" style={{ color: current ? "var(--color-ink)" : "var(--color-ink-dim)" }}>
+                  @{n.handle}{current ? " · current" : ""}
+                </span>
+                <span className="mono text-ink-faint">{seenWindow(n)}</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      {h.handleReused && (
+        <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-avoid)" }}>
+          This screen name has been worn by {accounts.length} different account ids - the followers and history on it may not belong to the account using it now.
+        </p>
+      )}
+      {proximity && (
+        <p className="mt-2 text-[11.5px]" style={{ color: proximity.near ? "var(--color-caution)" : "var(--color-ink-dim)" }}>{proximity.text}</p>
+      )}
+      {!accounts.length && <p className="mt-1.5 text-[11.5px] text-ink-dim">{h.note}</p>}
+      {accounts.length > 0 && (
+        <p className="mt-1.5 text-[10.5px] text-ink-faint">Dates are archive sightings (memory.lol), not exact rename timestamps. Coverage is partial, so an absent rename is a gap rather than proof of none.</p>
+      )}
+    </div>
+  );
+}
+
 // Linked-site safety: the token's own website is where drainers hide - a scam
 // tell that no contract check sees. Only rendered when there's something to say
 // (a flag, or a fresh token with no socials at all).
-function SitePanel({ s }: { s: NonNullable<ThreatScan["deep"]["site"]> }) {
+function SitePanel({ s, launchedAt }: { s: NonNullable<ThreatScan["deep"]["site"]>; launchedAt: number | null }) {
   const c = s.worst === "malicious" ? "var(--color-avoid)" : s.worst === "suspicious" ? "var(--color-caution)" : "var(--color-ink-dim)";
   return (
     <div className="mt-4 panel p-4" style={{ borderColor: s.worst === "malicious" ? "var(--color-avoid)" : "var(--color-line)" }}>
@@ -519,6 +595,7 @@ function SitePanel({ s }: { s: NonNullable<ThreatScan["deep"]["site"]> }) {
       {s.xBio && s.xBio.status !== "absent" && (
         <p className="mt-2 text-[11.5px]" style={{ color: s.xBio.status === "mismatch" ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>{s.xBio.note}</p>
       )}
+      {s.xHistory && <HandleProvenance h={s.xHistory} launchedAt={launchedAt} />}
       {s.sites.map((x) => (
         <div key={x.url} className="mt-2 border-t border-line/50 pt-2">
           <div className="mono text-[11.5px] text-ink-dim">{x.host} <span className="text-ink-faint">· {x.verdict}{x.sources.length ? ` (${x.sources.join(", ")})` : ""}</span></div>
@@ -696,7 +773,7 @@ function MarketRiskSummary({ scan }: { scan: ThreatScan }) {
           <span className="text-[13px] font-medium text-ink">{scan.call.action}</span>
         </div>
         <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
-          This is the concise market-and-mechanics interpretation of the saved token evidence. It does not treat price decline alone as a safety failure.
+          {scan.call.risk} of 100 risk points, where higher is worse. This is the opposite scale to the token safety score, which is a quality score where higher is safer, so the two can disagree without either being wrong. This is the concise market-and-mechanics interpretation of the saved token evidence. It does not treat price decline alone as a safety failure.
         </p>
         {items.length > 0 && (
           <ul className="mt-3 grid gap-2 lg:grid-cols-2">
@@ -882,7 +959,9 @@ function Report({ scan }: { scan: ThreatScan }) {
       {scan.deep.launch && scan.deep.launch.kind !== "unknown" && <LaunchPanel launch={scan.deep.launch} />}
 
       {/* linked-site safety */}
-      {scan.deep.site && (scan.deep.site.worst !== "clean" || !scan.deep.site.hasX || scan.deep.site.xBio != null) && <SitePanel s={scan.deep.site} />}
+      {scan.deep.site && (scan.deep.site.worst !== "clean" || !scan.deep.site.hasX || scan.deep.site.xBio != null || scan.deep.site.xHistory != null) && (
+        <SitePanel s={scan.deep.site} launchedAt={launchMs(scan)} />
+      )}
 
       {/* sell structure */}
       {scan.deep.sellers && (scan.deep.sellers.sellerCount > 0 || scan.deep.sellers.devSold || scan.deep.sellers.recentTape) && <SellStructurePanel s={scan.deep.sellers} chain={scan.chain} />}

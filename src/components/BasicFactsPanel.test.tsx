@@ -31,6 +31,7 @@ describe("BasicFactsPanel", () => {
             predicate: "founder",
             value: "Tharmas · creator",
             status: "verified",
+            artifact_verified: true,
             floorEligible: false,
             critical: true,
             sources: [{ url: "https://x.com/0xTharmas", relation: "supports" }],
@@ -57,6 +58,7 @@ describe("BasicFactsPanel", () => {
               predicate: "identity",
               value: "Jupiter is a Solana liquidity aggregation and trading platform.",
               status: "verified",
+              artifact_verified: true,
               critical: true,
               sources: [{
                 url: "https://jup.ag/",
@@ -71,6 +73,7 @@ describe("BasicFactsPanel", () => {
               predicate: "founders",
               value: "Meow and Siong",
               status: "corroborated",
+              artifact_verified: true,
               critical: true,
               sources: [
                 { url: "https://docs.jup.ag/tokenomics", title: "Official tokenomics", relation: "supports" },
@@ -413,6 +416,7 @@ describe("BasicFactsPanel", () => {
             predicate: "traction",
             value: "$2.36B market cap · captured 2026-07-23",
             status: "verified",
+            artifact_verified: true,
             providerProjection: true,
             floorEligible: false,
             sources: [{
@@ -451,6 +455,7 @@ describe("BasicFactsPanel", () => {
             predicate: "partnership",
             value: "Integration with Example Network",
             status: "corroborated",
+            artifact_verified: true,
             floorEligible: false,
             sources: [
               { url: "https://news-one.example/integration", relation: "supports", sourceClass: "independent_press" },
@@ -478,6 +483,7 @@ describe("BasicFactsPanel", () => {
               predicate: "official_identity",
               value: "Venice",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://x.com/askvenice", relation: "supports" }],
             },
             {
@@ -485,6 +491,7 @@ describe("BasicFactsPanel", () => {
               value: "Erik Voorhees",
               qualifier: "Founder and CEO",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://venice.ai", relation: "supports" }],
             },
           ]}
@@ -548,6 +555,7 @@ describe("BasicFactsPanel", () => {
             predicate: "legal_name",
             value: "Ada Example",
             status: "verified",
+            artifact_verified: true,
             sources: [{ url: "https://example.com/profile", title: "Official profile", relation: "supports" }],
           }]}
         />,
@@ -570,12 +578,14 @@ describe("BasicFactsPanel", () => {
               predicate: "official_identity",
               value: "Brian Armstrong",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://www.coinbase.com/about", relation: "supports" }],
             },
             {
               predicate: "current_role",
               value: "Co-founder, Chair and CEO of Coinbase",
               status: "corroborated",
+              artifact_verified: true,
               sources: [{ url: "https://investor.coinbase.com/governance/default.aspx", relation: "supports" }],
             },
           ]}
@@ -605,6 +615,7 @@ describe("BasicFactsPanel", () => {
             attributedEntity: "Brian Armstrong",
             attributionScope: "direct_subject",
             status: "verified",
+            artifact_verified: true,
             sources: [{ url: "https://example.com/court-order", relation: "supports" }],
           }]}
         />,
@@ -634,6 +645,7 @@ describe("BasicFactsPanel", () => {
               attributedEntity: "Coinbase, Inc.",
               attributionScope: "related_entity",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://example.com/regulator-order", relation: "supports" }],
             }]}
           />,
@@ -661,6 +673,7 @@ describe("BasicFactsPanel", () => {
             attributedEntity: "Brian Armstrong",
             attributionScope: "identity_unresolved",
             status: "verified",
+            artifact_verified: true,
             sources: [{ url: "https://example.com/regulator-order", relation: "supports" }],
           }]}
         />,
@@ -728,6 +741,7 @@ describe("BasicFactsPanel", () => {
             predicate: "public_security",
             value: "NASDAQ: COIN",
             status: "verified",
+            artifact_verified: true,
             sources: [{ url: "https://www.sec.gov/Archives/edgar/data/1679788/", relation: "supports" }],
           }]}
           questionLedger={[
@@ -778,24 +792,28 @@ describe("BasicFactsPanel", () => {
               predicate: "founder",
               value: "Meow",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://docs.jup.ag/tokenomics", relation: "supports" }],
             },
             {
               predicate: "co_founders",
               value: "Siong",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://discuss.jup.ag/founders", relation: "supports" }],
             },
             {
               predicate: "repositories",
               value: "jup-ag/jupiter-swap-api-client",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://github.com/jup-ag/jupiter-swap-api-client", relation: "supports" }],
             },
             {
               predicate: "repository",
               value: "jup-ag/jupiter-core-example",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://github.com/jup-ag/jupiter-core-example", relation: "supports" }],
             },
           ]}
@@ -818,12 +836,14 @@ describe("BasicFactsPanel", () => {
               predicate: "official_token",
               value: "JUP",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://jup.ag/token", relation: "supports" }],
             },
             {
               predicate: "official_token",
               value: "$JUP",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://coingecko.com/en/coins/jupiter-exchange-solana", relation: "supports" }],
             },
           ]}
@@ -848,6 +868,7 @@ describe("BasicFactsPanel", () => {
               value: "cbBTC",
               qualifier: "ERC20 token backed 1:1 by Bitcoin held by Coinbase",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://www.coinbase.com/cbbtc", relation: "supports" }],
             },
             {
@@ -855,6 +876,7 @@ describe("BasicFactsPanel", () => {
               value: "cbETH",
               qualifier: "ERC-20 token representing staked ETH issued by Coinbase",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://www.coinbase.com/cbeth", relation: "supports" }],
             },
           ]}
@@ -904,6 +926,7 @@ describe("BasicFactsPanel", () => {
             value,
             normalizedValue: value.toLowerCase(),
             status: "verified" as const,
+            artifact_verified: true,
             sources: [{ url: `https://example.com/${predicate}`, relation: "supports" as const }],
           }))}
         />,
@@ -933,6 +956,7 @@ describe("BasicFactsPanel", () => {
             predicate: "identity",
             value: "Example",
             status: "verified",
+            artifact_verified: true,
             sources: [
               { url: "http://127.0.0.1/internal" },
               { url: "http://localhost/admin" },
@@ -962,12 +986,14 @@ describe("BasicFactsPanel", () => {
               predicate: "official_token",
               value: "$AAVE",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://coingecko.com/en/coins/aave", relation: "supports" }],
             },
             {
               predicate: "tokenomics",
               value: "15.2M of 16.0M supply circulating (95%)",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://coingecko.com/en/coins/aave", relation: "supports" }],
             },
           ]}
@@ -991,6 +1017,7 @@ describe("BasicFactsPanel", () => {
               predicate: "tokenomics",
               value: "50% community allocation",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://example.com/tokenomics", relation: "supports" }],
             },
           ]}
@@ -1016,12 +1043,14 @@ describe("BasicFactsPanel", () => {
               predicate: "network",
               value: chain,
               status: "verified" as const,
+              artifact_verified: true,
               sources: [{ url: `https://aave.com/docs/${chain.toLowerCase().replace(/\s+/g, "-")}`, relation: "supports" as const }],
             })),
             {
               predicate: "network",
               value: "22 chains incl. Ethereum, Plasma, Base, Arbitrum",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://defillama.com/protocol/aave", relation: "supports" }],
             },
           ]}
@@ -1043,12 +1072,14 @@ describe("BasicFactsPanel", () => {
               predicate: "network",
               value: "Ethereum, Polygon, Avalanche, BNB Chain, Fantom",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://aave.com/docs", relation: "supports" }],
             },
             {
               predicate: "network",
               value: "22 chains incl. Ethereum, Plasma, Base, Arbitrum",
               status: "verified",
+              artifact_verified: true,
               sources: [{ url: "https://defillama.com/protocol/aave", relation: "supports" }],
             },
           ]}
@@ -1072,6 +1103,7 @@ describe("BasicFactsPanel", () => {
             // into ONE string, with stale captures interleaved.
             value: "CoinGecko rank #39 · $2.40B market cap · $15.5M on-chain liquidity · $166M 24h volume · captured 2026-07-22, $3.18B total value locked (Ethereum, Base, Arbitrum) · up 2.1% vs 30 days ago · captured 2026-07-22, $83.0M protocol fees in 30 days · captured 2026-07-22, CoinGecko rank #39 · $2.36B market cap · $15.4M on-chain liquidity · $165M 24h volume · captured 2026-07-23, $85.8M protocol fees in 30 days · captured 2026-07-23",
             status: "verified",
+            artifact_verified: true,
             critical: true,
             sources: [{ url: "https://www.coingecko.com/en/coins/uniswap", title: "CoinGecko token record", relation: "supports" }],
           }]}
@@ -1097,6 +1129,7 @@ describe("BasicFactsPanel", () => {
             predicate: "product",
             value: "Uniswap Web App, Uniswap Wallet, Uniswap Protocol, Uniswap operates a live on-chain protocol; its canonical token UNI is established and actively traded (CoinGecko rank #39 · $2.40B market cap), Uniswap operates a live on-chain protocol; its canonical token UNI is established and actively traded (CoinGecko rank #39 · $2.36B market cap)",
             status: "corroborated",
+            artifact_verified: true,
             critical: false,
             sources: [{ url: "https://www.coingecko.com/en/coins/uniswap", title: "On-chain market liveness", relation: "supports" }],
           }]}
@@ -1122,6 +1155,7 @@ describe("BasicFactsPanel", () => {
             predicate: "funding",
             value: "Series B, 6 public funding rounds · $178M raised · led by Andreessen Horowitz, Polychain",
             status: "corroborated",
+            artifact_verified: true,
             critical: true,
             sources: [{ url: "https://theblock.co/uniswap-series-b", title: "theblock.co", relation: "supports" }],
           }]}
@@ -1153,6 +1187,7 @@ describe("BasicFactsPanel", () => {
             predicate: "funding",
             value: "raised $11M, raised $165M",
             status: "corroborated",
+            artifact_verified: true,
             critical: true,
             sources: [{ url: "https://example.com/funding", relation: "supports" }],
           }]}

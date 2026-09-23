@@ -60,10 +60,19 @@ export async function checkLeaderDepartures(
   const out: LeaderDepartureCheck[] = [];
   for (const leader of leaders) {
     const name = (leader.name ?? "").trim();
+    // The profile URL is the strongest key this lookup takes, so it decides
+    // whose employment record comes back. Pass it only when the slug itself
+    // carries the person's name; otherwise name + company, which cannot
+    // silently resolve to a colleague (ARGUS-05).
+    const slugCarriesName = (() => {
+      const slug = (leader.linkedin ?? "").toLowerCase();
+      const tokens = name.toLowerCase().split(/\s+/).filter((token) => token.length > 2);
+      return tokens.length > 0 && tokens.every((token) => slug.includes(token));
+    })();
     const person = await enrich({
       name,
       company,
-      ...(leader.linkedin ? { profile: leader.linkedin } : {}),
+      ...(slugCarriesName && leader.linkedin ? { profile: leader.linkedin } : {}),
     });
     if (!person) continue;
     const currency = employmentCurrency(person.experience, company, name);

@@ -1,3 +1,4 @@
+import { hasThreatApiContext } from "../threat/net";
 import { officialXProfileHandle } from "../lib/officialXProfile";
 // Token audit: contract / DexScreener URL -> a forensic rug verdict, computed
 // live in the browser, keyless. Sources: DexScreener (market), GoPlus EVM +
@@ -278,6 +279,8 @@ export type CollectTokenShippingFn = (
     deadlineAt?: number;
     /** The token behind the project, so the lane can join its chart and its deployer's creations. */
     token?: { address: string; chain: string; deployer?: string | null };
+    /** The project's own words, so the lane can pick the sector it is compared with. */
+    sectorText?: string | null;
   },
 ) => Promise<ShippingSummary | undefined>;
 
@@ -321,15 +324,15 @@ export function deployerWalletAddress(d: Pick<TokenDossier, "deployer" | "deploy
 
 // Browser default: is the EVM creator record a contract? Asks ARGUS's own
 // bytecode route (one eth_getCode). Same shape as resolveDeployerViaRoute: a
-// relative URL only resolves in a browser, so a server or Node audit answers
-// "unknown" and keeps the provider's attribution as recorded.
+// relative URL requires a browser or an authenticated server transport. Raw
+// Node audits without either keep the provider attribution as unknown.
 export async function resolveEvmCreatorKind(
   chain: string,
   creator: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<"contract" | "wallet" | "unknown"> {
   const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
-  if (!origin) return "unknown";
+  if (!origin && !hasThreatApiContext()) return "unknown";
   try {
     const r = await fetchImpl(`/api/bytecode?address=${encodeURIComponent(creator)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(12000) });
     if (!r.ok) return "unknown";
@@ -342,9 +345,8 @@ export async function resolveEvmCreatorKind(
 }
 
 // Browser default: GET the deployer's Arkham trace from the scan-time route.
-// Only runs in a browser (relative fetch); the opts.screenDeployerRisk hook is
-// reserved for a future server-side direct screener (mirrors screenSanctions),
-// so server audits currently record the trace as "not run" rather than a throw.
+// Runs with a browser origin or a scoped server transport. Raw Node audits
+// without either continue to record this trace as not run.
 export async function screenDeployerRisk(
   address: string | null | undefined,
   fetchImpl: typeof fetch = fetch,
@@ -352,7 +354,7 @@ export async function screenDeployerRisk(
   if (!arkhamProviderEnabled()) return undefined;
   if (!address || address.length < 8) return undefined;
   const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
-  if (!origin) return undefined;
+  if (!origin && !hasThreatApiContext()) return undefined;
   const completedAt = new Date().toISOString();
   try {
     const r = await fetchImpl(`/api/deployer-risk?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(18000) });
@@ -378,14 +380,14 @@ const SIGNED_THE_CREATION = new Set(["mint feePayer", "creation-tx fee payer"]);
 // Browser default: ask ARGUS's own Solana deployer resolver. api/resolve-deployer
 // reads the Helius DAS creators/authority and the mint's oldest-transaction fee
 // payer, filtering the launchpad and system programs that are never a dev.
-// Same shape as screenDeployerRisk: a relative URL only resolves in a browser,
-// so a server or Node audit skips it and falls through to the keyless source.
+// Same shape as screenDeployerRisk: a browser or scoped server transport
+// resolves the relative route; raw Node audits fall through to keyless sources.
 export async function resolveDeployerViaRoute(
   mint: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<DeployerAttribution | null> {
   const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
-  if (!origin) return null;
+  if (!origin && !hasThreatApiContext()) return null;
   try {
     const r = await fetchImpl(`/api/resolve-deployer?mint=${encodeURIComponent(mint)}`, { signal: AbortSignal.timeout(20000) });
     if (!r.ok) return null;
@@ -404,11 +406,10 @@ export async function resolveDeployerViaRoute(
 // shows "unavailable" instead of silently claiming a clean pass.
 //
 // The screen calls a same-origin API route (/api/sanctions), which only
-// resolves under the browser's authenticated fetch wrapper. In a raw server or
+// resolves under the browser wrapper or authenticated server transport. In a raw server or
 // Node audit (public API, drift sweep, benchmark) there is no origin, so the
 // screen is skipped and returns undefined — recorded as "not run" rather than a
-// failed attempt or, worse, a false clean. Server-side direct screening is a
-// separate follow-up.
+// failed attempt or, worse, a false clean.
 export async function screenAddressSanctions(
   chain: string,
   addresses: readonly (string | null | undefined)[],
@@ -427,11 +428,11 @@ export async function screenAddressSanctions(
       reason: "no_screenable_addresses",
     };
   }
-  // Same-origin relative fetch only resolves in a browser. `globalThis` is
+  // A browser origin or scoped server transport must resolve this API. `globalThis` is
   // typed in both the DOM and Node libs (a bare `window` is not), so this is
   // the env-agnostic way to detect the browser without a DOM-lib dependency.
   const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
-  if (!origin) return undefined;
+  if (!origin && !hasThreatApiContext()) return undefined;
   const completedAt = new Date().toISOString();
   try {
     const r = await fetchImpl(
@@ -1267,7 +1268,7 @@ async function runTokenAudit(
     ? "Holder data not verifiable keyless."
     : !holdersReliable
       ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.`
-      : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
+      : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct < 10 ? topPct.toFixed(2) : topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
 
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
@@ -1275,7 +1276,7 @@ async function runTokenAudit(
   if (washSignature) aT5 = 2; // churn without price movement = manufactured volume
   else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
 
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
@@ -1358,7 +1359,12 @@ async function runTokenAudit(
   if (githubOrg && opts?.collectShipping) {
     step({ phase: "Corroborate", label: "Development", detail: `Reading github.com/${githubOrg}: cadence, committers, substance, whether the code reaches production.`, tone: "neutral" });
     opts?.signal?.throwIfAborted();
-    shipping = await opts.collectShipping(githubOrg, { fetchImpl: fetcher, deadlineAt: opts?.deadlineAt, token: { address, chain, deployer: deployerAttribution?.address ?? null } }).catch(() => undefined);
+    shipping = await opts.collectShipping(githubOrg, {
+      fetchImpl: fetcher,
+      deadlineAt: opts?.deadlineAt,
+      token: { address, chain, deployer: deployerAttribution?.address ?? null },
+      sectorText: [pair.baseToken.name, cg?.description].filter(Boolean).join(" · ") || null,
+    }).catch(() => undefined);
     if (shipping) {
       step({ phase: "Corroborate", label: "Development read", detail: shipping.headline, tone: shipping.grade === "stalled" ? "bad" : shipping.grade === "thin" ? "warn" : shipping.grade === "unknown" ? "neutral" : "good" });
       if (shipping.market === "price-without-shipping") findings.push({ claim: "The token's price rose over the last quarter while commits to the linked repositories fell: the move is not backed by visible development.", tone: "warn", source: "github" });

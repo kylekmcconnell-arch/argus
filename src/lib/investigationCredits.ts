@@ -1,3 +1,4 @@
+import { setPanelToken } from "./panelToken";
 export interface CreditReservation {
   chargedCredits: number;
   remainingCredits: number;
@@ -30,6 +31,9 @@ export async function reserveInvestigationCredit(
         : "ARGUS could not check your credit balance. No providers were started and no credit was taken. Try again.";
     throw new Error(message);
   }
+  // The capability for the panels this scan is about to open (#356). It is
+  // held in memory only and never dispatched with the credit event.
+  setPanelToken(typeof body.panelToken === "string" ? body.panelToken : undefined);
   const reservation = {
     chargedCredits: typeof body.chargedCredits === "number" ? body.chargedCredits : 0,
     remainingCredits: typeof body.remainingCredits === "number" ? body.remainingCredits : 0,

@@ -289,8 +289,8 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
       signals.push({
         id: "supply-overhang",
         severity: "watch",
-        headline: `Only ${pct(input.circulatingPct)} of the supply is circulating`,
-        detail: `The all-token value is ${ratio.toFixed(1)}x the market cap; most of the supply has not been released yet.`,
+        headline: `${pct(100 - input.circulatingPct)} of the supply is not classified as circulating`,
+        detail: `The all-token value is ${ratio.toFixed(1)}x the market cap. This source's circulating figure is not an allocation, burn, vesting or unlock record, and does not establish when or whether the rest reaches the market.`,
         anchor: anchors.market,
         discovery: {
           factCount: 3,

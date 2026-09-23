@@ -111,6 +111,58 @@ describe("verified project-token collection", () => {
     expect(evidence.projectToken).toBeUndefined();
   });
 
+  it.each(["announcement_url", "chat_url", "official_forum_url", "blockchain_site"])(
+    "does not bind the audited account from a profile URL sitting in %s",
+    async (linkKey) => {
+      // A registry link array holds whatever the listing supplied, routinely a
+      // link posted by somebody who merely announced or discussed the coin.
+      // Only the registry's own screen name, or its record of the project's
+      // site list, may name the token's official account (#359).
+      const { ctx, evidence } = context();
+      vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("coingecko.com") && url.includes("/search?")) return json(search());
+        if (url.includes("/coins/project-token?")) {
+          return json(details({
+            links: {
+              twitter_screen_name: "someoneelse",
+              homepage: ["https://unrelated.example/"],
+              [linkKey]: ["https://x.com/projectdex"],
+            },
+          }));
+        }
+        if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+        if (url === "https://project.example/") return new Response("Official website without a token declaration");
+        throw new Error(`unexpected URL ${url}`);
+      }));
+      await collectProjectTokenIdentity(ctx);
+      expect(evidence.projectToken).toBeUndefined();
+    },
+  );
+
+  it("still binds when a stale screen name sits beside the current X URL in the project's own site list", async () => {
+    // The case the broad scan existed for: CoinGecko keeps a renamed
+    // twitter_screen_name while the live X URL is in `homepage`.
+    const { ctx, evidence } = context();
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json(search());
+      if (url.includes("/coins/project-token?")) {
+        return json(details({
+          links: {
+            twitter_screen_name: "projectdex_old",
+            homepage: ["https://project.example/", "https://x.com/projectdex"],
+          },
+        }));
+      }
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://project.example/") return new Response("Official website without a token declaration");
+      throw new Error(`unexpected URL ${url}`);
+    }));
+    await collectProjectTokenIdentity(ctx);
+    expect(evidence.projectToken).toMatchObject({ verified: true, officialX: "@projectdex" });
+  });
+
   it("binds SSR to the exact contract declared by its official X profile without requiring a website or CoinGecko", async () => {
     const { ctx, evidence } = context("@strategicsuperr", "Strategic Super Reserve SSR", "");
     evidence.profile.bio = `The Strategic Super Reserve by @EnigmaFund Venture Capital: Multichain DTFs to support builders & communities. CA: ${SSR_TOKEN}`;
@@ -548,13 +600,29 @@ describe("verified project-token collection", () => {
           },
         }],
       });
-      // The subject's real site never publishes that contract.
-      if (url.startsWith("https://www.binance.com/")) return new Response("<html>Exchange the world.</html>");
+      // The subject's real site never publishes that contract. The canonical
+      // form drops the "www.", so match both or the read never reaches here.
+      if (/^https:\/\/(www\.)?binance\.com\//.test(url)) return new Response("<html>Exchange the world.</html>");
       throw new Error(`unexpected URL ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
+    // Without an injected reader the default recovery path resolves binance.com
+    // for real, which is a live DNS round trip inside a unit test: ~1.4s on a
+    // machine with no network, right under the 5s limit until load tips it over.
+    const recoverOfficialText = vi.fn(async (url: string) => ({
+      status: "ok" as const,
+      url,
+      host: "binance.com",
+      contentType: "text/markdown",
+      text: `URL Source: ${url}\n\nExchange the world.`,
+      contentHash: "binance-home-no-contract",
+      capturedAt: "2026-09-23T00:00:00.000Z",
+      retrievalMethod: "reader_recovery" as const,
+      retrievalProvider: "jina-reader" as const,
+      retrievalUrl: `https://r.jina.ai/${url}`,
+    }));
 
-    await collectProjectTokenIdentity(ctx);
+    await collectProjectTokenIdentity(ctx, { recoverOfficialText });
 
     expect(evidence.projectToken).toBeUndefined();
     expect(evidence.namesakeTokens).toEqual([expect.objectContaining({

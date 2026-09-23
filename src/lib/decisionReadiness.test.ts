@@ -109,7 +109,7 @@ describe("deriveDecisionReadiness", () => {
 
     expect(result).toMatchObject({
       status: "provisional",
-      coveragePercent: 99,
+      coveragePercent: 99.5,
       applicable: 200,
       successful: 199,
       unresolved: 1,
