@@ -16,6 +16,11 @@ jobs:
   database:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Job-wide, not just on the start step: `supabase test db` pulls pg_prove
+    # too, and on 2026-09-23 that single ghcr.io pull failed the job after
+    # every other image had come from the mirror.
+    env:
+      SUPABASE_INTERNAL_IMAGE_REGISTRY: public.ecr.aws
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
@@ -42,9 +47,7 @@ jobs:
       - name: Start isolated Supabase database
         # The pinned CLI defaults to ghcr.io; the same images are mirrored to
         # ECR Public (the registry newer CLIs default to), on a separate
-        # allowance. Every pinned tag was checked there on 2026-09-23.
-        env:
-          SUPABASE_INTERNAL_IMAGE_REGISTRY: public.ecr.aws
+        # allowance - see the job env. Every pinned tag was checked there.
         run: |
           set -eu
           supabase stop --no-backup || true
