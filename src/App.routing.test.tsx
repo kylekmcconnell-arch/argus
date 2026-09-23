@@ -2115,6 +2115,8 @@ describe("App routing safety", () => {
     await failPersonRunAndSettle(view);
     expect(view.querySelector("[data-testid='stored-person-report']")).toBeNull();
     expect(view.textContent).toContain("The combined token assessment could not be saved.");
+    expect(view.textContent).toContain("could not confirm a complete saved report");
+    expect(view.textContent).not.toContain("produced no new report");
     expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
   });
 
