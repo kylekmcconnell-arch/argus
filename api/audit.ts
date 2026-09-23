@@ -231,8 +231,8 @@ export async function persistServerDossier(
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestStartedAt = Date.now();
-  if (req.method !== "GET") {
-    res.status(405).setHeader("Allow", "GET").json({ error: "method_not_allowed" });
+  if (req.method !== "GET" && req.method !== "POST") {
+    res.status(405).setHeader("Allow", "GET, POST").json({ error: "method_not_allowed" });
     return;
   }
 

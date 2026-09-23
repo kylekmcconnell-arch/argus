@@ -622,6 +622,34 @@ export async function fetchReport(ref: string, kind?: ReportKind): Promise<Store
   return (await fetchReportState(ref, kind)).report;
 }
 
+export type PersonRunRecovery =
+  | { state: "saved"; dossier: Dossier }
+  | { state: "running" | "unavailable" | "failed" | "not_found" };
+
+/** Read-only lookup bound to this run, tenant, initiating user and subject. */
+export async function fetchPersonRun(runKey: string, ref: string, signal: AbortSignal): Promise<PersonRunRecovery> {
+  try {
+    const response = await fetch(`/api/report?${new URLSearchParams({ runKey, ref }).toString()}`, {
+      cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+    });
+    if (!response.ok) return { state: response.status === 404 ? "not_found" : "unavailable" };
+    const body = await response.json() as { state?: string; report?: StoredReport; panelToken?: string };
+    if (body.state === "saved" && body.report?.kind === "person"
+      && normalizeSubjectRef(body.report.ref) === normalizeSubjectRef(ref)
+      && body.report.versionContext?.reportVersionId) {
+      const d = storedPersonDossier(body.report);
+      if (normalizeSubjectRef(d.handle) !== normalizeSubjectRef(ref)) return { state: "not_found" };
+      return { state: "saved", dossier: {
+        ...d,
+        persistence: { state: "persisted", reportVersionId: body.report.versionContext.reportVersionId,
+          ...(body.panelToken ? { panelCostToken: body.panelToken } : {}),
+        },
+      } };
+    }
+    return { state: body.state === "running" ? "running" : body.state === "failed" ? "failed" : "unavailable" };
+  } catch { return { state: "unavailable" }; }
+}
+
 /** Load one immutable evidence snapshot by version id, even after archiving. */
 export async function fetchReportVersion(reportVersionId: string): Promise<StoredReport | null> {
   try {

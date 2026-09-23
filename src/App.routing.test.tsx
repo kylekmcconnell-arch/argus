@@ -528,7 +528,7 @@ describe("App routing safety", () => {
     harness.syncReport.mockResolvedValue({ state: "failed", reason: "Report storage did not accept the save." });
 
     await act(async () => {
-      await harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: initialVersionId }));
+      await expect(harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: initialVersionId }))).rejects.toThrow("Report storage did not accept the save.");
     });
 
     await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledTimes(1));
@@ -2102,6 +2102,20 @@ describe("App routing safety", () => {
 
     expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull();
     expect(view.textContent).not.toContain("The scan didn't finish");
+  });
+
+  it("does not substitute a newer project-only report after exact-run completion fails", async () => {
+    servePersonVersion(4);
+    harness.getRun.mockReturnValue({ runKey: "exact-owned-run", status: "error", error: "The combined token assessment could not be saved." });
+    const view = await renderApp("/?s=persisted_person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='person-rescan']")?.click());
+    await settle();
+    servePersonVersion(5);
+    await failPersonRunAndSettle(view);
+    expect(view.querySelector("[data-testid='stored-person-report']")).toBeNull();
+    expect(view.textContent).toContain("The combined token assessment could not be saved.");
+    expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
   });
 
   /** A run whose only failure is the browser's stream: the server is still collecting. */

@@ -54,3 +54,42 @@ market assessment, the current reading flags market risk and withholds overall
 reassurance. It does not average opposite scales or invent a replacement score.
 Saved reports display the current presentation revision separately from the
 report's snapshot identity.
+
+
+## Interrupted scan recovery
+
+New browser launches use POST with a stable run key. The API still accepts GET
+for existing clients. A duplicate-claim response means the original request may
+still be collecting; it does not mean the investigation failed. Other launch
+rejections remain terminal.
+
+On a dropped connection, the active browser runner polls a read-only endpoint
+bound to the organization, initiating user, subject and exact run receipt. It
+never substitutes the current active version for that subject and never starts
+another project investigation. Polling ends at the original server deadline plus
+45 seconds of persistence grace. Private scans do not use shared recovery.
+Archived cases are not restored by recovery.
+
+When the exact saved project snapshot arrives, the runner reuses its in-flight
+token check or starts the existing identity-bound token leg if no announcement
+arrived. Completion waits for the final combined save. A failed combined save is
+shown as a failure, not completion of the earlier project-only version. Late
+stream events and cancelled recovery responses cannot finalize the run again.
+
+This recovery requires the browser session to remain alive. Closing or reloading
+the page can still interrupt the browser-owned token leg; durable server-side
+execution of that leg is separate work. Recovery does not rerun a failed scorer,
+fill missing evidence, or rewrite a historical snapshot.
+
+Presentation revision `2026-09-23.1` clarifies that a displayed partial score
+covers assessed areas only and remains provisional. Unmeasured areas are not
+zeroes. The market-risk reconciliation rule from `2026-09-22.1` is unchanged.
+
+## Verification and rollback
+
+Use offline tests for duplicate launches, interrupted streams, exact-version
+recovery, tenant/user/subject isolation, cancellation, token-leg reuse and failed
+combined saves. Run the full test suite, typecheck, build, calibration and release
+canaries before merging through the protected branch. No database migration is
+required. Roll back this recovery change by reverting its commit through the
+same protected workflow; immutable saved reports remain intact.

@@ -1041,7 +1041,7 @@ export default function App() {
             },
           },
         });
-        return;
+        throw new Error(persisted.reason || "The project report is saved, but its completed token assessment could not be saved.");
       }
 
       const versionContext = savedVersionContext("person", d, persisted);
@@ -1183,6 +1183,15 @@ export default function App() {
       ? recorded
       : null;
     const run = getRun(ref);
+    // Current runners own exact-receipt recovery and token finalization. A
+    // terminal failure here must not be "recovered" by opening an unrelated
+    // newer version or the pre-token snapshot from that same run.
+    if (run?.runKey && run.status === "error") {
+      setLiveError(run.error ?? "The complete report could not be saved.");
+      setCaseNotice({ reason: "rescan-failed", ref, kind: "person", storedAvailable: true });
+      setPhase("notfound");
+      return;
+    }
     const dropped = run?.status === "error" && run.errorKind === "stream_dropped";
     const recoveryDeadline = dropped && run ? streamDropRecoveryDeadline(run) : 0;
     if (dropped) {

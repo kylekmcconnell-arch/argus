@@ -2902,7 +2902,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           <span className="review-icon" aria-hidden="true">△</span>
           <div>
             <strong>Partial decision assessment: {governingAxes.length} of {expectedGoverningAxes.length} decision areas were assessed.</strong>
-            <p>{unmeasuredGoverningAxes.map(axisLabel).join(" and ")} remain unmeasured, so no overall score was produced and missing evidence was not treated as zero.</p>
+            <p>{unmeasuredGoverningAxes.map(axisLabel).join(" and ")} remain unmeasured. Any displayed score covers the assessed areas only and remains provisional; missing evidence was not treated as zero.</p>
           </div>
           {onRescan && !shareView && <button type="button" className="textbtn" onClick={onRescan}>Run a fresh assessment →</button>}
         </div>
