@@ -16,7 +16,6 @@ import { EARN_SUBJECT_LEADS, isCanonicalEarnToken } from "../data/earnReport";
 import { EmbeddedThreatScan } from "./ThreatScanPage";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
-import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { decisionCriticalChecks, tokenChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness, type DecisionReadiness } from "../lib/decisionReadiness";
@@ -37,11 +36,9 @@ import { LinkEntity } from "./LinkEntity";
 import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
 import { TokenStory } from "./TokenStory";
 import { SecondOpinion } from "./SecondOpinion";
-import { ExpandableText } from "./ExpandableText";
-import { ReportDisclaimer } from "./ReportDisclaimer";
 import { RingAlert } from "./RingAlert";
-import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
-import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
+import { LiveSupplementalNotice } from "./SnapshotEvidenceControl";
+import { TokenDecisionChapter } from "../reports/argus/chapters/TokenDecisionChapter";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
 import { ArgusReportShell, type MoreAction } from "../reports/argus/ArgusReportShell";
 import { LegacySection } from "../reports/argus/primitives";
@@ -49,7 +46,6 @@ import { CodeChapter } from "../reports/argus/chapters/CodeChapter";
 import { buildCodeView } from "../reports/argus/codeView";
 import { ScoreComposition } from "./ScoreComposition";
 import { ReportChallengeButton } from "./ReportChallengeButton";
-import { ReportActionsRow } from "./ReportActionsRow";
 import { DimensionChapters } from "./DimensionChapters";
 import { compositionHeadline, orderByPlainAxis, tokenDimensionChapters } from "../lib/dimensionChapters";
 import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
@@ -212,7 +208,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const deployerLabel = deployerRoleLabel(attribution);
   const creatorPercentLabel = s.creatorPercent >= 10 ? `${s.creatorPercent.toFixed(0)}%` : `${s.creatorPercent.toFixed(1)}%`;
   const topSum = d.topHolders.reduce((a, h) => a + h.percent, 0);
-  const top10FromRows = top10ShareFromRows(d.topHolders, d.holdersAssessed);
+  const top10FromRows = top10ShareFromRows(d.topHolders, d.holdersAssessed, [d.pairAddress ?? ""]);
   const decisionDiscovery = deriveDecisionDiscovery(deriveNoticedSignals({
     lpLockedPct: d.safetyChecked && d.safety.available && d.safety.lpAssessed !== false
       ? (d.safety.lpLockedPct ?? 0) + (d.safety.lpBurnedPct ?? 0)
@@ -245,7 +241,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
   const otherLinks = d.socials.filter((x) => x.label !== "site" && !/x\.com|twitter\.com/i.test(x.url));
   const [watched, setWatched] = useState(() => isWatched(tokenSubjectIdentity(d.chain, d.address)?.ref ?? d.address));
-  const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
+
   const [copiedTxt, setCopiedTxt] = useState(false);
   const copyReport = () => {
     navigator.clipboard?.writeText(tokenReportText(d, readiness, presentation, {
@@ -276,34 +272,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     }
     return new URL(body.url, location.origin).toString();
   };
-  const share = async () => {
-    if (shareState === "creating") return;
-    setShareState("creating");
-    try {
-      const response = await fetch("/api/share", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          kind: "token",
-          ref: d.address,
-          reportVersionId: d.versionContext?.reportVersionId
-            ?? (d.persistence?.state === "persisted" ? d.persistence.reportVersionId : undefined),
-        }),
-      });
-      const body = (await response.json().catch(() => ({}))) as { url?: unknown; message?: unknown };
-      if (!response.ok || typeof body.url !== "string") {
-        throw new Error(typeof body.message === "string" ? body.message : "Secure share link creation failed.");
-      }
-      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable.");
-      await navigator.clipboard.writeText(new URL(body.url, location.origin).toString());
-      setShareState("copied");
-      setTimeout(() => setShareState("idle"), 1800);
-    } catch (error) {
-      console.error("[share] token report failed", error);
-      setShareState("error");
-      setTimeout(() => setShareState("idle"), 3000);
-    }
-  };
+
   const watch = () => {
     if (!canMutateWorkspace) return;
     setWatched(
@@ -428,68 +397,17 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       }}
       more={moreActions}
       chapters={{
-        decision: () => (
-          <>
-            {versionContext && (
-              <SnapshotEvidenceControl
-                snapshotVersion={versionContext.version}
-                capturedAt={versionContext.createdAt}
-                subjectKind="token"
-                currentIntelligenceEnabled={currentIntelligenceEnabled}
-                onLoadCurrentIntelligence={loadCurrentIntelligence}
-              />
-            )}
-            {!versionContext && (showCurrentIntelligence || privateSession) && (
-              <LiveSupplementalNotice private={privateSession} persisted={livePersistence?.state === "persisted"} />
-            )}
-            {persistencePending && (
-              <div className="panel mt-4 px-4 py-3 text-[12.5px] text-ink-dim" role="status">
-                Saving this report before running extra checks…
-              </div>
-            )}
-            {(persistenceFailed || persistenceMissingCapability) && (
-              <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
-                <strong className="block text-ink">This report is visible now, but it was not saved.</strong>
-                <span className="mt-1 block">It will disappear when you leave this page. Run the scan again to create a saved version before opening extra research.</span>
-                {livePersistence?.state === "failed" && livePersistence.reason && (
-                  <span className="mt-1 block text-ink-dim">{livePersistence.reason}</span>
-                )}
-              </div>
-            )}
-            {showCurrentIntelligence && <RingAlert handle={"$" + d.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
-            <section className="investigation-story-cover rd-legacy" data-canonical-report-header="true" aria-labelledby="token-report-title">
-              <div className="flex flex-wrap items-end gap-3">
-                {d.imageUrl ? (
-                  <img src={d.imageUrl} alt="" className="h-11 w-11 rounded-xl border border-line object-cover soft-shadow" />
-                ) : (
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-panel text-sm font-semibold text-signal-lift">${d.symbol.slice(0, 3)}</div>
-                )}
-                <div>
-                  <p className="eyebrow">Token investigation</p>
-                  <h1 id="token-report-title" className="display-sm mt-0.5 text-[30px] leading-none text-ink sm:text-[34px]">${d.symbol}</h1>
-                </div>
-                <button type="button" onClick={copyReport} className="btn-chip mb-0.5 ml-auto min-h-8 px-2.5 text-[10px] uppercase tracking-[0.08em]">
-                  {copiedTxt ? "Copied" : "Copy summary"}
-                </button>
-              </div>
-              <ProjectLinks
-                className="mt-3"
+        decision: () => (<TokenDecisionChapter
+                liveNotice={showCurrentIntelligence}
+                token={d}
                 website={projectSite}
-                xHandle={d.projectX ?? d.cg?.twitter}
-                contractAddress={d.address}
-                chain={d.chain}
-                links={d.socials}
-              />
-              {neutralProjectDescription && (
-                <ExpandableText
-                  text={neutralProjectDescription}
-                  className="mt-3 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim"
-                />
-              )}
-              <ReportDisclaimer className="mt-2 max-w-3xl" />
-            </section>
-            <div className="rd-legacy">
-              <InvestigationDecisionCanvas
+                openChecks={requiredGapChecks}
+                snapshot={versionContext}
+                currentDataEnabled={currentIntelligenceEnabled}
+                onCheckCurrentData={loadCurrentIntelligence}
+                privateReport={privateSession}
+                saving={persistencePending}
+                persistenceFailed={persistenceFailed || persistenceMissingCapability}
                 presentationStyle={reportStyle}
                 subjectName={d.name || `$${d.symbol}`}
                 subjectSummary={neutralProjectDescription}
@@ -520,17 +438,32 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                     ? "Optional follow-up research"
                     : "What is still open"}
                 capturedAt={capturedAt}
-                composition={compositionRows.length > 0 ? compositionRows : undefined}
-              />
-              <ReportActionsRow
-                canShare={canShare}
-                shareState={shareState}
-                onShare={() => void share()}
-                onExportPdf={() => printReportPdf(d.name || d.symbol)}
-              />
+                composition={compositionRows.length > 0 ? compositionRows : undefined} legacy={<>
+
+            {!versionContext && (showCurrentIntelligence || privateSession) && (
+              <LiveSupplementalNotice private={privateSession} persisted={livePersistence?.state === "persisted"} />
+            )}
+            {persistencePending && (
+              <div className="panel mt-4 px-4 py-3 text-[12.5px] text-ink-dim" role="status">
+                Saving this report before running extra checks…
+              </div>
+            )}
+            {(persistenceFailed || persistenceMissingCapability) && (
+              <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
+                <strong className="block text-ink">This report is visible now, but it was not saved.</strong>
+                <span className="mt-1 block">It will disappear when you leave this page. Run the scan again to create a saved version before opening extra research.</span>
+                {livePersistence?.state === "failed" && livePersistence.reason && (
+                  <span className="mt-1 block text-ink-dim">{livePersistence.reason}</span>
+                )}
+              </div>
+            )}
+            {showCurrentIntelligence && <RingAlert handle={"$" + d.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
+
+            <div className="rd-legacy">
+
+
             </div>
-          </>
-        ),
+          </>} />),
         scores: () => (
           <LegacySection title="How this score was composed" note="Every weighted dimension of the saved token result, with its evidence and what it could not measure.">
             <section id="composition" className="af-doc scroll-mt-28">

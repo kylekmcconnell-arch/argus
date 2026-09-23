@@ -13,6 +13,7 @@
  * input, no floors, no caps: the verdict machinery upstream stays untouched.
  */
 import { usdCompact } from "./format";
+import { classifyMarketAddress } from "./marketAddresses";
 
 // Same pattern as src/threat/tokenomics.ts's NFT_POSITION check: a
 // concentrated-liquidity AMM (Uniswap V3/V4, Raydium CLMM/CPMM, Meteora DLMM,
@@ -89,10 +90,17 @@ export function deriveDecisionDiscovery(signals: readonly NoticedSignal[]): Deci
  * quietly backfilled with an unreliable one.
  */
 export function top10ShareFromRows(
-  rows: readonly { percent?: number | null }[] | undefined,
+  rows: readonly { percent?: number | null; address?: string; isContract?: boolean; marketKind?: string; tag?: string }[] | undefined,
   holdersAssessed: boolean | undefined,
+  poolAddresses: readonly string[] = [],
 ): number | null {
   if (holdersAssessed === false || !rows || rows.length < 10) return null;
+  // A raw address register is not a register of ten independent holders.
+  // Do not silently replace excluded rows with smaller holders or claim a
+  // complete top-ten share when any identity remains infrastructure/uncertain.
+  if (rows.slice(0, 10).some((row) => row.isContract || row.marketKind
+    || classifyMarketAddress(row.address, { poolAddresses })
+    || /lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(row.tag ?? ""))) return null;
   const shares = rows.slice(0, 10).map((row) => row.percent);
   if (shares.some((share) => typeof share !== "number" || !Number.isFinite(share) || share < 0)) return null;
   const total = (shares as number[]).reduce((sum, share) => sum + share, 0);

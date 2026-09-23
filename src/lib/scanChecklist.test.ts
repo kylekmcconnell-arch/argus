@@ -769,3 +769,11 @@ describe("tokenChecks · GitHub forensics row from the frozen shipping summary",
     expect(none.note).toMatch(/build in private are read through on-chain deploys/);
   });
 });
+
+
+it("keeps partial contract observations distinct from a wholly absent provider response", () => {
+  const row = byLabel(tokenChecks(dossier({ safety: safety({ available: true, contractPropertiesAssessed: false, ownerAssessed: true, ownerRenounced: true }) })), "Contract safety");
+  expect(row.status).toBe("unavailable");
+  expect(row.note).toContain("complete contract-control evidence was not recorded");
+  expect(row.note).not.toContain("no contract-safety provider response");
+});

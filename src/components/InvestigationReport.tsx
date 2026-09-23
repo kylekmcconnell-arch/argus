@@ -17,7 +17,6 @@ import { personAvatar, trustedOfficialTeamPortraitUrl, trustedOfficialXAvatarUrl
 import { OnChainForensics } from "./OnChainForensics";
 import { deployerRoleLabel } from "../token/audit";
 import { ProjectResearch } from "./ProjectResearch";
-import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import {
   clearanceCoverage,
@@ -54,13 +53,13 @@ import { TrustGraph } from "./TrustGraph";
 import { PanelRequestNotice } from "./PanelRequestNotice";
 import { investigationContribution, getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
-import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
+import { LiveSupplementalNotice } from "./SnapshotEvidenceControl";
 import { ArrowClockwise, ArrowLeft, CaretDown, UserFocus, UsersThree, WarningCircle } from "@phosphor-icons/react";
-import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
+import { TokenDecisionChapter } from "../reports/argus/chapters/TokenDecisionChapter";
 import { SecondOpinion } from "./SecondOpinion";
 import { ExpandableText } from "./ExpandableText";
 import { ReportDisclaimer } from "./ReportDisclaimer";
-import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
+import { ScoreContextStrip } from "./ScoreContext";
 import { ArgusReportShell, type MoreAction } from "../reports/argus/ArgusReportShell";
 import { LegacySection } from "../reports/argus/primitives";
 import { CodeChapter } from "../reports/argus/chapters/CodeChapter";
@@ -69,8 +68,6 @@ import { ScoreComposition } from "./ScoreComposition";
 import { ReportChallengeButton } from "./ReportChallengeButton";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
-import { VerdictHero } from "./VerdictHero";
-import { ReportActionsRow } from "./ReportActionsRow";
 import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, projectAxisScores, tokenDimensionChapters } from "../lib/dimensionChapters";
 import {
   BasicFactsPanel,
@@ -753,7 +750,7 @@ export function InvestigationReport({
     ?? (inv.persistence?.state === "persisted" ? inv.persistence.reportVersionId : undefined)
     ?? undefined;
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
-  const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
+
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
   );
@@ -932,7 +929,8 @@ export function InvestigationReport({
         ...(projectAccount.basicFacts?.length ? { basicFacts: projectAccount.basicFacts } : {}),
         ...(projectAccount.projectToken ? { projectToken: projectAccount.projectToken } : {}),
       })
-    : token.cg?.description;
+    : token.cg?.description || (isProjectSiteBound(inv) && inv.recon?.retrieval.status !== "gap"
+      ? inv.recon?.profile?.selfDescription ?? undefined : undefined);
   const market = tokenMarketPresentation(token);
   const marketCap = market.marketCap ?? undefined;
   const fullyDilutedValue = market.fullyDilutedValuation ?? undefined;
@@ -1145,7 +1143,7 @@ export function InvestigationReport({
   // Summing the audit's own rows is only a top-ten share when the token lane
   // trusted its register and returned ten of them; otherwise it is a floor, and
   // a floor must not backfill a project-side figure that was suppressed.
-  const top10FromRows = top10ShareFromRows(token.topHolders, token.holdersAssessed);
+  const top10FromRows = top10ShareFromRows(token.topHolders, token.holdersAssessed, [token.pairAddress ?? ""]);
   const projectHolderAggregate = projectAccount?.holderProfile?.top10Pct != null;
   const circulatingSupplyPct = (() => {
     const circulating = projectAccount?.projectToken?.circulatingSupply;
@@ -1236,34 +1234,7 @@ export function InvestigationReport({
     setSpent(spentRef.current);
     onAudit(handle);
   };
-  const share = async () => {
-    if (shareState === "creating") return;
-    setShareState("creating");
-    try {
-      const response = await fetch("/api/share", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          kind: "investigation",
-          ref: token.address,
-          reportVersionId: versionContext?.reportVersionId
-            ?? (inv.persistence?.state === "persisted" ? inv.persistence.reportVersionId : undefined),
-        }),
-      });
-      const body = (await response.json().catch(() => ({}))) as { url?: unknown; message?: unknown };
-      if (!response.ok || typeof body.url !== "string") {
-        throw new Error(typeof body.message === "string" ? body.message : "Secure share link creation failed.");
-      }
-      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable.");
-      await navigator.clipboard.writeText(new URL(body.url, location.origin).toString());
-      setShareState("copied");
-      setTimeout(() => setShareState("idle"), 1800);
-    } catch (error) {
-      console.error("[share] investigation report failed", error);
-      setShareState("error");
-      setTimeout(() => setShareState("idle"), 3000);
-    }
-  };
+
   const watch = () => {
     if (!canMutateWorkspace) return;
     setWatched(toggleWatch({
@@ -1403,13 +1374,6 @@ export function InvestigationReport({
     nextChecks: nextStepItems.map((item) => item.label),
     applicableChecks: readiness.applicable,
   });
-  // One paste, whole verdict: composed for group chats. The link is appended
-  // at copy time (share link when mintable, app URL else).
-  const tldrBase = [
-    `ARGUS · $${token.symbol} investigation · risk score ${observedTokenMeta.label}${token.score == null ? "" : ` ${token.score}/100`} · safety checks ${readinessLabel}`,
-    plainLanguageSummary(token.headline),
-    nextStepItems[0] ? `Top open item: ${nextStepItems[0].label}.` : "",
-  ].filter(Boolean).join("\n");
   const verifiedItems = recordedChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
   const capturedAt = versionContext?.createdAt
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
@@ -1447,7 +1411,17 @@ export function InvestigationReport({
     </LegacySection>
   );
 
+  const copySummary = async () => {
+    const text = [
+      `ARGUS · $${token.symbol} investigation · risk score ${observedTokenMeta.label}${token.score == null ? "" : ` ${token.score}/100`} · safety checks ${readinessLabel}`,
+      plainLanguageSummary(token.headline),
+      nextStepItems[0] ? `Top open item: ${nextStepItems[0].label}.` : "",
+      canShare ? await mintShareUrl() : "",
+    ].filter(Boolean).join("\n");
+    await navigator.clipboard.writeText(text);
+  };
   const moreActions: MoreAction[] = shareView ? [] : [
+    { label: "Copy summary", detail: "The saved conclusion and read-only report link", onClick: () => { void copySummary().catch(() => undefined); } },
     ...(onOpenBrief ? [{ label: "Case brief", detail: "Analyst decision brief for this case", onClick: onOpenBrief }] : []),
     ...(onReAudit ? [{ label: "Rescan", detail: "Run this investigation again with current evidence", onClick: onReAudit }] : []),
     { label: "Print the full report", detail: "Every chapter, through your browser", onClick: () => printReportPdf(inv.token.name || inv.token.symbol) },
@@ -1492,99 +1466,30 @@ export function InvestigationReport({
       }}
       more={moreActions}
       chapters={{
-        decision: () => (
-          <div className="investigation-story rd-legacy">
-      {rescanError && (
-        <div role="alert" className="report-frame mt-4 rounded-xl border border-avoid/30 bg-avoid/5 px-4 py-3 text-[12.5px] leading-relaxed text-avoid">
-          {rescanError}
-        </div>
-      )}
-        {versionContext && (
-          <div className="mt-4">
-            <SnapshotEvidenceControl
-              snapshotVersion={versionContext.version}
-              capturedAt={versionContext.createdAt}
-              subjectKind="investigation"
-              currentIntelligenceEnabled={currentIntelligenceEnabled}
-              onLoadCurrentIntelligence={loadCurrentIntelligence}
-            />
-          </div>
-        )}
-        {!versionContext && (showCurrentIntelligence || privateSession) && (
-          <div className="mt-4">
-            <LiveSupplementalNotice private={privateSession} persisted={inv.persistence?.state === "persisted"} />
-          </div>
-        )}
-        {persistencePending && (
-          <div className="mt-4 panel px-4 py-3 text-[12.5px] text-ink-dim" role="status">
-            Saving this report before running extra checks…
-          </div>
-        )}
-        {(persistenceFailed || persistenceMissingCapability) && (
-          <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
-            <strong className="block text-ink">This report is visible now, but it was not saved.</strong>
-            <span className="mt-1 block">It will disappear when you leave this page. Run the scan again to create a saved version before opening extra research.</span>
-            {inv.persistence?.state === "failed" && inv.persistence.reason && (
-              <span className="mt-1 block text-ink-dim">{inv.persistence.reason}</span>
-            )}
-          </div>
-        )}
-        {showCurrentIntelligence && <RingAlert handle={"$" + token.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
-        {/* headline */}
-        <div className="investigation-story-cover mt-6" data-canonical-report-header="true">
-          <div className="flex flex-wrap items-end gap-3">
-            {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-11 w-11 shrink-0 rounded-xl border border-line object-cover soft-shadow" />}
-            <div>
-              <p className="eyebrow">Token investigation</p>
-              <h1 className="display-sm mt-0.5 text-[30px] leading-none text-ink sm:text-[34px]">{`$${token.symbol}`}</h1>
-            </div>
-            <CopyTldrButton
-              base={tldrBase}
-              {...(canShare ? { mint: mintShareUrl } : {})}
-              className="mb-0.5 ml-auto"
-            />
-          </div>
-
-          {/* Where the project actually lives, at the top where a reader looks
-              first: official site, socials, and the contract in one click. */}
-          <ProjectLinks
-            className="mt-3"
-            websites={[
-              ...(evidencedProjectSites.length
-                ? evidencedProjectSites.map((site, index) => ({
-                    label: index === 0 ? `${projectAccount?.display_name || "Project"} site` : site.host,
-                    url: site.url,
-                  }))
-                : projectAccount?.website
-                  ? [{ label: `${projectAccount.display_name || "Project"} site`, url: projectAccount.website }]
-                : []),
-              ...(siteUrl
-                ? [{ label: `$${token.symbol} site`, url: siteUrl }]
-                : []),
-            ]}
+        decision: () => (<TokenDecisionChapter
+            identityNote={teamPeople.length
+          ? `Built by ${teamPeople.slice(0, 3).map(p => p.name).filter(Boolean).join(", ")}. Full team below.`
+          : publishedTeamClaims.length
+            ? `${projectAccount?.display_name || projectX || token.name} names ${publishedTeamClaims.slice(0, 3).map(person => `${person.handle || person.name}${person.role ? ` as ${formatRoleLabel(person.role)}` : ""}`).join(", ")}. The project made these claims; an independent source has not yet confirmed identity, ownership, or control.`
+            : inv.founderNote}
+            error={rescanError}
+            notices={noticedSignals}
+            liveNotice={showCurrentIntelligence}
+            token={token}
             xHandle={projectX ?? token.cg?.twitter}
-            contractAddress={token.address}
-            chain={token.chain}
-            links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
-          />
-
-          {/* the document's own actions: share the read-only file, save the PDF */}
-          <ReportActionsRow
-            canShare={canShare}
-            shareState={shareState}
-            onShare={() => void share()}
-            onExportPdf={() => printReportPdf(inv.token.name || inv.token.symbol)}
-          />
-
-          {/* Legacy editorial/score heroes are quarantined. The shared decision
-              brief below is the only public report opening for every state. */}
-          {LEGACY_REPORT_HERO_ENABLED && readiness.status === "ready" && (
-            <div className="af-doc">
-              <VerdictHero token={token} savedLabel={capturedAt ? `Saved ${capturedAt}` : null} />
-            </div>
-          )}
-
-          <InvestigationDecisionCanvas
+            additionalLinks={[
+              ...evidencedProjectSites.map(site => ({ label: `${projectAccount?.display_name || "Project"} site`, url: site.url })),
+              ...(!evidencedProjectSites.length && projectAccount?.website ? [{ label: `${projectAccount.display_name || "Project"} site`, url: projectAccount.website }] : []),
+              ...boundSiteSocials, ...token.socials,
+            ]}
+            website={siteBound ? siteUrl : null}
+            openChecks={requiredGapChecks}
+            snapshot={versionContext}
+            currentDataEnabled={currentIntelligenceEnabled}
+            onCheckCurrentData={loadCurrentIntelligence}
+            privateReport={privateSession}
+            saving={persistencePending}
+            persistenceFailed={persistenceFailed || persistenceMissingCapability}
             presentationStyle={reportStyle}
             subjectName={projectAccount?.display_name || projectAccount?.handle || token.name || `$${token.symbol}`}
             subjectSummary={projectSubjectSummary}
@@ -1613,7 +1518,7 @@ export function InvestigationReport({
             coveragePercent={readiness.coveragePercent}
             successful={readiness.successful}
             applicable={readiness.applicable}
-            checkScopeLabel="Token safety checks"
+            checkScopeLabel="Required investigation checks"
             capturedAt={capturedAt}
             evidenceHref="#investigation-evidence"
             sourceOverviewHref={token.axes?.length ? "#composition" : "#investigation-methodology"}
@@ -1626,13 +1531,53 @@ export function InvestigationReport({
               verdictLabel: verdictMeta(accountReport.composite_verdict).label,
               context: "Who runs the project, what it has built, and what evidence supports its claims about backing and use.",
               composition: projectCompositionRows,
+              scoreIsProvisional: projectReviewOpen,
               // A withheld score states its own cause. "N/A, not measured" with
               // no reason reads as a broken product rather than as the honest
               // coverage limit it is.
               unavailableCopy: withheldScoreReason(projectAccount)
                 ?? "The linked project report did not publish a diligence score.",
-            } : undefined}
-          />
+            } : {
+              label: "Project diligence score",
+              score: null,
+              verdictLabel: "Not assessed",
+              context: "Project diligence is separate from token trading and safety measurements.",
+              composition: [],
+              unavailableCopy: inv.projectAccountAudit?.note
+                ?? "No linked project assessment was saved. The token score does not assess what the project does or who operates it.",
+            }} legacy={<div className="investigation-story rd-legacy">
+      {rescanError && (
+        <div role="alert" className="report-frame mt-4 rounded-xl border border-avoid/30 bg-avoid/5 px-4 py-3 text-[12.5px] leading-relaxed text-avoid">
+          {rescanError}
+        </div>
+      )}
+        {versionContext && (
+          <div className="mt-4">
+
+          </div>
+        )}
+        {!versionContext && (showCurrentIntelligence || privateSession) && (
+          <div className="mt-4">
+            <LiveSupplementalNotice private={privateSession} persisted={inv.persistence?.state === "persisted"} />
+          </div>
+        )}
+        {persistencePending && (
+          <div className="mt-4 panel px-4 py-3 text-[12.5px] text-ink-dim" role="status">
+            Saving this report before running extra checks…
+          </div>
+        )}
+        {(persistenceFailed || persistenceMissingCapability) && (
+          <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
+            <strong className="block text-ink">This report is visible now, but it was not saved.</strong>
+            <span className="mt-1 block">It will disappear when you leave this page. Run the scan again to create a saved version before opening extra research.</span>
+            {inv.persistence?.state === "failed" && inv.persistence.reason && (
+              <span className="mt-1 block text-ink-dim">{inv.persistence.reason}</span>
+            )}
+          </div>
+        )}
+        {showCurrentIntelligence && <RingAlert handle={"$" + token.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
+        {/* headline */}
+        <>
 
           <section aria-label="Investigation coverage by area" className="mt-4 grid gap-3 md:grid-cols-3">
             {facets.map(facet => <div key={facet.key} className="panel p-3">
@@ -1887,9 +1832,8 @@ export function InvestigationReport({
             </div>
           )}
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
-        </div>
-          </div>
-        ),
+        </>
+          </div>} />),
         scores: () => (
           <LegacySection title="How these scores were composed" note="Two recorded scores stay two honest strips. Every dimension of each is preserved with its evidence.">
             {!token.axes?.length && (

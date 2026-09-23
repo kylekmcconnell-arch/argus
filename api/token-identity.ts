@@ -111,6 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch { /* malformed model output is a partial provider result */ }
   }
   await recordAttempt(validContract ? "succeeded" : "partial", usd, validContract ? undefined : "output_contract_error");
+  if (!validContract) { res.status(200).json({ available: false, error: "identity_output_invalid" }); return; }
   const website = typeof p.website === "string" && /^https?:\/\//i.test(p.website) ? p.website.trim() : null;
   const x_handle = typeof p.x_handle === "string" && HANDLE.test(p.x_handle) ? "@" + p.x_handle.replace(/^@/, "") : null;
   const founder = typeof p.founder === "string" && p.founder.trim().length >= 2 && p.founder.trim().length < 60 ? p.founder.trim() : null;

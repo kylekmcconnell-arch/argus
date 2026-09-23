@@ -186,7 +186,10 @@ describe("token report supplemental evidence boundary", () => {
     // One canonical report frame: the interactive chapter shell.
     expect(container.querySelector(".argus-rd")).not.toBeNull();
     expect(container.querySelector('nav[aria-label="Report sections"]')).not.toBeNull();
-    expect(container.textContent).toContain("what the evidence tells us");
+    expect(container.textContent).toContain("The decision brief");
+    expect(container.querySelectorAll(".hero .score-card")).toHaveLength(2);
+    expect(container.querySelector(".investigation-story-cover")).toBeNull();
+    expect(container.querySelector(".kyle-intelligence-report")).toBeNull();
   });
 
   it("ignores a legacy Style 1 deep link and keeps the canonical report", () => {
@@ -194,7 +197,7 @@ describe("token report supplemental evidence boundary", () => {
     render(dossier());
     expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
     expect(container.querySelector(".argus-rd")).not.toBeNull();
-    expect(container.textContent).toContain("what the evidence tells us");
+    expect(container.textContent).toContain("The decision brief");
   });
 
   it("keeps a complete six-check token report complete when project graph and creator follow-ups are open", () => {
@@ -229,13 +232,13 @@ describe("token report supplemental evidence boundary", () => {
     expect(container.querySelectorAll('nav[aria-label="Report sections"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain(`$${symbol}`);
-    expect(container.textContent).toContain("what the evidence tells us");
-    expect(container.querySelector('a[href^="https://dexscreener.com/search?q="]')?.textContent).toBe("Dexscreener");
+    expect(container.textContent).toContain("The decision brief");
+    expect(container.querySelector('a[href^="https://dexscreener.com/"]')?.textContent).toContain("DexScreener");
     const decisionCanvas = container.querySelector('[data-canonical-decision-brief="true"]');
-    expect(decisionCanvas?.textContent).toContain("88");
-    expect(decisionCanvas?.textContent).toContain("/ 100");
+    expect(container.querySelector(".score-card.token")?.textContent).toContain("88");
+    expect(container.querySelector(".score-card.token")?.textContent).toContain("/100");
     expect(decisionCanvas?.textContent).toContain("6/6 token safety checks complete");
-    expect(decisionCanvas?.textContent).toContain("Token safety score");
+    expect(container.querySelector(".score-card.token")?.textContent).toContain("Token safety");
     expect(container.querySelector('[aria-label="Safety check status"]')).toBeNull();
   });
 
@@ -276,10 +279,10 @@ describe("token report supplemental evidence boundary", () => {
       expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();
     }
 
-    expect(container.textContent).toContain("What supports this result");
+    expect(container.textContent).toContain("What looks credible");
     expect(container.textContent).toContain("Finished checks");
     expect(container.textContent).toContain("What is still open");
-    expect(container.querySelector('[role="progressbar"][aria-label="Checks finished"]')).not.toBeNull();
+    expect(container.querySelector('section[aria-label="Finished checks"]')).not.toBeNull();
   });
 
   it("reopens the frozen decision boundary without recomputing it from current scoring rules", () => {
@@ -355,7 +358,7 @@ describe("token report supplemental evidence boundary", () => {
 
     // The footer names the stable case; the toolbar names the subject.
     expect(container.querySelector("[data-report-identity]")?.textContent).toContain("Case PA-00000000000040008000");
-    expect(container.textContent).toContain("SAVED REPORT v2");
+    expect(container.textContent).toContain("Saved report v2");
     expect(container.textContent).toContain("This report uses data saved on");
     expect(harness.livePanel).not.toHaveBeenCalled();
     expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({ panelCostToken: undefined }));
