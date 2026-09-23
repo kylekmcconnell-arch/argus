@@ -576,3 +576,12 @@
 .argus-rd .holder-intelligence-row { padding: 14px 0; border-top: 1px solid var(--rd-line); overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }
 .argus-rd .holder-intelligence-row p { margin: 6px 0; }
 .argus-rd .holder-intelligence-row summary { cursor: pointer; color: var(--rd-ink); }
+
+/* Deep evidence belongs to the same reading system as the decision chapters. */
+.argus-rd .threat-record h2 { text-transform: none; letter-spacing: normal; color: var(--rd-ink); font-family: "Young Serif", Georgia, serif; font-weight: 400; font-size: 24px; line-height: 1.3; }
+.argus-rd .threat-record p, .argus-rd .threat-record li { font-family: "DM Sans", sans-serif; font-size: 13px; line-height: 1.7; }
+.argus-rd .threat-record .uppercase { font-family: "DM Sans", sans-serif; text-transform: none; letter-spacing: normal; }
+.argus-rd .threat-record button { font-family: "DM Sans", sans-serif; }
+.argus-rd .threat-record td { overflow-wrap: anywhere; }
+
+@media (max-width: 560px) { .argus-rd .threat-record > .section-top { flex-direction: column; align-items: flex-start; gap: 8px; } }

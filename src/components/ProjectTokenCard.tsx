@@ -93,7 +93,7 @@ export function ProjectTokenCard({
         />
       </div>
 
-      {threat && <ProjectMarketIntelligence scan={threat} />}
+      {threat && <ProjectMarketIntelligence scan={threat} allowSupplemental={showCurrentIntelligence === true && refreshCurrentMarket === true} />}
       {!threat && threatNote && (
         <div className="border-t border-line/70 px-5 py-4">
           <div className="eyebrow text-caution">Deep token analysis unavailable</div>
