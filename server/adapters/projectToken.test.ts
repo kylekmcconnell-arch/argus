@@ -600,13 +600,29 @@ describe("verified project-token collection", () => {
           },
         }],
       });
-      // The subject's real site never publishes that contract.
-      if (url.startsWith("https://www.binance.com/")) return new Response("<html>Exchange the world.</html>");
+      // The subject's real site never publishes that contract. The canonical
+      // form drops the "www.", so match both or the read never reaches here.
+      if (/^https:\/\/(www\.)?binance\.com\//.test(url)) return new Response("<html>Exchange the world.</html>");
       throw new Error(`unexpected URL ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
+    // Without an injected reader the default recovery path resolves binance.com
+    // for real, which is a live DNS round trip inside a unit test: ~1.4s on a
+    // machine with no network, right under the 5s limit until load tips it over.
+    const recoverOfficialText = vi.fn(async (url: string) => ({
+      status: "ok" as const,
+      url,
+      host: "binance.com",
+      contentType: "text/markdown",
+      text: `URL Source: ${url}\n\nExchange the world.`,
+      contentHash: "binance-home-no-contract",
+      capturedAt: "2026-09-23T00:00:00.000Z",
+      retrievalMethod: "reader_recovery" as const,
+      retrievalProvider: "jina-reader" as const,
+      retrievalUrl: `https://r.jina.ai/${url}`,
+    }));
 
-    await collectProjectTokenIdentity(ctx);
+    await collectProjectTokenIdentity(ctx, { recoverOfficialText });
 
     expect(evidence.projectToken).toBeUndefined();
     expect(evidence.namesakeTokens).toEqual([expect.objectContaining({
