@@ -797,6 +797,14 @@ const UNCLASSIFIED: TokenClassification = { kind: "unknown", confidence: "low", 
 const EVM = (chain: string) => chain !== "solana";
 
 // ---- the transparent checklist: what was examined, including clean results ----
+/** "3.2x" or "unbounded": the day's volume as a multiple of the pool's depth. */
+function volumeToLiquidity(d: TokenDossier): string {
+  const vol = d.vol24 ?? 0; const liq = d.liquidityUsd ?? 0;
+  if (liq <= 0) return vol > 0 ? "unbounded relative to" : "0x";
+  const r = vol / liq;
+  return `${r.toFixed(r >= 100 ? 0 : 1)}x`;
+}
+
 export function buildChecks( // exported for unit tests only
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
@@ -967,8 +975,13 @@ export function buildChecks( // exported for unit tests only
         : d.capApplied === "documented_scanner_concealment" || d.findings.some((f) => f.tone === "bad" && f.source === "contract source") ? "The source documents defeating a safety scanner"
         : code.verified ? `${code.stats?.functions ?? 0} functions read, ${code.flags.length} flag${code.flags.length === 1 ? "" : "s"}` : "Source unverified - unreadable"),
     chk("market", "market", "Market conduct",
-      d.findings.some((f) => /wash-trad/i.test(f.claim)) ? "fail" : (d.liquidityUsd ?? 0) < 15000 ? "warn" : "pass",
-      d.findings.some((f) => /wash-trad/i.test(f.claim)) ? "Wash-trading signature" : `${money(d.liquidityUsd ?? 0)} liquidity, ${money(d.vol24 ?? 0)} 24h volume`),
+      d.findings.some((f) => /wash-trad|fake-volume|cycled|manufactured/i.test(f.claim)) ? "fail" : (d.liquidityUsd ?? 0) < 15000 ? "warn" : "pass",
+      // The ratio is printed beside every volume figure so the reader sees the
+      // denominator: volume means nothing until it is set against the pool.
+      d.findings.some((f) => /fabricated|without a pool/i.test(f.claim)) ? `Fake-volume signature: ${money(d.vol24 ?? 0)} of volume on ${money(d.liquidityUsd ?? 0)} of liquidity`
+        : d.findings.some((f) => /cycled|manufactured/i.test(f.claim)) ? `Cycled-volume signature: 24h volume is ${volumeToLiquidity(d)} the pool`
+        : d.findings.some((f) => /wash-trad/i.test(f.claim)) ? `Wash-trading signature: 24h volume is ${volumeToLiquidity(d)} the pool with a flat price`
+        : `${money(d.liquidityUsd ?? 0)} liquidity, ${money(d.vol24 ?? 0)} 24h volume (${volumeToLiquidity(d)} the pool)`),
     chk("structure", "market", "Market structure",
       d.pairAddress ? "pass" : "na",
       d.pairAddress ? "Trading ranges, volume concentration and fib zones charted from pool candles on this report" : "No pool candles to chart"),
