@@ -13,12 +13,16 @@ import {
   PLATFORM_CHAIN,
   projectRegistrySearchQueries,
   siteContractCandidates,
+  siteDeclaredContractCandidates,
+  profileDisclaimsAffiliation,
   tokenSearchQueries,
 } from "./projectToken";
 
 const SOLANA_TOKEN = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const OTHER_TOKEN = "So11111111111111111111111111111111111111112";
 const SSR_TOKEN = "BpdHpqznEgYPXZNrJVRZvBhdWoafYLVVuLxTQo34pump";
+/** A second, unrelated mint an official page might print beside its own contract. */
+const SECOND_MINT = "8wXtPeU6557ETkp9WHFY1n1EcU6NxDvbAggHGsMYiHsB";
 const SSR_POOL = "C2TLNU8AwnaWrnAGhQm4X6y9T79mcMnmbKTMsYGPHKJd";
 const PONS_TOKEN = "0x39dBED3a2bd333467115dE45665cC57F813C4571";
 const PONS_POOL = "0x10CC6BD38112cAc182db90B6a71d8Bb5939526bA";
@@ -105,6 +109,58 @@ describe("verified project-token collection", () => {
     }));
     await collectProjectTokenIdentity(ctx);
     expect(evidence.projectToken).toBeUndefined();
+  });
+
+  it.each(["announcement_url", "chat_url", "official_forum_url", "blockchain_site"])(
+    "does not bind the audited account from a profile URL sitting in %s",
+    async (linkKey) => {
+      // A registry link array holds whatever the listing supplied, routinely a
+      // link posted by somebody who merely announced or discussed the coin.
+      // Only the registry's own screen name, or its record of the project's
+      // site list, may name the token's official account (#359).
+      const { ctx, evidence } = context();
+      vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("coingecko.com") && url.includes("/search?")) return json(search());
+        if (url.includes("/coins/project-token?")) {
+          return json(details({
+            links: {
+              twitter_screen_name: "someoneelse",
+              homepage: ["https://unrelated.example/"],
+              [linkKey]: ["https://x.com/projectdex"],
+            },
+          }));
+        }
+        if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+        if (url === "https://project.example/") return new Response("Official website without a token declaration");
+        throw new Error(`unexpected URL ${url}`);
+      }));
+      await collectProjectTokenIdentity(ctx);
+      expect(evidence.projectToken).toBeUndefined();
+    },
+  );
+
+  it("still binds when a stale screen name sits beside the current X URL in the project's own site list", async () => {
+    // The case the broad scan existed for: CoinGecko keeps a renamed
+    // twitter_screen_name while the live X URL is in `homepage`.
+    const { ctx, evidence } = context();
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json(search());
+      if (url.includes("/coins/project-token?")) {
+        return json(details({
+          links: {
+            twitter_screen_name: "projectdex_old",
+            homepage: ["https://project.example/", "https://x.com/projectdex"],
+          },
+        }));
+      }
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://project.example/") return new Response("Official website without a token declaration");
+      throw new Error(`unexpected URL ${url}`);
+    }));
+    await collectProjectTokenIdentity(ctx);
+    expect(evidence.projectToken).toMatchObject({ verified: true, officialX: "@projectdex" });
   });
 
   it("binds SSR to the exact contract declared by its official X profile without requiring a website or CoinGecko", async () => {
@@ -429,6 +485,8 @@ describe("verified project-token collection", () => {
           [200, 0.02, 0.04, 0.015, 0.03, 800],
         ] } },
       });
+      // Reciprocity: the subject's own site adopts the contract.
+      if (url.startsWith("https://ponsfamily.com/")) return new Response(`Token contract: ${PONS_TOKEN}`);
       throw new Error(`unexpected URL ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -441,7 +499,8 @@ describe("verified project-token collection", () => {
     expect(captured.result).toMatchObject({
       state: "executed",
       detail: expect.stringContaining("identity-bound DEX pair"),
-      attempts: 3,
+      // CoinGecko search + DexScreener search + reciprocity site fetch + OHLCV history.
+      attempts: 4,
     });
     expect(evidence.projectToken).toMatchObject({
       verified: true,
@@ -512,6 +571,74 @@ describe("verified project-token collection", () => {
     }));
   });
 
+  it("refuses a namesake token whose DexScreener listing declares the subject's account but nothing of the subject's adopts it", async () => {
+    // The $CZ shape: anyone can deploy a token and attach any X account and
+    // website to its DexScreener profile. The listing alone must never bind;
+    // reciprocity (bio CA, own posts, or the official site publishing the
+    // contract) is required, and a refused contender is recorded as a namesake.
+    const NAMESAKE_TOKEN = "0x6412beD99AE9Fd8bcc8eA8fbC1a1e5B4A4d4C7a1";
+    const { ctx, evidence } = context("@cz_binance", "CZ", "https://www.binance.com/");
+    evidence.profile.bio = "Former CEO of Binance. Now focused on education.";
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({
+        pairs: [{
+          chainId: "bsc",
+          pairAddress: "0xPoolCz00000000000000000000000000000000cz",
+          url: "https://dexscreener.com/bsc/0xpoolcz00000000000000000000000000000000cz",
+          baseToken: { address: NAMESAKE_TOKEN, name: "CZ", symbol: "CZ" },
+          quoteToken: { address: OTHER_TOKEN, symbol: "WBNB" },
+          priceUsd: "0.002",
+          marketCap: 1_800_000,
+          fdv: 1_800_000,
+          volume: { h24: 240_000 },
+          liquidity: { usd: 320_000 },
+          info: {
+            websites: [{ url: "https://www.binance.com/", label: "Website" }],
+            socials: [{ url: "https://x.com/cz_binance", type: "twitter" }],
+          },
+        }],
+      });
+      // The subject's real site never publishes that contract. The canonical
+      // form drops the "www.", so match both or the read never reaches here.
+      if (/^https:\/\/(www\.)?binance\.com\//.test(url)) return new Response("<html>Exchange the world.</html>");
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    // Without an injected reader the default recovery path resolves binance.com
+    // for real, which is a live DNS round trip inside a unit test: ~1.4s on a
+    // machine with no network, right under the 5s limit until load tips it over.
+    const recoverOfficialText = vi.fn(async (url: string) => ({
+      status: "ok" as const,
+      url,
+      host: "binance.com",
+      contentType: "text/markdown",
+      text: `URL Source: ${url}\n\nExchange the world.`,
+      contentHash: "binance-home-no-contract",
+      capturedAt: "2026-09-23T00:00:00.000Z",
+      retrievalMethod: "reader_recovery" as const,
+      retrievalProvider: "jina-reader" as const,
+      retrievalUrl: `https://r.jina.ai/${url}`,
+    }));
+
+    await collectProjectTokenIdentity(ctx, { recoverOfficialText });
+
+    expect(evidence.projectToken).toBeUndefined();
+    expect(evidence.namesakeTokens).toEqual([expect.objectContaining({
+      name: "CZ",
+      symbol: "CZ",
+      address: NAMESAKE_TOKEN,
+      chain: "bsc",
+      declaredX: "@cz_binance",
+    })]);
+    expect(ctx.emit).toHaveBeenCalledWith(expect.objectContaining({
+      tone: "warn",
+      label: expect.stringContaining("Namesake token"),
+      detail: expect.stringContaining("launched by someone else"),
+    }));
+  });
+
   it("retries the DEX search without the display name's generic suffix when the full name misses the token", async () => {
     // The $GWOOD shape: the X account is "Greenwood Finance" but the token is
     // named just "Greenwood", and DexScreener's search for the two-word name
@@ -545,6 +672,9 @@ describe("verified project-token collection", () => {
         return json({ pairs: q === "Greenwood" ? [gwoodPair] : [] });
       }
       if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      // Reciprocity: the official site publishes the contract, closing the
+      // two-way link a deployer-supplied DexScreener profile cannot fake.
+      if (url.startsWith("https://greenwood.fi")) return new Response(`Token contract: ${GWOOD_TOKEN}`);
       throw new Error(`unexpected URL ${url}`);
     }));
 
@@ -783,10 +913,10 @@ describe("token declared on the project's own site", () => {
         if (url === "https://project.example/") {
           if (["403", "429", "404"].includes(failure)) return new Response("blocked", { status: Number(failure) });
           if (failure === "transport") throw new Error("connection failed");
-          return new Response(`Official contract: ${SOLANA_TOKEN} ${failure === "followup" ? OTHER_TOKEN : ""}`);
+          return new Response(`Official contract: ${SOLANA_TOKEN}${failure === "followup" ? ` · Vault contract: ${SECOND_MINT}` : ""}`);
         }
         if (url.includes("/latest/dex/tokens/")) {
-          if (failure === "batch" || url.endsWith(`/${OTHER_TOKEN}`)) return json({}, 503);
+          if (failure === "batch" || url.endsWith(`/${SECOND_MINT}`)) return json({}, 503);
           return json({ pairs: failure === "followup" ? Array.from({ length: 30 }, () => pair()) : [pair()] });
         }
         if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
@@ -860,7 +990,7 @@ describe("token declared on the project's own site", () => {
       const url = String(input);
       if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
       if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
-      if (url === "https://project.example/") return new Response(`<button>${siteToken}</button>`, { status: 200 });
+      if (url === "https://project.example/") return new Response(`<span>Contract address</span><button>${siteToken}</button>`, { status: 200 });
       if (url.includes(`/latest/dex/tokens/${siteToken}`)) return json({
         pairs: [{
           chainId: "base",
@@ -969,7 +1099,7 @@ describe("token declared on the project's own site", () => {
       "https://stonkbrokers.cash/",
     ];
     const stonkHtml = `<a href="https://robinhoodchain.blockscout.com/address/${vault}">vault</a>
-      <button>${token}</button>
+      <span class="lm-badge">$STONKBROKER CA</span><button title="Copy contract address">${token}</button>
       <span>0x0000000000000000000000000000000000000000</span>
       <span>0xE934E36A439C94017B64A3FECE66AF12099ABF50</span>`;
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
@@ -1032,14 +1162,14 @@ describe("token declared on the project's own site", () => {
       const url = String(input);
       if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
       if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
-      if (url === "https://alpha.example/") return new Response(`<button>${tokenA}</button>`, { status: 200 });
-      if (url === "https://beta.example/") return new Response(`<button>${tokenB}</button>`, { status: 200 });
+      if (url === "https://alpha.example/") return new Response(`<p>Contract: ${tokenA}</p>`, { status: 200 });
+      if (url === "https://beta.example/") return new Response(`<p>Contract: ${tokenB}</p>`, { status: 200 });
       if (url.includes(`/latest/dex/tokens/${tokenA}`)) return json({
         pairs: [{
           chainId: "base",
           pairAddress: poolA,
           url: `https://dexscreener.com/base/${poolA}`,
-          baseToken: { address: tokenA, name: "Alpha", symbol: "ALPHA" },
+          baseToken: { address: tokenA, name: "Split Project Alpha", symbol: "ALPHA" },
           liquidity: { usd: 80_000 },
         }],
       });
@@ -1048,7 +1178,7 @@ describe("token declared on the project's own site", () => {
           chainId: "base",
           pairAddress: poolB,
           url: `https://dexscreener.com/base/${poolB}`,
-          baseToken: { address: tokenB, name: "Beta", symbol: "BETA" },
+          baseToken: { address: tokenB, name: "Split Project Beta", symbol: "BETA" },
           liquidity: { usd: 90_000 },
         }],
       });
@@ -1068,11 +1198,199 @@ describe("token declared on the project's own site", () => {
   });
 });
 
+describe("official-site declarations bind only the subject's own labeled token (ID-1)", () => {
+  const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+  const PARTNER = "0x038a7f4e4e89448ad74e044337c9ac25c11e726b";
+  const POOL = "0x3333333333333333333333333333333333333333";
+
+  const dexPair = (address: string, name: string, symbol: string) => ({
+    pairs: [{
+      chainId: "ethereum",
+      pairAddress: POOL,
+      url: `https://dexscreener.com/ethereum/${POOL}`,
+      baseToken: { address, name, symbol },
+      quoteToken: { address: "0x1111111111111111111111111111111111111111", symbol: "WETH" },
+      priceUsd: "1.00",
+      liquidity: { usd: 900_000_000 },
+    }],
+  });
+
+  const stubRegistriesEmpty = (page: string, tokens: (url: string) => Response | null) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://acmepay.example/") return new Response(page, { status: 200 });
+      const answer = url.includes("/latest/dex/tokens/") ? tokens(url) : null;
+      if (answer) return answer;
+      if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+  };
+
+  it("never binds USDC printed as an accepted currency on a payments app's site", async () => {
+    const { ctx, evidence } = context("@acmepay", "Acme Pay", "https://acmepay.example/");
+    stubRegistriesEmpty(
+      `<p>We accept USDC. Contract: ${USDC}</p>`,
+      (url) => url.toLowerCase().includes(USDC.toLowerCase()) ? json(dexPair(USDC, "USD Coin", "USDC")) : null,
+    );
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "finding" }));
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "confirmed" }));
+  });
+
+  it("never binds a labeled partner contract whose token is named for somebody else", async () => {
+    const { ctx, evidence } = context("@acmepay", "Acme Pay", "https://acmepay.example/");
+    stubRegistriesEmpty(
+      `<p>Buy $PARTNER here. CA: ${PARTNER}</p>`,
+      (url) => url.toLowerCase().includes(PARTNER) ? json(dexPair(PARTNER, "Partner Coin", "PARTNER")) : null,
+    );
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "confirmed" }));
+  });
+
+  it("never binds a bare tradeable address the page does not label as its contract", async () => {
+    const { ctx, evidence } = context("@acmepay", "Acme Pay", "https://acmepay.example/");
+    stubRegistriesEmpty(
+      `<script>window.__CONFIG__={"token":"${PARTNER}"}</script><h1>Acme Pay</h1>`,
+      (url) => url.toLowerCase().includes(PARTNER) ? json(dexPair(PARTNER, "Acme Pay", "ACME")) : null,
+    );
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toBeUndefined();
+  });
+
+  it("still binds the subject's own token when the page labels the contract and names it for the subject", async () => {
+    const { ctx, evidence } = context("@acmepay", "Acme Pay", "https://acmepay.example/");
+    stubRegistriesEmpty(
+      `<p>We accept USDC (${USDC}).</p><p>$ACME token contract: ${PARTNER}</p>`,
+      (url) => {
+        if (url.toLowerCase().includes(PARTNER)) return json(dexPair(PARTNER, "Acme Pay", "ACME"));
+        if (url.toLowerCase().includes(USDC.toLowerCase())) return json(dexPair(USDC, "USD Coin", "USDC"));
+        return null;
+      },
+    );
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toMatchObject({ verification: "official_domain", symbol: "ACME", address: PARTNER });
+  });
+
+  it("does not use a verified blog post URL as a declaration scope", async () => {
+    const { ctx, evidence } = context("@acmepay", "Acme Pay", "https://acmepay.example/");
+    evidence.basicFacts = [{
+      predicate: "official_identity",
+      subject: "Acme Pay",
+      value: "Acme Pay",
+      status: "verified",
+      artifact_verified: true,
+      evidence_origin: "deterministic",
+      provider: "public-web",
+      capturedAt: "2026-07-12T17:00:00.000Z",
+      sources: [{
+        url: "https://acmepay.example/blog/partner-launch",
+        sourceClass: "official_subject",
+        relation: "supports",
+        artifactVerified: true,
+      }],
+    } as never];
+    const fetched: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      fetched.push(url);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://acmepay.example/") return new Response("<h1>Acme Pay</h1>", { status: 200 });
+      if (url.startsWith("https://acmepay.example/blog/")) return new Response(`<p>Acme Pay token contract: ${PARTNER}</p>`, { status: 200 });
+      if (url.includes("/latest/dex/tokens/")) return json(dexPair(PARTNER, "Acme Pay", "ACME"));
+      throw new Error(`unexpected URL ${url}`);
+    }));
+    await collectProjectTokenIdentity(ctx);
+    expect(evidence.projectToken).toBeUndefined();
+    expect(fetched.some((url) => url.startsWith("https://acmepay.example/blog/"))).toBe(false);
+  });
+
+  it("extracts only labeled, non-infrastructure contract candidates", () => {
+    const html = `<span class="badge">$TOKEN CA</span><button type="button" title="Copy contract address" class="${"x".repeat(150)}">${PARTNER}</button>
+      <p>Pay with USDC: ${USDC}</p>
+      <a href="https://etherscan.io/address/0x9999999999999999999999999999999999999999">treasury</a>
+      <p>Mint: ${SSR_TOKEN}</p> <p>${SOLANA_TOKEN}</p>`;
+    expect(siteDeclaredContractCandidates(html)).toEqual([PARTNER, SSR_TOKEN]);
+    expect(siteContractCandidates(html)).toContain(USDC);
+  });
+});
+
+describe("bio-linked registry records refuse a namesake or fan account (ID-2)", () => {
+  const UNI = "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984";
+  const uniswapDetails = (screenName: string | undefined) => details({
+    id: "uniswap",
+    name: "Uniswap",
+    symbol: "uni",
+    asset_platform_id: "ethereum",
+    platforms: { ethereum: UNI },
+    links: { ...(screenName ? { twitter_screen_name: screenName } : {}), homepage: ["https://uniswap.org/"] },
+  });
+  const stubUniswap = (screenName: string | undefined) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [{ id: "uniswap", name: "Uniswap", symbol: "UNI", market_cap_rank: 20 }] });
+      if (url.includes("/coins/uniswap?")) return json(uniswapDetails(screenName));
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://uniswap.org/") return new Response("<h1>Uniswap</h1>", { status: 200 });
+      if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+  };
+
+  it("refuses an official_domain bind when the registry names a different official X account", async () => {
+    const { ctx, evidence } = context("@uniswap_updates", "Uniswap Updates", "https://uniswap.org/");
+    stubUniswap("Uniswap");
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "finding",
+      note: expect.stringContaining("@Uniswap"),
+    }));
+    expect(ctx.emit).toHaveBeenCalledWith(expect.objectContaining({
+      label: expect.stringContaining("different X account"),
+      tone: "warn",
+    }));
+  });
+
+  it("refuses every official scope for an account whose bio disclaims affiliation", async () => {
+    const { ctx, evidence } = context("@uniswapfans", "Uniswap Fans", "https://uniswap.org/");
+    evidence.profile.bio = "Unofficial fan page. Not affiliated. $UNI";
+    // Registry with NO official X: the domain gate alone used to bind.
+    stubUniswap(undefined);
+    await collectProjectTokenIdentity(ctx);
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "confirmed" }));
+  });
+
+  it("still binds by official_domain when the registry names no X account and the bio makes no disclaimer", async () => {
+    const { ctx, evidence } = context("@uniswap", "Uniswap", "https://uniswap.org/");
+    stubUniswap(undefined);
+    await collectProjectTokenIdentity(ctx);
+    expect(evidence.projectToken).toMatchObject({ verification: "official_domain", symbol: "UNI" });
+  });
+
+  it.each([
+    ["Unofficial fan page. Not affiliated.", true],
+    ["Parody account", true],
+    ["Community-run news for $UNI holders", true],
+    ["Fans of Uniswap", true],
+    ["The largest onchain marketplace. Swap, earn, and build.", false],
+    ["Official account of the Uniswap Foundation community", false],
+  ])("reads %s as disclaimer=%s", (bio, expected) => {
+    expect(profileDisclaimsAffiliation({ bio, display_name: "Uniswap" })).toBe(expected);
+  });
+});
+
 const STONKBROKER = "0xe934e36A439C94017B64a3FecE66AF12099aBF50";
 const STONKBROKER_LC = STONKBROKER.toLowerCase();
 const STONKBROKER_VAULT = "0x038a7f4e4e89448ad74e044337c9ac25c11e726b";
 const STONKBROKER_HTML = `<a href="https://robinhoodchain.blockscout.com/address/${STONKBROKER_VAULT}">vault</a>
-      <button>${STONKBROKER_LC}</button>
+      <span class="lm-badge lm-badge-orange flex-shrink-0">$STONKBROKER CA</span><button type="button" title="Copy contract address" class="lm-mono text-white break-all">${STONKBROKER_LC}</button>
       <span>0x0000000000000000000000000000000000000000</span>
       <span>0xE934E36A439C94017B64A3FECE66AF12099ABF50</span>`;
 
@@ -1762,6 +2080,8 @@ describe("official-domain gates read every credible domain on the frozen profile
         }],
       });
       if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      // Reciprocity: the subject's own site adopts the contract.
+      if (url.startsWith("https://ponsfamily.com/")) return new Response(`Token contract: ${PONS_TOKEN}`);
       throw new Error(`unexpected URL ${url}`);
     }));
 
@@ -2119,5 +2439,32 @@ describe("CoinGecko fan-out stays bounded and a throttle is retried once", () =>
       expect(evidence.projectToken).toMatchObject({ verified: true, symbol: "PDX" });
       expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ status: "unavailable" }));
     }
+  });
+});
+
+describe("the official-site declaration read is bounded (ID-9)", () => {
+  it("records an unread page instead of buffering an over-size official site", async () => {
+    const { ctx, evidence } = context("@projectdex", "Project Dex", "https://project.example/");
+    const recoverOfficialText = vi.fn(async () => ({ status: "failed" as const, reason: "reader unavailable" }));
+    let bodyPulls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://project.example/") {
+        return new Response(new ReadableStream({
+          pull(controller) {
+            bodyPulls += 1;
+            controller.enqueue(new Uint8Array(256 * 1024));
+          },
+        }), { status: 200, headers: { "content-type": "text/html" } });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    }));
+    await expect(collectProjectTokenIdentity(ctx, { recoverOfficialText })).resolves.toMatchObject({ state: "partial" });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(bodyPulls).toBeLessThan(6);
+    const check = vi.mocked(ctx.recordCheck!).mock.calls.map(([row]) => row).find((row) => row.id === "project-token-identity");
+    expect(check).toMatchObject({ status: "unavailable" });
   });
 });

@@ -11,6 +11,8 @@ export function runAudit(
   emit?: (step: TraceStep) => void,
   options?: {
     organizationId?: string;
+    /** Private run: the collector leaves no durable org-visible trace (no entity-facts write-back). */
+    privateRun?: boolean;
     analystDeadlineAt?: number;
     intent?: ResearchIntent;
     authorizedResearchScope?: {
@@ -32,6 +34,9 @@ export function collectSocialActivity(identity: {
   ticker?: string | null;
   projectName?: string | null;
 }, options?: { fetchImpl?: typeof fetch; deadlineAt?: number }): Promise<SocialActivitySnapshot>;
+
+export function getRecentPostsMeta(handle: string, limit?: number): Promise<{ text: string; createdAt: number }[]>;
+export function collectShippingSummary(githubOrg: string, options?: { fetchImpl?: typeof fetch; deadlineAt?: number }): Promise<import("../src/threat/shipping").ShippingSummary | undefined>;
 
 export function resolveInput(raw: string): ResolvedInput;
 

@@ -1,4 +1,6 @@
 // Authenticated person investigation stream.
+import { waitUntil } from "@vercel/functions";
+import { completeProjectToken } from "./_projectTokenCompletion.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { resolveInput, runAudit } from "./_collector.js";
 import type { TraceStep } from "../src/data/evidence";
@@ -11,7 +13,7 @@ import {
   type AuthContext,
 } from "./_auth.js";
 import { activateReportVersion, persistReportVersionBundle } from "./_provenance.js";
-import { issuePanelCostToken, recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
+import { issuePanelCostToken, issueScanPanelToken, recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
 import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
@@ -20,7 +22,7 @@ import {
 } from "../src/lib/investigationRuntime.js";
 import { activateReportVersionWithAuthoritativeGraph } from "./_graph.js";
 import type { ResearchIntent } from "../src/lib/researchDirector.js";
-import { claimScanReceipt, recordScanReceipt } from "./_scanReceipts.js";
+import { claimScanReceipt, describeClaimedRun, recordScanReceipt } from "./_scanReceipts.js";
 
 export const config = { maxDuration: 600 };
 
@@ -231,8 +233,8 @@ export async function persistServerDossier(
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestStartedAt = Date.now();
-  if (req.method !== "GET") {
-    res.status(405).setHeader("Allow", "GET").json({ error: "method_not_allowed" });
+  if (req.method !== "GET" && req.method !== "POST") {
+    res.status(405).setHeader("Allow", "GET, POST").json({ error: "method_not_allowed" });
     return;
   }
 
@@ -287,10 +289,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     startedAt: new Date(requestStartedAt).toISOString(),
   });
   if (claim !== "written") {
-    res.status(claim === "duplicate" ? 409 : 503).json({
-      error: claim === "duplicate" ? "scan_run_already_claimed" : "scan_run_claim_unavailable",
-      message: "This scan could not be started. Open its saved result or use a new scan identifier.",
-    });
+    if (claim !== "duplicate") {
+      res.status(503).json({
+        error: "scan_run_claim_unavailable",
+        message: "This scan could not be started. Try again shortly.",
+      });
+      return;
+    }
+    const prior = await describeClaimedRun(auth, receiptRunKey, "/api/audit", handle);
+    res.status(409).json(prior === "subject_mismatch"
+      ? {
+        error: "idempotency_subject_mismatch",
+        message: "This scan identifier was already used for a different subject. Start this scan with a new identifier.",
+      }
+      : {
+        error: "scan_run_already_claimed",
+        message: "This scan has already run under that identifier. Open its saved result or use a new scan identifier.",
+      });
     return;
   }
 
@@ -306,7 +321,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
   res.flushHeaders?.();
 
+  let streamOpen = true;
+  res.on?.("close", () => { streamOpen = false; });
+  res.on?.("error", () => { streamOpen = false; });
   const send = (event: string, data: unknown) => {
+    if (!streamOpen || res.writableEnded || res.destroyed) return;
     try {
       res.write(`event: ${event}\n`);
       res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -316,9 +335,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
   const emit = (step: TraceStep) => send("step", step);
   if (typeof quota.creditRemaining === "number") {
-    send("credits", { remaining: quota.creditRemaining });
+    send("credits", {
+      remaining: quota.creditRemaining,
+      // A capability for the panels this scan opens before it is saved. Sent
+      // on the transient credits event, never on a step: steps are persisted
+      // with the report and a capability must not be (#356).
+      ...(() => {
+        const panelToken = issueScanPanelToken(auth.organizationId, receiptRunKey);
+        return panelToken ? { panelToken } : {};
+      })(),
+    });
   }
+  const serverToken = !privateRun && req.query.tokenExecution === "server";
+  if (serverToken) emit({ phase: "ARGUS · Completion", label: "Server-owned completion", detail: "The server will finish and save this scan, including its linked-token assessment, even if this page disconnects.", source: "argus", tone: "neutral", tokenExecution: "server" });
   const heartbeat = setInterval(() => {
+    if (!streamOpen || res.writableEnded || res.destroyed) return;
     try {
       res.write(": argus-heartbeat\n\n");
     } catch {
@@ -327,35 +358,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }, AUDIT_SSE_HEARTBEAT_MS);
   heartbeat.unref?.();
 
-  try {
-    const collectionStartedAt = Date.now();
-    console.info("[audit-route-runtime]", JSON.stringify({
-      stage: "collection-start",
-      elapsedMs: collectionStartedAt - requestStartedAt,
-    }));
-    const tokenAddress = typeof req.query.address === "string" ? req.query.address.trim() : "";
-    const tokenChain = typeof req.query.chain === "string" ? req.query.chain.trim().toLowerCase() : "";
-    const tokenSymbol = typeof req.query.symbol === "string" ? req.query.symbol.trim() : "";
-    const seededContract = tokenAddress
-      && tokenChain
-      && (/^0x[a-fA-F0-9]{40}$/.test(tokenAddress) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tokenAddress))
-      ? { tokenAddress, tokenChain, ...(tokenSymbol ? { tokenSymbol } : {}) }
-      : {};
-    const dossier = await runAudit(handle, emit, {
-      organizationId: auth.organizationId,
-      intent: typeof req.query.intent === "string" && RESEARCH_INTENTS.has(req.query.intent as ResearchIntent)
-        ? req.query.intent as ResearchIntent
-        : "investment_due_diligence",
-      analystDeadlineAt: requestStartedAt
-        + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
-        - ANALYST_FINALIZATION_RESERVE_MS,
-      ...seededContract,
-    }) as ServerDossier | null;
-    console.info("[audit-route-runtime]", JSON.stringify({
-      stage: "collection-complete",
-      stageMs: Date.now() - collectionStartedAt,
-      elapsedMs: Date.now() - requestStartedAt,
-    }));
+  const investigation = (async () => {
+    try {
+      const collectionStartedAt = Date.now();
+      console.info("[audit-route-runtime]", JSON.stringify({
+        stage: "collection-start",
+        elapsedMs: collectionStartedAt - requestStartedAt,
+      }));
+      const tokenAddress = typeof req.query.address === "string" ? req.query.address.trim() : "";
+      const tokenChain = typeof req.query.chain === "string" ? req.query.chain.trim().toLowerCase() : "";
+      const tokenSymbol = typeof req.query.symbol === "string" ? req.query.symbol.trim() : "";
+      const seededContract = tokenAddress
+        && tokenChain
+        && (/^0x[a-fA-F0-9]{40}$/.test(tokenAddress) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tokenAddress))
+        ? { tokenAddress, tokenChain, ...(tokenSymbol ? { tokenSymbol } : {}) }
+        : {};
+      const dossier = await runAudit(handle, emit, {
+        organizationId: auth.organizationId,
+        // The private flag used to govern only report persistence; the
+        // collector's knowledge-base write-back still left an org-visible row.
+        privateRun,
+        intent: typeof req.query.intent === "string" && RESEARCH_INTENTS.has(req.query.intent as ResearchIntent)
+          ? req.query.intent as ResearchIntent
+          : "investment_due_diligence",
+        analystDeadlineAt: requestStartedAt
+          + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
+          - ANALYST_FINALIZATION_RESERVE_MS,
+        ...seededContract,
+      }) as ServerDossier | null;
+      console.info("[audit-route-runtime]", JSON.stringify({
+        stage: "collection-complete",
+        stageMs: Date.now() - collectionStartedAt,
+        elapsedMs: Date.now() - requestStartedAt,
+      }));
       if (!dossier) {
         await recordScanReceipt(auth, {
           runKey: receiptRunKey, route: "/api/audit", kind: "person", canonicalRef: handle,
@@ -367,90 +402,106 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         send("error", { error: "not_found" });
       } else {
-      let reportVersionId: string | null = null;
-      let persistenceFailureReason: string | undefined;
-      let persistence: "private" | "persisted" | "failed" = req.query.private === "1" ? "private" : "persisted";
-      if (req.query.private !== "1") {
-        const persistenceStartedAt = Date.now();
-        console.info("[audit-route-runtime]", JSON.stringify({
-          stage: "persistence-start",
-          elapsedMs: persistenceStartedAt - requestStartedAt,
-        }));
-        try {
-          reportVersionId = await persistServerDossier(handle, dossier, auth);
-          if (!reportVersionId) {
-            // persistServerDossier returns null without throwing when report
-            // storage is unconfigured or the subject carries no canonical ref.
-            // Reporting that as "persisted" handed the browser a save receipt
-            // with no immutable version behind it, which then failed the
-            // client's version binding and took the whole finished scan -
-            // score included - down with it. An absent version id is a failed
-            // save, and the report says so.
-            persistence = "failed";
-            persistenceFailureReason = "Report storage did not return an immutable version for this scan.";
-            send("persistence", { state: "failed", reason: persistenceFailureReason });
-          }
-        } catch (persistenceError) {
-          persistence = "failed";
-          console.error("[api/audit] persistence failed", persistenceError);
-          // Surface the sanitized cause to the client: a failed immutable save
-          // must be diagnosable from the report page, not only from server logs.
-          persistenceFailureReason = String(persistenceError instanceof Error ? persistenceError.message : persistenceError).slice(0, 300);
-          send("persistence", { state: "failed", reason: persistenceFailureReason });
-        } finally {
-          console.info("[audit-route-runtime]", JSON.stringify({
-            stage: "persistence-complete",
-            state: persistence,
-            stageMs: Date.now() - persistenceStartedAt,
-            elapsedMs: Date.now() - requestStartedAt,
-          }));
+        if (serverToken) {
+          await completeProjectToken(dossier, {
+            authorization: typeof req.headers.authorization === "string" ? req.headers.authorization : "",
+            panelToken: issueScanPanelToken(auth.organizationId, receiptRunKey),
+            deadlineAt: requestStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000 - 30_000,
+            emit,
+          });
         }
+        let reportVersionId: string | null = null;
+        let persistenceFailureReason: string | undefined;
+        let persistence: "private" | "persisted" | "failed" = req.query.private === "1" ? "private" : "persisted";
+        if (req.query.private !== "1") {
+          const persistenceStartedAt = Date.now();
+          console.info("[audit-route-runtime]", JSON.stringify({
+            stage: "persistence-start",
+            elapsedMs: persistenceStartedAt - requestStartedAt,
+          }));
+          try {
+            reportVersionId = await persistServerDossier(handle, dossier, auth);
+            if (!reportVersionId) {
+              // persistServerDossier returns null without throwing when report
+              // storage is unconfigured or the subject carries no canonical ref.
+              // Reporting that as "persisted" handed the browser a save receipt
+              // with no immutable version behind it, which then failed the
+              // client's version binding and took the whole finished scan -
+              // score included - down with it. An absent version id is a failed
+              // save, and the report says so.
+              persistence = "failed";
+              persistenceFailureReason = "Report storage did not return an immutable version for this scan.";
+              send("persistence", { state: "failed", reason: persistenceFailureReason });
+            }
+          } catch (persistenceError) {
+            persistence = "failed";
+            console.error("[api/audit] persistence failed", persistenceError);
+            // Surface the sanitized cause to the client: a failed immutable save
+            // must be diagnosable from the report page, not only from server logs.
+            persistenceFailureReason = String(persistenceError instanceof Error ? persistenceError.message : persistenceError).slice(0, 300);
+            send("persistence", { state: "failed", reason: persistenceFailureReason });
+          } finally {
+            console.info("[audit-route-runtime]", JSON.stringify({
+              stage: "persistence-complete",
+              state: persistence,
+              stageMs: Date.now() - persistenceStartedAt,
+              elapsedMs: Date.now() - requestStartedAt,
+            }));
+          }
+        }
+        const panelCostToken = persistence === "persisted" && reportVersionId
+          ? issuePanelCostToken(auth.organizationId, reportVersionId)
+          : undefined;
+        const cost = dossier.cost && typeof dossier.cost === "object" && !Array.isArray(dossier.cost)
+          ? dossier.cost as { usd?: unknown; estimated?: unknown; calls?: Array<{ status?: unknown; failed?: unknown }> }
+          : null;
+        const providerCostUsd = typeof cost?.usd === "number" && Number.isFinite(cost.usd) ? Math.max(0, cost.usd) : null;
+        // Terminal provider failures only (the same rule as providerFailureLines
+        // in server/cost.ts). A line that mixes live and cached reads, or a
+        // legitimately empty model answer, is not a degraded scan.
+        const providerIssue = cost?.calls?.some((line) => line?.status === "failed" && typeof line.failed === "number" && line.failed > 0) === true;
+        const tokenUnavailable = dossier.tokenAssessment?.state === "unavailable";
+        const receiptStatus = persistence === "failed" || providerIssue || tokenUnavailable ? "degraded" : "complete";
+        await recordScanReceipt(auth, {
+          runKey: receiptRunKey, route: "/api/audit", kind: "person", canonicalRef: handle,
+          displayQuery: rawHandle || `@${handle}`, privateRun, status: receiptStatus,
+          creditsCharged: embeddedProjectAccount ? 0 : quota.used, reportVersionId,
+          providerCostUsd, costBasis: providerCostUsd == null ? "unknown" : cost?.estimated === false ? "exact" : "estimated",
+          startedAt: new Date(requestStartedAt).toISOString(), finishedAt: new Date().toISOString(),
+          durationMs: Date.now() - requestStartedAt,
+          failureCode: persistence === "failed" ? "persistence_failed" : providerIssue ? "provider_incomplete" : tokenUnavailable ? "token_unavailable" : null,
+          failureDetail: persistenceFailureReason ?? null,
+        });
+        send("done", {
+          ...dossier,
+          persistence: {
+            state: persistence,
+            reportVersionId,
+            ...(panelCostToken ? { panelCostToken } : {}),
+            ...(persistenceFailureReason ? { reason: persistenceFailureReason } : {}),
+          },
+        });
       }
-      const panelCostToken = persistence === "persisted" && reportVersionId
-        ? issuePanelCostToken(auth.organizationId, reportVersionId)
-        : undefined;
-      const cost = dossier.cost && typeof dossier.cost === "object" && !Array.isArray(dossier.cost)
-        ? dossier.cost as { usd?: unknown; estimated?: unknown; calls?: Array<{ status?: unknown }> }
-        : null;
-      const providerCostUsd = typeof cost?.usd === "number" && Number.isFinite(cost.usd) ? Math.max(0, cost.usd) : null;
-      const providerIssue = cost?.calls?.some((line) => line?.status === "failed" || line?.status === "partial") === true;
-      const receiptStatus = persistence === "failed" || providerIssue ? "degraded" : "complete";
+    } catch (error) {
+      console.error("[api/audit] failed", error);
       await recordScanReceipt(auth, {
         runKey: receiptRunKey, route: "/api/audit", kind: "person", canonicalRef: handle,
-        displayQuery: rawHandle || `@${handle}`, privateRun, status: receiptStatus,
-        creditsCharged: embeddedProjectAccount ? 0 : quota.used, reportVersionId,
-        providerCostUsd, costBasis: providerCostUsd == null ? "unknown" : cost?.estimated === false ? "exact" : "estimated",
+        displayQuery: rawHandle || `@${handle}`, privateRun, status: "failed",
+        creditsCharged: embeddedProjectAccount ? 0 : quota.used,
         startedAt: new Date(requestStartedAt).toISOString(), finishedAt: new Date().toISOString(),
-        durationMs: Date.now() - requestStartedAt,
-        failureCode: persistence === "failed" ? "persistence_failed" : providerIssue ? "provider_incomplete" : null,
-        failureDetail: persistenceFailureReason ?? null,
+        durationMs: Date.now() - requestStartedAt, failureCode: "investigation_failed",
+        failureDetail: error instanceof Error ? error.message : "The investigation failed before a report was saved.",
       });
-      send("done", {
-        ...dossier,
-        persistence: {
-          state: persistence,
-          reportVersionId,
-          ...(panelCostToken ? { panelCostToken } : {}),
-          ...(persistenceFailureReason ? { reason: persistenceFailureReason } : {}),
-        },
-      });
+      send("error", { error: "investigation_failed", message: String(error) });
+    } finally {
+      console.info("[audit-route-runtime]", JSON.stringify({
+        stage: "request-complete",
+        elapsedMs: Date.now() - requestStartedAt,
+      }));
+      clearInterval(heartbeat);
+      try { res.end(); } catch { /* client disconnected; server persistence already completed */ }
     }
-  } catch (error) {
-    console.error("[api/audit] failed", error);
-    await recordScanReceipt(auth, {
-      runKey: receiptRunKey, route: "/api/audit", kind: "person", canonicalRef: handle,
-      displayQuery: rawHandle || `@${handle}`, privateRun, status: "failed",
-      creditsCharged: embeddedProjectAccount ? 0 : quota.used,
-      startedAt: new Date(requestStartedAt).toISOString(), finishedAt: new Date().toISOString(),
-      durationMs: Date.now() - requestStartedAt, failureCode: "investigation_failed",
-      failureDetail: error instanceof Error ? error.message : "The investigation failed before a report was saved.",
-    });
-    send("error", { error: "investigation_failed", message: String(error) });
-  }
-  console.info("[audit-route-runtime]", JSON.stringify({
-    stage: "request-complete",
-    elapsedMs: Date.now() - requestStartedAt,
-  }));
-  clearInterval(heartbeat);
-  res.end();
+  })();
+  if (serverToken) waitUntil(investigation);
+  await investigation;
 }

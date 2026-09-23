@@ -254,3 +254,9 @@ describe("DecisionBasis", () => {
     expect(container.textContent).not.toContain("Reddit provider collection unavailable");
   });
 });
+
+it("shows the operational cause and withholds the unchanged retry action", () => {
+  act(() => root.render(<DecisionBasis unavailableReason="scoring" operationalFailure="Provider access must be restored before retrying." onRescan={vi.fn()} />));
+  expect(container.textContent).toContain("Provider access must be restored");
+  expect(container.textContent).not.toContain("Retry scoring investigation");
+});

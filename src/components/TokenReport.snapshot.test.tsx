@@ -183,7 +183,9 @@ describe("token report supplemental evidence boundary", () => {
     render(dossier());
 
     expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
-    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    // One canonical report frame: the interactive chapter shell.
+    expect(container.querySelector(".argus-rd")).not.toBeNull();
+    expect(container.querySelector('nav[aria-label="Report sections"]')).not.toBeNull();
     expect(container.textContent).toContain("what the evidence tells us");
   });
 
@@ -191,7 +193,7 @@ describe("token report supplemental evidence boundary", () => {
     window.history.replaceState(null, "", "/?s=%24ARG&kind=token&reportStyle=1");
     render(dossier());
     expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
-    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    expect(container.querySelector(".argus-rd")).not.toBeNull();
     expect(container.textContent).toContain("what the evidence tells us");
   });
 
@@ -224,7 +226,7 @@ describe("token report supplemental evidence boundary", () => {
     render(dossier({ symbol, name, versionContext }));
 
     expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
-    expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('nav[aria-label="Report sections"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain(`$${symbol}`);
     expect(container.textContent).toContain("what the evidence tells us");
@@ -245,11 +247,21 @@ describe("token report supplemental evidence boundary", () => {
       reportVersionId: versionContext.reportVersionId,
     }));
 
-    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report table of contents"]');
+    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report sections"]');
     expect(nav).not.toBeNull();
-    const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
-      .map((link) => link.getAttribute("href"));
-    expect(hrefs).toEqual([
+    expect([...(nav?.querySelectorAll("button") ?? [])].map((tab) => tab.textContent?.trim())).toEqual([
+      "Decision",
+      "Scores",
+      "What the product is",
+      "Code",
+      "People",
+      "Market",
+      "Social",
+      "Connections",
+      "Evidence & method",
+    ]);
+    // Every chapter stays mounted, so the report's own anchors keep resolving.
+    const hrefs = [
       "#report-summary",
       "#report-risks",
       "#token-story",
@@ -257,7 +269,7 @@ describe("token report supplemental evidence boundary", () => {
       "#token-evidence",
       "#token-methodology",
       "#token-challenge",
-    ]);
+    ];
     expect(container.textContent).toContain("What was not verified");
     expect(container.textContent).toContain("No CoinGecko record was captured");
     for (const href of hrefs) {
@@ -341,17 +353,18 @@ describe("token report supplemental evidence boundary", () => {
   it("keeps every current-data panel paused on an immutable snapshot until explicit opt-in", () => {
     render(dossier({ versionContext }));
 
-    expect(container.querySelector('[aria-label="Case PA-00000000000040008000"]')?.textContent).toContain(
-      "/ PA-00000000000040008000",
-    );
+    // The footer names the stable case; the toolbar names the subject.
+    expect(container.querySelector("[data-report-identity]")?.textContent).toContain("Case PA-00000000000040008000");
     expect(container.textContent).toContain("SAVED REPORT v2");
     expect(container.textContent).toContain("This report uses data saved on");
     expect(harness.livePanel).not.toHaveBeenCalled();
     expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({ panelCostToken: undefined }));
     expect(harness.serviceAlert).not.toHaveBeenCalled();
 
+    const more = container.querySelector<HTMLButtonElement>('button[aria-label="More report actions"]');
+    act(() => more?.click());
     const copy = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.trim() === "Copy report");
+      .find((button) => button.textContent?.includes("Copy report"));
     act(() => copy?.click());
     const copiedReport = String(harness.clipboard.mock.calls.at(-1)?.[0] ?? "");
     expect(copiedReport).toContain(`?version=${versionContext.reportVersionId}`);
@@ -435,8 +448,10 @@ describe("token report supplemental evidence boundary", () => {
     expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Share")).toBe(false);
     expect([...container.querySelectorAll("button")].some((button) => button.textContent?.includes("Watch"))).toBe(false);
 
+    const more = container.querySelector<HTMLButtonElement>('button[aria-label="More report actions"]');
+    act(() => more?.click());
     const copy = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.trim() === "Copy report");
+      .find((button) => button.textContent?.includes("Copy report"));
     act(() => copy?.click());
     const copiedReport = String(harness.clipboard.mock.calls.at(-1)?.[0] ?? "");
     expect(copiedReport).toContain("private ARGUS scan");
@@ -460,8 +475,10 @@ describe("token report supplemental evidence boundary", () => {
     expect(container.textContent).toContain("FAIL");
     expect(container.textContent).toContain("Do not rely on the score or result yet");
 
+    const more = container.querySelector<HTMLButtonElement>('button[aria-label="More report actions"]');
+    act(() => more?.click());
     const copy = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.trim() === "Copy report");
+      .find((button) => button.textContent?.includes("Copy report"));
     act(() => copy?.click());
     const copiedReport = String(harness.clipboard.mock.calls.at(-1)?.[0] ?? "");
     expect(copiedReport).toContain("RISK WARNING: FAIL");

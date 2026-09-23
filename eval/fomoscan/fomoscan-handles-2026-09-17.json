@@ -1,0 +1,269 @@
+{
+  "generatedAt": "2026-09-17T13:50:42.815Z",
+  "spentCu": 13750,
+  "rows": [
+    {
+      "handle": "tradeonprism",
+      "cabal": "rh-farm-prism",
+      "role": "project",
+      "label": "Prism Finance (prismfinance.net)",
+      "state": "miss",
+      "fomo": null,
+      "cu": 250,
+      "note": "FomoScan holds no FOMO account named tradeonprism."
+    },
+    {
+      "handle": "synepsepad",
+      "cabal": "rh-farm-synapse-hub",
+      "role": "project",
+      "label": "Synapse (usesynapse.ink), AI-model launchpad on Pons",
+      "state": "miss",
+      "fomo": null,
+      "cu": 250,
+      "note": "FomoScan holds no FOMO account named synepsepad."
+    },
+    {
+      "handle": "altcoinist",
+      "cabal": "altcoinist-ring",
+      "role": "promoter",
+      "label": "Altcoinist · $ALTT · 103k followers",
+      "state": "hit",
+      "fomo": {
+        "id": "9a44e792-3ace-5ebe-9842-722d690ad31a",
+        "handle": "Altcoinist",
+        "name": "Altcoinist",
+        "bio": "I fear my 2030 $TIBBIR target of $100 is too low",
+        "twitter": null,
+        "solanaAddress": "DVFYHVKFYLxws4bV97va6EceVRrKjddHSWYq3is4ad49",
+        "evmAddress": "0xccdeb7744e778992bfbff798f239638b76448e75"
+      },
+      "cu": 2500,
+      "note": "FomoScan holds FOMO account Altcoinist with 2 verified wallets.",
+      "pnl": {
+        "handle": "Altcoinist",
+        "twitter": null,
+        "wallet": "DVFYHVKFYLxws4bV97va6EceVRrKjddHSWYq3is4ad49",
+        "evmWallet": "0xccdeb7744e778992bfbff798f239638b76448e75",
+        "updatedAt": "2026-09-17T13:04:02.813Z",
+        "windows": {
+          "24h": {
+            "netUsd": -234.489021,
+            "returnPct": -100,
+            "volumeUsd": 234.489021,
+            "trades": 1,
+            "rank": 430421
+          },
+          "7d": {
+            "netUsd": -2196.806108,
+            "returnPct": -2.9929605384428077,
+            "volumeUsd": 144601.394522,
+            "trades": 96,
+            "rank": 433536
+          },
+          "30d": {
+            "netUsd": -6590.26082,
+            "returnPct": -7.149056628055346,
+            "volumeUsd": 177777.024624,
+            "trades": 121,
+            "rank": 432057
+          },
+          "all": {
+            "netUsd": -7641.475614,
+            "returnPct": -8.137035563756047,
+            "volumeUsd": 180178.168386,
+            "trades": 125,
+            "rank": 430418
+          }
+        }
+      }
+    },
+    {
+      "handle": "konstantinsebeo",
+      "cabal": "altcoinist-ring",
+      "role": "cofounder",
+      "label": "ALT BRAH · co-founder Altcoinist",
+      "state": "miss",
+      "fomo": null,
+      "cu": 250,
+      "note": "FomoScan holds no FOMO account named konstantinsebeo."
+    },
+    {
+      "handle": "theunipcs",
+      "cabal": "altcoinist-ring",
+      "role": "kol",
+      "label": "Unipcs (Bonk Guy) · 315k followers",
+      "state": "miss",
+      "fomo": null,
+      "cu": 250,
+      "note": "FomoScan holds no FOMO account named theunipcs."
+    },
+    {
+      "handle": "0x7_anderson",
+      "cabal": "altcoinist-ring",
+      "role": "member",
+      "label": "Anderson · Base / Virtuals",
+      "state": "miss",
+      "fomo": null,
+      "cu": 250,
+      "note": "FomoScan holds no FOMO account named 0x7_anderson."
+    },
+    {
+      "handle": "wrestler_galaxy",
+      "cabal": "altcoinist-ring",
+      "role": "project",
+      "label": "$WRESTLER project account",
+      "state": "miss",
+      "fomo": null,
+      "cu": 250,
+      "note": "FomoScan holds no FOMO account named wrestler_galaxy."
+    },
+    {
+      "handle": "fihonrh",
+      "cabal": "altcoinist-ring",
+      "role": "project",
+      "label": "Fih In Hood (the small 0xd51c58f1 token, not the $1.4M FIH)",
+      "state": "miss",
+      "fomo": null,
+      "cu": 250,
+      "note": "FomoScan holds no FOMO account named fihonrh."
+    },
+    {
+      "handle": "lowcap_hunter",
+      "cabal": "altcoinist-ring",
+      "role": "member",
+      "state": "hit",
+      "fomo": {
+        "id": "ae1981a7-4469-5afd-b850-29d002584c4d",
+        "handle": "lowcap_hunter",
+        "name": "LowCap Hunter",
+        "bio": "All my life You have been faithful\nAll my life You have been so, so good\nWith every breath that I am able\nOh, I will sing of the goodness of God",
+        "twitter": "https://x.com/lowcap_hunter",
+        "solanaAddress": "4CH1wgHqyirN8KR3o9L8oYNpDtRmDccCtiRJjnjLtnYp",
+        "evmAddress": "0x517b826b1902f9d44edaa2259afaa7e6e4b23b3b"
+      },
+      "cu": 2500,
+      "note": "FomoScan holds FOMO account lowcap_hunter with 2 verified wallets.",
+      "pnl": {
+        "handle": "lowcap_hunter",
+        "twitter": "https://x.com/lowcap_hunter",
+        "wallet": "4CH1wgHqyirN8KR3o9L8oYNpDtRmDccCtiRJjnjLtnYp",
+        "evmWallet": "0x517b826b1902f9d44edaa2259afaa7e6e4b23b3b",
+        "updatedAt": "2026-09-17T13:04:02.813Z",
+        "windows": {
+          "24h": {
+            "netUsd": 0,
+            "returnPct": null,
+            "volumeUsd": 0,
+            "trades": 0,
+            "rank": 29857
+          },
+          "7d": {
+            "netUsd": -10.185519,
+            "returnPct": -22.081372812570454,
+            "volumeUsd": 82.068881,
+            "trades": 2,
+            "rank": 335511
+          },
+          "30d": {
+            "netUsd": -1377.20707,
+            "returnPct": -6.22747041207765,
+            "volumeUsd": 42852.856788,
+            "trades": 178,
+            "rank": 412678
+          },
+          "all": {
+            "netUsd": -32667.091202,
+            "returnPct": -4.533246979611022,
+            "volumeUsd": 1408555.562182,
+            "trades": 4312,
+            "rank": 437474
+          }
+        }
+      }
+    },
+    {
+      "handle": "djgriffith",
+      "cabal": "altcoinist-ring",
+      "role": "member",
+      "state": "miss",
+      "fomo": null,
+      "cu": 250,
+      "note": "FomoScan holds no FOMO account named djgriffith."
+    },
+    {
+      "handle": "stonkspark",
+      "cabal": "sol-park-pumpswap-pool-factory",
+      "role": "project",
+      "label": "$PARK project account (recycled serial-memecoin handle)",
+      "state": "miss",
+      "fomo": null,
+      "cu": 250,
+      "note": "FomoScan holds no FOMO account named stonkspark."
+    },
+    {
+      "handle": "idx_rh",
+      "cabal": "rh-farm-idx9000",
+      "role": "project",
+      "label": "$IDX9000 project account (appeared after the exit)",
+      "state": "miss",
+      "fomo": null,
+      "cu": 250,
+      "note": "FomoScan holds no FOMO account named idx_rh."
+    },
+    {
+      "handle": "yusufgemz",
+      "cabal": "rh-farm-idx9000",
+      "role": "kol",
+      "label": "Yusuf · paid caller (34.4k followers, Telegram channel)",
+      "state": "hit",
+      "fomo": {
+        "id": "58357f87-9d71-59dc-bb28-579510f4d0a2",
+        "handle": "YusufGemz",
+        "name": "YusufGemz",
+        "bio": "$500-$10K challenge",
+        "twitter": null,
+        "solanaAddress": "EkeSXXNqPc5bvxeLgPmAQoVjwTPUB4k8hzNHDmfQ4S9p",
+        "evmAddress": "0xde42eaab9559311dca35ea946091021c69f557a3"
+      },
+      "cu": 2500,
+      "note": "FomoScan holds FOMO account YusufGemz with 2 verified wallets.",
+      "pnl": {
+        "handle": "YusufGemz",
+        "twitter": null,
+        "wallet": "EkeSXXNqPc5bvxeLgPmAQoVjwTPUB4k8hzNHDmfQ4S9p",
+        "evmWallet": "0xde42eaab9559311dca35ea946091021c69f557a3",
+        "updatedAt": "2026-09-17T13:04:02.813Z",
+        "windows": {
+          "24h": {
+            "netUsd": -359.896437,
+            "returnPct": -11.24676365625,
+            "volumeUsd": 6040.103563,
+            "trades": 23,
+            "rank": 432680
+          },
+          "7d": {
+            "netUsd": 1855.778406,
+            "returnPct": 12.278361531963519,
+            "volumeUsd": 32084.215664,
+            "trades": 138,
+            "rank": 4040
+          },
+          "30d": {
+            "netUsd": -985.354542,
+            "returnPct": -2.0662360580756,
+            "volumeUsd": 94391.409226,
+            "trades": 359,
+            "rank": 405246
+          },
+          "all": {
+            "netUsd": -985.354542,
+            "returnPct": -2.0662360580756,
+            "volumeUsd": 94391.409226,
+            "trades": 359,
+            "rank": 394774
+          }
+        }
+      }
+    }
+  ]
+}

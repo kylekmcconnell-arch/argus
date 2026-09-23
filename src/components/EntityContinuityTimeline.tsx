@@ -57,7 +57,7 @@ export function EntityContinuityTimeline({ snapshot }: { snapshot: EntityContinu
       </div>
       {snapshot.coverage.state !== "complete" && (
         <p className="mt-4 rounded-lg border border-caution/30 bg-caution/5 px-4 py-3 text-[13px] leading-relaxed text-ink-dim">
-          <strong className="text-caution">Lifecycle coverage remains open.</strong> {snapshot.coverage.reason}
+          <strong className="text-caution">Parts of this history are unconfirmed.</strong> {snapshot.coverage.reason}
         </p>
       )}
     </section>

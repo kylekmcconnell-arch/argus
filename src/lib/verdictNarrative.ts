@@ -49,6 +49,11 @@ const SCORE_AREA_NAMES: Record<string, string> = {
 const plainScoreArea = (label: string): string =>
   SCORE_AREA_NAMES[label] ?? lowerFirst(label.replace(/\s*&\s*/g, " and "));
 
+const withCommas = (value: string): string => {
+  const n = Number(String(value).replace(/,/g, ""));
+  return Number.isFinite(n) ? n.toLocaleString("en-US") : value;
+};
+
 /** Reader copy for the compact rationales emitted by the token scorer. */
 export function plainScoreRationale(value: string): string {
   const raw = plainLanguageSummary(value).replace(/\s+/g, " ").trim();
@@ -60,6 +65,7 @@ export function plainScoreRationale(value: string): string {
       .replace(/^LP in one unlocked wallet$/i, "liquidity-provider tokens are held in one unlocked wallet")
       .replace(/^LP not locked$/i, "liquidity-provider tokens are not confirmed locked")
       .replace(/^LP lock not measured$/i, "liquidity protection is unverified")
+      .replace(/^liquidity protection unverified$/i, "liquidity protection is unverified")
       .replace(/^LP burned$/i, "the liquidity-provider tokens were burned")
       .replace(/^LP locked$/i, "the liquidity-provider tokens are locked");
     return qualifier
@@ -79,7 +85,57 @@ export function plainScoreRationale(value: string): string {
     return `${source}, and ${ownership}${remainder ? `. The contract is also ${remainder}` : ""}.`;
   }
 
+  const solana = raw.match(/^(authorities revoked|mint\/freeze authority active)(?:,\s*(.+?))?\.?$/i);
+  if (solana) {
+    const authority = solana[1].toLowerCase() === "authorities revoked"
+      ? "Mint and freeze authorities have been revoked"
+      : "Someone can still mint or freeze this token";
+    const remainder = solana[2]?.replace(/metadata mutable/i, "the token metadata can still be changed").trim();
+    return remainder ? `${authority}, and ${remainder}.` : `${authority}.`;
+  }
+
+  const holders = raw.match(/^([\d,]+) holders(?:,\s*top holder ([\d.]+)%)?(.*)$/i);
+  if (holders) {
+    const count = withCommas(holders[1]);
+    const top = holders[2];
+    const extra = holders[3].replace(/^,\s*/, "").replace(/\.+$/, "").trim();
+    const spread = top
+      ? `About ${count} wallets hold this token, and the largest holds about ${top}% of supply`
+      : `About ${count} wallets hold this token`;
+    return extra ? `${spread}. ${ensureSentence(extra)}` : `${spread}.`;
+  }
+
+  const wash = raw.match(/^vol\/liquidity ([\d.]+)x but price flat \(([-.\d]+)%\):\s*wash-trade signature\.?$/i);
+  if (wash) {
+    return `Trading volume was ${wash[1]} times the pool size while the price barely moved (${wash[2]}%). That pattern is a wash-trade signature, not proof of genuine demand.`;
+  }
+
+  const tape = raw.match(/^24h vol\/liquidity ([\d.]+)x,\s*([\d,]+) buys \/ ([\d,]+) sells\.?$/i);
+  if (tape) {
+    return `In the last day, trading volume was about ${tape[1]} times the pool size, with ${withCommas(tape[2])} buys and ${withCommas(tape[3])} sells.`;
+  }
+
+  const tax = raw.match(/^buy ([\d.]+)% \/ sell ([\d.]+)%(?:\s*\((simulated)\))?\.?$/i);
+  if (tax) {
+    const simulated = tax[3] ? " A simulated buy and sell produced these rates." : "";
+    return `Buying currently costs about ${tax[1]}% and selling about ${tax[2]}%.${simulated}`;
+  }
+
   return ensureSentence(raw);
+}
+
+/** Connect the saved facts to the points shown on the score row. */
+export function explainCompositionScore(
+  rationale: string,
+  score: number,
+  weight: number,
+  applicability?: "not_applicable" | "deferred" | "unassessed",
+): string {
+  const why = plainScoreRationale(rationale);
+  if (applicability || !(weight > 0)) return why;
+  if (score >= weight) return `${why} This area earned its full ${weight} points.`;
+  const missing = Math.round(weight - score);
+  return `${why} That is why it scored ${Math.round(score)} of ${weight} points (${missing} ${missing === 1 ? "point" : "points"} not earned).`;
 }
 
 /**

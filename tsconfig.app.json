@@ -31,6 +31,10 @@
     // program (making other tests' @ts-expect-error node-import guards unused).
     // Vitest still runs it. Keep it out of the DOM typecheck graph.
     "src/threat/parseReview.test.ts",
+    // Reads consumer sources with node:fs to assert the evidence-tier
+    // predicate is not redefined locally anywhere. Vitest still runs it; it
+    // stays out of the DOM typecheck graph for the same reason as above.
+    "src/lib/evidenceTier.test.ts",
     "src/**/* 2.ts",
     "src/**/* 2.tsx"
   ]

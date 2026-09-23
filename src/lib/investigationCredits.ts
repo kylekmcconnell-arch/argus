@@ -1,3 +1,4 @@
+import { setPanelToken } from "./panelToken";
 export interface CreditReservation {
   chargedCredits: number;
   remainingCredits: number;
@@ -10,11 +11,16 @@ export async function reserveInvestigationCredit(
   displayQuery = canonicalRef,
   privateRun = false,
   startedAt = new Date().toISOString(),
+  // A stalled reservation must reject rather than hold the run open forever:
+  // the runner keys runs by subject, so an unresolved reservation blocked every
+  // later scan of that subject. Callers pass a wall-clock signal.
+  options?: { signal?: AbortSignal },
 ): Promise<CreditReservation> {
   const response = await fetch("/api/investigation-credit", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ idempotencyKey, kind, canonicalRef, displayQuery, privateRun, startedAt }),
+    ...(options?.signal ? { signal: options.signal } : {}),
   });
   const body = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {
@@ -25,6 +31,9 @@ export async function reserveInvestigationCredit(
         : "ARGUS could not check your credit balance. No providers were started and no credit was taken. Try again.";
     throw new Error(message);
   }
+  // The capability for the panels this scan is about to open (#356). It is
+  // held in memory only and never dispatched with the credit event.
+  setPanelToken(typeof body.panelToken === "string" ? body.panelToken : undefined);
   const reservation = {
     chargedCredits: typeof body.chargedCredits === "number" ? body.chargedCredits : 0,
     remainingCredits: typeof body.remainingCredits === "number" ? body.remainingCredits : 0,

@@ -67,6 +67,75 @@ describe("mergeManagementIntoWebTeam", () => {
     });
   });
 
+  it("never promotes a model-guessed handle or GitHub through a display-name merge", () => {
+    // Regression for INT-3: a Grok row {John Smith, @johnsmith_wrongguy, github}
+    // matched by name to a Monid CFO record must not become a verified identity
+    // for the guessed accounts, which would enter the trust graph as a TEAM edge.
+    const evidence = emptyEvidence("@uniswap");
+    evidence.profile.website = "https://uniswap.org";
+    evidence.webTeam = [{
+      name: "John Smith",
+      handle: "@johnsmith_wrongguy",
+      role: "team",
+      linkedin: "linkedin.com/in/some-other-john",
+      source: "web/LinkedIn search",
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      provider: "grok",
+      identity_link_evidence_origin: "model_lead",
+      projects_evidence_origin: "model_lead",
+      github: { handle: "someone-else", url: "https://github.com/someone-else" } as never,
+      developerProfiles: [{ provider: "github", url: "https://github.com/someone-else", sourceUrl: "https://x.com/johnsmith_wrongguy" }],
+    }];
+    evidence.companyEnrichment = enrichment([
+      { name: "john smith", title: "CFO", priorCompanies: ["Goldman"], linkedin: "linkedin.com/in/john-smith-cfo", startYear: "2020" },
+    ]);
+    mergeManagementIntoWebTeam(evidence, vi.fn());
+
+    expect(evidence.webTeam).toHaveLength(1);
+    const row = evidence.webTeam[0];
+    expect(row).toMatchObject({
+      name: "John Smith",
+      role: "CFO",
+      linkedin: "linkedin.com/in/john-smith-cfo",
+      artifact_verified: true,
+      evidence_origin: "deterministic",
+      provider: "monid",
+    });
+    expect(row.handle).toBeUndefined();
+    expect(row.github).toBeUndefined();
+    expect(row.developerProfiles).toBeUndefined();
+    expect(row.evidence).toContain("Goldman");
+  });
+
+  it("keeps a first-party-bound handle when Monid corroborates the same person", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.profile.website = "https://uniswap.org";
+    evidence.webTeam = [{
+      name: "Hayden Adams",
+      handle: "@haydenzadams",
+      role: "team",
+      source: "subject posts",
+      evidence_origin: "deterministic",
+      artifact_verified: false,
+      provider: "x",
+      identity_link_evidence_origin: "deterministic",
+      projects_evidence_origin: "model_lead",
+      handleProvenance: "subject_first_party",
+    }];
+    evidence.companyEnrichment = enrichment([
+      { name: "Hayden Adams", title: "CEO", priorCompanies: [], linkedin: "linkedin.com/in/haydenadams", startYear: "2018" },
+    ]);
+    mergeManagementIntoWebTeam(evidence, vi.fn());
+    expect(evidence.webTeam[0]).toMatchObject({
+      handle: "@haydenzadams",
+      role: "CEO",
+      linkedin: "linkedin.com/in/haydenadams",
+      artifact_verified: true,
+      identity_link_evidence_origin: "deterministic",
+    });
+  });
+
   it("does nothing without a management record", () => {
     const evidence = emptyEvidence("@uniswap");
     const emit = vi.fn();

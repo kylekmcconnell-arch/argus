@@ -19,6 +19,13 @@ interface Venue {
   name: string;
   chain: "solana" | "evm" | "any";
   chains?: string[]; // restrict to specific EVM chains (dossier.chain values)
+  /**
+   * The venue's own official web domains, for recognizing the VENUE ITSELF as
+   * an audited subject (a launchpad scanned by its X account must never be
+   * judged on a native token it does not have). Only domains the venue's docs
+   * or a verified probe established; never guessed from the brand name.
+   */
+  domains?: string[];
   // matchers - ANY hit identifies the venue. NOTE (verified 2026-08-10):
   // DexScreener `labels` are AMM-type only ("v2"/"v3"/"CLMM"...), NEVER
   // launchpad names - launchpads surface via dexId (fourmeme, flapsh, pumpfun),
@@ -44,6 +51,7 @@ interface Venue {
 const VENUES: Venue[] = [
   {
     name: "pump.fun",
+    domains: ["pump.fun"],
     chain: "solana",
     mintSuffix: /pump$/,
     // Graduated tokens keep the old pumpfun pair ALONGSIDE the new pumpswap
@@ -62,6 +70,7 @@ const VENUES: Venue[] = [
     // (also Bankr and Raydium-native launches - see the generic entry below).
     // Suffix match only here.
     name: "bonk.fun",
+    domains: ["bonk.fun"],
     chain: "solana",
     mintSuffix: /bonk$/i,
     lpOnGraduation: "burned",
@@ -152,6 +161,7 @@ const VENUES: Venue[] = [
   },
   {
     name: "clanker",
+    domains: ["clanker.world"],
     chain: "evm",
     chains: ["base", "robinhood"],
     // Clanker v4 deployments carry a vanity address suffix ...b07 (verified).
@@ -172,6 +182,7 @@ const VENUES: Venue[] = [
     // creation), and neither creator nor Bankr can pull liquidity or change
     // the fee schedule.
     name: "bankr",
+    domains: ["bankr.bot"],
     chain: "evm",
     chains: ["base", "robinhood"],
     lpOnGraduation: "locked",
@@ -188,12 +199,34 @@ const VENUES: Venue[] = [
     // /api/launch via Blockscout. No client-side fingerprint exists.
     dexIds: [],
     lpOnGraduation: "locked",
-    lpNote: "the liquidity position is transferred to the Pons launch locker at launch (PonsLaunchLocker on v1, PonsV2LaunchLocker on v2) - permanent custody, no unlock path for principal",
+    lpNote: "the liquidity position is transferred to the Pons launch locker at launch (PonsLaunchLocker on v1, PonsV2LaunchLocker on v2) - permanent custody, no unlock path for principal. On v2 the curve sells 71.4% of supply, graduation moves 20.4% plus the curve proceeds into a Uniswap v4 pool and 8.16% into the locker (verified 2026-09-12)",
     platformPaysCreator: true,
-    feeNote: "1% pool fee split ~70% creator / 30% protocol, accruing inside the locked position; the creator claims through the locker",
+    feeNote: "v1: 1% pool fee split ~70% creator / 30% protocol inside the locked position. v2: the PonsV2MemeHook takes 5% on sells and 100% on sells by launch-block buyers, and both accrue as creator tax the deployer claims from PonsV2FeeEscrow - so a deployer who snipes their own launch recycles the tax; watch claim cadence and where the claimed ETH/USDG goes (RESEARCH.md, Pons V2 launch farms)",
+  },
+  {
+    // o1 Launchpad (o1.exchange): one launchpad-v4-minimal suite on Base,
+    // Robinhood Chain, Monad and Arc. No bonding curve - the creation tx pools
+    // the full supply into a Uniswap v4 pool under the o1 launch hook, quoted
+    // in ETH, USDC/USDG or a tokenized stock, so the pool reads as plain
+    // uniswap on DexScreener. Robinhood tokens are resolved server-side from
+    // the creating contract (/api/launch, current and historical o1 factories).
+    // Base tokens are native B20 assets (system addresses 0xb20000..., no
+    // creator on Blockscout); the 0xb2 prefix marks the B20 standard, not o1,
+    // so there is no client fingerprint yet on Base. Verified on $WRESTLER
+    // (Robinhood, 2026-09-14) and $BRAINARM (Base, 2026-09-16); see RESEARCH.md.
+    name: "o1",
+    domains: ["o1.exchange"],
+    chain: "evm",
+    chains: ["base", "robinhood"],
+    dexIds: [],
+    lpOnGraduation: "locked",
+    lpNote: "no curve phase: the full supply is pooled into a Uniswap v4 pool under the o1 launch hook in the creation tx and o1 documents the liquidity as permanent - creator rights are fee claims only, so an LP-pull is not the exit path here; the deployer's optional atomic Dev Buy and the 20-second anti-snipe window are the launch-block variables to read",
+    platformPaysCreator: true,
+    feeNote: "1% per swap split creator 50 bps / platform 30 bps / referrer 20 bps, claimed from the suite's Fee Escrow (claimFor) as ETH or the quote asset; a creator who sets their own address as referrer takes 70 bps of every trade. Watch the claim cadence and where the claimed ETH goes - $BRAINARM's creator claimed 1.68 ETH in 10 claims over 26 hours and parked it as USDC in two fresh wallets (RESEARCH.md, o1 Launchpad)",
   },
   {
     name: "four.meme",
+    domains: ["four.meme"],
     chain: "evm",
     chains: ["bsc"],
     dexIds: ["fourmeme"],
@@ -205,6 +238,7 @@ const VENUES: Venue[] = [
   },
   {
     name: "flap.sh",
+    domains: ["flap.sh"],
     chain: "evm",
     chains: ["bsc", "robinhood"],
     dexIds: ["flapsh"],
@@ -222,9 +256,13 @@ interface LaunchApiResponse {
   pumpfun?: { complete?: boolean; curvePct?: number | null };
 }
 
-async function fromApi(chain: string, address: string): Promise<LaunchApiResponse | null> {
+async function fromApi(chain: string, address: string, pairAddress?: string): Promise<LaunchApiResponse | null> {
   try {
-    const r = await apiFetch(`/api/launch?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(20000) });
+    // The audited pool's address lets the snipe trace identify the pool
+    // directly instead of guessing it from transfer fan-out (a pre-pool
+    // airdrop from the deployer otherwise reads as the pool).
+    const pair = pairAddress && /^0x[0-9a-f]{40}$/i.test(pairAddress) ? `&pair=${encodeURIComponent(pairAddress.toLowerCase())}` : "";
+    const r = await apiFetch(`/api/launch?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}${pair}`, { signal: AbortSignal.timeout(20000) });
     if (!r.ok) return null;
     const value: unknown = await r.json();
     return value && typeof value === "object" && !Array.isArray(value)
@@ -247,6 +285,51 @@ export function matchVenue(chain: string, address: string, dexId: string, quote:
   ) ?? null;
 }
 
+/**
+ * The venue itself, as an auditable subject. A launchpad scanned by its own X
+ * account must never be judged on a native token it does not have; what it CAN
+ * be judged on is the launch mechanics it imposes on every token it releases
+ * (who holds LP, who gets fees). This projection exposes exactly those fields.
+ */
+export interface LaunchVenueProfile {
+  name: string;
+  matchedDomain: string;
+  chains: string[];
+  lpDisposition: LaunchProvenance["lpDisposition"];
+  lpNote: string;
+  platformPaysCreator: boolean;
+  feeNote: string;
+}
+
+/**
+ * Recognize an audited subject as a launch venue by its verified official
+ * domain. Only exact apex agreement with a venue's documented domain binds;
+ * brand-name similarity never does.
+ */
+export function launchVenueForOfficialDomain(officialDomain: string): LaunchVenueProfile | null {
+  const apex = officialDomain.trim().toLowerCase().replace(/^www\./, "");
+  if (!apex) return null;
+  for (const venue of VENUES) {
+    const matched = venue.domains?.find((domain) => domain === apex);
+    if (!matched) continue;
+    return {
+      name: venue.name,
+      matchedDomain: matched,
+      chains: venue.chain === "solana" ? ["solana"] : venue.chains ?? [],
+      lpDisposition: venue.lpOnGraduation,
+      lpNote: venue.lpNote,
+      platformPaysCreator: venue.platformPaysCreator,
+      feeNote: venue.feeNote,
+    };
+  }
+  return null;
+}
+
+/** Venue names for backer classification: a backer named like a launch venue is a launchpad, not a fund. */
+export function launchVenueNames(): string[] {
+  return VENUES.map((venue) => venue.name);
+}
+
 // Quote-asset ramifications that hold regardless of venue.
 export function genericQuoteNote(quote: string, sol: boolean): string | null {
   const q = quote.toUpperCase();
@@ -262,11 +345,13 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
   try {
     // The pair we audited: dexId is on the dossier; the quote symbol needs a
     // (cheap, keyless) DexScreener re-read.
-    const pair = pickPair(await dexByToken(d.address).catch(() => []), d.address);
+    // Same-chain only: a token at one address on several chains must not have
+    // its quote asset and venue read from another chain's deepest pool.
+    const pair = pickPair((await dexByToken(d.address).catch(() => [])).filter((p) => p.chainId === d.chain), d.address);
     const quote = pair?.quoteToken?.symbol ?? null;
     const dexId = (d.dexId || pair?.dexId || "").toLowerCase();
 
-    const api = await fromApi(d.chain, d.address);
+    const api = await fromApi(d.chain, d.address, d.pairAddress);
     // Client fingerprints first; the server's creator-contract check (Blockscout)
     // catches the venues that leave no client-visible trace (Pons reads as plain
     // uniswap/WETH - only the token's creator address gives it away).

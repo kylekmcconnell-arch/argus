@@ -8,7 +8,10 @@
 // to the report on completion; the data-side logging (log + persist + graph) runs
 // via onComplete regardless of what the user is looking at, so a backgrounded
 // audit still appears in Recent audits and Dossiers.
-import { streamAudit } from "./live";
+import { fetchPersonRun } from "./reports";
+import { setPanelToken } from "./panelToken";
+import { streamAudit, type LiveFailureKind } from "./live";
+import { DEEP_INVESTIGATION_MAX_DURATION_SECONDS } from "./investigationRuntime";
 import { threatScan } from "../threat/scan";
 import type { ThreatScan } from "../threat/types";
 import {
@@ -23,15 +26,40 @@ import type { ResearchIntent } from "./researchDirector";
 
 export interface BgRun {
   handle: string;   // display handle, with leading @
+  runKey?: string; // exact server receipt identity; absent only on legacy runs
   key: string;      // normalized (lowercase, no @) — the map key + cache key
   steps: TraceStep[];
   pct: number;
   status: "running" | "done" | "error";
   error?: string;
+  /**
+   * How a run reached `error`. "stream_dropped" means only the browser's
+   * connection died: the server keeps collecting and persists on its own, so
+   * the owner view re-attaches by polling for the saved version until
+   * `serverDeadlineAt` instead of relaunching a paid audit. "rejected" means
+   * the server declared the run dead. Absent for save failures.
+   */
+  errorKind?: LiveFailureKind;
   dossier?: Dossier;
   startedAt: number;
+  /** The instant the server's own collection budget for this run expires. */
+  serverDeadlineAt: number;
   priv?: boolean;   // private/incognito: never persisted, logged, graphed, or shown in the sidebar
   intent?: ResearchIntent;
+}
+
+/** How far past the server's own budget a dropped stream keeps being polled. */
+export const STREAM_DROP_RECOVERY_GRACE_MS = 45_000;
+
+/**
+ * The instant a run whose stream dropped can no longer produce a saved
+ * version: the server budget from the run's start plus persistence grace.
+ */
+export function streamDropRecoveryDeadline(run: Pick<BgRun, "startedAt" | "serverDeadlineAt">): number {
+  const serverDeadline = typeof run.serverDeadlineAt === "number" && Number.isFinite(run.serverDeadlineAt)
+    ? run.serverDeadlineAt
+    : run.startedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000;
+  return serverDeadline + STREAM_DROP_RECOVERY_GRACE_MS;
 }
 
 type Listener = () => void;
@@ -74,13 +102,16 @@ export function startPersonAudit(
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
 
+  const startedAt = Date.now();
   const run: BgRun = {
     handle: handle.startsWith("@") ? handle : "@" + key,
     key,
+    runKey: crypto.randomUUID(),
     steps: [],
     pct: 0,
     status: "running",
-    startedAt: Date.now(),
+    startedAt,
+    serverDeadlineAt: startedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000,
     priv,
     intent,
   };
@@ -94,22 +125,36 @@ export function startPersonAudit(
   // rest of the collection, streaming into the same console. The dossier is
   // finalized only once both legs land, so a full-scan report always carries its
   // token verdict. The standalone Threat tab remains the cheap, token-only tier.
+  const recoveryController = new AbortController();
+  let recoveryStarted = false;
+  let finalizationStarted = false;
+  let serverOwnsToken = false;
   let threatLeg: Promise<ThreatScan | null> | null = null;
-  let threatCandidate: TokenCandidate | null = null;
+  /** Provenance is absent only when a stale server announced without it. */
+  type AnnouncedCandidate = Omit<TokenCandidate, "binding"> & { binding?: TokenCandidate["binding"] };
+  let threatCandidate: AnnouncedCandidate | null = null;
   let threatSettled = false;
   let threatNote = "";
   let threatFailure = "";
+  // Every threat-leg call is abortable: the wall clock below and cancelRun
+  // both stop the scanner instead of leaving it spending against a detached
+  // run, and a merely slow first leg is never overlapped by a forced retry.
+  const threatController = new AbortController();
+  let retryController: AbortController | null = null;
   const pushStep = (s: TraceStep) => {
     run.steps = [...run.steps, s];
     run.pct = Math.min(92, Math.max(run.pct, run.steps.length * 11));
     emit();
   };
-  const startThreatLeg = (cand: TokenCandidate) => {
+  // A stale server build can announce a token without the provenance field.
+  // Leaving it undefined renders the neutral legacy title; inferring
+  // "canonical" would relabel somebody else's token as the subject's (#371).
+  const startThreatLeg = (cand: AnnouncedCandidate) => {
     if (threatLeg) return;
     threatCandidate = cand;
     threatNote = `Token attributed via ${cand.source}.`;
     pushStep({ phase: "ARGUS · Threat", label: "Token threat leg", detail: `Full scan includes the token threat pipeline - scanning ${cand.address.slice(0, 10)}… (${cand.via}) in parallel.`, source: "argus", tone: "neutral" });
-    threatLeg = threatScan({ kind: "token", ref: cand.address, via: cand.via }, pushStep)
+    threatLeg = threatScan({ kind: "token", ref: cand.address, via: cand.via }, pushStep, { signal: threatController.signal })
       .catch((error: unknown) => {
         threatFailure = error instanceof Error ? error.message : String(error);
         pushStep({
@@ -125,13 +170,16 @@ export function startPersonAudit(
   };
 
   const finalize = async (d: Dossier) => {
+    if (finalizationStarted || runs.get(key) !== run) return;
+    finalizationStarted = true;
+    if (d.persistence?.panelCostToken) setPanelToken(d.persistence.panelCostToken);
     // Fallback attribution when the server never announced a token: the
     // verified project token, then the contract in the subject's own bio, then
     // a claimed promotion. Nothing else. A CoinGecko name match used to be the
     // last resort here; it is gone on purpose (#321): anyone can mint a token
     // in anyone's name, so a same-name listing is never evidence that the
     // token is the subject's, and the server rightly refused to save it.
-    if (!threatLeg) {
+    if (!threatLeg && d.tokenAssessment?.owner !== "server") {
       const cand = tokenFromVerifiedProjectToken(d.projectToken)
         ?? tokenFromBio(d.bio)
         ?? tokenFromPromotions(d.evidence?.promotions);
@@ -145,16 +193,15 @@ export function startPersonAudit(
       // Bounded wait: the threat scanner's own fetches are all timeout-capped,
       // so this only guards against a pathological hang - never block a
       // finished person audit indefinitely on the token leg.
-      let scan = await Promise.race([
-        threatLeg,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 120_000)),
-      ]);
+      let scan = await raceThreatLeg(threatLeg, threatController);
       // Newly launched tokens can reach the server's identity-bound search a
       // moment before DexScreener's by-token endpoint reaches the browser. The
       // first lookup then caches an empty result. Once the completed dossier
       // confirms the exact token, retry that resolution once without the null
-      // cache. A completed token assessment is never rerun here.
-      if (!scan) {
+      // cache. A completed token assessment is never rerun here, and a leg
+      // that was cut off by the wall clock (not settled) is never overlapped
+      // by a second concurrent scan of the same token.
+      if (!scan && threatSettled && !threatController.signal.aborted) {
         const retryCandidate = tokenFromVerifiedProjectToken(d.projectToken) ?? threatCandidate;
         if (retryCandidate) {
           const projectPairAddress = d.projectToken?.pairAddress?.trim();
@@ -173,17 +220,20 @@ export function startPersonAudit(
             source: "argus",
             tone: "neutral",
           });
-          scan = await threatScan(
-            retryInput,
-            pushStep,
-            { force: true },
-          ).catch((error: unknown) => {
-            threatFailure = error instanceof Error ? error.message : String(error);
-            return null;
-          });
+          retryController = new AbortController();
+          scan = await raceThreatLeg(
+            threatScan(retryInput, pushStep, { force: true, signal: retryController.signal })
+              .catch((error: unknown) => {
+                threatFailure = error instanceof Error ? error.message : String(error);
+                return null;
+              }),
+            retryController,
+          );
         }
       }
       d.threat = scan;
+      // The scan is worthless to a reader without knowing whose token it is.
+      if (threatCandidate?.binding) d.threatBinding = threatCandidate.binding;
       threatNote = scan
         ? `${threatNote} $${scan.symbol}: ${scan.call.verdict} · ${scan.call.risk}/100 risk.`
         : `${threatNote} The token scan did not complete${threatFailure ? `: ${threatFailure}` : " (no DEX pair or no completed scanner result)"} - it can be rerun from the Threat tab.`;
@@ -218,25 +268,96 @@ export function startPersonAudit(
     emit();
   };
 
-  const abort = streamAudit(key, priv, {
+  const recover = async () => {
+    if (recoveryStarted || finalizationStarted) return;
+    recoveryStarted = true;
+    pushStep({ phase: "ARGUS · Recovery", label: "Reconnecting to this scan", detail: "The connection was interrupted. Checking this scan's saved result without starting or charging for another investigation.", source: "argus", tone: "neutral" });
+    const deadline = streamDropRecoveryDeadline(run);
+    let attempt = 0;
+    let failure = "The saved result for this scan could not be confirmed within its collection deadline.";
+    while (runs.get(key) === run && !recoveryController.signal.aborted && Date.now() < deadline) {
+      const result = await fetchPersonRun(run.runKey!, run.handle, recoveryController.signal);
+      if (runs.get(key) !== run || recoveryController.signal.aborted || finalizationStarted) return;
+      if (result.state === "saved") {
+        pushStep({ phase: "ARGUS · Recovery", label: "Project evidence recovered", detail: result.dossier.tokenAssessment?.owner === "server"
+          ? "The server saved the project and linked-token assessment. Opening that exact version."
+          : "The exact saved result was recovered. Completing and saving its linked-token assessment.", source: "argus", tone: "good" });
+        await finalize(result.dossier);
+        return;
+      }
+      if (result.state === "failed") {
+        failure = "The server finished this scan without a saved report. The earlier report has not been substituted.";
+        break;
+      }
+      // Missing/unavailable receipts are not evidence that the server stopped.
+      const delay = Math.min(++attempt < 4 ? 1500 : 10_000, Math.max(0, deadline - Date.now()));
+      await new Promise<void>((resolve) => {
+        const finish = () => { clearTimeout(timer); recoveryController.signal.removeEventListener("abort", finish); resolve(); };
+        const timer = setTimeout(finish, delay);
+        recoveryController.signal.addEventListener("abort", finish, { once: true });
+      });
+    }
+    if (runs.get(key) !== run || recoveryController.signal.aborted || finalizationStarted) return;
+    threatController.abort();
+    run.status = "error";
+    run.error = failure;
+    aborts.delete(key);
+    emit();
+  };
+
+  const abortStream = streamAudit(key, priv, {
     onStep: (s) => {
+      if (runs.get(key) !== run || finalizationStarted) return;
+      if (s.tokenExecution === "server") serverOwnsToken = true;
       run.steps = [...run.steps, s];
       // Open-ended progress: ramp asymptotically toward ~92% by step count.
       run.pct = Math.min(92, run.steps.length * 11);
       emit();
       // The server's mid-stream token announcement - start the parallel leg.
-      if (s.token) startThreatLeg(s.token);
+      if (s.token && !serverOwnsToken) startThreatLeg(s.token);
     },
     onDone: (d) => { void finalize(d); },
-    onError: (e) => {
+    onError: (e, failure) => {
+      if (runs.get(key) !== run || finalizationStarted) return;
+      if (!priv && failure?.kind === "stream_dropped") { void recover(); return; }
+      threatController.abort();
       run.status = "error";
       run.error = e;
+      run.errorKind = failure?.kind;
       aborts.delete(key);
       emit();
     },
-  }, intent);
-  aborts.set(key, abort);
+  }, intent, undefined, run.runKey, !priv);
+  // Cancelling detaches this view and stops browser-owned work. An opted-in
+  // server investigation remains authorized and finishes its bounded save.
+  aborts.set(key, () => {
+    abortStream();
+    recoveryController.abort();
+    threatController.abort();
+    retryController?.abort();
+  });
   return run;
+}
+
+/** The threat leg's wall clock: guards against a pathological hang without
+ * blocking a finished person audit indefinitely on the token leg. */
+export const THREAT_LEG_WALL_CLOCK_MS = 120_000;
+
+// Bounded wait on a threat leg. On timeout the leg is ABORTED, not merely
+// abandoned: previously the race resolved null while the scanner kept running
+// and the forced retry then ran concurrently against the same token.
+async function raceThreatLeg(leg: Promise<ThreatScan | null>, controller: AbortController): Promise<ThreatScan | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      leg,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => { controller.abort(); resolve(null); }, THREAT_LEG_WALL_CLOCK_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // Hard-stop and forget a run (used on explicit cancel / purge, never on nav).

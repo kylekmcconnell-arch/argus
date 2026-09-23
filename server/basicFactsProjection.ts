@@ -8,6 +8,7 @@ import {
   type BasicFactPredicate,
   type BasicFactSource,
   type CollectedEvidence,
+  type CryptoRankFundingSnapshot,
 } from "../src/data/evidence";
 import { companyEnrichmentMatchesOfficialDomain } from "./adapters/monid";
 
@@ -86,6 +87,84 @@ function canonicalProtocolIndexMatch(
     : undefined;
   const indexedId = geckoId?.trim().toLowerCase();
   return Boolean(canonicalId && indexedId && canonicalId === indexedId);
+}
+
+const apexDomainsAgree = (left: string, right: string): boolean =>
+  left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
+
+/**
+ * Identity join for a protocol document that carries no CoinGecko id — the
+ * tokenless-protocol case ($2.5M-seed Ammalgam had both of its raises sitting
+ * in DeFiLlama's curated record, discarded for want of a token to join on).
+ * The document's own X handle and official site must match the audited
+ * subject's provider-resolved handle and official domain, the same doctrine the
+ * token binding uses. One exact surface binds; a contradiction between the two
+ * surfaces never does.
+ */
+export function protocolRecordMatchesOfficialIdentity(
+  record: { officialTwitter: string | null; officialUrl: string | null },
+  subjectHandle: string,
+  profile: Pick<CollectedEvidence["profile"], "website" | "profile_collection_state" | "profile_provider">,
+): boolean {
+  const handle = subjectHandle.replace(/^@/, "").trim().toLowerCase();
+  const recordHandle = (record.officialTwitter ?? "").replace(/^@/, "").trim().toLowerCase();
+  const handleMatches = Boolean(handle && recordHandle && handle === recordHandle);
+  const profileResolved = profile.profile_collection_state === "resolved"
+    && profile.profile_provider === "twitterapi";
+  const subjectScope = profileResolved ? canonicalOfficialWebsite(profile.website) : null;
+  const recordScope = record.officialUrl ? canonicalOfficialWebsite(record.officialUrl) : null;
+  const domainsAgree = Boolean(
+    subjectScope && recordScope && apexDomainsAgree(subjectScope.domain, recordScope.domain),
+  );
+  if (recordHandle && handle && !handleMatches && domainsAgree) return false;
+  if (handleMatches && subjectScope && recordScope && !domainsAgree) return false;
+  return handleMatches || domainsAgree;
+}
+
+/**
+ * Whether an indexed DeFiLlama record is identity-bound to the audited
+ * subject: by the verified canonical token's CoinGecko id, or, for a tokenless
+ * protocol, by the record's own official X handle / official domain.
+ */
+export function indexedProtocolRecordMatch(
+  evidence: Pick<CollectedEvidence, "projectToken" | "profile">,
+  record: { geckoId?: string | null; officialTwitter?: string | null; officialUrl?: string | null } | undefined,
+): boolean {
+  if (!record) return false;
+  if (canonicalProtocolIndexMatch(evidence, record.geckoId)) return true;
+  return protocolRecordMatchesOfficialIdentity(
+    { officialTwitter: record.officialTwitter ?? null, officialUrl: record.officialUrl ?? null },
+    evidence.profile.handle,
+    evidence.profile,
+  );
+}
+
+/**
+ * Whether a frozen CryptoRank record is still identity-bound to the audited
+ * subject. The binding frozen at collection time is re-validated here, never
+ * trusted: an exact contract-address binding must equal the verified canonical
+ * token's address, and an official-identity binding must pass the same
+ * handle/domain doctrine every other tokenless protocol record passes.
+ */
+export function cryptoRankRecordMatch(
+  evidence: Pick<CollectedEvidence, "projectToken" | "profile">,
+  record: CryptoRankFundingSnapshot | undefined,
+): boolean {
+  if (!record) return false;
+  if (record.binding.method === "canonical_token_address") {
+    const token = evidence.projectToken?.verified === true ? evidence.projectToken : undefined;
+    if (!token) return false;
+    const tokenAddress = token.address.trim();
+    const boundAddress = record.binding.address.trim();
+    return tokenAddress.startsWith("0x") && boundAddress.startsWith("0x")
+      ? tokenAddress.toLowerCase() === boundAddress.toLowerCase()
+      : tokenAddress === boundAddress;
+  }
+  return protocolRecordMatchesOfficialIdentity(
+    { officialTwitter: record.binding.officialTwitter, officialUrl: record.binding.officialUrl },
+    evidence.profile.handle,
+    evidence.profile,
+  );
 }
 
 function canonicalTokenAddressChainMatch(
@@ -432,9 +511,14 @@ function profileSupportsVenture(
 
 function mergeProjectedFact(evidence: CollectedEvidence, fact: BasicFact): BasicFact {
   const existing = evidence.basicFacts ?? (evidence.basicFacts = []);
+  // Attribution scope is part of a fact's identity. A direct-subject projection
+  // must never be absorbed into a related-entity (or unresolved) fact with the
+  // same value, where the ledger and the analyst would skip it.
+  const scope = (candidate: BasicFact) => candidate.attributionScope ?? "direct_subject";
   const same = existing.find((candidate) =>
     candidate.predicate === fact.predicate
-    && candidate.normalizedValue === fact.normalizedValue,
+    && candidate.normalizedValue === fact.normalizedValue
+    && scope(candidate) === scope(fact),
   );
   if (!same) {
     existing.push(fact);
@@ -829,7 +913,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     // which the singleton reconciliation would mark conflicted.
     const protocolFootprint = token.deployedChains?.length
       && evidence.protocolTvl?.sourceUrl
-      && canonicalProtocolIndexMatch(evidence, evidence.protocolTvl.geckoId)
+      && indexedProtocolRecordMatch(evidence, evidence.protocolTvl)
       ? evidence.protocolTvl
       : undefined;
     const chainFootprint = protocolFootprint
@@ -968,6 +1052,61 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       })],
     ));
   }
+  // Registry-backed legal entity: a real registry record (SEC EDGAR by the
+  // verified listing's CIK, or Companies House / OpenCorporates by a number
+  // the official site itself declares) answers the legal-entity question with
+  // registry provenance. One fact, strongest join first, and never on top of a
+  // legal_entity answer the search lane already verified.
+  const hasVerifiedLegalEntity = (evidence.basicFacts ?? []).some((fact) =>
+    fact.predicate === "legal_entity"
+    && (fact.status === "verified" || fact.status === "corroborated"));
+  const registry = evidence.companyRegistry;
+  if (!hasVerifiedLegalEntity && registry && (isProject || organizationAccount)) {
+    const registryFact = registry.sec
+      ? {
+          value: `${registry.sec.entityName} (SEC CIK ${registry.sec.cik}${registry.sec.stateOfIncorporation ? `, incorporated in ${registry.sec.stateOfIncorporation}` : ""})`,
+          url: registry.sec.sourceUrl,
+          title: "SEC EDGAR registrant record",
+          excerpt: `SEC EDGAR lists ${registry.sec.entityName} as CIK ${registry.sec.cik}${registry.sec.stateOfIncorporation ? `, incorporated in ${registry.sec.stateOfIncorporation}` : ""}${registry.sec.lastAnnualReportAt ? `, latest annual report filed ${registry.sec.lastAnnualReportAt}` : ""}. Joined by the CIK of the verified public listing, never by name.`,
+          capturedAt: registry.sec.capturedAt,
+          provider: "sec-edgar",
+        }
+      : registry.companiesHouse
+        ? {
+            value: `${registry.companiesHouse.companyName} (Companies House No. ${registry.companiesHouse.companyNumber}${registry.companiesHouse.status ? `, ${registry.companiesHouse.status}` : ""})`,
+            url: registry.companiesHouse.sourceUrl,
+            title: "Companies House record",
+            excerpt: `Companies House lists ${registry.companiesHouse.companyName} under number ${registry.companiesHouse.companyNumber}${registry.companiesHouse.incorporatedOn ? `, incorporated ${registry.companiesHouse.incorporatedOn}` : ""}${registry.companiesHouse.status ? `, status ${registry.companiesHouse.status}` : ""}. Joined by the registration number the official site itself declares (${registry.companiesHouse.declaredOn}).`,
+            capturedAt: registry.companiesHouse.capturedAt,
+            provider: "companies-house",
+          }
+        : registry.openCorporates
+          ? {
+              value: `${registry.openCorporates.companyName} (${registry.openCorporates.jurisdiction.toUpperCase()} registry No. ${registry.openCorporates.companyNumber}${registry.openCorporates.status ? `, ${registry.openCorporates.status}` : ""})`,
+              url: registry.openCorporates.sourceUrl,
+              title: "OpenCorporates registry record",
+              excerpt: `OpenCorporates lists ${registry.openCorporates.companyName} under ${registry.openCorporates.jurisdiction.toUpperCase()} number ${registry.openCorporates.companyNumber}. Joined by the registration number the official site itself declares (${registry.openCorporates.declaredOn}).`,
+              capturedAt: registry.openCorporates.capturedAt,
+              provider: "opencorporates",
+            }
+          : null;
+    if (registryFact) {
+      projected.push(makeFact(
+        evidence,
+        "legal_entity",
+        registryFact.value,
+        [source({
+          url: registryFact.url,
+          title: registryFact.title,
+          excerpt: registryFact.excerpt,
+          capturedAt: registryFact.capturedAt,
+          provider: registryFact.provider,
+          sourceClass: "regulatory_or_onchain",
+        })],
+      ));
+    }
+  }
+
   const enrichmentRecord = domainBoundEnrichment?.funding
     && domainBoundEnrichment.funding.rounds.length
     ? domainBoundEnrichment
@@ -979,12 +1118,20 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     && fact.sources.some((candidate) =>
       candidate.artifactVerified === true
       && candidate.provider !== "defillama"
+      && candidate.provider !== "cryptorank"
       && candidate.provider !== "monid"
       && candidate.relation === "supports"));
+  // The CryptoRank record only speaks after its frozen binding re-validates
+  // against the evidence in hand, exactly like the DeFiLlama re-join above it.
+  const cryptoRankRecord = isProject
+    && evidence.cryptoRankFunding
+    && cryptoRankRecordMatch(evidence, evidence.cryptoRankFunding)
+    ? evidence.cryptoRankFunding
+    : undefined;
   const fundingFact = !hasStrongerFundingFact
     && isProject
     && evidence.protocolFunding
-    && canonicalProtocolIndexMatch(evidence, evidence.protocolFunding.geckoId)
+    && indexedProtocolRecordMatch(evidence, evidence.protocolFunding)
     && evidence.protocolFunding.rounds.length
     ? {
         rounds: evidence.protocolFunding.rounds.length,
@@ -997,6 +1144,18 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
         ventureName: "",
         subjectLabel: evidence.profile.display_name || "The project",
       }
+    : !hasStrongerFundingFact && cryptoRankRecord && cryptoRankRecord.rounds.length
+      ? {
+          rounds: cryptoRankRecord.rounds.length,
+          totalRaisedUsd: cryptoRankRecord.totalRaisedUsd ?? 0,
+          leadInvestors: [...new Set(cryptoRankRecord.rounds.flatMap((round) => round.leadInvestors))],
+          sourceUrl: cryptoRankRecord.sourceUrl,
+          capturedAt: cryptoRankRecord.capturedAt,
+          provider: "cryptorank",
+          title: "CryptoRank funding record",
+          ventureName: "",
+          subjectLabel: evidence.profile.display_name || "The project",
+        }
     : (isProject || isFounderSubject) && enrichmentRecord && enrichmentRecord.funding
       ? {
           rounds: enrichmentRecord.funding.rounds.length,
@@ -1036,18 +1195,86 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     projected.push(projectedFundingFact);
   }
 
+  // A bound CryptoRank record whose round-by-round detail sits behind a plan
+  // gate can still confirm that rounds exist and name backer funds. That
+  // partial answer is published as the partial answer it is, never dressed up
+  // as round-level detail.
+  if (
+    !fundingFact
+    && !hasStrongerFundingFact
+    && cryptoRankRecord
+    && !cryptoRankRecord.rounds.length
+    && cryptoRankRecord.hasFundingRounds
+    && cryptoRankRecord.funds.length
+  ) {
+    const namedFunds = cryptoRankRecord.funds
+      .slice()
+      .sort((a, b) => Number(b.isLead) - Number(a.isLead))
+      .slice(0, 6)
+      .map((fund) => fund.name);
+    const partialFundingFact = makeFact(
+      evidence,
+      "funding",
+      `Funding rounds indexed · named backers include ${namedFunds.join(", ")}`,
+      [source({
+        url: cryptoRankRecord.sourceUrl,
+        title: "CryptoRank funding record",
+        excerpt: `CryptoRank's index confirms ${evidence.profile.display_name || "the project"} has recorded funding rounds and names backers including ${namedFunds.join(", ")}. Round-level amounts and dates are not in the index view available to this scan, so the total raised is unknown here, not zero.`,
+        capturedAt: cryptoRankRecord.capturedAt,
+        provider: "cryptorank",
+        sourceClass: "other_public",
+      })],
+    );
+    partialFundingFact.floorEligible = false;
+    projected.push(partialFundingFact);
+  }
+
   // "Who funded it?" is a project question of its own. The funding fact above
   // answers "how much?" and inlines the backers into its prose, so the investor
   // question resolved to nothing and an allocator got no named names. One fact
   // per distinct named backer resolves it, and each name carries the aggregator
-  // row it came from. DeFiLlama keeps leadInvestors and otherInvestors apart:
+  // row it came from. Both indexes keep leadInvestors and otherInvestors apart:
   // a name is published at the role the aggregator gave it and is never
-  // promoted to lead.
-  const indexedFunding = isProject
+  // promoted to lead. DeFiLlama's record speaks first; the CryptoRank record
+  // answers only when DeFiLlama has no identity-bound rounds, so one project
+  // never publishes two competing backer lists.
+  const defiLlamaIndexedFunding = isProject
     && evidence.protocolFunding
-    && canonicalProtocolIndexMatch(evidence, evidence.protocolFunding.geckoId)
+    && indexedProtocolRecordMatch(evidence, evidence.protocolFunding)
+    && evidence.protocolFunding.rounds.length
     ? evidence.protocolFunding
     : undefined;
+  const indexedFunding = defiLlamaIndexedFunding
+    ? {
+        rounds: defiLlamaIndexedFunding.rounds.map((round) => ({
+          roundLabel: round.round,
+          date: round.date,
+          amountUsd: round.amountUsd,
+          leadInvestors: round.leadInvestors,
+          otherInvestors: round.otherInvestors,
+        })),
+        sourceUrl: defiLlamaIndexedFunding.sourceUrl,
+        capturedAt: defiLlamaIndexedFunding.capturedAt,
+        provider: "defillama",
+        title: "DeFiLlama funding record",
+        indexName: "DeFiLlama's funding index",
+      }
+    : cryptoRankRecord?.rounds.length
+      ? {
+          rounds: cryptoRankRecord.rounds.map((round) => ({
+            roundLabel: round.stage,
+            date: round.date,
+            amountUsd: round.amountUsd,
+            leadInvestors: round.leadInvestors,
+            otherInvestors: round.otherInvestors,
+          })),
+          sourceUrl: cryptoRankRecord.sourceUrl,
+          capturedAt: cryptoRankRecord.capturedAt,
+          provider: "cryptorank",
+          title: "CryptoRank funding record",
+          indexName: "CryptoRank's funding index",
+        }
+      : undefined;
   if (indexedFunding?.rounds.length) {
     const backers = new Map<string, {
       name: string;
@@ -1063,7 +1290,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
           const name = named.trim();
           const key = normalizeValue(name);
           if (!name || !key || backers.has(key)) continue;
-          backers.set(key, { name, lead, round: round.round, date: round.date, amountUsd: round.amountUsd });
+          backers.set(key, { name, lead, round: round.roundLabel, date: round.date, amountUsd: round.amountUsd });
         }
       }
     }
@@ -1088,10 +1315,10 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
         backer.name,
         [source({
           url: indexedFunding.sourceUrl,
-          title: "DeFiLlama funding record",
-          excerpt: `DeFiLlama's funding index names ${backer.name} as ${role} in ${backer.round}${dated}${sized}. One aggregator naming a backer is an attribution, not a verified investment, and this index is not an exhaustive cap table.${capped}`,
+          title: indexedFunding.title,
+          excerpt: `${indexedFunding.indexName} names ${backer.name} as ${role} in ${backer.round}${dated}${sized}. One aggregator naming a backer is an attribution, not a verified investment, and this index is not an exhaustive cap table.${capped}`,
           capturedAt: indexedFunding.capturedAt,
-          provider: "defillama",
+          provider: indexedFunding.provider,
           sourceClass: "other_public",
         })],
         // Deliberately no qualifier. The fact sheet merges same-predicate rows
@@ -1107,12 +1334,44 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     }
   }
 
+  // The subject's OWN backer wall: self-published names from the bound
+  // official site. Each renders with that provenance and can be cited, but a
+  // subject's claim about its investors is never independent confirmation and
+  // never a score floor. Names an index already attributed are not repeated.
+  if (isProject && evidence.siteBackers?.names.length) {
+    const alreadyNamed = new Set(
+      [...(evidence.basicFacts ?? []), ...projected]
+        .filter((fact) => fact.predicate === "investor")
+        .map((fact) => normalizeValue(fact.value)),
+    );
+    for (const name of evidence.siteBackers.names) {
+      const key = normalizeValue(name);
+      if (!key || alreadyNamed.has(key)) continue;
+      alreadyNamed.add(key);
+      const backerFact = makeFact(
+        evidence,
+        "investor",
+        name,
+        [source({
+          url: evidence.siteBackers.sourceUrl,
+          title: "Official site backer wall",
+          excerpt: `The project's own site ("${evidence.siteBackers.heading}") lists ${name} as a backer. Self-published by the subject; not independently confirmed, and never a substitute for a funding record.`,
+          capturedAt: evidence.siteBackers.capturedAt,
+          provider: "official-site",
+          sourceClass: "official_subject",
+        })],
+      );
+      backerFact.floorEligible = false;
+      projected.push(backerFact);
+    }
+  }
+
   // On-chain TVL → traction (P5). Security incidents from the same document
   // become standalone negative facts below. A $295M exploit must never be
   // buried inside the source excerpt for an otherwise positive TVL metric.
   const tvlSnapshot = isProject
     && evidence.protocolTvl
-    && canonicalProtocolIndexMatch(evidence, evidence.protocolTvl.geckoId)
+    && indexedProtocolRecordMatch(evidence, evidence.protocolTvl)
     ? evidence.protocolTvl
     : undefined;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
@@ -1300,8 +1559,8 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
 
   // Protocol fees → a second dated usage metric (P5). Fees are on-chain
   // derived and self-limiting to fake: generating fee volume costs the fees.
-  const protocolIndexIdentityMatched = canonicalProtocolIndexMatch(evidence, evidence.protocolTvl?.geckoId)
-    || canonicalProtocolIndexMatch(evidence, evidence.protocolFunding?.geckoId);
+  const protocolIndexIdentityMatched = indexedProtocolRecordMatch(evidence, evidence.protocolTvl)
+    || indexedProtocolRecordMatch(evidence, evidence.protocolFunding);
   const feesSnapshot = isProject && protocolIndexIdentityMatched && protocolFeesBindingMatches(evidence)
     ? evidence.protocolFees
     : undefined;

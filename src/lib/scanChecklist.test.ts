@@ -9,6 +9,7 @@ import {
   tokenChecks,
   type CheckStatus,
   type ScanCheck,
+  coveragePercentOf,
 } from "./scanChecklist";
 
 afterEach(() => {
@@ -321,6 +322,26 @@ describe("clearanceCoverage (full-clearance coverage policy)", () => {
     expect(coverage.recordedPercent).toBe(75);
     expect(coverage.openNeverWaive).toEqual([]);
     expect(coverage.sufficient).toBe(false);
+  });
+
+  it("reports 7 of 8 as 87.5 percent, neither truncated to 87 nor rounded to 88 (ARGUS-08)", () => {
+    const checks = [
+      row("identity-resolution", "confirmed"),
+      ...Array.from({ length: 6 }, (_, index) => row(`enrichment-${index}`, "confirmed" as CheckStatus)),
+      row("news-press", "unavailable"),
+    ];
+    const coverage = clearanceCoverage(checks);
+    expect(coverage.recorded).toBe(7);
+    expect(coverage.applicable).toBe(8);
+    expect(coverage.recordedPercent).toBe(87.5);
+    expect(coverage.sufficient).toBe(false);
+  });
+
+  it("never lets one-decimal rounding manufacture a clean 100 percent", () => {
+    expect(coveragePercentOf(249, 250)).toBe(99.6);
+    expect(coveragePercentOf(2, 3)).toBe(66.6);
+    expect(coveragePercentOf(8, 8)).toBe(100);
+    expect(coveragePercentOf(0, 0)).toBe(0);
   });
 
   it("never waives an open sanctions screen regardless of coverage", () => {
@@ -710,5 +731,41 @@ describe("token operator/funding trace (Arkham deployer risk)", () => {
     ]);
 
     expect(governing.map((check) => check.checkId)).toEqual(["ofac-sanctions-address"]);
+  });
+});
+
+describe("tokenChecks · GitHub forensics row from the frozen shipping summary", () => {
+  const summary = (over: Partial<import("../threat/shipping").ShippingSummary> = {}): import("../threat/shipping").ShippingSummary => ({
+    version: 1, target: "acme", capturedAt: "2026-09-15T00:00:00Z", windowDays: 90,
+    grade: "shipping-team", headline: "Shipping as a team: 45 commits in 90 days from 3 people.",
+    cadenceStatus: "shipping", totalCommits: 45, activeWeeks: 13, distinctHuman: 3, concentration: "team",
+    authorship: "hand-authored", origin: "original", stars: "organic", market: "mixed",
+    claimsSupported: 0, claimsUnsupported: 0, live: "live", adoption: "used", health: "sound",
+    leadDeparted: false, reposRead: 3, commitsRead: 45, releasesInWindow: 1,
+    ...over,
+  });
+
+  it("closes the row as confirmed when the read is clean", () => {
+    const row = byLabel(tokenChecks(dossier({ socials: [{ label: "github", url: "https://github.com/acme" }], shipping: summary() })), "GitHub forensics");
+    expect(row.status).toBe("confirmed");
+    expect(row.note).toMatch(/3 human committers, cadence shipping, code reaching production; 3 repos and 45 commits read/);
+  });
+
+  it("records a finding for a stall, a rally without code, a departed lead or suspect stars", () => {
+    for (const over of [{ grade: "stalled" as const }, { market: "price-without-shipping" as const }, { leadDeparted: true }, { stars: "suspect" as const }]) {
+      const row = byLabel(tokenChecks(dossier({ shipping: summary(over) })), "GitHub forensics");
+      expect(row.status).toBe("finding");
+    }
+  });
+
+  it("keeps a linked-but-unread repository unavailable and an unlinked one an honest unknown", () => {
+    const unread = byLabel(tokenChecks(dossier({ socials: [{ label: "github", url: "https://github.com/acme" }], shipping: summary({ grade: "unknown" }) })), "GitHub forensics");
+    expect(unread.status).toBe("unavailable");
+    const linked = byLabel(tokenChecks(dossier({ socials: [{ label: "github", url: "https://github.com/acme" }] })), "GitHub forensics");
+    expect(linked.status).toBe("unknown");
+    expect(linked.note).toMatch(/a GitHub account is linked/);
+    const none = byLabel(tokenChecks(dossier()), "GitHub forensics");
+    expect(none.status).toBe("unknown");
+    expect(none.note).toMatch(/build in private are read through on-chain deploys/);
   });
 });

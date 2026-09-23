@@ -2,6 +2,7 @@ import type { ScoreCoverage } from "../engine/audit.js";
 // NOTE: this module is loaded as native ESM by the api/ functions — every
 // runtime import here MUST carry an explicit .js extension.
 import {
+  coveragePercentOf,
   CLEARANCE_COVERAGE_FLOOR_PERCENT,
   NEVER_WAIVE_CHECK_IDS,
   POST_SCAN_ENRICHMENT_CHECK_IDS,
@@ -170,7 +171,7 @@ export function coverageQualifiedCompleteness(input: {
   const recordedCount = rows.filter((row) => row.recorded).length;
   const openNeverWaive = hasStableIds
     && rows.some((row) => row.id && NEVER_WAIVE_CHECK_IDS.has(row.id) && !row.neverWaiveRecorded);
-  const recordedPercent = Math.floor((recordedCount / rows.length) * 100);
+  const recordedPercent = coveragePercentOf(recordedCount, rows.length);
   const coverageSufficient = hasStableIds
     ? !openNeverWaive && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT
     : recordedCount === rows.length;
@@ -193,6 +194,23 @@ function visibleVerdict(value: string): string {
 
 function modelSignal(verdict: string, score: string, prefix: string): string {
   return `${prefix} · ${visibleVerdict(verdict)}${score ? ` ${score}/100` : ""}`;
+}
+
+/**
+ * A composite PROVISIONAL verdict is the governing role's band-derived verdict
+ * relabelled because another axis or role is still unmeasured. The governing
+ * score itself is unchanged, so its band is the governing signal: a fully
+ * assessed FAIL role must not read as a neutral provisional score with no
+ * FAIL signal. Same thresholds as scoreMatchesVerdict / the engine's
+ * VERDICT_BANDS (kept literal here: this module is native ESM for api/).
+ */
+function governingSignalForScore(score: string): string | null {
+  if (!score) return null;
+  const value = Number(score);
+  if (!Number.isFinite(value) || value < 0 || value > 100) return null;
+  if (value >= 70) return "PASS SIGNAL";
+  if (value >= 40) return "CAUTION SIGNAL";
+  return "FAIL SIGNAL";
 }
 
 function scoreMatchesVerdict(verdict: string, score: string): boolean {
@@ -262,7 +280,8 @@ export function presentPublicReport(input: {
       rawVerdict, displayVerdict: "PROVISIONAL", resultLabel: "DECISION READINESS",
       readinessLabel: "ASSESSMENT PROVISIONAL", coverageLabel,
       color: VERDICT_COLORS.PROVISIONAL, primaryScore: score,
-      scoreLabel: "PROVISIONAL SCORE", secondarySignal: rawVerdict === "PASS" ? "PASS SIGNAL" : null,
+      scoreLabel: "PROVISIONAL SCORE",
+      secondarySignal: rawVerdict === "PASS" ? "PASS SIGNAL" : governingSignalForScore(score),
       note: `${assessed}${missing} ${gap} The score may change as gaps are resolved.`, final: false,
     });
   }

@@ -9,6 +9,15 @@ import { groundedSearch, groundedSearchProvisioned } from "./groundedSearch";
 
 type OrganicResult = { title: string; url: string; snippet: string };
 
+// Coverage copy renders verbatim in the report's "Earlier names and token
+// history" section. The reader is an investor, not a data engineer: name what
+// was and was not confirmed in their words, never in field names ("predecessor,
+// contract, migration-ratio or dated-event fields" told a VC nothing).
+export const CONTINUITY_COVERAGE_COMPLETE_REASON =
+  "The project's earlier names, the old and new token contracts, the swap terms for holders, and the dates were all confirmed from primary records.";
+export const CONTINUITY_COVERAGE_PARTIAL_REASON =
+  "There are signs this project renamed itself or replaced its token before, but the full story could not be confirmed: what it was called before, which contracts were involved, what holders received in the swap, or when it happened. Treat the history as not fully verified rather than clean.";
+
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -171,8 +180,8 @@ function recomputeContinuityCoverage(snapshot: EntityContinuitySnapshot): Entity
     .map((node) => ({ ticker: node.ticker, contract: node.contract, status: node.status, sourceUrls: node.sourceUrls }));
   snapshot.coverage.state = complete ? "complete" : "partial";
   snapshot.coverage.reason = complete
-    ? "Historical aliases, the dated migration ratio and both sides of the token lineage were recovered from primary records."
-    : "A lifecycle signal was found, but one or more predecessor, contract, migration-ratio or dated-event fields remain unresolved.";
+    ? CONTINUITY_COVERAGE_COMPLETE_REASON
+    : CONTINUITY_COVERAGE_PARTIAL_REASON;
   snapshot.coverage.primarySourceCount = snapshot.sources.filter((source) => source.sourceClass !== "secondary").length;
   return snapshot;
 }
@@ -316,8 +325,8 @@ export function normalizeEntityContinuity(
       required: Boolean(currentToken?.contract),
       state: complete ? "complete" : "partial",
       reason: complete
-        ? "Historical aliases, migration mechanics and both sides of the token lineage were recovered from primary records."
-        : "A lifecycle signal was found, but one or more predecessor, contract, migration-ratio or dated-event fields remain unresolved.",
+        ? CONTINUITY_COVERAGE_COMPLETE_REASON
+        : CONTINUITY_COVERAGE_PARTIAL_REASON,
       primarySourceCount,
       searchedAt: new Date().toISOString(),
     },

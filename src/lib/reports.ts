@@ -18,6 +18,7 @@ import type {
   ReportVersionContext,
 } from "./reportVersion";
 import type { MaterialReportDelta } from "./reportDelta";
+import { setPanelToken } from "./panelToken.js";
 
 export type ReportKind = "person" | "token" | "investigation" | "site";
 export type ReportStatus = "open" | "archived";
@@ -340,6 +341,11 @@ export async function syncReport(
       ) {
         return { state: "failed", reason: "Report storage returned an incomplete save receipt." };
       }
+      // The saved report's panels need a capability too, not only the ones
+      // opened while the scan was running (#356). Components that pass this
+      // token explicitly still win, since only it names a report version for
+      // cost attribution.
+      setPanelToken(body.panelCostToken);
       return {
         state: "persisted",
         reportVersionId: body.reportVersionId,
@@ -595,7 +601,9 @@ export async function fetchReportState(ref: string, kind?: ReportKind): Promise<
           : { status: "unavailable", report: null };
       }
       if (!r.ok) { if (attempt === 0) continue; return { status: "unavailable", report: null }; }
-      const d = await r.json() as { report?: StoredReport | null; caseStatus?: ReportStatus | "missing" };
+      const d = await r.json() as { report?: StoredReport | null; caseStatus?: ReportStatus | "missing"; panelCostToken?: unknown };
+      // The capability for this report's paid panels (#356).
+      if (typeof d?.panelCostToken === "string") setPanelToken(d.panelCostToken);
       const report = d?.report ?? null;
       if (kind && report && report.kind !== kind) return { status: "missing", report: null };
       return {
@@ -612,6 +620,34 @@ export async function fetchReportState(ref: string, kind?: ReportKind): Promise<
 
 export async function fetchReport(ref: string, kind?: ReportKind): Promise<StoredReport | null> {
   return (await fetchReportState(ref, kind)).report;
+}
+
+export type PersonRunRecovery =
+  | { state: "saved"; dossier: Dossier }
+  | { state: "running" | "unavailable" | "failed" | "not_found" };
+
+/** Read-only lookup bound to this run, tenant, initiating user and subject. */
+export async function fetchPersonRun(runKey: string, ref: string, signal: AbortSignal): Promise<PersonRunRecovery> {
+  try {
+    const response = await fetch(`/api/report?${new URLSearchParams({ runKey, ref }).toString()}`, {
+      cache: "no-store", signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
+    });
+    if (!response.ok) return { state: response.status === 404 ? "not_found" : "unavailable" };
+    const body = await response.json() as { state?: string; report?: StoredReport; panelToken?: string };
+    if (body.state === "saved" && body.report?.kind === "person"
+      && normalizeSubjectRef(body.report.ref) === normalizeSubjectRef(ref)
+      && body.report.versionContext?.reportVersionId) {
+      const d = storedPersonDossier(body.report);
+      if (normalizeSubjectRef(d.handle) !== normalizeSubjectRef(ref)) return { state: "not_found" };
+      return { state: "saved", dossier: {
+        ...d,
+        persistence: { state: "persisted", reportVersionId: body.report.versionContext.reportVersionId,
+          ...(body.panelToken ? { panelCostToken: body.panelToken } : {}),
+        },
+      } };
+    }
+    return { state: body.state === "running" ? "running" : body.state === "failed" ? "failed" : "unavailable" };
+  } catch { return { state: "unavailable" }; }
 }
 
 /** Load one immutable evidence snapshot by version id, even after archiving. */

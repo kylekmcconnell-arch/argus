@@ -1,0 +1,49 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { o1BaseAnnouncementVenue } from "./launch";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+const B20_TOKEN = "0xb20aa11f3a344924f8e34b1b6cf27fabbcc9d4f1";
+
+describe("o1BaseAnnouncementVenue", () => {
+  it("never spends a call on a non-B20 address (o1 Base tokens are B20 system assets)", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    expect(await o1BaseAnnouncementVenue("0x1111111111111111111111111111111111111111", "k")).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("attributes o1 when the announcement registry carries a log referencing the token", async () => {
+    const fetchSpy = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      expect(url).toContain("chainid=8453");
+      expect(url).toContain("address=0xab1243c97a37361115d5cef7666bf49ad2fb6baa");
+      expect(url).toContain(B20_TOKEN.slice(2));
+      return new Response(JSON.stringify({ result: [{ topics: ["0xdead"] }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    expect(await o1BaseAnnouncementVenue(B20_TOKEN, "k")).toBe("o1");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("tries the second indexed position before giving up, and a miss is null, never a guess", async () => {
+    const fetchSpy = vi.fn(async (input: string | URL | Request) => {
+      void input;
+      return new Response(JSON.stringify({ result: [] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    expect(await o1BaseAnnouncementVenue(B20_TOKEN, "k")).toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const urls = fetchSpy.mock.calls.map((call) => String(call[0]));
+    expect(urls[0]).toContain("topic1=");
+    expect(urls[1]).toContain("topic2=");
+  });
+
+  it("treats an upstream failure as unattributed rather than throwing", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("boom"); }));
+    expect(await o1BaseAnnouncementVenue(B20_TOKEN, "k")).toBeNull();
+  });
+});

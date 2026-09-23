@@ -7,10 +7,12 @@ import {
   collectProtocolTvl,
   defiLlamaLookupName,
   defiLlamaSlug,
+  defiLlamaSlugCandidates,
   describeFunding,
   formatTvlUsd,
   formatUsd,
   resetDefiLlamaScanMemo,
+  resolveDefiLlamaSlug,
 } from "./defiLlama";
 
 // Every test below is its own "scan": the read memo must not carry a document
@@ -192,6 +194,36 @@ describe("collectProtocolFunding", () => {
     expect(out.value.totalRaisedUsd).toBe(41_200_000);
     expect(describeFunding(out)).toMatchObject({ status: "confirmed" });
     expect(describeFunding(out).note).toContain("Blockchain Capital");
+  });
+
+  it("carries the protocol document's own identity surfaces for tokenless binding", async () => {
+    // The Ammalgam shape: no gecko_id (tokenless protocol), but the curated
+    // record names its X handle and official site. Those surfaces are what an
+    // official-identity join binds on when no CoinGecko id can.
+    const out = await collectProtocolFunding("Ammalgam", {
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody({
+        name: "Ammalgam",
+        gecko_id: null,
+        twitter: "ammalgam",
+        url: "https://ammalgam.xyz/",
+        raises: [{
+          date: 1725926400,
+          round: "Seed",
+          amount: 2.5,
+          valuation: null,
+          leadInvestors: ["Faction", "Framework Ventures"],
+          otherInvestors: ["Robot Ventures"],
+        }],
+      }))),
+    });
+
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.geckoId).toBeNull();
+    expect(out.value.officialTwitter).toBe("ammalgam");
+    expect(out.value.officialUrl).toBe("https://ammalgam.xyz/");
+    expect(out.value.rounds[0]).toMatchObject({ round: "Seed", amountUsd: 2_500_000 });
+    expect(out.value.leadInvestors).toEqual(["Faction", "Framework Ventures"]);
   });
 
   it("rejects investor-only relationship rows that are not funding rounds", async () => {
@@ -478,5 +510,53 @@ describe("collectProtocolFees", () => {
       fetcher: fetcherReturning(() => jsonResponse({ total30d: 30_000, change_30dover30d: 250_000 })),
     });
     expect(absurd.available && absurd.value.change30dOver30dPct).toBe(null);
+  });
+});
+
+describe("identity-derived slug discovery (the Definitive miss)", () => {
+  it("builds candidates from the lookup name, the official-domain label, and the handle, deduplicated", () => {
+    expect(defiLlamaSlugCandidates("Definitive | DeFi for institutions", "https://www.definitive.fi/", "@DefinitiveFi"))
+      .toEqual(["definitive-defi-for-institutions", "definitive", "definitivefi"]);
+    expect(defiLlamaSlugCandidates("Aave", "https://aave.com/", "@aave")).toEqual(["aave"]);
+    expect(defiLlamaSlugCandidates("Aave", "not a url", null)).toEqual(["aave"]);
+  });
+
+  it("resolves the first slug DeFiLlama actually knows and stays fail-visible on outages", async () => {
+    resetDefiLlamaScanMemo();
+    const fetcher = ((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/protocol/definitive-defi-for-institutions")) {
+        return Promise.resolve(new Response("{}", { status: 400 }));
+      }
+      if (url.endsWith("/protocol/definitive")) {
+        return Promise.resolve(jsonResponse(protocolBody({ name: "Definitive", twitter: "DefinitiveFi" })));
+      }
+      throw new Error(`unexpected ${url}`);
+    }) as unknown as typeof fetch;
+    await expect(resolveDefiLlamaSlug(["definitive-defi-for-institutions", "definitive"], fetcher))
+      .resolves.toBe("definitive");
+
+    resetDefiLlamaScanMemo();
+    const outage = ((input: string | URL | Request) => {
+      void input;
+      return Promise.resolve(new Response("boom", { status: 503 }));
+    }) as unknown as typeof fetch;
+    await expect(resolveDefiLlamaSlug(["a", "b"], outage)).resolves.toBeNull();
+  });
+
+  it("the resolved slug feeds funding with the handle-bindable identity surfaces intact", async () => {
+    resetDefiLlamaScanMemo();
+    const fetcher = fetcherReturning(() => jsonResponse(protocolBody({
+      name: "Definitive",
+      twitter: "DefinitiveFi",
+      url: "https://app.definitive.fi",
+      raises: [{ date: 1699401600, round: "Seed", amount: 4.1, leadInvestors: ["BlockTower Capital"], otherInvestors: ["Nascent", "Coinbase Ventures", "CMT Digital"], valuation: null }],
+    })));
+    const out = await collectProtocolFunding("Definitive | DeFi for institutions", { fetcher, slug: "definitive" });
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.totalRaisedUsd).toBe(4_100_000);
+    expect(out.value.leadInvestors).toEqual(["BlockTower Capital"]);
+    expect(out.value.officialTwitter).toBe("DefinitiveFi");
   });
 });

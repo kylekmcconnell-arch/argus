@@ -5,7 +5,7 @@ import { getProfile, SubjectClass } from "../src/engine";
 import { deriveDecisionReadiness } from "../src/lib/decisionReadiness";
 import type { ScanCheck } from "../src/lib/scanChecklist";
 import { officialSiteAccessDeniedFinding, type SiteSubstance } from "./adapters/sitecheck";
-import { buildScoringEvidencePacket, deriveProjectStrengthBands } from "./agent";
+import { buildScoringEvidencePacket, deriveProjectStrengthBands, inspectAnalystScoringPreflight } from "./agent";
 import type { CheckObservation, CollectContext } from "./adapters/types";
 import { PersonCheckTracker } from "./checks";
 import { applySiteSubstanceOutcome, bioWebsiteDomain } from "./orchestrate";
@@ -230,9 +230,14 @@ describe("site-liveness evidence attribution", () => {
       checkOutcomes: requiredChecks,
     }, axes);
     const bands = deriveProjectStrengthBands(packet, axes);
-    expect(bands.P2_product_substance.tier).toBe("assessed_null");
+    // A finished access-denied result completes the required check but is
+    // not product evidence: with nothing substantive for P2 the axis is
+    // unmeasured (band "none", supported-axis scoring), never credited and
+    // never admitted to a scorer call the validator would have to reject.
+    expect(bands.P2_product_substance.tier).toBe("none");
     expect(bands.P2_product_substance).not.toHaveProperty("floorTier");
     expect(bands.P2_product_substance.minScore ?? 0).toBe(0);
+    expect(inspectAnalystScoringPreflight(axes, packet).missingSubstantiveAxes).toContain("P2_product_substance");
   });
 
   it("treats recovered official-page evidence as the same official site, not an independent source", () => {
@@ -444,4 +449,18 @@ describe("bio website domain extraction covers the TLDs crypto projects register
     expect(bioWebsiteDomain("Watch us on youtube.com and chat on t.me")).toBeUndefined();
     expect(bioWebsiteDomain("Watch us on youtube.com, then visit stonkbrokers.cash")).toBe("stonkbrokers.cash");
   });
+});
+
+it("preserves website description separately from the scoring packet", () => {
+  const { ctx, evidence } = context();
+  const site: SiteSubstance = { url: "https://project.example", status: "live", detail: "live product website" };
+  applySiteSubstanceOutcome(ctx, "project.example", site);
+  const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+    .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+  const before = JSON.stringify(buildScoringEvidencePacket({ ...evidence }, axes));
+  const productDescription = "A platform for AI models, agents and cloud computers with managed Linux workspaces.";
+  applySiteSubstanceOutcome(ctx, "project.example", { ...site, productDescription });
+  expect(evidence.officialProductDescription).toMatchObject({ text: productDescription, sourceUrl: site.url });
+  expect(JSON.stringify(buildScoringEvidencePacket({ ...evidence }, axes))).not.toContain(productDescription);
+  expect(JSON.stringify(buildScoringEvidencePacket({ ...evidence }, axes))).toBe(before);
 });

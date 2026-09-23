@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
-import { githubAdapter, searchQueryVariants } from "./github";
+import { githubAdapter, githubOrgFromOfficialSite, searchQueryVariants, sitemapCandidateUrls } from "./github";
 
 const json = (body: unknown) => new Response(JSON.stringify(body), {
   status: 200,
@@ -47,6 +47,78 @@ describe("GitHub evidence provenance", () => {
       evidence_origin: "deterministic",
       artifact_verified: true,
     }));
+  });
+
+  it("records outages on the repos and orgs lists as unavailable, never as an empty account", async () => {
+    // Regression for INT-5: a 403 on /repos rendered "no public repositories";
+    // a 403 on /orgs rendered affiliations checked-empty.
+    vi.stubEnv("GITHUB_TOKEN", "github-test-key");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/search/users")) return json({ items: [{ login: "subject" }] });
+      if (url.endsWith("/users/subject")) return json({ login: "subject", twitter_username: "subject", public_repos: 40 });
+      if (url.endsWith("/users/subject/orgs")) return new Response("forbidden", { status: 403 });
+      if (url.includes("/users/subject/repos")) return new Response("forbidden", { status: 403 });
+      throw new Error(`unexpected GitHub URL: ${url}`);
+    }));
+    const evidence = emptyEvidence("@subject");
+    evidence.profile.display_name = "";
+    evidence.profile.bio = "founder and builder: github.com/subject";
+    const recordCheck = vi.fn();
+    const emit = vi.fn();
+    await githubAdapter.run({ handle: evidence.profile.handle, evidence, emit, recordCheck });
+
+    const assessment = evidence.profile.githubAssessment;
+    expect(assessment).toMatchObject({ login: "subject", repoSampleState: "unavailable", publicRepos: 40 });
+    expect(assessment?.claimChecks.some((check) => /no public repositories/i.test(check.observation))).toBe(false);
+    expect(assessment?.claimChecks.some((check) => check.grade === "unsupported" || check.grade === "contradicted")).toBe(false);
+    expect(assessment?.summary).toContain("unavailable");
+    expect(recordCheck).toHaveBeenCalledWith(expect.objectContaining({ id: "affiliations-associates", status: "unavailable" }));
+    expect(recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "affiliations-associates", status: "checked-empty" }));
+    expect(emit).not.toHaveBeenCalledWith(expect.objectContaining({ label: "No public orgs" }));
+  });
+
+  it("records a provider failure during resolution as unavailable rather than no match", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "github-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("rate limited", { status: 429 })));
+    const evidence = emptyEvidence("@subject");
+    evidence.profile.display_name = "Subject Name";
+    const recordCheck = vi.fn();
+    await githubAdapter.run({ handle: evidence.profile.handle, evidence, emit: vi.fn(), recordCheck });
+    expect(recordCheck).toHaveBeenCalledWith(expect.objectContaining({ id: "code-footprint-github", status: "unavailable" }));
+    expect(recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "code-footprint-github", status: "checked-empty" }));
+  });
+
+  it("labels a truncated repository window as a sample and withholds ratio grades", async () => {
+    // Regression for INT-16: 30 most-recently-pushed forks of a 200-repo
+    // account are not the account's fork ratio.
+    vi.stubEnv("GITHUB_TOKEN", "github-test-key");
+    const forks = Array.from({ length: 30 }, (_, index) => ({
+      name: `fork-${index}`,
+      html_url: `https://github.com/subject/fork-${index}`,
+      owner: { login: "subject", type: "User" },
+      fork: true,
+      pushed_at: "2026-07-01T00:00:00Z",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/search/users")) return json({ items: [{ login: "subject" }] });
+      if (url.endsWith("/users/subject")) return json({ login: "subject", twitter_username: "subject", public_repos: 200 });
+      if (url.endsWith("/users/subject/orgs")) return json([]);
+      if (url.includes("/users/subject/repos")) return json(forks);
+      throw new Error(`unexpected GitHub URL: ${url}`);
+    }));
+    const evidence = emptyEvidence("@subject");
+    evidence.profile.display_name = "";
+    evidence.profile.bio = "founder and builder: github.com/subject";
+    const emit = vi.fn();
+    await githubAdapter.run({ handle: evidence.profile.handle, evidence, emit, recordCheck: vi.fn() });
+
+    const assessment = evidence.profile.githubAssessment;
+    expect(assessment).toMatchObject({ repoSampleState: "sample", sampledRepos: 30, publicRepos: 200, forkCount: 30 });
+    expect(assessment?.summary).toContain("30 most recently pushed of 200");
+    expect(assessment?.claimChecks.every((check) => check.grade !== "contradicted" && check.grade !== "unsupported")).toBe(true);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({ label: "GitHub assessment", tone: "neutral" }));
   });
 
   it("treats a one-directional twitter_username claim as a lead and attributes nothing", async () => {
@@ -269,5 +341,105 @@ describe("GitHub squatter suppression", () => {
       id: "code-footprint-github",
       status: "unknown",
     }));
+  });
+});
+
+describe("GitHub org from the project's own web surfaces", () => {
+  const html = (body: string, status = 200, url = "") =>
+    Object.assign(new Response(body, { status, headers: { "content-type": "text/html" } }), url ? { url } : {});
+
+  it("finds the org in a docs-subdomain shell even when the site root is challenge-blocked", async () => {
+    // The Ammalgam shape: ammalgam.xyz root has no GitHub link, the docs root
+    // 403s behind a bot challenge, but the docs app shell (served even on its
+    // 404 page) carries the header link to github.com/ammalgam-protocol.
+    const fetcher = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://ammalgam.xyz/") return html("<html><body>DLEX protocol</body></html>");
+      if (url === "https://docs.ammalgam.xyz/") return html("challenge", 403);
+      if (url === "https://docs.ammalgam.xyz/llms.txt") {
+        return html('<a class="github-link" href="https://github.com/ammalgam-protocol">GitHub</a>', 404);
+      }
+      throw new Error(`unexpected ${url}`);
+    }) as typeof fetch;
+
+    await expect(githubOrgFromOfficialSite("https://ammalgam.xyz/", fetcher)).resolves.toEqual({
+      org: "ammalgam-protocol",
+      sourceUrl: "https://docs.ammalgam.xyz/llms.txt",
+    });
+  });
+
+  it("skips github.com product pages and off-domain redirects", async () => {
+    const fetcher = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://example.xyz/") {
+        return html('<a href="https://github.com/features">features</a> <a href="https://github.com/pricing">pricing</a>');
+      }
+      // The docs host redirects to a parking page off the controlled apex:
+      // whatever it links proves nothing about this subject.
+      if (url.startsWith("https://docs.example.xyz")) {
+        return html('<a href="https://github.com/someone-else">gh</a>', 200, "https://parking.example-registrar.com/lander");
+      }
+      throw new Error(`unexpected ${url}`);
+    }) as typeof fetch;
+
+    await expect(githubOrgFromOfficialSite("https://example.xyz/", fetcher)).resolves.toBeNull();
+  });
+
+  it("returns null without an official website", async () => {
+    await expect(githubOrgFromOfficialSite(undefined)).resolves.toBeNull();
+    await expect(githubOrgFromOfficialSite("")).resolves.toBeNull();
+  });
+
+  it("walks the site's own sitemap when the primary surfaces carry no link (the Definitive shape)", async () => {
+    // definitive.fi live (2026-09-17): the home page is client-rendered with
+    // no GitHub link in its raw HTML, docs.* does not exist, but the sitemap
+    // lists /flash-api whose prerendered footer links github.com/DefinitiveCo.
+    const sitemap = `<?xml version="1.0"?><urlset>
+      <loc>https://www.definitive.fi</loc>
+      <loc>https://www.definitive.fi/about</loc>
+      <loc>https://www.definitive.fi/blog/some-post</loc>
+      <loc>https://www.definitive.fi/flash-api</loc>
+    </urlset>`;
+    const fetched: string[] = [];
+    const fetcher = (async (input: string | URL | Request) => {
+      const url = String(input);
+      fetched.push(url);
+      if (url === "https://definitive.fi/") return html("<html><body>app shell, no links</body></html>");
+      if (url === "https://definitive.fi/sitemap.xml") return html(sitemap);
+      if (url.startsWith("https://docs.definitive.fi")) return html("no such host", 404);
+      if (url === "https://www.definitive.fi/flash-api") {
+        return html('<footer><a href="https://github.com/DefinitiveCo">GitHub</a></footer>');
+      }
+      if (url === "https://www.definitive.fi/about") return html("<html><body>about us</body></html>");
+      return html("not found", 404);
+    }) as typeof fetch;
+
+    await expect(githubOrgFromOfficialSite("https://www.definitive.fi/", fetcher)).resolves.toEqual({
+      org: "DefinitiveCo",
+      sourceUrl: "https://www.definitive.fi/flash-api",
+    });
+    // The api-shaped page ranks first, so the walk resolves there and never
+    // spends fetches on the about or blog pages.
+    expect(fetched).toContain("https://www.definitive.fi/flash-api");
+    expect(fetched).not.toContain("https://www.definitive.fi/about");
+    expect(fetched).not.toContain("https://www.definitive.fi/blog/some-post");
+  });
+
+  it("ranks sitemap pages developer-first, drops off-apex and root entries, and caps the walk", () => {
+    const xml = `<urlset>
+      <loc>https://apex.example/</loc>
+      <loc>https://apex.example/blog/one</loc>
+      <loc>https://apex.example/blog/two</loc>
+      <loc>https://apex.example/about</loc>
+      <loc>https://apex.example/developers</loc>
+      <loc>https://elsewhere.example/developers</loc>
+      <loc>https://apex.example/pricing</loc>
+    </urlset>`;
+    const ranked = sitemapCandidateUrls(xml, "apex.example", 3);
+    expect(ranked[0]).toBe("https://apex.example/developers");
+    expect(ranked[1]).toBe("https://apex.example/about");
+    expect(ranked).toHaveLength(3);
+    expect(ranked).not.toContain("https://elsewhere.example/developers");
+    expect(ranked).not.toContain("https://apex.example/");
   });
 });

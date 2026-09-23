@@ -16,6 +16,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { arr, isRecord, num, rec, str, type JsonRecord } from "../src/lib/json.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, grokUsd, resolvePanelCostVersion } from "./_cache.js";
+import { fetchTeamPage } from "../server/adapters/teampage.js";
 
 export const config = { maxDuration: 60 };
 
@@ -40,7 +41,7 @@ function personLinkedInUrl(value: unknown): string | undefined {
 
 interface TeamAngle {
   people: JsonRecord[];
-  provider: "grok" | "twitterapi" | "github";
+  provider: "grok" | "twitterapi" | "github" | "team-page";
   calls: number;
   usd: number;
   status: "succeeded" | "partial" | "failed";
@@ -62,7 +63,12 @@ const personProvenance = (provider: TeamAngle["provider"]) => provider === "grok
   ? { evidence_origin: "model_lead" as const, artifact_verified: false, evidenceKind: "model_candidate" as const }
   : provider === "twitterapi"
     ? { evidence_origin: "deterministic" as const, artifact_verified: true, evidenceKind: "project_association" as const }
-    : { evidence_origin: "deterministic" as const, artifact_verified: true, evidenceKind: "code_contribution" as const };
+    : provider === "team-page"
+      // The project's OWN site pages name these people: first-party roster,
+      // not a search lead. This is what lets the client show them in the
+      // standard team section instead of the "possible people" quarantine.
+      ? { evidence_origin: "deterministic" as const, artifact_verified: true, evidenceKind: "team_attribution" as const }
+      : { evidence_origin: "deterministic" as const, artifact_verified: true, evidenceKind: "code_contribution" as const };
 
 interface ReconPerson {
   name: string;
@@ -73,7 +79,7 @@ interface ReconPerson {
   provider: TeamAngle["provider"];
   evidence_origin: "model_lead" | "deterministic";
   artifact_verified: boolean;
-  evidenceKind: "model_candidate" | "project_association" | "code_contribution";
+  evidenceKind: "model_candidate" | "project_association" | "code_contribution" | "team_attribution";
   developerProfiles?: ReturnType<typeof profileDeveloperLinks>;
 }
 
@@ -282,6 +288,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     angles.push(followsAndTags(x, twKey, counter)
       .then((people): TeamAngle => ({ people, provider: "twitterapi", calls: counter.calls, usd: counter.calls * 0.0002, status: counterStatus(counter) }))
       .catch((): TeamAngle => ({ people: [], provider: "twitterapi", calls: counter.calls, usd: counter.calls * 0.0002, status: counter.succeeded > 0 ? "partial" : "failed" })));
+  }
+  // 5. TEAM PAGE (first-party) — the same machinery every handle scan runs:
+  // fetch the site's own /team, /about and docs pages, LLM roster extraction,
+  // anchor-bound LinkedIn/X/contact links. A site scan that says "the team is
+  // on the site" must produce that roster, not just classify the section.
+  if (domain) {
+    angles.push(fetchTeamPage(domain, name || title || undefined)
+      .then((team): TeamAngle => ({
+        people: team.slice(0, 20).map((member) => ({
+          name: member.name,
+          handle: member.handle ?? null,
+          linkedin: member.linkedin
+            ? (/^https?:\/\//i.test(member.linkedin) ? member.linkedin : `https://${member.linkedin}`)
+            : null,
+          role: member.role || "team",
+          evidence: member.evidence ?? `named on ${member.sourceUrl ?? domain}`,
+        })),
+        provider: "team-page",
+        calls: 1,
+        usd: 0.02,
+        status: "succeeded",
+      }))
+      .catch((): TeamAngle => ({ people: [], provider: "team-page", calls: 1, usd: 0, status: "failed" })));
   }
   if (ghKey && gh) {
     const counter = { calls: 0, succeeded: 0 };

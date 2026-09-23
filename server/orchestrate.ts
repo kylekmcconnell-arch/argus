@@ -1,3 +1,4 @@
+import { withProviderAccessScope, grokAccessFailure } from "./providerAccess";
 import { scoreComparisonNote } from "../src/lib/scoreComparison";
 import { withProviderDeadline } from "./providerDeadline.js";
 import { withWallClockBox } from "./boundedProvider";
@@ -14,10 +15,10 @@ import { withWallClockBox } from "./boundedProvider";
 // The engine always owns caps, banding and the composite verdict.
 
 import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEntityKey, repeatBackingSignal, type Finding, type Venture } from "../src/engine";
-import { env, providerFallbacksEnabled } from "./config";
+import { env, providerFallbacksEnabled, GROK_ANALYST_MODEL } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
-import { emptyEvidence, type BasicFact, type WebTeamMember } from "../src/data/evidence";
+import { emptyEvidence, type AxisEvidenceRecord, type BasicFact, type ProjectStrengthBandRecord, type WebTeamMember } from "../src/data/evidence";
 import type { EvmControlRealitySnapshot } from "../src/data/evmControlReality";
 import type { AdapterRunResult, CheckObservation, CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import {
@@ -43,9 +44,12 @@ import { teamIdentityKeys } from "../src/lib/teamIdentity";
 import { teamCandidateSourceMatchesIdentity } from "../src/lib/teamCandidateIdentity";
 import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
+import { captureTimestamp } from "./captureTime";
 import { deriveTokenApplicability } from "./tokenApplicability";
+import { launchVenueForOfficialDomain } from "../src/threat/launch";
+import { deriveSubjectCategory } from "./subjectCategory";
 
-import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, reverseBioClaimIsStanding, followsSubject, resetFollowScanMemo, resetReverseBioMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, isConfirmedOfficialSiteAccessDenial, officialSiteAccessDeniedFinding, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
@@ -82,9 +86,11 @@ import { githubAdapter } from "./adapters/github";
 import { dexscreenerAdapter } from "./adapters/dexscreener";
 import { coingeckoAdapter } from "./adapters/coingecko";
 import { onchainAdapter } from "./adapters/onchain";
+import { fomoscanAdapter } from "./adapters/fomoscan";
 import { arkhamAdapter } from "./adapters/arkham";
 import { basicFactsAdapter, registrableDomain, screenSecRegistryForNames } from "./adapters/basicFacts";
 import { writeEntityFacts } from "./entityStore";
+import { investorObservationsFromEvidence, writeInvestorObservations } from "./investorStore";
 import {
   hasResolvedRealName,
   offchainAdapter,
@@ -100,8 +106,10 @@ import { collectFundScale } from "./adapters/fundScale";
 import { collectProjectTokenIdentity, collectVentureTokenIdentity, launchedProductSearchQueries } from "./adapters/projectToken";
 import {
   hydrateProjectTeamFromVerifiedFacts,
+  indexedProtocolRecordMatch,
   isInstitutionalOrganizationSubject,
   projectProviderBackedBasicFacts,
+  protocolRecordMatchesOfficialIdentity,
 } from "./basicFactsProjection";
 import { enforceProjectFactCoherence } from "./projectFactCoherence";
 import {
@@ -110,9 +118,23 @@ import {
   collectProtocolFunding,
   collectProtocolTvl,
   defiLlamaLookupName,
+  defiLlamaSlugCandidates,
+  formatUsd,
   resetDefiLlamaScanMemo,
+  resolveDefiLlamaSlug,
 } from "./adapters/defiLlama";
+import { collectCryptoRankFunding, cryptoRankConfigured } from "./adapters/cryptoRank";
 import { collectHolderProfile } from "./adapters/tokenHolders";
+import { collectStockHealth, resolveTokenizedStockUnderlying, tokenizedStockPairingSnapshot } from "./adapters/stockHealth";
+import { collectSiteBackers } from "./adapters/siteBackers";
+import {
+  collectCompaniesHouseRecord,
+  collectOpenCorporatesRecord,
+  collectSecRegistrant,
+  collectSiteDeclaredRegistrations,
+  companiesHouseConfigured,
+  openCorporatesConfigured,
+} from "./adapters/companyRegistries";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { buildMaterialReportDelta } from "../src/lib/reportDelta";
 import { collectSecurityAudits } from "./adapters/securityAudits";
@@ -127,6 +149,7 @@ import {
 } from "./adapters/monid";
 import { collectOperatorLaunches, describeLaunchHistory } from "./adapters/operatorLaunches";
 import { collectSocialActivity } from "./socialActivity";
+import { isRetainedSourceFact, isStrictlyVerifiedFact } from "../src/lib/evidenceTier.js";
 import {
   hydrateOfficialProjectIdentityFromFacts,
   verifiedOfficialProjectIdentity,
@@ -309,6 +332,7 @@ const ADAPTERS: Adapter[] = [
   dexscreenerAdapter,
   coingeckoAdapter,
   // redditAdapter retired: Reddit API access was not approved.
+  fomoscanAdapter,
   onchainAdapter,
   arkhamAdapter,
   basicFactsAdapter,
@@ -322,7 +346,9 @@ const ADAPTERS: Adapter[] = [
 export const ADAPTERS_FOR_TEST: readonly Adapter[] = ADAPTERS;
 export const IDENTITY_LANE = [xAdapter, githubAdapter, peopledatalabsAdapter, offchainAdapter] as const;
 export const TOKEN_LANE = [dexscreenerAdapter, coingeckoAdapter] as const;
-export const WALLET_LANE = [onchainAdapter, arkhamAdapter] as const;
+// fomoscan runs first: it is the lane that can ADD an attributed wallet for the
+// on-chain and Arkham reads to examine.
+export const WALLET_LANE = [fomoscanAdapter, onchainAdapter, arkhamAdapter] as const;
 
 /**
  * Every cost-ledger provider an adapter's run() can record. Concurrent
@@ -340,6 +366,7 @@ export const ADAPTER_PROVIDERS: Record<string, readonly string[]> = {
   "offchain-diligence": ["google-news", "courtlistener", "opensanctions", "x-avatar", "claude", "cache"],
   "dexscreener": ["dexscreener"],
   "coingecko": ["coingecko"],
+  "fomoscan": ["fomoscan"],
   "onchain": ["helius"],
   "arkham": ["arkham", "public-evm-rpc"],
 };
@@ -637,6 +664,7 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
     ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
     ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
+    if (prof.userId) ctx.evidence.profile.x_user_id = prof.userId;
     if (prof.image) {
       ctx.evidence.profile.avatar_url = prof.image; // official X image source for the frozen integrity screen
       ctx.evidence.profile.avatar_source_state = "resolved";
@@ -658,6 +686,13 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
       : officialWebsites.find((url) => canonicalOfficialWebsite(url) !== null) ?? firstWebsite;
     ctx.evidence.profile.website = profileWebsite;
     if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
+    // URLs typed into the bio description are kept as leads about the
+    // account. They never enter `official_websites`: a fan page or an
+    // impersonator can paste the real project's site into its bio.
+    const bioWebsites = (prof.bioWebsites ?? [])
+      .map((url) => canonicalPublicProfileWebsite(url))
+      .filter((url): url is string => Boolean(url));
+    if (bioWebsites.length) ctx.evidence.profile.bio_websites = bioWebsites;
     // A link aggregator is a pointer, not a website: left as-is it kills
     // PROJECT routing, official-site verification, and token binding for the
     // whole run. Dereference it deterministically (hub must link this exact
@@ -741,6 +776,13 @@ export function applySiteSubstanceOutcome(
   ctx.evidence.profile.website = site.url;
   ctx.evidence.profile.site_substance_status = site.status;
   const isProject = ctx.evidence.roles.includes(SubjectClass.PROJECT);
+  if (isProject && site.status === "live" && site.productDescription?.trim()) {
+    ctx.evidence.officialProductDescription = {
+      text: site.productDescription.trim().slice(0, 1200),
+      sourceUrl: site.url,
+      capturedAt: new Date().toISOString(),
+    };
+  }
   const verifiedProjectToken = ctx.evidence.projectToken?.verified === true
     ? ctx.evidence.projectToken
     : undefined;
@@ -952,6 +994,7 @@ export function mergeDiscoveredAffiliations(
       // it to the same project seen in another audit.
       x_handle: v.x_handle,
       domain: v.domain,
+      ...(v.domain ? { domain_evidence_origin: "model_lead" as const } : {}),
       role: v.role,
       period: v.year ?? "",
       outcome: VentureOutcome.ACTIVE,
@@ -1105,7 +1148,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // domain or a project name — a big public project's roster lives off-X, and
     // many project accounts put no plain domain in the bio.
     domain || ctx.evidence.profile.display_name
-      ? findTeamOnSite(domain, ctx.evidence.profile.display_name)
+      ? findTeamOnSite(domain, ctx.evidence.profile.display_name, ctx.handle)
       : Promise.resolve([] as TeamMember[]),
     // Read the project's own /team page directly (Grok's summary can miss it).
     fetchTeamPage(teamDomain, ctx.evidence.profile.display_name),
@@ -1254,7 +1297,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // later duplicates, so a page-roster name still gets its identity links.
   const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
   const namedCorpus = [...posts, ...corpus.teamSignalPosts];
-  const officialOrgs = officialXNamedOrgs(namedCorpus).filter((org) => norm(org.handle) && norm(org.handle) !== norm(ctx.handle));
+  const officialOrgs = officialXNamedOrgs(namedCorpus, ctx.evidence.profile.display_name).filter((org) => norm(org.handle) && norm(org.handle) !== norm(ctx.handle));
   const orgKeys = new Set(officialOrgs.map((org) => norm(org.handle)));
   // Official twitterapi corpus naming @handles as founder/co-founder/team.
   // Unique-id is the handle. Independent of Serper.
@@ -1375,14 +1418,16 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     }),
     // Reverse-bio twitterapi: the claimant's own bio @-mentions this subject
     // next to founder/COO/CEO/"we built @H" language. Handle is the unique id.
+    // A role read from a TWEET ("who is the founder of @proj?") is a lead;
+    // only a standing bio claim is a first-party artifact.
     ...reverseBioTwitter.team.map((member) => ({
       ...member,
-      evidence_origin: "deterministic" as const,
-      artifact_verified: true,
+      evidence_origin: reverseBioClaimIsStanding(member) ? "deterministic" as const : "model_lead" as const,
+      artifact_verified: reverseBioClaimIsStanding(member),
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "model_lead" as const,
-      handleProvenance: member.handle ? "subject_first_party" as const : undefined,
+      handleProvenance: member.handle && reverseBioClaimIsStanding(member) ? "subject_first_party" as const : undefined,
     })),
   ];
   for (const t of teamCandidates) {
@@ -1415,6 +1460,8 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         existing.linkedin = t.linkedin;
         existing.identity_link_evidence_origin = t.identity_link_evidence_origin;
       }
+      if (!existing.telegram && t.telegram) existing.telegram = t.telegram;
+      if (!existing.email && t.email) existing.email = t.email;
       if ((!existing.projects || !existing.projects.length) && t.projects?.length) {
         existing.projects = t.projects;
         existing.projects_evidence_origin = t.projects_evidence_origin;
@@ -1470,6 +1517,8 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       biography: t.biography,
       kind: "kind" in t && (t.kind === "org" || t.kind === "person") ? t.kind : "person" as const,
       linkedin: t.linkedin,
+      telegram: t.telegram,
+      email: t.email,
       evidence: t.evidence,
       source: t.source ?? "X content",
       sourceUrl: t.sourceUrl,
@@ -1641,7 +1690,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     || postRoleTeam.length > 0
     || operatorTeam.length > 0
     || amplifiedTeam.length > 0
-    || reverseBioTwitter.team.length > 0
+    || reverseBioTwitter.team.some(reverseBioClaimIsStanding)
     || webTeam.some((t) => t.artifact_verified === true && norm(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
     ctx.emit({ phase: "P1 · Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
@@ -1661,7 +1710,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // and LinkedIn. The co-founder of a known fund should never render "named only".
   const nameOnly = webTeam.filter((m) => !m.handle && !m.linkedin).slice(0, 15);
   if (nameOnly.length >= 1) {
-    const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })));
+    const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })), ctx.handle);
     let linked = 0;
     for (const f of found) {
       const m = byName.get(norm(f.name));
@@ -1722,7 +1771,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // Only directly fetched first-party team pages and deterministic role scans
     // can raise identity confidence. Grok web/X results remain useful leads in
     // the roster, but cannot confirm the very identity it was asked to discover.
-    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam, ...reverseBioTwitter.team, ...operatorTeam, ...amplifiedTeam].filter((candidate) =>
+    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam, ...reverseBioTwitter.team.filter(reverseBioClaimIsStanding), ...operatorTeam, ...amplifiedTeam].filter((candidate) =>
       webTeam.some((member) =>
         (!!candidate.handle && norm(candidate.handle) === norm(member.handle)) ||
         (!!candidate.name && norm(candidate.name) === norm(member.name)),
@@ -1859,7 +1908,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
             // The archived page must name BOTH the subject AND the venture on its
             // own /team or /about page, so this is a genuine first-party team tie
             // (not a coincidental mention on a wrong or misguessed domain).
-            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name);
+            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name, ctx.handle);
             // The archive now reads a bounded spread of captures rather than only
             // the newest, so a name scrubbed from a current team page still
             // corroborates. When the tie survives only in the older captures the
@@ -1868,8 +1917,20 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
             if (arch) {
               corrob.push(...archiveCorroborationLabels(arch));
               rec.evidence_url = arch.url;
-              archiveVerified = true;
-              archiveProvider = arch.provider;
+              // The display name is not a bind key. Only a capture that also
+              // carries the audited @handle (or its bare profile backlink)
+              // ties THIS account to the venture; a name-only match is a
+              // corroborated lead that a namesake could equally satisfy.
+              if (arch.handleBound) {
+                archiveVerified = true;
+                archiveProvider = arch.provider;
+                // The archived /team page on this very domain named the
+                // venture and linked the audited account: the domain is now
+                // read from the artifact, not from the model.
+                rec.domain_evidence_origin = "deterministic";
+              } else {
+                corrob.push("the archived page names the display name only, not this X account (namesake possible; lead, not verified)");
+              }
             }
           }
           if (xHandle) {
@@ -2021,6 +2082,24 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // Unique-id: a PROJECT-bound handle is the brand/protocol account. Display
   // name never binds a person. Founder facts describe some OTHER handle.
   const projectBound = projectOrientationBound(evidence);
+  // An individual human: the account is bridged to a person (identity binding
+  // or a licensed resolved name, both of which only ever attach to people) or
+  // the orientation model read it as a person. Deliberately NOT gated on
+  // isOrganizationAccount, which reads the CURRENT roles and would let an
+  // earlier wrong PROJECT refresh disable this guard forever. A famous
+  // founder's bio is full of product vocabulary about the companies they lead
+  // ("exchange", "platform", "our mission"), and that vocabulary must classify
+  // the VENTURE, never turn the person into a PROJECT: CZ was scored as a
+  // company because "exchange" outscored "CEO" and the weakest-lens rule then
+  // let the thin company read govern (PA-14D1862DDA8E49EF86B0). Unique-id
+  // binds (a PROJECT-bound orientation, a canonical token on the exact handle
+  // with no resolved person name, a bio-declared labelled contract) still
+  // route PROJECT below: those prove the handle IS the brand, which
+  // vocabulary never does.
+  const individualHuman =
+    Boolean(evidence.profile.identity_binding)
+    || Boolean(evidence.profile.resolved_name?.trim())
+    || (evidence.subjectOrientation?.kind === "FOUNDER" && orientationHandleBound(evidence));
   // A canonical token can bind the audited handle to the project even when
   // the orientation model mistakes a project bio that names a developer for
   // that developer's personal account. The exact official-X match is a
@@ -2029,7 +2108,8 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   const canonicalTokenProjectBound = evidence.projectToken?.verified === true
     && Boolean(evidence.projectToken.officialX)
     && handlesMatch(evidence.projectToken.officialX ?? "", evidence.profile.handle)
-    && !evidence.profile.resolved_name?.trim();
+    && !evidence.profile.resolved_name?.trim()
+    && subjectAdoptsCanonicalToken(evidence);
   // The bio is the first-party self-description, but an empty bio is not an
   // absent subject: the account's own posts are the same kind of evidence from
   // the same provider, so they classify when the bio says nothing.
@@ -2046,13 +2126,14 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     // Strict margin required: on a PROJECT/INVESTOR tie the fund lens keeps
     // governing, so a real fund with product-ish vocabulary never flips.
     bioPrimaryProjectVerified = projectProfileVerified
+      && !individualHuman
       && classification.subject_class === SubjectClass.PROJECT
       && classification.scores[SubjectClass.PROJECT] > classification.scores[SubjectClass.INVESTOR];
     profileRoles.forEach((role) => {
       // classifySubject(bio) founder/CEO/"building" language describes a person.
       // It must not put FOUNDER methodology on a PROJECT-bound brand handle.
       if (role === SubjectClass.FOUNDER && projectBound) return;
-      if (role !== SubjectClass.PROJECT || projectProfileVerified) roles.add(role);
+      if (role !== SubjectClass.PROJECT || (projectProfileVerified && !individualHuman)) roles.add(role);
     });
     // A verified brand profile can mention the community it serves without
     // becoming one person inside that community. Once PROJECT is the primary
@@ -2132,6 +2213,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     // website never becomes a PROJECT methodology by accident.
     if (
       fact.predicate === "official_identity"
+      && !individualHuman
       && verifiedOfficialProjectIdentity(evidence, [fact]) !== null
     ) {
       roles.add(SubjectClass.PROJECT);
@@ -2140,7 +2222,14 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
     roles.add(SubjectClass.AGENCY);
   }
-  if (evidence.projectToken?.verified === true) {
+  // A verified project token routes PROJECT for a brand account, but never for
+  // an individual human: anyone can launch a "$CZ" on a memepad and point its
+  // declared socials at the real person's profile, and that token has nothing
+  // to do with them unless their OWN account endorsed it. A person's real
+  // token relationship (CZ and BNB) flows through their verified ventures
+  // (ventureToken), which binds through the venture's identity, not the
+  // person's celebrity.
+  if (evidence.projectToken?.verified === true && !individualHuman) {
     roles.add(SubjectClass.PROJECT);
   }
   // A fund's brand account can use project-like language, but its governing
@@ -2166,6 +2255,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // subject is unroutable and publishes as an empty INCOMPLETE shell with no
   // methodology at all, which helps no one deciding on the subject.
   if (roles.size === 0
+    && !individualHuman
     && evidence.profile.profile_collection_state === "resolved"
     && evidence.profile.profile_provider === "twitterapi"
     && canonicalOfficialWebsite(evidence.profile.website) !== null
@@ -2200,6 +2290,49 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     if (other.length === 0) roles.add(SubjectClass.PROJECT);
   }
   return [...roles];
+}
+
+/**
+ * Does the SUBJECT claim this token, rather than merely being claimed by it?
+ *
+ * A registry row is written by whoever listed the coin. Letting it alone
+ * delete FOUNDER and install PROJECT meant a person who appeared in a namesake
+ * coin's registry links became that coin's project account (#359). The
+ * DexScreener fallback already refuses a candidate on exactly this ground, so
+ * this applies the same reciprocity test to the registry path.
+ *
+ * Two surfaces satisfy it, both first-party:
+ *  - "official_domain": the registry homepage sat on a domain the subject's
+ *    own provider-frozen profile declares, so the subject published the link.
+ *  - the exact contract appears in the subject's own bio or own posts.
+ *
+ * An official-X match is deliberately NOT enough on its own: that is the token
+ * naming the account, which is the direction of the attack.
+ */
+function subjectAdoptsCanonicalToken(evidence: CollectedEvidence): boolean {
+  const token = evidence.projectToken;
+  if (!token?.verified) return false;
+  if (token.verification === "official_domain") return true;
+  const ownText = `${evidence.profile.bio ?? ""}\n${evidence.profile.self_post_sample ?? ""}`;
+  const address = (token.address ?? "").trim();
+  if (address) {
+    const adoptsAddress = address.startsWith("0x")
+      ? ownText.toLowerCase().includes(address.toLowerCase())
+      : ownText.includes(address);
+    if (adoptsAddress) return true;
+  }
+  // The account's own text claiming the ticker is the other direction of the
+  // same bind: the registry names this account as the token's, and the account
+  // names the token as its own ("official account for $SUPERGEMMA"). Require
+  // the conventional $TICKER form, or a distinctive bare symbol, so a common
+  // word in a bio cannot adopt a token by coincidence.
+  const symbol = (token.symbol ?? "").trim();
+  if (symbol && /^[A-Za-z0-9]{2,15}$/.test(symbol)) {
+    const escaped = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`\\$${escaped}\\b`, "i").test(ownText)) return true;
+    if (symbol.length >= 4 && new RegExp(`\\b${escaped}\\b`, "i").test(ownText)) return true;
+  }
+  return false;
 }
 
 const LEGAL_ENTITY_LANGUAGE = /\b(?:incorporated|corporation|company|limited|llc|l\.l\.c\.?|ltd\.?|inc\.?|plc|llp|l\.p\.?|gmbh|s\.a\.?|foundation|association|registered)\b/i;
@@ -2254,17 +2387,9 @@ export function strictOrganizationLegalEntity(
  * roster. The search model only suggests candidates; every row admitted here
  * already passed an independent page fetch plus exact excerpt verification.
  */
-const isRetainedSourceFact = (fact: BasicFact): boolean =>
-  fact.artifact_verified === true
-  && (fact.status === "verified" || fact.status === "corroborated");
-
-// A provider projection or ceiling-only record is useful investigator context,
-// but it is deliberately ineligible to become ARGUS verification. Keep this
-// predicate shared by every project check that publishes the word "verified".
-const isStrictlyVerifiedFact = (fact: BasicFact): boolean =>
-  isRetainedSourceFact(fact)
-  && fact.providerProjection !== true
-  && fact.floorEligible !== false;
+// isRetainedSourceFact / isStrictlyVerifiedFact now live in
+// src/lib/evidenceTier.ts so the scoring bands, this check writer, the person
+// roster and the key-facts panel cannot drift apart again (#472, ARGUS-04/09).
 
 const sameOfficialDomain = (candidateUrl: string | undefined, officialWebsite: string | undefined): boolean => {
   const expected = canonicalOfficialWebsite(officialWebsite)?.domain;
@@ -2290,15 +2415,12 @@ export function projectCompanyEnrichmentSections(
   evidence: Pick<CollectedEvidence, "projectToken" | "protocolFunding" | "profile" | "webTeam" | "basicFacts">,
 ): EnrichmentSection[] {
   const sections: EnrichmentSection[] = [];
-  const canonicalGeckoId = evidence.projectToken?.verified === true
-    ? evidence.projectToken.coingeckoId?.trim().toLowerCase()
-    : undefined;
-  const protocolGeckoId = evidence.protocolFunding?.geckoId?.trim().toLowerCase();
+  // Identity-bound indexed funding (CoinGecko-id join, or the tokenless
+  // official-identity join) with real rounds already answers the financing
+  // question; buying the licensed funding section again would be a duplicate.
   const hasEquivalentFunding = Boolean(
-    canonicalGeckoId
-    && protocolGeckoId
-    && canonicalGeckoId === protocolGeckoId
-    && evidence.protocolFunding?.rounds.length,
+    evidence.protocolFunding?.rounds.length
+    && indexedProtocolRecordMatch(evidence, evidence.protocolFunding),
   );
   if (!hasEquivalentFunding) sections.push("funding_detail");
 
@@ -2831,7 +2953,12 @@ export function collectFounderDecisionQuestionOutcomes(ctx: CollectContext): voi
   }
 }
 
-const PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
+// Covers both the human role words (advisor/backer/investor) and the
+// LinkedOrgRole vocabulary the deterministic twitterapi org path emits
+// ("backed-by" / "vc" / "fund" / "incubator"): a first-party "backed by @X"
+// post produced a verified backer row whose role never matched this regex, so
+// it silently didn't count toward the backing check.
+const PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor|backed-by|vc|fund|incubator)\b/i;
 const PROJECT_BACKING_PROVIDERS = new Set(["team-page", "twitterapi"]);
 const PROJECT_TRANSPARENCY_FACT_PREDICATES = new Set([
   "legal_entity",
@@ -3055,11 +3182,6 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
     .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")))
     .slice(0, 5)) {
     const sourceDate = incident.date ?? protocol.capturedAt;
-    const duplicate = evidence.findings.some((finding) =>
-      finding.finding_type === "ProtocolSecurityIncident"
-      && finding.source_url === protocol.sourceUrl
-      && finding.source_date === sourceDate);
-    if (duplicate) continue;
     const amount = incident.amountUsd ? `$${(incident.amountUsd / 1_000_000).toFixed(incident.amountUsd % 1_000_000 === 0 ? 0 : 1)}M` : "an unquantified";
     const classification = incident.classification ? `${incident.classification.toLowerCase()} ` : "";
     const technique = incident.technique ? ` Technique recorded: ${incident.technique}.` : "";
@@ -3074,9 +3196,20 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
         || incident.amountUsd == null
         || incident.returnedAmountUsd >= incident.amountUsd
       );
+    const claim = `DeFiLlama records ${amount} ${classification}security incident affecting ${protocol.name}${incident.date ? ` on ${incident.date}` : ""}.${technique}${recovery} This is evidence of protocol security and control failure, not by itself evidence of fraud or intentional misconduct.`;
+    // Every incident of a protocol shares the page URL, and undated rows share
+    // the capture date, so keying on those collapsed distinct exploits into
+    // one finding. The claim is built from the incident row itself (date,
+    // amount, classification, technique, recovery), so equal claims are the
+    // same incident and different incidents never collide.
+    const duplicate = evidence.findings.some((finding) =>
+      finding.finding_type === "ProtocolSecurityIncident"
+      && finding.source_url === protocol.sourceUrl
+      && finding.claim === claim);
+    if (duplicate) continue;
     evidence.findings.push({
       finding_type: "ProtocolSecurityIncident",
-      claim: `DeFiLlama records ${amount} ${classification}security incident affecting ${protocol.name}${incident.date ? ` on ${incident.date}` : ""}.${technique}${recovery} This is evidence of protocol security and control failure, not by itself evidence of fraud or intentional misconduct.`,
+      claim,
       source_url: protocol.sourceUrl,
       source_date: sourceDate,
       source_author: "defillama",
@@ -3106,19 +3239,465 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
   return recorded;
 }
 
+/**
+ * Free protocol evidence for a TOKENLESS project. The cold-intake enrichment
+ * only runs behind a verified canonical token, so a pre-token protocol (the
+ * Ammalgam shape: $3.25M across two raises sitting in DeFiLlama's curated
+ * record) published "no funding found" while its rounds, lead investors, and
+ * TVL were one free keyless GET away. Binding is by exact official identity:
+ * the protocol document's own X handle / official site must match the audited
+ * subject's provider-resolved handle / official domain.
+ */
+async function collectTokenlessProtocolEvidence(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.projectToken?.verified) return;
+  const displayName = evidence.profile.display_name || ctx.handle.replace(/^@/, "");
+  const protocolLookupName = defiLlamaLookupName(displayName);
+  const protocolSlug = await resolveDefiLlamaSlug(defiLlamaSlugCandidates(
+    displayName,
+    evidence.profile.website,
+    ctx.handle,
+  )) ?? undefined;
+  const [fundingOutcome, tvlOutcome] = await Promise.all([
+    evidence.protocolFunding ? Promise.resolve(null) : collectProtocolFunding(protocolLookupName, { slug: protocolSlug }),
+    evidence.protocolTvl ? Promise.resolve(null) : collectProtocolTvl(protocolLookupName, { slug: protocolSlug }),
+  ]);
+  if (
+    fundingOutcome?.available
+    && protocolRecordMatchesOfficialIdentity(fundingOutcome.value, ctx.handle, evidence.profile)
+  ) {
+    evidence.protocolFunding = { ...fundingOutcome.value };
+    const rounds = fundingOutcome.value.rounds;
+    const leads = fundingOutcome.value.leadInvestors;
+    ctx.emit({
+      phase: "Token",
+      label: `Protocol financing indexed · ${rounds.length} round${rounds.length === 1 ? "" : "s"}`,
+      detail: `DeFiLlama's curated record for "${fundingOutcome.value.name}" is identity-bound to this account by its own X handle/site (no token required)${leads.length ? `; led by ${leads.slice(0, 3).join(", ")}` : ""}.`,
+      source: "defillama",
+      tone: "good",
+    });
+  }
+  if (
+    tvlOutcome?.available
+    && protocolRecordMatchesOfficialIdentity(tvlOutcome.value, ctx.handle, evidence.profile)
+  ) {
+    evidence.protocolTvl = { ...tvlOutcome.value };
+    const incidentCount = recordProtocolSecurityIncidentFindings(evidence);
+    if (incidentCount > 0) {
+      ctx.emit({
+        phase: "Token",
+        label: `${incidentCount} protocol security incident${incidentCount === 1 ? "" : "s"} recorded`,
+        detail: "Frozen as verified counter-evidence alongside the identity-bound protocol record.",
+        source: "defillama",
+        tone: "warn",
+      });
+    }
+  }
+  // Same fallback order as the token path: CryptoRank's index speaks only when
+  // DeFiLlama's record left funding unanswered, bound here by the record's own
+  // official X handle / official domain (no token exists to join on).
+  await collectCryptoRankFundingEvidence(ctx);
+  // Independent audits are not a token property: a tokenless protocol still
+  // publishes its audit history (Ammalgam lists its audits and bug bounty on
+  // docs.ammalgam.xyz/docs/security, and the lane never ran because it lived
+  // inside the verified-token block). Same wall-clock box, no contract anchor.
+  if (!evidence.securityAudits) {
+    const officialWebsite = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+    if (officialWebsite) {
+      const auditLinks = await collectProtocolAuditLinks(protocolLookupName, { slug: protocolSlug });
+      const auditsResult = await withWallClockBox(
+        (fetcher) => collectSecurityAudits(
+          displayName,
+          officialWebsite,
+          auditLinks.available ? auditLinks.value.auditLinks : [],
+          { fetcher },
+        ),
+        SECURITY_AUDITS_BUDGET_MS,
+      );
+      if (auditsResult?.available) {
+        evidence.securityAudits = {
+          securityPageUrl: auditsResult.securityPageUrl,
+          selfAttested: auditsResult.selfAttested,
+          attestations: auditsResult.attestations.map((attestation) => ({ ...attestation })),
+          corroborated: auditsResult.corroborated.map((entry) => ({
+            ...entry,
+            matchedIdentityAnchor: { ...entry.matchedIdentityAnchor },
+          })),
+          capturedAt: auditsResult.capturedAt,
+        };
+        ctx.emit({
+          phase: "Token",
+          label: auditsResult.corroborated.length
+            ? `Independent audits confirmed · ${auditsResult.corroborated.map((entry) => entry.auditor).slice(0, 3).join(", ")}`
+            : "Audit leads found · confirmation pending",
+          detail: auditsResult.corroborated.length
+            ? `${auditsResult.corroborated.length} auditor-domain page${auditsResult.corroborated.length === 1 ? "" : "s"} carried explicit audit context plus a canonical identity anchor for ${displayName}; audits apply to the protocol whether or not a token exists.`
+            : `${auditsResult.selfAttested.length} unverified auditor lead${auditsResult.selfAttested.length === 1 ? " came" : "s came"} from bounded first-party disclosures; confirmation is pending.`,
+          source: "security-audits",
+          tone: auditsResult.corroborated.length ? "good" : "neutral",
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Second raises index: CryptoRank (keyed, plan-tiered). Runs only when the
+ * DeFiLlama record produced no identity-bound funding, so one project never
+ * carries two competing round lists. Binding doctrine matches the rest of the
+ * lane: an exact contract-address join to the verified canonical token, or the
+ * record's own official X handle / official domain. Never throws; a missing
+ * key is silence, an outage is a coverage warning, and a plan gate keeps
+ * whatever partial answer the configured plan gave.
+ */
+async function collectCryptoRankFundingEvidence(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.protocolFunding || evidence.cryptoRankFunding || !cryptoRankConfigured()) return;
+  const token = evidence.projectToken?.verified ? evidence.projectToken : undefined;
+  const subjectName = token?.name || evidence.profile.display_name || ctx.handle.replace(/^@/, "");
+  const outcome = await collectCryptoRankFunding({
+    name: subjectName,
+    symbol: token?.symbol ?? null,
+    contractAddress: token?.address ?? null,
+    chain: token?.chain ?? null,
+    matchesOfficialIdentity: (record) =>
+      protocolRecordMatchesOfficialIdentity(record, ctx.handle, evidence.profile),
+  });
+  if (!outcome.available) {
+    if (outcome.reason === "unavailable") {
+      ctx.emit({
+        phase: "Token",
+        label: "CryptoRank funding index unavailable",
+        detail: `${outcome.note} A missing index is a coverage gap for this scan, never evidence that the project is unfunded.`,
+        source: "cryptorank",
+        tone: "warn",
+      });
+    }
+    return;
+  }
+  evidence.cryptoRankFunding = { ...outcome.value };
+  const record = outcome.value;
+  const boundBy = record.binding.method === "canonical_token_address"
+    ? "the verified token's exact contract address"
+    : "its own official X handle/site";
+  if (record.rounds.length) {
+    const leads = [...new Set(record.rounds.flatMap((round) => round.leadInvestors))];
+    ctx.emit({
+      phase: "Token",
+      label: `Funding rounds indexed · ${record.rounds.length} round${record.rounds.length === 1 ? "" : "s"} (CryptoRank)`,
+      detail: `CryptoRank's record for "${record.name}" is identity-bound by ${boundBy}${record.totalRaisedUsd ? `; ${formatUsd(record.totalRaisedUsd)} disclosed` : ""}${leads.length ? `; led by ${leads.slice(0, 3).join(", ")}` : ""}.`,
+      source: "cryptorank",
+      tone: "good",
+    });
+  } else if (record.hasFundingRounds) {
+    const named = record.funds.slice(0, 3).map((fund) => fund.name);
+    ctx.emit({
+      phase: "Token",
+      label: "Funding rounds exist on CryptoRank · round detail not available to this scan",
+      detail: `The identity-bound record (${boundBy}) confirms recorded funding rounds${named.length ? ` and names backers including ${named.join(", ")}` : ""}, but the round-by-round detail sits behind a CryptoRank plan this deployment does not hold. Treat the total raised as unknown here, not zero.`,
+      source: "cryptorank",
+      tone: "neutral",
+    });
+  } else {
+    ctx.emit({
+      phase: "Token",
+      label: "CryptoRank also lists no funding rounds",
+      detail: `The identity-bound record (${boundBy}) carries no funding rounds, corroborating the empty DeFiLlama read rather than contradicting it.`,
+      source: "cryptorank",
+      tone: "neutral",
+    });
+  }
+}
+
+/**
+ * Venue-as-subject: when the audited account's verified official domain IS a
+ * documented launch venue (the "Long on Robinhood" case), freeze that fact
+ * with the venue's registered launch mechanics. A launchpad without a native
+ * token must never be judged on token metrics; what it answers for is what it
+ * does to every token it launches: who holds the liquidity, who gets the
+ * fees. Domain-exact recognition only; brand similarity never binds.
+ */
+function detectLaunchVenueSubject(ctx: CollectContext): void {
+  const evidence = ctx.evidence;
+  if (evidence.launchVenueSubject) return;
+  if (!evidence.roles.includes(SubjectClass.PROJECT) && !isOrganizationAccount(evidence)) return;
+  const officialDomain = canonicalOfficialWebsite(evidence.profile.website)?.domain;
+  if (!officialDomain) return;
+  const venue = launchVenueForOfficialDomain(officialDomain);
+  if (!venue) return;
+  evidence.launchVenueSubject = {
+    venue: venue.name,
+    matchedDomain: venue.matchedDomain,
+    chains: venue.chains,
+    lpDisposition: venue.lpDisposition,
+    lpNote: venue.lpNote,
+    platformPaysCreator: venue.platformPaysCreator,
+    feeNote: venue.feeNote,
+    capturedAt: new Date().toISOString(),
+  };
+  ctx.emit({
+    phase: "Research",
+    label: `Subject recognized as a launch venue · ${venue.name}`,
+    detail: `The verified official domain ${venue.matchedDomain} is the ${venue.name} launchpad. Token metrics do not apply to the venue itself; its launch mechanics (liquidity ${venue.lpDisposition}; ${venue.platformPaysCreator ? "creators are paid ongoing fees" : "no ongoing creator fee stream"}) are frozen with the report, and each launched token carries its own provenance when scanned.`,
+    source: "launch-venues",
+    tone: "neutral",
+  });
+}
+
+/**
+ * Listed-security health: when a scan verified that the subject has a publicly
+ * traded security (the SEC-registry public_security fact), read the stock's
+ * own point-in-time health. This is the doctrine's stock leg — a company whose
+ * applicable instrument is a stock is assessed on the stock, penny stocks
+ * through mega-caps — frozen as score-neutral context exactly like the EVM
+ * control surface. Never throws; a feed outage is a visible coverage note.
+ */
+async function collectListedSecurityHealth(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.stockHealth) return;
+  const listingFact = (evidence.basicFacts ?? []).find((fact) =>
+    fact.predicate === "public_security"
+    && fact.status === "verified"
+    && fact.security);
+  if (!listingFact?.security) return;
+  const outcome = await collectStockHealth({
+    ticker: listingFact.security.ticker,
+    issuer: listingFact.security.issuer,
+    exchange: listingFact.security.exchange,
+    registryFactId: listingFact.factId,
+    registrySourceUrl: listingFact.sources[0]?.url ?? "",
+  });
+  if (!outcome.available) {
+    ctx.emit({
+      phase: "Research",
+      label: outcome.reason === "identity_mismatch"
+        ? "Listed-security health withheld · feed identity disagreed"
+        : outcome.reason === "unavailable"
+          ? "Listed-security health unavailable"
+          : "Listed-security health · no market-feed record",
+      detail: `${outcome.note} The verified listing itself stands; only the market-health read is affected.`,
+      source: "market-feed",
+      tone: outcome.reason === "no_data" ? "neutral" : "warn",
+    });
+    return;
+  }
+  evidence.stockHealth = { ...outcome.value };
+  const value = outcome.value;
+  const position = value.fiftyTwoWeekPositionPct !== null ? `${value.fiftyTwoWeekPositionPct}% of its 52-week range` : "an unbounded 52-week range";
+  const yearMove = value.change1yPct !== null ? `${value.change1yPct > 0 ? "up" : "down"} ${Math.abs(value.change1yPct)}% over the year` : "with under a year of history";
+  ctx.emit({
+    phase: "Research",
+    label: `Listed-security health captured · ${value.ticker}${value.pennyStock ? " · penny-stock range" : ""}`,
+    detail: `${value.issuer} trades at ${value.price} ${value.currency ?? ""} on ${value.exchange ?? "an unconfirmed venue"}, at ${position}, ${yearMove}. Frozen as score-neutral context.`,
+    source: "market-feed",
+    tone: "neutral",
+  });
+}
+
+/**
+ * Tokenized-stock pairing: a verified token can carry stock exposure two ways.
+ * It can BE a tokenized stock (xStocks, Dinari, Backed, native stock-token
+ * chains), or its price-corroborated pool can QUOTE in one (StonkBroker-class
+ * venues pair tokens against stocks, penny stocks included). Either way the
+ * doctrine wants the underlying stock's health in the assessment, so this
+ * resolves the underlying through the fail-closed tokenized-stock binding and
+ * freezes it score-neutral. Never throws.
+ */
+async function collectTokenizedStockExposure(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  const token = evidence.projectToken;
+  if (!token?.verified || evidence.tokenizedStockPairing) return;
+  const sides: Array<{ exposure: "token_is_tokenized_stock" | "quote_is_tokenized_stock"; side: { symbol: string; name: string | null; chain: string | null } }> = [
+    { exposure: "token_is_tokenized_stock", side: { symbol: token.symbol, name: token.name, chain: token.chain } },
+    ...(token.pairQuoteSymbol
+      ? [{
+          exposure: "quote_is_tokenized_stock" as const,
+          side: { symbol: token.pairQuoteSymbol, name: token.pairQuoteName ?? null, chain: token.chain },
+        }]
+      : []),
+  ];
+  for (const { exposure, side } of sides) {
+    const resolution = await resolveTokenizedStockUnderlying(side);
+    if (!resolution.resolved) {
+      if (resolution.reason === "not_tokenized_stock") continue;
+      ctx.emit({
+        phase: "Token",
+        label: resolution.reason === "identity_mismatch"
+          ? "Tokenized-stock exposure withheld · underlying identity disagreed"
+          : resolution.reason === "unavailable"
+            ? "Tokenized-stock exposure check unavailable"
+            : "Tokenized-stock exposure · no listed underlying",
+        detail: resolution.note,
+        source: "market-feed",
+        tone: resolution.reason === "unavailable" || resolution.reason === "identity_mismatch" ? "warn" : "neutral",
+      });
+      continue;
+    }
+    evidence.tokenizedStockPairing = tokenizedStockPairingSnapshot(exposure, side, resolution);
+    const underlying = evidence.tokenizedStockPairing.underlying;
+    ctx.emit({
+      phase: "Token",
+      label: exposure === "token_is_tokenized_stock"
+        ? `Token is a tokenized stock · underlying ${underlying.ticker}${underlying.pennyStock ? " (penny-stock range)" : ""}`
+        : `Pool quotes in a tokenized stock · underlying ${underlying.ticker}${underlying.pennyStock ? " (penny-stock range)" : ""}`,
+      detail: `${resolution.basis[0] ?? ""} The stock's health is frozen with the report as score-neutral context.`,
+      source: "market-feed",
+      tone: "neutral",
+    });
+    return;
+  }
+}
+
+/**
+ * Company-registry pass: real registries answer the legal-entity questions for
+ * every company subject, crypto or not. The SEC EDGAR record joins by the CIK
+ * the verified public_security fact already carries; Companies House and
+ * OpenCorporates join by registration numbers the subject's OWN bound official
+ * site declares. Names never join a registry record. Never throws; keyed
+ * registries without keys stay silent here and visible on /api/health.
+ */
+async function collectCompanyRegistryEvidence(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.companyRegistry) return;
+  if (!evidence.roles.includes(SubjectClass.PROJECT) && !isOrganizationAccount(evidence)) return;
+
+  const snapshot: NonNullable<CollectedEvidence["companyRegistry"]> = {
+    siteDeclaredRegistrations: [],
+    capturedAt: new Date().toISOString(),
+  };
+
+  const listingFact = (evidence.basicFacts ?? []).find((fact) =>
+    fact.predicate === "public_security" && fact.status === "verified" && fact.security);
+  if (listingFact?.security) {
+    const outcome = await collectSecRegistrant(listingFact.security.cik);
+    if (outcome.available) {
+      const officialDomain = canonicalOfficialWebsite(evidence.profile.website)?.domain ?? null;
+      const registrantDomain = outcome.value.registrantWebsite
+        ? canonicalOfficialWebsite(outcome.value.registrantWebsite)?.domain ?? null
+        : null;
+      snapshot.sec = {
+        ...outcome.value,
+        websiteAgreesWithOfficialDomain: officialDomain && registrantDomain
+          ? officialDomain === registrantDomain
+          : null,
+      };
+      ctx.emit({
+        phase: "Research",
+        label: `SEC registrant record joined · CIK ${outcome.value.cik}`,
+        detail: `${outcome.value.entityName}${outcome.value.stateOfIncorporation ? ` · incorporated in ${outcome.value.stateOfIncorporation}` : ""}${outcome.value.lastAnnualReportAt ? ` · latest annual report ${outcome.value.lastAnnualReportAt}` : ""}${snapshot.sec.websiteAgreesWithOfficialDomain === false ? " · NOTE: the registrant's declared website is a different domain than the subject's official site" : ""}.`,
+        source: "sec-edgar",
+        tone: snapshot.sec.websiteAgreesWithOfficialDomain === false ? "warn" : "neutral",
+      });
+    } else if (outcome.reason === "unavailable") {
+      ctx.emit({
+        phase: "Research",
+        label: "SEC registrant record unavailable",
+        detail: `${outcome.note} The verified listing itself stands.`,
+        source: "sec-edgar",
+        tone: "warn",
+      });
+    }
+  }
+
+  const officialWebsite = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+  if (officialWebsite) {
+    snapshot.siteDeclaredRegistrations = await collectSiteDeclaredRegistrations(officialWebsite);
+    for (const declared of snapshot.siteDeclaredRegistrations.slice(0, 2)) {
+      if (declared.jurisdiction === "gb" && companiesHouseConfigured() && !snapshot.companiesHouse) {
+        const record = await collectCompaniesHouseRecord(declared.number);
+        if (record.available) {
+          snapshot.companiesHouse = { ...record.value, declaredOn: declared.sourceUrl };
+          ctx.emit({
+            phase: "Research",
+            label: `Companies House record joined · No. ${record.value.companyNumber}`,
+            detail: `${record.value.companyName}${record.value.status ? ` · ${record.value.status}` : ""}${record.value.incorporatedOn ? ` · incorporated ${record.value.incorporatedOn}` : ""} · joined by the number the official site itself declares.`,
+            source: "companies-house",
+            tone: record.value.status && record.value.status !== "active" ? "warn" : "neutral",
+          });
+        } else if (record.reason !== "not_configured") {
+          ctx.emit({
+            phase: "Research",
+            label: record.reason === "no_data"
+              ? `Companies House has no record for site-declared No. ${declared.number}`
+              : "Companies House unavailable",
+            detail: `${record.note} The site's own declaration is frozen either way.`,
+            source: "companies-house",
+            tone: record.reason === "no_data" ? "warn" : "neutral",
+          });
+        }
+      } else if (declared.jurisdiction && openCorporatesConfigured() && !snapshot.companiesHouse && !snapshot.openCorporates) {
+        const record = await collectOpenCorporatesRecord(declared.jurisdiction, declared.number);
+        if (record.available) {
+          snapshot.openCorporates = { ...record.value, declaredOn: declared.sourceUrl };
+          ctx.emit({
+            phase: "Research",
+            label: `OpenCorporates record joined · ${record.value.jurisdiction.toUpperCase()} ${record.value.companyNumber}`,
+            detail: `${record.value.companyName}${record.value.status ? ` · ${record.value.status}` : ""} · joined by the number the official site itself declares.`,
+            source: "opencorporates",
+            tone: "neutral",
+          });
+        }
+      }
+    }
+    if (snapshot.siteDeclaredRegistrations.length && !snapshot.companiesHouse && !snapshot.openCorporates
+      && !companiesHouseConfigured() && !openCorporatesConfigured()) {
+      ctx.emit({
+        phase: "Research",
+        label: "Registration number found · no registry key configured",
+        detail: `The official site declares registration number${snapshot.siteDeclaredRegistrations.length === 1 ? "" : "s"} ${snapshot.siteDeclaredRegistrations.map((entry) => entry.number).join(", ")}, but neither Companies House nor OpenCorporates keys are configured, so the registry record was not read.`,
+        source: "site fetch",
+        tone: "neutral",
+      });
+    }
+  }
+
+  if (snapshot.sec || snapshot.companiesHouse || snapshot.openCorporates || snapshot.siteDeclaredRegistrations.length) {
+    evidence.companyRegistry = snapshot;
+  }
+}
+
+/**
+ * The subject's own backer wall: a "Backed by ..." section on the bound
+ * official site is the project's self-published investor list. It renders
+ * with its provenance and feeds P4 as reported evidence (never a floor), and
+ * it exists whether or not any aggregator indexed the round.
+ */
+async function collectSiteBackersEvidence(ctx: CollectContext): Promise<void> {
+  const evidence = ctx.evidence;
+  if (evidence.siteBackers) return;
+  if (!evidence.roles.includes(SubjectClass.PROJECT) && !isOrganizationAccount(evidence)) return;
+  const officialWebsite = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+  if (!officialWebsite) return;
+  const outcome = await collectSiteBackers(officialWebsite);
+  if (!outcome.available || !outcome.value) return;
+  evidence.siteBackers = { ...outcome.value, names: [...outcome.value.names] };
+  ctx.emit({
+    phase: "Research",
+    label: `Self-published backers found · ${outcome.value.names.length} name${outcome.value.names.length === 1 ? "" : "s"}`,
+    detail: `The official site's "${outcome.value.heading}" section names ${outcome.value.names.slice(0, 5).join(", ")}${outcome.value.names.length > 5 ? " and more" : ""}. Self-published by the subject; recorded with that provenance and never treated as independent confirmation.`,
+    source: "site fetch",
+    tone: "neutral",
+  });
+}
+
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
   const protocolLookupName = defiLlamaLookupName(token.name);
+  const protocolSlug = await resolveDefiLlamaSlug(defiLlamaSlugCandidates(
+    token.name,
+    token.homepage ?? ctx.evidence.profile.website,
+    ctx.handle,
+  )) ?? undefined;
   // A project whose canonical token is recovered late should get the same free
   // protocol evidence as a token resolved during cold intake. Fetch funding in
   // parallel with TVL: an exact CoinGecko-id join can answer financing without
   // paying Monid for a duplicate funding section.
   const [outcome, fundingOutcome] = await Promise.all([
-    collectProtocolTvl(protocolLookupName),
+    collectProtocolTvl(protocolLookupName, { slug: protocolSlug }),
     ctx.evidence.protocolFunding
       ? Promise.resolve(null)
-      : collectProtocolFunding(protocolLookupName),
+      : collectProtocolFunding(protocolLookupName, { slug: protocolSlug }),
   ]);
   if (
     fundingOutcome?.available
@@ -3742,6 +4321,58 @@ interface RunAuditOptions {
   tokenAddress?: string;
   tokenChain?: string;
   tokenSymbol?: string;
+  /**
+   * The request asked for a private run: nothing durable and org-visible may
+   * be left behind. Persistence of the report is the route's decision; this
+   * flag governs the collector's own write-backs (entity knowledge base).
+   */
+  privateRun?: boolean;
+}
+
+/**
+ * Adapters an authorized gap-investigation scope may run, keyed by the
+ * delegate names a frozen research plan carries. An adapter missing from this
+ * map can never run under a scope, so every registered adapter must appear.
+ */
+export const ADAPTER_DELEGATES: Readonly<Record<string, readonly string[]>> = {
+  x: ["x-profile", "twitterapi", "official-x"],
+  github: ["github"],
+  peopledatalabs: ["peopledatalabs"],
+  "offchain-diligence": ["official-domain", "public-web", "independent-web", "adverse-search", "courtlistener", "opensanctions"],
+  dexscreener: ["dexscreener"],
+  coingecko: ["coingecko"],
+  // FomoScan is the wallet-graph lane that can ADD an attributed wallet, so a
+  // wallet-graph or x-profile scope may re-run it.
+  fomoscan: ["wallet-graph", "x-profile", "fomoscan"],
+  onchain: ["direct-chain-rpc", "wallet-graph"],
+  // Arkham had no entry, so a wallet-graph or person scope never re-collected
+  // deployer attribution or exposure and the row read "outside the frozen
+  // gap-investigation authorization" for work the analyst had authorized.
+  arkham: ["wallet-graph", "arkham"],
+  "basic-facts": ["basic-facts"],
+};
+
+/**
+ * Capabilities the cold intake wave serves (team and claim discovery, handle
+ * and wallet identity, affiliations, orientation, product and site
+ * discovery). A scoped follow-up authorized for none of them (an
+ * official-facts, token, fund-scale or legal-only re-run) gets its profile
+ * resolved and goes straight to the authorized adapters instead of re-buying
+ * the whole unscoped intake first and exhausting the collection window on it.
+ */
+export const COLD_INTAKE_CAPABILITIES: readonly ResearchCapability[] = [
+  "role_resolution",
+  "identity_resolution",
+  "people_and_control",
+  "project_fundamentals",
+  "portfolio_and_outcomes",
+  "network_connections",
+  "counter_evidence",
+];
+
+export function coldIntakeAuthorized(scope: RunAuditOptions["authorizedResearchScope"] | undefined): boolean {
+  if (!scope) return true;
+  return scope.capabilities.some((capability) => COLD_INTAKE_CAPABILITIES.includes(capability));
 }
 
 /**
@@ -3777,11 +4408,31 @@ export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Em
     if (!name) continue;
     const existing = webTeam.find((member) => norm(member.name) === norm(name));
     if (existing) {
+      // The display name is the only thing Monid and the existing row share.
+      // A name match corroborates the person's role, title and LinkedIn; it
+      // never verifies an X handle, GitHub, or developer profile the model
+      // guessed for that name. Those survive only when the identity link was
+      // already deterministic before this merge (first-party bound), so a
+      // verified row can never carry a model-lead handle into the trust graph.
+      const identityAlreadyDeterministic = existing.identity_link_evidence_origin === "deterministic"
+        || existing.handleProvenance === "subject_first_party";
+      if (!identityAlreadyDeterministic) {
+        delete existing.handle;
+        delete existing.github;
+        delete existing.developerProfiles;
+        delete existing.avatarUrl;
+        delete existing.linkedin;
+      }
+      // With model-guessed links stripped, Monid's LinkedIn is the row's only
+      // identity link, so it may carry the deterministic origin on its own.
       if (!existing.linkedin && person.linkedin) {
         existing.linkedin = person.linkedin;
         existing.identity_link_evidence_origin = "deterministic";
       }
       if ((!existing.role || /^team$/i.test(existing.role)) && person.title) existing.role = person.title;
+      if (!existing.evidence && person.priorCompanies?.length) {
+        existing.evidence = `prior: ${person.priorCompanies.slice(0, 3).join(", ")}`;
+      }
       if (existing.artifact_verified !== true) {
         existing.evidence_origin = "deterministic";
         existing.artifact_verified = true;
@@ -3816,7 +4467,20 @@ export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Em
   }
 }
 
-async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
+/**
+ * X handles are case-insensitive. Every provider cache key downstream is
+ * built from the handle as given, so an embedded project-account audit
+ * (`@Uniswap` from a registry record) and a direct audit (`uniswap`) used to
+ * buy every intake search twice. Normalize exactly once, at the entry.
+ */
+export function normalizeAuditHandle(rawHandle: string): string {
+  const trimmed = rawHandle.trim();
+  const bare = trimmed.replace(/^@/, "");
+  return /^[A-Za-z0-9_]{1,30}$/.test(bare) ? bare.toLowerCase() : trimmed;
+}
+
+async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
+  const rawHandle = normalizeAuditHandle(inputHandle);
   const runtimeStartedAt = Date.now();
   const authorizedCapabilities = options?.authorizedResearchScope?.capabilities;
   const authorizedCapabilitySet = authorizedCapabilities ? new Set(authorizedCapabilities) : null;
@@ -3825,18 +4489,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const authorizedDelegates = options?.authorizedResearchScope
     ? new Set(options.authorizedResearchScope.delegates)
     : null;
-  const adapterDelegates: Record<string, readonly string[]> = {
-    x: ["x-profile", "twitterapi", "official-x"],
-    github: ["github"],
-    peopledatalabs: ["peopledatalabs"],
-    "offchain-diligence": ["official-domain", "public-web", "independent-web", "adverse-search", "courtlistener", "opensanctions"],
-    dexscreener: ["dexscreener"],
-    coingecko: ["coingecko"],
-    onchain: ["direct-chain-rpc", "wallet-graph"],
-    "basic-facts": ["basic-facts"],
-  };
   const adapterIsAuthorized = (adapter: Adapter): boolean => !authorizedDelegates
-    || (adapterDelegates[adapter.id] ?? []).some((delegate) => authorizedDelegates.has(delegate));
+    || (ADAPTER_DELEGATES[adapter.id] ?? []).some((delegate) => authorizedDelegates.has(delegate));
   // The DeFiLlama reader coalesces reads of the same URL for a short window so
   // one protocol document is not pulled three times per scan. That window is
   // already far shorter than a scan, but a warm serverless container can start
@@ -3845,6 +4499,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   resetDefiLlamaScanMemo();
   // Same boundary, same reason: the follow answers belong to one subject's scan.
   resetFollowScanMemo();
+  // And the reverse-bio team discovery: a warm container must never replay a
+  // previous scan's (possibly outage-empty or since-edited) bio reads as this
+  // scan's evidence, for this tenant or another.
+  resetReverseBioMemo();
   // Single source of truth for the analyst start-by deadline (the route passes
   // it; fall back to the same formula for direct/test callers). Collection must
   // stop launching new provider work COLLECTION_ANALYST_RESERVE_MS before it, so
@@ -4153,11 +4811,18 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     if (evidence.projectToken?.verified && capabilityIsAuthorized("token_and_market", "project_fundamentals")) {
       const projectName = evidence.projectToken.name;
       const protocolLookupName = defiLlamaLookupName(projectName);
+      // Discovery by identity surfaces, not display-name guessing: the domain
+      // label and handle resolve the slug when the name is decorated.
+      const protocolSlug = await resolveDefiLlamaSlug(defiLlamaSlugCandidates(
+        projectName,
+        evidence.projectToken.homepage ?? evidence.profile.website,
+        ctx.handle,
+      )) ?? undefined;
       try {
         const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome] = await Promise.all([
-          collectProtocolTvl(protocolLookupName),
-          collectProtocolFunding(protocolLookupName),
-          collectProtocolFees(protocolLookupName),
+          collectProtocolTvl(protocolLookupName, { slug: protocolSlug }),
+          collectProtocolFunding(protocolLookupName, { slug: protocolSlug }),
+          collectProtocolFees(protocolLookupName, { slug: protocolSlug }),
           // Float control (free, keyless): who holds the supply, is the LP
           // locked. Answers the reader's dump/rug question for project tokens.
           evidence.projectToken.address
@@ -4168,20 +4833,28 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           evidence.holderProfile = { ...holdersOutcome.value, capturedAt: holdersOutcome.value.sourceCapturedAt };
         }
         const canonicalGeckoId = evidence.projectToken.coingeckoId;
-        const tvlIdentityMatched = canonicalGeckoId !== undefined
-          && tvlOutcome.available
-          && protocolRecordMatchesCanonicalToken(tvlOutcome.value.geckoId, canonicalGeckoId);
-        const fundingIdentityMatched = canonicalGeckoId !== undefined
-          && fundingOutcome.available
-          && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, canonicalGeckoId);
+        // Identity join: the exact CoinGecko id of the verified canonical
+        // token, or (when the protocol document carries no gecko id, the
+        // tokenless-protocol shape) the document's own X handle / official
+        // domain matching the audited subject's provider-resolved identity.
+        const tvlIdentityMatched = tvlOutcome.available && (
+          (canonicalGeckoId !== undefined
+            && protocolRecordMatchesCanonicalToken(tvlOutcome.value.geckoId, canonicalGeckoId))
+          || protocolRecordMatchesOfficialIdentity(tvlOutcome.value, evidence.profile.handle, evidence.profile)
+        );
+        const fundingIdentityMatched = fundingOutcome.available && (
+          (canonicalGeckoId !== undefined
+            && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, canonicalGeckoId))
+          || protocolRecordMatchesOfficialIdentity(fundingOutcome.value, evidence.profile.handle, evidence.profile)
+        );
         // Slug similarity is discovery, not identity. A protocol document can
         // only lend TVL, fees, or funding to the audited project when its own
         // CoinGecko id joins the already verified canonical token.
-        if (feesOutcome.available && (tvlIdentityMatched || fundingIdentityMatched)) {
+        if (canonicalGeckoId !== undefined && feesOutcome.available && (tvlIdentityMatched || fundingIdentityMatched)) {
           evidence.protocolFees = {
             ...feesOutcome.value,
             binding: {
-              canonicalGeckoId: canonicalGeckoId!,
+              canonicalGeckoId,
               protocolSlug: feesOutcome.value.slug,
               method: "matched_protocol_gecko_id",
             },
@@ -4221,12 +4894,17 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
             tone: "warn",
           });
         }
+        // Second raises index: CryptoRank answers only when DeFiLlama's
+        // curated record produced no identity-bound rounds (one project never
+        // publishes two competing round lists), joined by the verified token's
+        // exact contract address.
+        await collectCryptoRankFundingEvidence(ctx);
         // Independent audits: bounded discovery leads plus the auditor-domain
         // corroboration hop. Wall-clock boxed: up to ~6
         // bounded fetches must degrade to a skipped enrichment, never a
         // stalled audit.
         {
-          const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
+          const auditLinks = await collectProtocolAuditLinks(protocolLookupName, { slug: protocolSlug });
           const auditsResult = await withWallClockBox(
             (fetcher) => collectSecurityAudits(
               projectName,
@@ -4289,7 +4967,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     }
     evidence.roles = providerBackedRoles(evidence);
     recordOfficialXAccountStatusFinding(evidence);
-    await coldIntake(ctx, true);
+    if (coldIntakeAuthorized(options?.authorizedResearchScope)) {
+      await coldIntake(ctx, true);
+    } else {
+      emit({
+        phase: "Collect",
+        label: "Discovery intake skipped",
+        detail: "This scoped follow-up authorizes none of the discovery capabilities, so the collection budget goes to the authorized adapters; untouched evidence carries forward from the source version.",
+        tone: "neutral",
+      });
+    }
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
 
@@ -4487,6 +5174,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       tone: "warn",
     });
   }
+  // The stock leg of the assessment doctrine: a verified public listing gets
+  // its own point-in-time health read (score-neutral), whether the subject is
+  // a non-Web3 company or a listed Web3 one; a verified token that is or is
+  // paired against a tokenized stock gets the underlying stock's health too.
+  await collectListedSecurityHealth(ctx);
+  await collectTokenizedStockExposure(ctx);
+  await collectCompanyRegistryEvidence(ctx);
+  await collectSiteBackersEvidence(ctx);
+  // Venue-as-subject recognition rides on the finalized official domain.
+  detectLaunchVenueSubject(ctx);
   let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
   if (rolesAfterBasicFacts.includes(SubjectClass.PROJECT)) {
@@ -4658,6 +5355,27 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       emit({
         phase: "Token",
         label: "Recovered protocol incident lookup failed",
+        detail: String(error),
+        source: "defillama",
+        tone: "warn",
+      });
+    }
+  }
+  // A PROJECT with no verified token still gets the free protocol record when
+  // DeFiLlama's own identity surfaces (X handle / official site) exactly match
+  // the audited subject. Runs after role routing so it never fires for people.
+  if (
+    !evidence.projectToken?.verified
+    && evidence.roles.includes(SubjectClass.PROJECT)
+    && (!evidence.protocolFunding || !evidence.protocolTvl)
+    && capabilityIsAuthorized("token_and_market", "project_fundamentals")
+  ) {
+    try {
+      await collectTokenlessProtocolEvidence(ctx);
+    } catch (error) {
+      emit({
+        phase: "Token",
+        label: "Tokenless protocol lookup failed",
         detail: String(error),
         source: "defillama",
         tone: "warn",
@@ -5183,6 +5901,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     organizationSubject: isOrganizationAccount(evidence),
   });
   evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
+  // Market categorization rides on the applicability decision: every company
+  // report states Web3 vs non-Web3 so the reader knows which metric families
+  // applied. Deterministic, identity-bound inputs only; fails to
+  // "undetermined" rather than guessing when the token search never completed.
+  evidence.subjectCategory = deriveSubjectCategory(evidence);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
     ventures: evidence.ventures,
@@ -5265,6 +5988,28 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     const scoringEvidenceJson = partialAxisScoring
       ? buildScoringEvidencePacket(baseEvidence, scoringAxes)
       : evidenceJson;
+    // The analyst is validated against the packet it actually reads. When that
+    // packet is the supported-axis subset, its catalog can retain artifacts the
+    // full packet pruned (fewer axes, less budget pressure) and its bands can
+    // differ for a scored axis, so reconciling and persisting the FULL packet's
+    // catalog and bands could fail a successful paid verdict closed or have
+    // persistence reject a score that was legal in the packet the model saw.
+    // Persist and reconcile against the scored packet: the full catalog plus
+    // every subset artifact it lacks (artifact ids are content-addressed, so
+    // shared artifacts agree), and subset bands for the scored axes with the
+    // full packet's bands kept only for the unmeasured remainder so the
+    // persisted PROJECT band set stays canonical.
+    const persisted = reconcileScoredPacketLineage({
+      partialAxisScoring,
+      fullCatalog: frozenAxisEvidence,
+      fullBands: projectStrengthBands,
+      scoredCatalog: partialAxisScoring
+        ? extractScoringEvidenceCatalog(scoringEvidenceJson, scoringAxes)
+        : frozenAxisEvidence,
+      scoredBands: partialAxisScoring
+        ? deriveProjectStrengthBands(scoringEvidenceJson, scoringAxes)
+        : projectStrengthBands,
+    });
     const decisionPacketUsable = scoringPreflight.state === "ready"
       || scoringPreflight.state === "insufficient_evidence";
     if (decisionPacketUsable) {
@@ -5280,11 +6025,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         tone: partialAxisScoring ? "warn" : "neutral",
       });
     }
-    if (frozenAxisEvidence.length > 0) {
+    if (persisted.catalog.length > 0) {
       evidence.axisCitationVersion = 1;
-      evidence.axisEvidenceCatalog = frozenAxisEvidence;
-      if (Object.keys(projectStrengthBands).length > 0) {
-        evidence.projectStrengthBands = projectStrengthBands;
+      evidence.axisEvidenceCatalog = persisted.catalog;
+      if (Object.keys(persisted.bands).length > 0) {
+        evidence.projectStrengthBands = persisted.bands;
       }
     }
     // The validator accepts all requested axes or none, and the collector ledger
@@ -5304,12 +6049,14 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         : Promise.resolve(null),
     ]);
     const lineageReconciliation = rawVerdict
-      ? reconcileAnalystVerdictLineage(rawVerdict, frozenAxisEvidence, scoringAxes)
+      ? reconcileAnalystVerdictLineage(rawVerdict, persisted.catalog, scoringAxes)
       : null;
     const verdict = lineageReconciliation?.verdict ?? null;
     if (lineageReconciliation?.removed.length) {
       console.warn("[agent-lineage]", JSON.stringify({
         state: verdict ? "reconciled" : "failed_closed",
+        packet: partialAxisScoring ? "supported_axis_subset" : "full",
+        removedArtifactIds: [...new Set(lineageReconciliation.removed.map((row) => row.artifactId))],
         removed: lineageReconciliation.removed,
         ...(lineageReconciliation.reason ? { reason: lineageReconciliation.reason } : {}),
       }));
@@ -5324,6 +6071,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     );
     const contradictionObserved = contradictionAttempts.total > 0;
     const scorerObserved = scorerAttempts.total > 0;
+    const accessFailure = !verdict && scorerCanRun && !providerFallbacksEnabled() ? grokAccessFailure(GROK_ANALYST_MODEL) : undefined;
+    const accessFailureDetail = accessFailure
+      ? `Scoring is unavailable because Grok rejected access (HTTP ${accessFailure.httpStatus}). An administrator must restore provider access before retrying. Collected evidence remains available; this is not a finding about the subject.`
+      : undefined;
     if (!decisionPacketUsable) {
       const detail = scoringPreflight.state === "packet_oversize"
         ? "Contradiction analysis was skipped because the bounded evidence packet could not preserve required coverage."
@@ -5345,7 +6096,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     if (scorerObserved && verdict) {
       evidence.axes = verdict.axes;
       evidence.headline = partialAxisScoring
-        ? `Partial assessment: ARGUS scored ${verdict.axes.length} of ${requestedAxes.length} decision areas. ${scoringPreflight.missingSubstantiveAxes.map(axisLabel).join(" and ")} remain unmeasured, so ARGUS did not produce an overall score.`
+        ? partialScoringHeadline({
+          scoredAxes: scoringAxes,
+          requestedAxes,
+          missingAxes: scoringPreflight.missingSubstantiveAxes,
+          analystHeadline: verdict.headline,
+        })
         : verdict.headline || evidence.headline;
       if (verdict.identity_note) evidence.profile.identity_note = verdict.identity_note;
       emit({
@@ -5357,6 +6113,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         source: "AI analyst",
         tone: partialAxisScoring ? "warn" : "good",
       });
+    } else if (accessFailureDetail) {
+      evidence.headline = accessFailureDetail;
+      emit({ phase: "Analyst", label: "Provider access rejected", detail: accessFailureDetail, tone: "warn" });
     } else if (scoringPreflight.state === "packet_oversize") {
       evidence.headline = `Investigation incomplete: the analyst evidence packet could not preserve required coverage within ${ANALYST_EVIDENCE_MAX_CHARS.toLocaleString("en-US")} characters. No axis scores were inferred.`;
       emit({
@@ -5388,7 +6147,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       emit({
         phase: "Analyst",
         label: "Coverage abstention",
-        detail: `Scoring did not run because these axes lack substantive eligible evidence: ${missingAxes}. Coverage-only gaps were preserved; no zero scores were inferred.`,
+        detail: `${scorerObserved ? "Scoring of the supported axes was attempted but did not return a valid result." : "No scoring request completed."} These additional axes lack substantive eligible evidence: ${missingAxes}. No zero scores were inferred.`,
         tone: "warn",
       });
     } else if (scoringPreflight.state === "invalid_catalog") {
@@ -5411,7 +6170,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       evidence.headline = "Investigation incomplete: the analyst did not return one valid score for every required axis.";
       emit({ phase: "Analyst", label: "Invalid response", detail: "The scorer response was unavailable, partial, duplicated an axis, or contained an invalid score. No verdict score will be published.", tone: "warn" });
     }
-    const analystState: ProviderRunState = scoringPreflight.state === "packet_oversize"
+    const analystState: ProviderRunState = accessFailure ? "failed" : scoringPreflight.state === "packet_oversize"
       || scoringPreflight.state === "unsupported_axes"
       || scoringPreflight.state === "invalid_catalog"
       ? "failed"
@@ -5422,7 +6181,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           : observedRunState(scorerAttempts) === "failed"
             ? "failed"
             : "partial";
-    const analystDetail = scoringPreflight.state === "packet_oversize"
+    const analystDetail = accessFailureDetail ?? (scoringPreflight.state === "packet_oversize"
       ? `scoring packet exceeded the ${ANALYST_EVIDENCE_MAX_CHARS}-character structural budget while preserving required axis coverage; no scorer call made`
       : scoringPreflight.state === "no_axes"
         ? "no provider-backed methodology axes were requested; no scorer call made"
@@ -5436,15 +6195,33 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
               ? "scoring preflight rejected the frozen evidence or axis catalog; no scorer call made"
               : !scorerObserved
                 ? "evidence preflight passed; no scorer provider attempt was observed"
-                : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`;
+                : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`);
     checkTracker.provider(
       "ai-analyst",
       "AI analyst",
       analystState,
       analystDetail,
     );
+    // Freeze the same sentence with the report. The provider snapshot lives
+    // only in memory, so without this the reason a score was withheld is gone
+    // by the time anyone opens the saved version.
+    evidence.scoringOutcome = {
+      state: analystState === "executed" || analystState === "partial" || analystState === "failed"
+        ? analystState
+        : "skipped",
+      detail: analystDetail,
+      missingAxes: [...scoringPreflight.missingSubstantiveAxes],
+      attemptedAxes: scorerObserved ? scoringAxes.map((row) => row.axis) : [],
+      ...(accessFailure ? { failure: { kind: "provider_access" as const, ...accessFailure } } : {}),
+      capturedAt: captureTimestamp(),
+    };
   } else {
     checkTracker.provider("ai-analyst", "AI analyst", "unavailable", "analyst provider is not configured");
+    evidence.scoringOutcome = {
+      state: "skipped",
+      detail: "the analyst provider is not configured, so no scorer call was made",
+      capturedAt: captureTimestamp(),
+    };
   }
   finishRuntimeStage("analyst", analystStartedAt);
 
@@ -5551,36 +6328,122 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // Best-effort, org-scoped, verified-only. Time-sensitive + legal signals are
   // intentionally EXCLUDED: BasicFact legal_regulatory_event, adverse findings,
   // and sanctions/legal source artifacts must all be re-screened live every run.
-  if (options?.organizationId) {
-    const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) =>
-      fact.artifact_verified === true
-      && (fact.status === "verified" || fact.status === "corroborated")
-      && fact.predicate !== "legal_regulatory_event"
-      // Provider-projection facts are regenerated fresh every run from free
-      // providers; storing them only grows the row and re-injects stale
-      // captures (the compounding "captured ..., captured ..." duplication).
-      && fact.providerProjection !== true);
-    const verifiedVentures = (evidence.ventures ?? []).filter((venture) =>
-      venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
-    if (verifiedBasicFacts.length || verifiedVentures.length || evidence.projectToken?.verified === true) {
-      void writeEntityFacts(options.organizationId, canonicalEntityKey({ handle: evidence.profile.handle }), {
-        entityType: evidence.roles[0] ? String(evidence.roles[0]) : null,
-        handle: evidence.profile.handle,
-        displayName: evidence.profile.resolved_name || evidence.profile.display_name,
-        facts: {
-          schema: 1,
-          basicFacts: verifiedBasicFacts,
-          ventures: verifiedVentures,
-          roles: evidence.roles.map((role) => String(role)),
-          projectToken: evidence.projectToken?.verified ? evidence.projectToken : undefined,
-        },
-      });
-    }
+  writeVerifiedEntityFacts(evidence, options);
+  // Cross-scan investor store: the frozen funding rounds' backers, one row per
+  // (investor x subject x round), feeding the derived VC ranking surface. Same
+  // best-effort, org-scoped, never-private rules as the entity KB.
+  if (options?.organizationId && !options.privateRun) {
+    const investorRows = investorObservationsFromEvidence(
+      options.organizationId,
+      evidence.profile.handle.replace(/^@/, "").toLowerCase(),
+      evidence.roles[0] ? String(evidence.roles[0]).toLowerCase() : "person",
+      { ...evidence, website: evidence.profile.website },
+    );
+    if (investorRows.length) void writeInvestorObservations(investorRows);
   }
   finishRuntimeStage("pipeline", runtimeStartedAt);
   return dossier;
 }
 
+/**
+ * Headline for a supported-axis (partial) scoring run. The engine publishes a
+ * provisional governing score over the assessed axes on this same immutable
+ * version, so the copy must say that the score exists and is provisional,
+ * not that ARGUS produced no overall score. The analyst's own headline is kept
+ * as a secondary sentence.
+ */
+export function partialScoringHeadline(input: {
+  scoredAxes: readonly { axis: string; weight: number }[];
+  requestedAxes: readonly { axis: string; weight: number }[];
+  missingAxes: readonly string[];
+  analystHeadline?: string;
+}): string {
+  const scoredWeight = input.scoredAxes.reduce((sum, axis) => sum + axis.weight, 0);
+  const totalWeight = input.requestedAxes.reduce((sum, axis) => sum + axis.weight, 0);
+  const weightPercent = Math.round(100 * scoredWeight / Math.max(1, totalWeight));
+  const labels = input.missingAxes.map(axisLabel);
+  const missing = labels.length <= 2
+    ? labels.join(" and ")
+    : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  const analyst = (input.analystHeadline ?? "").trim();
+  return [
+    `Provisional assessment: ARGUS scored ${input.scoredAxes.length} of ${input.requestedAxes.length} decision areas (${weightPercent}% of the methodology weight).`,
+    missing
+      ? `${missing} remain${input.missingAxes.length === 1 ? "s" : ""} unmeasured, so the score is provisional and may change when ${input.missingAxes.length === 1 ? "that area is" : "those areas are"} assessed.`
+      : "The score is provisional and may change as the remaining areas are assessed.",
+    analyst,
+  ].filter(Boolean).join(" ");
+}
+
+/**
+ * Lineage for a scoring run: the catalog and bands that are reconciled and
+ * persisted must describe the packet the analyst actually scored.
+ */
+export function reconcileScoredPacketLineage(input: {
+  partialAxisScoring: boolean;
+  fullCatalog: readonly AxisEvidenceRecord[];
+  fullBands: Readonly<Record<string, ProjectStrengthBandRecord>>;
+  scoredCatalog: readonly AxisEvidenceRecord[];
+  scoredBands: Readonly<Record<string, ProjectStrengthBandRecord>>;
+}): { catalog: AxisEvidenceRecord[]; bands: Record<string, ProjectStrengthBandRecord> } {
+  if (!input.partialAxisScoring) {
+    return { catalog: [...input.fullCatalog], bands: { ...input.fullBands } };
+  }
+  const byId = new Map(input.fullCatalog.map((artifact) => [artifact.artifactId, artifact]));
+  for (const artifact of input.scoredCatalog) {
+    if (!byId.has(artifact.artifactId)) byId.set(artifact.artifactId, artifact);
+  }
+  return {
+    catalog: [...byId.values()],
+    bands: { ...input.fullBands, ...input.scoredBands },
+  };
+}
+
+/**
+ * Knowledge-base write-back of a run's verified facts. Best-effort and
+ * org-scoped. A private run leaves no durable org-visible trace: the entity
+ * row (handle, display name, facts, audit_count, fresh updated_at) would
+ * otherwise let a colleague's later scan stream "verified recently" for a
+ * subject the analyst scanned privately. Returns whether a write was started.
+ */
+export function writeVerifiedEntityFacts(evidence: CollectedEvidence, options: RunAuditOptions | undefined): boolean {
+  if (!options?.organizationId || options.privateRun) return false;
+  const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) =>
+    fact.artifact_verified === true
+    && (fact.status === "verified" || fact.status === "corroborated")
+    && fact.predicate !== "legal_regulatory_event"
+    // Provider-projection facts are regenerated fresh every run from free
+    // providers; storing them only grows the row and re-injects stale
+    // captures (the compounding "captured ..., captured ..." duplication).
+    && fact.providerProjection !== true);
+  const verifiedVentures = (evidence.ventures ?? []).filter((venture) =>
+    venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
+  if (!verifiedBasicFacts.length && !verifiedVentures.length && evidence.projectToken?.verified !== true) return false;
+  void writeEntityFacts(options.organizationId, canonicalEntityKey({ handle: evidence.profile.handle }), {
+    entityType: evidence.roles[0] ? String(evidence.roles[0]) : null,
+    handle: evidence.profile.handle,
+    displayName: evidence.profile.resolved_name || evidence.profile.display_name,
+    facts: {
+      schema: 1,
+      basicFacts: verifiedBasicFacts,
+      ventures: verifiedVentures,
+      roles: evidence.roles.map((role) => String(role)),
+      projectToken: evidence.projectToken?.verified ? evidence.projectToken : undefined,
+      // Who these facts were recorded for. A handle can change hands; the
+      // reader refuses the row when the live account no longer matches.
+      identity: {
+        ...(evidence.profile.x_user_id ? { xUserId: evidence.profile.x_user_id } : {}),
+        ...(evidence.profile.account_created_at ? { accountCreatedAt: evidence.profile.account_created_at } : {}),
+        ...(evidence.profile.display_name ? { displayName: evidence.profile.display_name } : {}),
+        ...(canonicalOfficialWebsite(evidence.profile.website)?.domain
+          ? { websiteDomain: canonicalOfficialWebsite(evidence.profile.website)!.domain }
+          : {}),
+      },
+    },
+  });
+  return true;
+}
+
 export function runAudit(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
-  return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
+  return withProviderAccessScope(() => withCostLedger(() => runAuditWithLedger(rawHandle, emit, options)));
 }

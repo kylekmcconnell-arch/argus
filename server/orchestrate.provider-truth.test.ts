@@ -202,7 +202,7 @@ describe("orchestrator provider execution truth", () => {
     expect(anthropicTools).not.toContain("record_verdict");
   });
 
-  it("reports a coverage-preflight abstention separately from an invalid analyst response", async () => {
+  it.each([false, true])("separates partial coverage from scorer access failure (rejected=%s)", async (accessDenied) => {
     vi.stubEnv("PDL_API_KEY", "pdl-key");
     vi.stubEnv("XAI_API_KEY", "xai-key");
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
@@ -262,6 +262,7 @@ describe("orchestrator provider execution truth", () => {
         };
         const name = request.response_format?.json_schema?.name ?? "unknown";
         const prompt = JSON.stringify(request.messages ?? []);
+        if (accessDenied && name === "record_verdict") return new Response("model access denied", { status: 403 });
         return new Response(JSON.stringify({
           choices: [{ message: { content: JSON.stringify(structuredInput(name, prompt)) } }],
           usage: { prompt_tokens: 100, completion_tokens: 20 },
@@ -292,8 +293,24 @@ describe("orchestrator provider execution truth", () => {
     )).toBe(false);
     expect(grokTools).toContain("record_contradictions");
     expect(grokTools).toContain("record_verdict");
+    if (accessDenied) {
+      expect(dossier?.headline).toContain("Grok rejected access (HTTP 403)");
+      expect(dossier?.scoringOutcome).toMatchObject({
+        state: "failed",
+        failure: { kind: "provider_access", httpStatus: 403 },
+        attemptedAxes: ["I1_identity_legitimacy"],
+      });
+      expect(dossier?.scoringOutcome?.missingAxes?.length).toBeGreaterThan(0);
+      expect(dossier?.report.role_reports.every(role => Object.keys(role.axes).length === 0)).toBe(true);
+      expect(emitted).toContainEqual(expect.objectContaining({ label: "Provider access rejected" }));
+      expect(emitted).not.toContainEqual(expect.objectContaining({ label: "Coverage abstention" }));
+      expect(analystRun?.state).toBe("failed");
+      return;
+    }
     expect(dossier?.report.composite_verdict).toBe("PROVISIONAL");
-    expect(dossier?.headline).toContain("Partial assessment: ARGUS scored 1 of 5 decision areas");
+    expect(dossier?.headline).toContain("Provisional assessment: ARGUS scored 1 of 5 decision areas (15% of the methodology weight).");
+    expect(dossier?.headline).toContain("remain unmeasured, so the score is provisional");
+    expect(dossier?.headline).not.toContain("did not produce an overall score");
     expect(Object.keys(dossier?.report.role_reports[0]?.axes ?? {})).toEqual(["I1_identity_legitimacy"]);
     expect(emitted).toContainEqual(expect.objectContaining({
       phase: "Analyst",

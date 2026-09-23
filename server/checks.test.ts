@@ -40,6 +40,49 @@ describe("PersonCheckTracker", () => {
     expect(check?.sourceCount).toBe(2);
   });
 
+  it("supersedes a name screen recorded for a different screened name instead of merging it", () => {
+    // Regression for INT-2 / INT-17: checked-empty for the display name must
+    // not outrank an unavailable refresh for the resolved real name, and
+    // source counts never add up across names.
+    const tracker = new PersonCheckTracker();
+    tracker.record({
+      id: "ofac-sanctions-name",
+      status: "checked-empty",
+      note: "screen completed against 6,002 OFAC SDN names with no match",
+      provider: "opensanctions",
+      sourceCount: 1,
+      screenedName: "Alice Smith",
+    });
+    expect(byId(tracker, ["FOUNDER"], "ofac-sanctions-name", { resolvedRealName: true })).toMatchObject({
+      status: "checked-empty",
+      sourceCount: 1,
+    });
+
+    tracker.record({
+      id: "ofac-sanctions-name",
+      status: "unavailable",
+      note: "OFAC name screen failed (503)",
+      provider: "opensanctions",
+      screenedName: "Bob Jones",
+    });
+    const outage = byId(tracker, ["FOUNDER"], "ofac-sanctions-name", { resolvedRealName: true });
+    expect(outage?.status).toBe("unavailable");
+    expect(outage?.sourceCount).toBeUndefined();
+
+    tracker.record({
+      id: "ofac-sanctions-name",
+      status: "checked-empty",
+      note: "screen completed against 6,002 OFAC SDN names with no match",
+      provider: "opensanctions",
+      sourceCount: 1,
+      screenedName: "Bob Jones",
+    });
+    expect(byId(tracker, ["FOUNDER"], "ofac-sanctions-name", { resolvedRealName: true })).toMatchObject({
+      status: "checked-empty",
+      sourceCount: 1,
+    });
+  });
+
   it("lets a later confirmed token bind supersede the earlier assessed-null token identity finding", () => {
     // The token collector runs before intake and again after orientation names a
     // launched product or source verification recovers the official site. The
@@ -365,7 +408,7 @@ describe("PersonCheckTracker", () => {
     // decision gate), but the six founder questions, the adverse sweep, and the
     // trust-graph reconciliation remain open: far from decision-ready.
     const readiness = deriveDecisionReadiness(tracker.snapshot(["FOUNDER"], { resolvedRealName: true }));
-    expect(readiness).toMatchObject({ status: "incomplete", successful: 1, applicable: 9, coveragePercent: 11 });
+    expect(readiness).toMatchObject({ status: "incomplete", successful: 1, applicable: 9, coveragePercent: 11.1 });
   });
 
   it("reaches decision-ready founder coverage from investor questions plus the legal-grade screens, not optional provider bookkeeping", () => {

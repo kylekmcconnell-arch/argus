@@ -7,6 +7,7 @@ import { GOLDEN } from "./golden";
 import { runCalibration } from "./run";
 import {
   buildScoringEvidencePacket,
+  deriveInvestorStrengthBands,
   deriveProjectStrengthBands,
   inspectAnalystScoringPreflight,
   type AnalystAxis,
@@ -77,6 +78,29 @@ describe("ARGUS calibration (golden set)", () => {
         expect(scored.score, `${expected.name}:${scored.axis}`).toBeLessThanOrEqual(band.maxScore);
       }
     }
+  });
+
+  it("never mints an I5 reputation floor from adverse press (fund with adverse press only)", () => {
+    const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.INVESTOR).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.INVESTOR }));
+    const golden = GOLDEN.find((candidate) => candidate.name === "investor:fund-with-adverse-press-only")!;
+    const evidence = golden.evidence;
+    const packet = buildScoringEvidencePacket({
+      profile: evidence.profile,
+      sourceArtifacts: evidence.sourceArtifacts,
+    }, axes);
+    const band = deriveInvestorStrengthBands(packet, axes).I5_reputation_fud;
+    const emergingFloor = Math.ceil(getProfile(SubjectClass.INVESTOR).axes.I5_reputation_fud * 0.4);
+    // Adverse press is scoreable (the axis is not unmeasured) but its floor
+    // is never above emerging and its ceiling stays in the bottom band.
+    expect(inspectAnalystScoringPreflight(axes, packet).missingSubstantiveAxes).not.toContain("I5_reputation_fud");
+    expect(band.tier).toBe("assessed_null");
+    expect(band.minScore).toBe(0);
+    expect(band.minScore).toBeLessThan(emergingFloor);
+    expect(band.maxScore).toBe(Math.floor(getProfile(SubjectClass.INVESTOR).axes.I5_reputation_fud * 0.39));
+    const scored = evidence.axes.find((axis) => axis.axis === "I5_reputation_fud")!;
+    expect(scored.score).toBeGreaterThanOrEqual(band.minScore);
+    expect(scored.score).toBeLessThanOrEqual(band.maxScore);
   });
 
   it("has no critical quality failures", () => {

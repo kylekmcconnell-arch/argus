@@ -6,7 +6,7 @@
 import { build } from "esbuild";
 
 await build({
-  entryPoints: ["src/threat/serverScan.ts"],
+  entryPoints: ["server/threatRuntime.ts"],
   bundle: true,
   platform: "node",
   format: "esm",

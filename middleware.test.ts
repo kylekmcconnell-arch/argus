@@ -6,6 +6,12 @@ vi.mock("@vercel/functions", () => ({
 
 import { next } from "@vercel/functions";
 import middleware from "./middleware";
+import { issueScanPanelToken } from "./api/_cache.js";
+
+const TEST_ORG = "00000000-0000-4000-8000-000000000001";
+const PANEL_SECRET = "panel-capability-test-secret";
+/** A paid panel needs a capability; mint the real thing rather than a stub. */
+const panelCapability = () => issueScanPanelToken(TEST_ORG, "scan-run-key-12345") as string;
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -20,6 +26,7 @@ describe("Case Brief middleware policy", () => {
     vi.stubEnv("SUPABASE_URL", "https://database.example");
     vi.stubEnv("SUPABASE_PUBLISHABLE_KEY", "publishable-test-key");
     vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
+    vi.stubEnv("PANEL_COST_TOKEN_SECRET", PANEL_SECRET);
   });
 
   afterEach(() => {
@@ -402,13 +409,30 @@ describe("Case Brief middleware policy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/rest/v1/rpc/consume_usage_quota"))).toBe(false);
   });
-  it.each([['/api/ask',false],['/api/ask',null],['/api/deep-launch',false],['/api/deep-launch',null]])("blocks %s when budget admission is %s", async (path, allowed) => {
+  // /api/ask and /api/reclassify reserve their own unit from the handler
+  // after validation (reserveSupplementalBudget). Pre-reserving here charged
+  // the daily allowance for 409s, clarification-only turns and provider
+  // outages that delivered nothing.
+  it.each(["/api/ask", "/api/reclassify"])("admits %s without a middleware budget reservation", async (path) => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: "00000000-0000-4000-8000-000000000010", email_confirmed_at: "2026-07-11T00:00:00Z" }))
+      .mockResolvedValueOnce(jsonResponse([{ organization_id: "00000000-0000-4000-8000-000000000001", role: "owner", active: true }]))
+      .mockResolvedValueOnce(jsonResponse([{ allowed: false, used: 100, remaining: 0 }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await middleware(new Request(`https://argus.example${path}`, { method: "POST", headers: { authorization: "Bearer owner-token" } }));
+    expect(response.status).toBe(204);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("reserve_supplemental_budget"))).toBe(false);
+  });
+
+  it.each([['/api/x-find',false],['/api/x-find',null],['/api/deep-launch',false],['/api/deep-launch',null]])("blocks %s when budget admission is %s", async (path, allowed) => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ id: "00000000-0000-4000-8000-000000000010", email_confirmed_at: "2026-07-11T00:00:00Z" }))
       .mockResolvedValueOnce(jsonResponse([{ organization_id: "00000000-0000-4000-8000-000000000001", role: "analyst", active: true }]))
       .mockResolvedValueOnce(allowed === null ? jsonResponse({}, 503) : jsonResponse([{ allowed, used: 100, remaining: 0 }]));
     vi.stubGlobal("fetch", fetchMock);
-    const response = await middleware(new Request(`https://argus.example${path}`, { method: "POST", headers: { authorization: "Bearer analyst-token" } }));
+    const response = await middleware(new Request(`https://argus.example${path}`, { method: "POST", headers: { authorization: "Bearer analyst-token", "x-argus-panel-token": panelCapability() } }));
     expect(response.status).toBe(allowed === null ? 503 : 429);
     expect(next).not.toHaveBeenCalled();
     expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ p_organization_id: "00000000-0000-4000-8000-000000000001", p_daily_limit: 100 });
@@ -423,4 +447,212 @@ describe("Case Brief middleware policy", () => {
     expect(response.status).toBe(204); expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+});
+
+describe("one analyst cannot spend the whole workspace day (#356)", () => {
+  beforeEach(() => {
+    vi.mocked(next).mockClear();
+    vi.stubEnv("SUPABASE_URL", "https://database.example");
+    vi.stubEnv("SUPABASE_PUBLISHABLE_KEY", "publishable-test-key");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
+    vi.stubEnv("PANEL_COST_TOKEN_SECRET", PANEL_SECRET);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const authThenMember = () => vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      id: "00000000-0000-4000-8000-000000000010",
+      email_confirmed_at: "2026-07-11T00:00:00.000Z",
+    }))
+    .mockResolvedValueOnce(jsonResponse([{
+      organization_id: "00000000-0000-4000-8000-000000000001",
+      role: "analyst",
+      active: true,
+    }]));
+
+  // /api/ask reserves in its handler, so the middleware-side reservation is
+  // asserted on a middleware-metered panel instead.
+  const askRequest = () => new Request("https://argus.example/api/arkham", {
+    headers: { authorization: "Bearer analyst-token", "x-argus-panel-token": panelCapability() },
+  });
+
+  it("passes the configured per-user cap to the reservation", async () => {
+    vi.stubEnv("ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT", "25");
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 99, reason: null }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await middleware(askRequest());
+
+    const reservation = fetchMock.mock.calls.find(([input]) => String(input).includes("reserve_supplemental_budget"));
+    expect(reservation).toBeDefined();
+    expect(JSON.parse(String(reservation![1].body))).toMatchObject({ p_user_daily_limit: 25 });
+  });
+
+  it("tells an analyst who hit their own cap that the workspace still has budget", async () => {
+    vi.stubEnv("ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT", "25");
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: false, used: 40, remaining: 60, reason: "user_daily_limit" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(askRequest());
+
+    expect(response.status).toBe(429);
+    const body = await response.json();
+    expect(body).toMatchObject({ error: "supplemental_user_daily_limit_reached", limit: 25 });
+    expect(String(body.message)).toContain("workspace still has budget");
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("still reports a genuinely exhausted workspace as a workspace limit", async () => {
+    vi.stubEnv("ARGUS_SUPPLEMENTAL_USER_DAILY_LIMIT", "25");
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: false, used: 100, remaining: 0, reason: "workspace_daily_limit" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(askRequest());
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({ error: "supplemental_daily_limit_reached" });
+  });
+
+  it("sends no per-user cap when none is configured, keeping the previous behaviour", async () => {
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 99, reason: null }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await middleware(askRequest());
+
+    const reservation = fetchMock.mock.calls.find(([input]) => String(input).includes("reserve_supplemental_budget"));
+    expect(JSON.parse(String(reservation![1].body)).p_user_daily_limit).toBeNull();
+  });
+
+  it("forwards the workspace so a gated panel can attribute its spend", async () => {
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 99, reason: null }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await middleware(askRequest());
+
+    const forwarded = (next.mock.calls[0]?.[0] as { request?: { headers?: Headers } } | undefined)?.request?.headers;
+    expect(forwarded?.get("x-argus-organization-id")).toBe("00000000-0000-4000-8000-000000000001");
+  });
+
+  it("overwrites a client-supplied workspace header instead of trusting it", async () => {
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 99, reason: null }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await middleware(new Request("https://argus.example/api/arkham", {
+      headers: {
+        authorization: "Bearer analyst-token",
+        "x-argus-panel-token": panelCapability(),
+        "x-argus-organization-id": "00000000-0000-4000-8000-0000000000ff",
+      },
+    }));
+
+    const forwarded = (next.mock.calls[0]?.[0] as { request?: { headers?: Headers } } | undefined)?.request?.headers;
+    expect(forwarded?.get("x-argus-organization-id")).toBe("00000000-0000-4000-8000-000000000001");
+  });
+});
+
+describe("a paid panel must present a capability (#356)", () => {
+  beforeEach(() => {
+    vi.mocked(next).mockClear();
+    vi.stubEnv("SUPABASE_URL", "https://database.example");
+    vi.stubEnv("SUPABASE_PUBLISHABLE_KEY", "publishable-test-key");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
+    vi.stubEnv("PANEL_COST_TOKEN_SECRET", PANEL_SECRET);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const authThenMember = () => vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ id: "00000000-0000-4000-8000-000000000010", email_confirmed_at: "2026-07-11T00:00:00.000Z" }))
+    .mockResolvedValueOnce(jsonResponse([{ organization_id: TEST_ORG, role: "analyst", active: true }]));
+
+  const panelRequest = (headers: Record<string, string>) =>
+    new Request("https://argus.example/api/cluster", { headers: { authorization: "Bearer analyst-token", ...headers } });
+
+  it("refuses a paid panel with no capability, before any budget is spent", async () => {
+    const fetchMock = authThenMember();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(panelRequest({}));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: "panel_capability_required" });
+    expect(next).not.toHaveBeenCalled();
+    // The refusal must not reserve a supplemental unit.
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("reserve_supplemental_budget"))).toBe(false);
+  });
+
+  it("admits a scan capability, so a panel opened mid-scan still works", async () => {
+    const fetchMock = authThenMember();
+    fetchMock.mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 99, reason: null }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(panelRequest({ "x-argus-panel-token": panelCapability() }));
+
+    expect(response.status).toBe(204);
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a capability issued to another workspace", async () => {
+    const otherOrgToken = issueScanPanelToken("00000000-0000-4000-8000-0000000000ff", "scan-run-key-12345") as string;
+    vi.stubGlobal("fetch", authThenMember());
+
+    const response = await middleware(panelRequest({ "x-argus-panel-token": otherOrgToken }));
+
+    expect(response.status).toBe(409);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("refuses a forged or altered capability", async () => {
+    const [payload, signature] = panelCapability().split(".");
+    for (const forged of [`${payload}x.${signature}`, `${payload}.${"A".repeat(43)}`, payload, "not-a-token"]) {
+      vi.stubGlobal("fetch", authThenMember());
+      const response = await middleware(panelRequest({ "x-argus-panel-token": forged }));
+      expect(response.status, forged.slice(0, 24)).toBe(409);
+    }
+  });
+
+  it("leaves unpaid authenticated routes alone", async () => {
+    const fetchMock = authThenMember();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(new Request("https://argus.example/api/report", {
+      headers: { authorization: "Bearer analyst-token" },
+    }));
+
+    expect(response.status).toBe(204);
+  });
+});
+
+describe("the paid-panel list matches the routes that resolve a capability", () => {
+  it("names every route that attributes cost through a panel token", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("./middleware.ts", import.meta.url), "utf8");
+    const listed = new Set(
+      [...(/const PAID_PANEL_PATHS = new Set\(\[([\s\S]*?)\]\.map/.exec(source)?.[1] ?? "")
+        .matchAll(/"([a-z0-9-]+)"/g)].map((match) => match[1]),
+    );
+
+    const resolvers = readdirSync(new URL("./api/", import.meta.url))
+      // .d.ts only declares the helper; it is not a route.
+      .filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts") && !file.includes(".test."))
+      .filter((file) => readFileSync(new URL(`./api/${file}`, import.meta.url), "utf8").includes("resolvePanelCostVersion"))
+      .map((file) => file.replace(/\.ts$/, ""));
+
+    // A route that starts attributing cost is a paid panel, and must be gated
+    // with the others rather than quietly staying open.
+    expect([...resolvers].sort()).toEqual([...listed].sort());
+  });
 });

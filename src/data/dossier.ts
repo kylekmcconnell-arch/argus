@@ -1,4 +1,5 @@
 import { isOrganizationAccount } from "../lib/investorSubject";
+import { cabalEvidenceForSubject } from "./cabals";
 // Dossier — the rendered report payload. Both the local fixture path and the
 // live server path produce a Dossier, so <Report> renders identically for each.
 
@@ -127,6 +128,7 @@ export interface Dossier {
   website?: string;
   /** Grok's bound-source explanation of what this exact subject is and does. */
   subjectOrientation?: CollectedEvidence["subjectOrientation"];
+  officialProductDescription?: CollectedEvidence["officialProductDescription"];
   profile_collection_state?: CollectedEvidence["profile"]["profile_collection_state"];
   profile_provider?: string;
   profile_captured_at?: string;
@@ -220,14 +222,22 @@ export interface Dossier {
   /** Model-only or otherwise unverified team candidates; never grounded evidence. */
   webTeamLeads?: WebTeamMember[];
   githubAssessment?: GithubAssessment; // subject's resolved GitHub: quality/claims/history
-  // The token threat leg of the FULL scan. Attached client-side by the runner
-  // (the threat scanner runs in the browser, in parallel with the server
-  // collection) and persisted with the report. Absent: no project token could
+  // The token threat leg of the FULL scan. New public scans complete and save
+  // it on the server; legacy/private runs retain browser completion.
+  // Absent: no project token could
   // be attributed to this subject. null: a token was found but the scan failed.
   threat?: import("../threat/types").ThreatScan | null;
+  /** Server-owned completion: browsers must not rerun this leg or resave it. */
+  tokenAssessment?: { owner: "server"; state: "complete" | "unavailable" | "unattributed"; completedAt: string };
   // Why the threat leg ran on that token (or why it was skipped) - one line,
   // rendered with the section so the attribution is auditable.
   threatNote?: string;
+  /**
+   * How the scanned contract was tied to this subject. A card, share or export
+   * that reads `threat` must read this too: only "canonical" is the subject's
+   * own token (#371).
+   */
+  threatBinding?: "canonical" | "bio" | "promotion";
   /** Second-hop discovery stays inspectable even when excluded from the graph. */
   ventureTeams?: CollectedEvidence["ventureTeams"];
   /** Cited model discoveries that did not govern the frozen result. */
@@ -244,6 +254,8 @@ export interface Dossier {
   /** Frozen public X conversation breadth and volume. Separate from the verdict. */
   socialActivity?: CollectedEvidence["socialActivity"];
   protocolFunding?: CollectedEvidence["protocolFunding"];
+  /** Frozen CryptoRank funding record (the second raises index), bound at capture. */
+  cryptoRankFunding?: CollectedEvidence["cryptoRankFunding"];
   /** Frozen protocol fee totals (DeFiLlama); the second dated usage metric for the charts. */
   protocolFees?: CollectedEvidence["protocolFees"];
   /** Frozen float-control profile (GoPlus holder register) for the concentration bar. */
@@ -258,6 +270,20 @@ export interface Dossier {
   entityContinuity?: CollectedEvidence["entityContinuity"];
   /** Frozen pre-scoring token applicability decision. */
   tokenApplicability?: CollectedEvidence["tokenApplicability"];
+  /** The audited subject recognized as a launch venue, with its registered launch mechanics. */
+  launchVenueSubject?: CollectedEvidence["launchVenueSubject"];
+  /** Frozen point-in-time health of the verified listed security (score-neutral). */
+  stockHealth?: CollectedEvidence["stockHealth"];
+  /** Frozen stock exposure behind the verified token (score-neutral). */
+  tokenizedStockPairing?: CollectedEvidence["tokenizedStockPairing"];
+  /** Frozen registry records (SEC EDGAR / Companies House / OpenCorporates). */
+  companyRegistry?: CollectedEvidence["companyRegistry"];
+  /** The subject's own published backer wall, from the bound official site. */
+  siteBackers?: CollectedEvidence["siteBackers"];
+  /** Name-alike tokens refused for lacking the subject's own adoption; launched by someone else. */
+  namesakeTokens?: CollectedEvidence["namesakeTokens"];
+  /** Frozen Web3 / non-Web3 market categorization for a company subject. */
+  subjectCategory?: CollectedEvidence["subjectCategory"];
   /**
    * Deterministic, score-neutral decision intelligence built from this exact
    * evidence capture. Older reports omit it and must not reconstruct it from
@@ -273,6 +299,7 @@ export interface Dossier {
   evidenceAttempts?: import("../lib/evidenceRetry").EvidenceAttempt[];
   /** What the investigation director asked, delegated, and could not finish. */
   researchPlan?: ResearchPlan;
+  scoringOutcome?: CollectedEvidence["scoringOutcome"];
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
@@ -338,7 +365,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     .map((member) => ({
       ...member,
       ...(member.identity_link_evidence_origin === "model_lead"
-        ? { handle: undefined, linkedin: undefined, github: undefined, developerProfiles: undefined }
+        ? { handle: undefined, linkedin: undefined, telegram: undefined, email: undefined, github: undefined, developerProfiles: undefined }
         : {}),
       ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
     }));
@@ -387,7 +414,21 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     a.addAssociate(typedAssociate);
     if (governingEligible(typedAssociate)) graphAudit.addAssociate(typedAssociate);
   });
+  // Curated cabal registry (src/data/cabals.ts): a subject recorded in a traced
+  // cluster gets its cabal-mates as `in_cabal_kb` associates so the trust graph
+  // forms the cabal without a second audited subject, and one finding per
+  // nefarious cluster so the membership reads in the report. Collected
+  // associates win on a handle collision; the registry never overwrites live
+  // evidence, it only fills what collection could not know.
+  const registry = cabalEvidenceForSubject(ev.profile.handle);
+  const collectedAssociateKeys = new Set(ev.associates.map((x) => x.associate_handle.replace(/^@/, "").toLowerCase()));
+  for (const associate of registry.associates) {
+    if (collectedAssociateKeys.has(associate.associate_handle.replace(/^@/, "").toLowerCase())) continue;
+    a.addAssociate(associate);
+    graphAudit.addAssociate(associate);
+  }
   ev.findings.forEach((f) => { a.addFinding(f); if (governingEligible(f)) graphAudit.addFinding(f); });
+  for (const finding of registry.findings) { a.addFinding(finding); graphAudit.addFinding(finding); }
   ev.axes.forEach((ax) => {
     try {
       a.setAxis(ax.axis, ax.score, ax.rationale, {
@@ -544,6 +585,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     bio: ev.profile.bio,
     website: ev.profile.website,
     ...(ev.subjectOrientation ? { subjectOrientation: structuredClone(ev.subjectOrientation) } : {}),
+    ...(ev.officialProductDescription ? { officialProductDescription: { ...ev.officialProductDescription } } : {}),
     profile_collection_state: ev.profile.profile_collection_state,
     profile_provider: ev.profile.profile_provider,
     profile_captured_at: ev.profile.profile_captured_at,
@@ -598,6 +640,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
         ...(ev.protocolTvl.hacks ? { hacks: ev.protocolTvl.hacks.map((incident) => ({ ...incident })) } : {}),
       },
     } : {}),
+    ...(ev.cryptoRankFunding ? { cryptoRankFunding: structuredClone(ev.cryptoRankFunding) } : {}),
     ...(ev.protocolFunding ? {
       protocolFunding: {
         ...ev.protocolFunding,
@@ -659,10 +702,18 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {}),
     ...(ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {}),
     ...(ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {}),
+    ...(ev.launchVenueSubject ? { launchVenueSubject: structuredClone(ev.launchVenueSubject) } : {}),
+    ...(ev.stockHealth ? { stockHealth: structuredClone(ev.stockHealth) } : {}),
+    ...(ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {}),
+    ...(ev.companyRegistry ? { companyRegistry: structuredClone(ev.companyRegistry) } : {}),
+    ...(ev.siteBackers ? { siteBackers: structuredClone(ev.siteBackers) } : {}),
+    ...(ev.namesakeTokens ? { namesakeTokens: structuredClone(ev.namesakeTokens) } : {}),
+    ...(ev.subjectCategory ? { subjectCategory: structuredClone(ev.subjectCategory) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),
     ...(intelligence ? { intelligence } : {}),
+    ...(ev.scoringOutcome ? { scoringOutcome: structuredClone(ev.scoringOutcome) } : {}),
     ...(ev.researchPlan ? {
       researchPlan: {
         ...ev.researchPlan,

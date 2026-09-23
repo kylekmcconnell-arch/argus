@@ -21,14 +21,14 @@ import {
   type StoredCaseSubject,
   type StoredCaseResolution,
 } from "./lib/reports";
-import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph } from "./graph/store";
+import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph, setGraphStoreOrganization } from "./graph/store";
 import { ThreatScanPage, ThreatLanding } from "./components/ThreatScanPage";
 import { WalletScanPage } from "./components/WalletScanPage";
-import type { Investigation } from "./lib/investigation";
+import { isProjectSiteBound, type Investigation } from "./lib/investigation";
 import type { Recon } from "./collect/recon";
 import { type Dossier } from "./data/dossier";
 import { probeBackend } from "./lib/live";
-import { startPersonAudit, setOnComplete, getRun } from "./lib/runner";
+import { startPersonAudit, setOnComplete, getRun, streamDropRecoveryDeadline } from "./lib/runner";
 import { startTokenScan, startInvestigationScan, setScanOnComplete, getScanRun, type ScanRun } from "./lib/scanrunner";
 import { isRunnableTokenInput, resolveInput, type RunnableTokenInput, type ResolvedInput } from "./lib/resolveInput";
 import { formatInvestigationRescanError, resolveInvestigationRescanInput } from "./lib/investigationRescan";
@@ -46,6 +46,7 @@ import type { ResearchIntent } from "./lib/researchDirector";
 import { fetchReconWebTeam } from "./lib/reconSupplements";
 import { recentReportKind } from "./lib/recentReportRoute";
 import { consumeStaleChunkReloadNotice } from "./components/AppErrorBoundary";
+import { startVersionHeartbeat } from "./lib/versionHeartbeat";
 import { finishScanReceipt } from "./lib/scanReceipts";
 import { normalizedReportLane, REPORT_VIEW_QUERY_KEY } from "./reports/shared/resolveReportLane";
 
@@ -73,6 +74,7 @@ const ReferralsPage = lazy(() => import("./components/ReferralsPage").then((modu
 const PolymarketTraderRun = lazy(() => import("./components/PolymarketTraderRun").then((module) => ({ default: module.PolymarketTraderRun })));
 const ReconPage = lazy(() => import("./components/ReconPage").then((module) => ({ default: module.ReconPage })));
 const Report = lazy(() => import("./components/Report").then((module) => ({ default: module.Report })));
+import { ScanTray } from "./components/ScanTray";
 const TokenReport = lazy(() => import("./components/TokenReport").then((module) => ({ default: module.TokenReport })));
 const TokenRun = lazy(() => import("./components/TokenRun").then((module) => ({ default: module.TokenRun })));
 const TrendingPage = lazy(() => import("./components/TrendingPage").then((module) => ({ default: module.TrendingPage })));
@@ -397,7 +399,7 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
 }
 
 export default function App() {
-  const { role } = useArgusAuth();
+  const { role, organizationId } = useArgusAuth();
   const [boot] = useState(initialFromUrl);
   const [evidenceReviewVersionId, setEvidenceReviewVersionId] = useState<string | null>(boot.openVersionId ?? null);
   const [phase, setPhase] = useState<Phase>(boot.phase);
@@ -434,13 +436,15 @@ export default function App() {
   // instead of the "no live dossier / demo" copy that implies nothing ever ran.
   const [liveError, setLiveError] = useState<string | null>(null);
   const [caseNotice, setCaseNotice] = useState<{
-    reason: "archived" | "missing" | "unavailable" | "search-unavailable" | "launch-failed" | "token-unresolved" | "case-ambiguous" | "privacy-conflict" | "rescan-failed";
+    reason: "archived" | "missing" | "unavailable" | "search-unavailable" | "launch-failed" | "token-unresolved" | "case-ambiguous" | "privacy-conflict" | "rescan-failed" | "stream-dropped";
     ref: string;
     kind?: ReportKind;
     mode?: TokenLaunchMode;
     reuseStored?: boolean;
     /** A stored report exists for this subject, offered explicitly (rescan-failed only). */
     storedAvailable?: boolean;
+    /** When the disconnected server run can no longer save a version (stream-dropped only). */
+    recoveryDeadline?: number;
     /** The exact durable cases behind an ambiguous label, offered as a chooser (case-ambiguous only). */
     subjects?: StoredCaseSubject[];
   } | null>(null);
@@ -512,6 +516,12 @@ export default function App() {
   // was running an older build, a lazy page chunk 404'd, and the app reloaded
   // itself - silently dropping the user on the home screen mid-task. Say so.
   const [staleReloadNotice, setStaleReloadNotice] = useState(() => consumeStaleChunkReloadNotice());
+  // A tab open across a deploy keeps its old build forever (the CDN never
+  // fails its old chunks), so staleness must be detected, not awaited. The
+  // heartbeat only shows a notice: reloading is the reader's call, because a
+  // reload drops this tab's live scan streams (server collection continues).
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  useEffect(() => startVersionHeartbeat(() => setUpdateAvailable(true)), []);
 
   const leaveEvidenceReview = useCallback(() => {
     if (!evidenceReviewVersionId) return;
@@ -523,7 +533,11 @@ export default function App() {
   // sees everyone's work (no-op when no backend is configured).
   // Warm the serverless backend on load (functions scale to zero after idle) so
   // the first audit click of the day doesn't eat a cold start on the live path.
-  useEffect(() => { void hydrateCommunityGraph(); void hydrateSharedLog(); void probeBackend(); }, []);
+  // The graph cache is bound to the signed-in organization BEFORE it hydrates,
+  // so only this tenant's rows are read or backfilled; an org switch rebinds
+  // and re-hydrates.
+  useEffect(() => { setGraphStoreOrganization(organizationId); void hydrateCommunityGraph(); }, [organizationId]);
+  useEffect(() => { void hydrateSharedLog(); void probeBackend(); }, []);
 
   const showPrivacyConflict = useCallback((ref: string) => {
     setQuery(ref);
@@ -537,15 +551,22 @@ export default function App() {
     priv = false,
     force = false,
     intent: ResearchIntent = "investment_due_diligence",
+    // A deep dive launched FROM a report runs in the background tray instead
+    // of replacing the report the reader is on. Only the happy launch path is
+    // silent; every outcome that needs the reader (ambiguity, not-found)
+    // still navigates so it is never swallowed.
+    background = false,
   ) => {
-    if (!closeCaseBriefForNavigation()) return;
-    leaveEvidenceReview();
+    if (!background && !closeCaseBriefForNavigation()) return;
+    if (!background) leaveEvidenceReview();
     const requestId = ++safeAuditRequestRef.current;
-    setPersonBriefTarget(null);
-    setTokenBriefTarget(null);
-    setCaseNotice(null);
-    privRef.current = priv;
-    setPrivateMode(priv);
+    if (!background) {
+      setPersonBriefTarget(null);
+      setTokenBriefTarget(null);
+      setCaseNotice(null);
+      privRef.current = priv;
+      setPrivateMode(priv);
+    }
     const resolved = resolveInput(raw);
     if (resolved.kind === "token") {
       if (!isRunnableTokenInput(resolved)) {
@@ -555,11 +576,13 @@ export default function App() {
         setPhase("notfound");
         return;
       }
-      setQuery(raw);
-      setTokenInput(resolved);
+      if (!background) {
+        setQuery(raw);
+        setTokenInput(resolved);
+      }
       const run = startTokenScan(resolved, priv, { force }); // background: survives navigation
       if (run.priv !== priv) { showPrivacyConflict(raw); return; }
-      setPhase("token-run");
+      if (!background) setPhase("token-run");
       return;
     }
     // A Polymarket profile link. Checked before "site" because the fallback
@@ -584,8 +607,10 @@ export default function App() {
     }
     // handle: use the RESOLVED username (e.g. extracted from an x.com URL), not raw.
     const handle = resolved.ref;
-    setQuery(handle);
-    setLiveError(null);
+    if (!background) {
+      setQuery(handle);
+      setLiveError(null);
+    }
     const providers = await probeBackend();
     if (requestId !== safeAuditRequestRef.current) return;
     if (providers) {
@@ -597,7 +622,7 @@ export default function App() {
       // immediate navigation away — the runner owns the stream, not the view.
       const run = startPersonAudit(handle, priv, intent);
       if (!!run.priv !== priv) { showPrivacyConflict(handle); return; }
-      setPhase("live");
+      if (!background) setPhase("live");
     } else {
       setPhase("notfound");
     }
@@ -794,6 +819,10 @@ export default function App() {
         && persisted.panelCostToken
         && inv.siteUrl
         && inv.recon
+        // Paid team discovery runs only against a site bound to the scanned
+        // contract; a model-suggested site that never bound is a lead, and
+        // researching its team would pay to profile a namesake.
+        && isProjectSiteBound(inv)
       ) {
         void fetchReconWebTeam(inv.siteUrl, inv.token.name, inv.recon, persisted.panelCostToken)
           .then((webTeamDiscovery) => {
@@ -966,13 +995,27 @@ export default function App() {
       return;
     }
 
+    const scanId = d.report.audit_id || persistedVersionId;
+    if (d.tokenAssessment?.owner === "server") {
+      // The server already saved the combined report and published its exact
+      // audit/graph binding. Read metadata only; do not create another version.
+      const saved = { ...d, persistence: { ...d.persistence!, scanId } };
+      cacheResult(resultCache.current, d.handle, { kind: "person", dossier: saved });
+      const stored = await fetchReportVersion(persistedVersionId);
+      const completed = stored?.kind === "person"
+        && normalizeSubjectRef(stored.ref) === normalizeSubjectRef(d.handle)
+        ? { ...saved, versionContext: stored.versionContext }
+        : saved;
+      settleCachedScan(resultCache.current, d.handle, scanId, { kind: "person", dossier: completed });
+      return;
+    }
+
     // The server first saves the project/person evidence so a background scan
     // survives a closed tab. The browser then finishes the linked-token safety
     // leg and adds `threat` to this dossier. Persist that final combined payload
     // as a second immutable version and, critically, move every live/cache link
     // to that final version. Otherwise the page shows the in-memory token score
     // but "Saved report" reopens the earlier pre-token snapshot as N/A.
-    const scanId = d.report.audit_id || persistedVersionId;
     const pending: Dossier = {
       ...d,
       persistence: {
@@ -1012,7 +1055,7 @@ export default function App() {
             },
           },
         });
-        return;
+        throw new Error(persisted.reason || "The project report is saved, but its completed token assessment could not be saved.");
       }
 
       const versionContext = savedVersionContext("person", d, persisted);
@@ -1124,9 +1167,21 @@ export default function App() {
   // throttle) — but the server persists finished audits, so recover the report
   // before dead-ending. Poll a few times: the server upsert may land just after
   // our stream died. Only show "not found" when nothing was produced.
-  const onLiveError = useCallback(async () => {
+  //
+  // Two failures look alike from the browser and must not be treated alike:
+  //  - the server REJECTED or ended the run (non-OK response, `error` event):
+  //    nothing more will be saved, so a short poll then "the scan didn't
+  //    finish" is honest and a relaunch is the right offer;
+  //  - only the STREAM DROPPED (proxy idle cut, tab throttling, network blip):
+  //    api/audit keeps collecting for up to its full budget and persists on
+  //    its own, typically minutes later. Declaring "nothing was saved" after
+  //    six seconds and offering "Run the scan again" started a second paid
+  //    audit of the same subject while the first was still running. A dropped
+  //    stream is therefore treated as "still collecting, disconnected": poll
+  //    with backoff for the remaining server budget, and only offer a relaunch
+  //    once that budget (plus persistence grace) has passed.
+  const recoverPersonRun = useCallback(async (ref: string) => {
     const requestId = ++safeAuditRequestRef.current;
-    const ref = query;
     if (privRef.current) {
       setLiveError(getRun(ref)?.error ?? "The private live audit didn't finish.");
       setPhase("notfound");
@@ -1141,8 +1196,31 @@ export default function App() {
     const baseline = recorded && normalizeSubjectRef(recorded.ref) === normalizeSubjectRef(ref)
       ? recorded
       : null;
+    const run = getRun(ref);
+    // Current runners own exact-receipt recovery and token finalization. A
+    // terminal failure here must not be "recovered" by opening an unrelated
+    // newer version or the pre-token snapshot from that same run.
+    if (run?.runKey && run.status === "error") {
+      setLiveError(run.error ?? "The complete report could not be saved.");
+      const cached = resultCache.current.get(cacheKey(ref, "person"));
+      const storedAvailable = !!baseline?.reportVersionId
+        || (cached?.kind === "person" && !!cached.dossier.persistence?.reportVersionId);
+      setCaseNotice({ reason: "rescan-failed", ref, kind: "person", storedAvailable });
+      setPhase("notfound");
+      return;
+    }
+    const dropped = run?.status === "error" && run.errorKind === "stream_dropped";
+    const recoveryDeadline = dropped && run ? streamDropRecoveryDeadline(run) : 0;
+    if (dropped) {
+      // Say what is known right away: the server is still working, this page
+      // will update, and no second collection has been launched.
+      setLiveError(run?.error ?? "The audit stream dropped.");
+      setCaseNotice({ reason: "stream-dropped", ref, kind: "person", recoveryDeadline });
+      setPhase("notfound");
+    }
     let storedFallback = false;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    let attempt = 0;
+    for (;;) {
       const rep = await fetchReport(ref, "person");
       if (requestId !== safeAuditRequestRef.current) return;
       if (rep?.payload && rep.kind === "person") {
@@ -1159,10 +1237,17 @@ export default function App() {
         // A newer immutable version means the run finished server-side and only
         // our stream died — that is a real recovery. A version at or below the
         // baseline is the report this run was meant to replace.
-        if (storedReportIsNewerThanBaseline(rep, baseline)) { showCached(ref, c); return; }
+        if (storedReportIsNewerThanBaseline(rep, baseline)) { setCaseNotice(null); showCached(ref, c); return; }
         storedFallback = true;
       }
-      await new Promise((r) => setTimeout(r, 1500));
+      attempt += 1;
+      const stillCollecting = dropped && Date.now() < recoveryDeadline;
+      if (!stillCollecting && attempt >= 4) break;
+      // Four quick polls catch a save that landed just as the stream died;
+      // after that a disconnected run is checked with backoff, never faster
+      // than the server can plausibly finish.
+      const delay = attempt < 4 ? 1500 : Math.min(15_000, 5_000 * (attempt - 3));
+      await new Promise((r) => setTimeout(r, Math.min(delay, Math.max(0, stillCollecting ? recoveryDeadline - Date.now() : delay))));
       if (requestId !== safeAuditRequestRef.current) return;
     }
     // This run produced nothing. Surface WHY (timeout, stream drop, backend
@@ -1171,7 +1256,9 @@ export default function App() {
     setLiveError(getRun(ref)?.error ?? "The live audit didn't finish.");
     setCaseNotice({ reason: "rescan-failed", ref, kind: "person", storedAvailable: storedFallback });
     setPhase("notfound");
-  }, [query, setCaseNotice, showCached]);
+  }, [setCaseNotice, showCached]);
+
+  const onLiveError = useCallback(() => recoverPersonRun(query), [query, recoverPersonRun]);
 
 
   // Clicking a recent audit SHOWS the report already produced (with a Rescan
@@ -1233,7 +1320,12 @@ export default function App() {
     const sessionCached = cachedForRef(resultCache.current, ref, cachedKind);
     const sessionPersistence = cachedPersistence(sessionCached);
     if (lookup.status === "open" && !lookup.report) {
-      if (sessionCached && (sessionPersistence?.state === "pending" || sessionPersistence?.state === "failed")) {
+      // A result this tab just produced outranks a lagging projection:
+      // pending and failed saves as before, and a PERSISTED result whose
+      // activation the read model has not caught up with yet. Evicting that
+      // one dead-ended the analyst on "temporarily unavailable" while the
+      // client held the exact payload and version id it had just received.
+      if (sessionCached && (sessionPersistence?.state === "pending" || sessionPersistence?.state === "failed" || sessionPersistence?.state === "persisted")) {
         showCached(ref, sessionCached);
         return;
       }
@@ -1341,12 +1433,15 @@ export default function App() {
     allowLaunch = true,
     reuseStored = true,
     intent: ResearchIntent = "investment_due_diligence",
+    background = false,
   ) => {
     const activeRequestId = requestId ?? ++safeAuditRequestRef.current;
     try {
-      privRef.current = priv;
-      setPrivateMode(priv);
-      setPhase("resolving");
+      if (!background) {
+        privRef.current = priv;
+        setPrivateMode(priv);
+        setPhase("resolving");
+      }
       if (!priv && reuseStored) {
         const storedLookup = await resolveStoredCases(candidate.canonicalRef);
         if (activeRequestId !== safeAuditRequestRef.current) return;
@@ -1379,25 +1474,27 @@ export default function App() {
         }
       }
 
-      setTokenChoices([]);
-      setCaseNotice(null);
-      setQuery(candidate.input.ref);
-      privRef.current = priv;
-      setPrivateMode(priv);
+      if (!background) {
+        setTokenChoices([]);
+        setCaseNotice(null);
+        setQuery(candidate.input.ref);
+        privRef.current = priv;
+        setPrivateMode(priv);
+      }
       if (mode === "token") {
-        setTokenInput(candidate.input);
+        if (!background) setTokenInput(candidate.input);
         const run = reuseStored
           ? startTokenScan(candidate.input, priv)
           : startTokenScan(candidate.input, priv, { force: true });
         if (run.priv !== priv) { showPrivacyConflict(candidate.canonicalRef); return; }
-        setPhase("token-run");
+        if (!background) setPhase("token-run");
       } else {
-        setInvestigationInput(candidate.input);
+        if (!background) setInvestigationInput(candidate.input);
         const run = reuseStored
           ? startInvestigationScan(candidate.input, priv, { intent })
           : startInvestigationScan(candidate.input, priv, { force: true, intent });
         if (run.priv !== priv) { showPrivacyConflict(candidate.canonicalRef); return; }
-        setPhase("investigation");
+        if (!background) setPhase("investigation");
       }
     } catch (error) {
       if (activeRequestId !== safeAuditRequestRef.current) return;
@@ -1415,19 +1512,22 @@ export default function App() {
     allowLaunch = true,
     reuseStored = true,
     intent: ResearchIntent = "investment_due_diligence",
+    background = false,
   ) => {
-    if (!closeCaseBriefForNavigation()) return;
-    leaveEvidenceReview();
+    if (!background && !closeCaseBriefForNavigation()) return;
+    if (!background) leaveEvidenceReview();
     const requestId = ++safeAuditRequestRef.current;
     try {
-      setCaseNotice(null);
-      setTokenChoices([]);
-      privRef.current = priv;
-      setPrivateMode(priv);
-      setQuery(raw);
-      setLiveError(null);
-      setResolutionUsesStoredCases(reuseStored);
-      setPhase("resolving");
+      if (!background) {
+        setCaseNotice(null);
+        setTokenChoices([]);
+        privRef.current = priv;
+        setPrivateMode(priv);
+        setQuery(raw);
+        setLiveError(null);
+        setResolutionUsesStoredCases(reuseStored);
+        setPhase("resolving");
+      }
 
       const parsed = resolveInput(raw);
       const lookupInput = parsed.kind === "handle"
@@ -1467,7 +1567,7 @@ export default function App() {
           setPhase("notfound");
           return;
         }
-        await onAudit(raw, priv, false, intent);
+        await onAudit(raw, priv, false, intent, background);
         return;
       }
 
@@ -1557,7 +1657,7 @@ export default function App() {
         setPhase("token-choice");
         return;
       }
-      await openOrLaunchTokenCandidate(resolution.candidate, priv, mode, requestId, allowLaunch, reuseStored, intent);
+      await openOrLaunchTokenCandidate(resolution.candidate, priv, mode, requestId, allowLaunch, reuseStored, intent, background);
     } catch (error) {
       if (requestId !== safeAuditRequestRef.current) return;
       showAuditLaunchFailure(raw, mode, reuseStored, error);
@@ -1587,9 +1687,11 @@ export default function App() {
       label: dossier.display_name || dossier.handle,
       kind: "person",
     });
-    // A paid rabbit-hole action is always a fresh investigation. Stored cases
-    // remain available through the free "Open saved report" path in the sheet.
-    void onSafeAuditMode(raw, priv, "investigation", true, false);
+    // A paid rabbit-hole action is always a fresh investigation, and it runs
+    // in the background tray: the reader stays on the report they are reading
+    // instead of being yanked to the scan view (#455). Stored cases remain
+    // available through the free "Open saved report" path in the sheet.
+    void onSafeAuditMode(raw, priv, "investigation", true, false, "investment_due_diligence", true);
   }, [dossier, onSafeAuditMode]);
 
   const returnToResearchSource = useCallback(async () => {
@@ -1782,6 +1884,14 @@ export default function App() {
   return (
     <AppShell onNav={onNav} onAudit={onSafeAudit} onOpenRecent={onOpenRecent} activeHandle={activeHandle} view={view}>
       <Suspense fallback={<RouteLoading />}>
+      {updateAvailable && (
+        <div className="tint-signal mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-[12.5px]" role="status">
+          <span className="font-medium text-signal-lift">A new ARGUS version is live</span>
+          <span className="text-ink-dim">This tab is still running the older build, so new features and fixes are not visible here yet. Reload when convenient; background scans keep running on the server.</span>
+          <button type="button" onClick={() => window.location.reload()} className="btn-chip ml-auto font-medium">Reload now</button>
+          <button type="button" aria-label="Dismiss update notice" onClick={() => setUpdateAvailable(false)} className="btn-chip">Later</button>
+        </div>
+      )}
       {staleReloadNotice && (
         <div className="tint-signal mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-[12.5px]" role="status">
           <span className="font-medium text-signal-lift">ARGUS updated while this tab was open</span>
@@ -1860,6 +1970,22 @@ export default function App() {
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 
+      {/* Background-scan tray (#455): deep dives launched from a report run
+          down here instead of replacing the report. Sticky, collapsible, with
+          per-task progress; a finished task flips green with an Open button,
+          and expanding a task fills the window under a "Go back" bar. */}
+      {(phase === "report" || phase === "token-report" || phase === "investigation-report" || phase === "project") && (
+        <ScanTray
+          parentLabel={
+            phase === "report" ? (dossier?.display_name || dossier?.handle || "current") :
+            phase === "token-report" ? (tokenDossier?.symbol ? `$${tokenDossier.symbol}` : "current") :
+            phase === "investigation-report" ? (investigation?.token?.symbol ? `$${investigation.token.symbol}` : "current") :
+            "current"
+          }
+          excludeRef={phase === "report" ? dossier?.handle : undefined}
+          onOpen={(ref, kind) => { void onOpenRecent(ref, kind === "person" ? "person" : kind); }}
+        />
+      )}
       {phase === "report" && dossier && <Report key={`person:${dossier.versionContext?.reportVersionId ?? dossier.viewVersionContext?.reportVersionId ?? dossier.persistence?.scanId ?? dossier.viewPersistence?.scanId ?? dossier.report.audit_id}`} dossier={dossier} onReset={reset} onAudit={personReportPrivate ? onPrivateAudit : onSafeAudit} onResearchAudit={(raw, priv) => onReportResearch(raw, personReportPrivate || priv)} onOpenSavedResearch={(raw, kind) => void onOpenRecent(raw, kind)} onOpenTokenReport={onOpenIncludedToken} onRescan={() => onAudit(dossier.handle, personReportPrivate)} onOpenProject={personReportPrivate ? onOpenPrivateProject : (name, domain, panelCostToken) => onOpenProject(name, domain, false, panelCostToken)} onOpenBrief={!evidenceReviewVersionId && !privateMode && personBriefTarget ? () => setCaseBriefTarget(personBriefTarget) : undefined} />}
       {phase === "project" && viewedProject && <ProjectView project={viewedProject} onAudit={viewedProject.privateMode ? onPrivateAudit : onSafeAudit} onReset={reset} record={!viewedProject.privateMode} panelCostToken={viewedProject.panelCostToken} />}
 
@@ -1970,6 +2096,8 @@ export default function App() {
                       ? "Couldn't start the audit"
                       : caseNotice.reason === "rescan-failed"
                         ? "The scan didn't finish"
+                      : caseNotice.reason === "stream-dropped"
+                        ? "The connection dropped; the server is still collecting"
                       : caseNotice.reason === "privacy-conflict"
                         ? "A scan is already running in another privacy mode"
                         : caseNotice.reason === "token-unresolved"
@@ -1987,8 +2115,10 @@ export default function App() {
                       ? "ARGUS hit an unexpected resolver or orchestration error and exited the launch flow instead of leaving it stuck. Retry once; any same-subject run already in flight will be reused rather than duplicated."
                       : caseNotice.reason === "rescan-failed"
                         ? caseNotice.storedAvailable
-                          ? "This scan produced no new report, so ARGUS is not showing one. The last saved report is unchanged and still available below. It is the earlier scan's result, not this one's."
-                          : "This scan produced no new report, and nothing was saved for this subject. ARGUS did not show an older result in its place."
+                          ? "ARGUS could not confirm a complete saved report for this scan. You can open the last saved version below; it may not include this scan's completed assessment."
+                          : "ARGUS could not confirm a complete saved report for this scan. Check the failure details below. Any saved project evidence remains available in Dossiers."
+                      : caseNotice.reason === "stream-dropped"
+                        ? `The live stream to this scan was interrupted, but the collector keeps running on the server and saves its result on its own, usually within a few minutes. ARGUS is checking for the saved report and will open it as soon as it appears${caseNotice.recoveryDeadline ? ` (until ${new Date(caseNotice.recoveryDeadline).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })})` : ""}. No second scan was launched and no additional credit was used.`
                       : caseNotice.reason === "privacy-conflict"
                         ? "ARGUS will not attach a private view to a public run, or suppress persistence for a public request by reusing a private run. Let the current scan finish, then retry."
                         : caseNotice.reason === "token-unresolved"
@@ -2017,7 +2147,7 @@ export default function App() {
                   ))}
                 </div>
               ) : null}
-              {(caseNotice.reason === "launch-failed" || caseNotice.reason === "rescan-failed") && liveError && (
+              {(caseNotice.reason === "launch-failed" || caseNotice.reason === "rescan-failed" || caseNotice.reason === "stream-dropped") && liveError && (
                 <div role="alert" className="mono panel-inset mt-3 max-w-md break-words px-3 py-2 text-left text-[12.5px] text-ink-dim">
                   {liveError}
                 </div>
@@ -2028,6 +2158,8 @@ export default function App() {
                     if (caseNotice.reason === "archived") setPhase("dossiers");
                     else if (caseNotice.reason === "missing") reset();
                     else if (caseNotice.reason === "rescan-failed") void onAudit(caseNotice.ref, privRef.current);
+                    // Re-attach to the disconnected server run; never relaunch it.
+                    else if (caseNotice.reason === "stream-dropped") void recoverPersonRun(caseNotice.ref);
                     else if (caseNotice.reason === "unavailable") void onOpenRecent(caseNotice.ref, caseNotice.kind);
                     else if (caseNotice.reason === "search-unavailable" || caseNotice.reason === "launch-failed") void onSafeAuditMode(
                       caseNotice.ref,
@@ -2049,6 +2181,8 @@ export default function App() {
                       ? "Back to home"
                       : caseNotice.reason === "rescan-failed"
                         ? "Run the scan again"
+                      : caseNotice.reason === "stream-dropped"
+                        ? "Check for the saved report now"
                       : caseNotice.reason === "launch-failed"
                         ? "Retry audit"
                         : caseNotice.reason === "unavailable" || caseNotice.reason === "search-unavailable"

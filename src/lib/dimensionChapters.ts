@@ -5,7 +5,10 @@
 // score band, never invented, and the specific numbers live in the lead and
 // the ledger where they can be checked.
 import type { TokenDossier } from "../token/audit";
+import type { AuditReport, AxisScore } from "../engine/audit";
+import { getProfile, SubjectClass } from "../engine";
 import { publicStrengthLabel } from "./intelligencePresentation";
+import { plainScoreRationale } from "./verdictNarrative";
 
 export type ChapterTone = "pass" | "caution" | "fail";
 
@@ -21,7 +24,9 @@ export interface DimensionChapter {
   eyebrow: string;
   /** The judgment sentence, chosen by band. */
   headline: string;
-  score: number;
+  /** Awarded points from the saved scoring record; null when the saved report never scored this axis. */
+  score: number | null;
+  /** The axis maximum from the scoring contract, never an evidence-band ceiling. */
   weight: number;
   tone: ChapterTone;
   /** The engine's recorded rationale: the report-specific facts in prose. */
@@ -49,11 +54,11 @@ const PLAIN_AXES: Record<string, { label: string; order: number }> = {
   P4_backing_and_partners: { label: "Backing & partners", order: 40 },
   P3_token_conduct: { label: "Token conduct", order: 50 },
   P6_transparency_integrity: { label: "Transparency", order: 60 },
-  T5: { label: "Onchain health", order: 110 },
-  T4: { label: "The holders", order: 120 },
-  T3: { label: "The token", order: 130 },
-  T2: { label: "Code & security", order: 140 },
-  T1: { label: "The liquidity", order: 150 },
+  T5: { label: "Trading activity", order: 110 },
+  T4: { label: "Holders", order: 120 },
+  T3: { label: "Trading costs", order: 130 },
+  T2: { label: "Code and security", order: 140 },
+  T1: { label: "Liquidity", order: 150 },
   T6: { label: "Maturity & presence", order: 160 },
 };
 
@@ -190,7 +195,7 @@ export function tokenDimensionChapters(d: TokenDossier): DimensionChapter[] {
       score: axis.score,
       weight: axis.weight,
       tone,
-      lead: axis.rationale,
+      lead: plainScoreRationale(axis.rationale),
       facts: factsFor(axis.key, d),
     };
   }));
@@ -252,36 +257,57 @@ export interface PersonStrengthBandInput {
   reasons?: string[];
 }
 
-/** Person/project chapters from recorded strength bands. Headline is chosen
- *  by the recorded tier; the lead is the engine's own reasons. */
+/** The PROJECT role report's awarded axis scores, when the saved report scored them. */
+export function projectAxisScores(
+  report: Pick<AuditReport, "role_reports"> | null | undefined,
+): Record<string, AxisScore> | undefined {
+  return report?.role_reports?.find((roleReport) => roleReport.role === SubjectClass.PROJECT)?.axes;
+}
+
+/** Person/project chapters from the saved scoring record plus the recorded
+ *  strength bands. The number a reader sees is the AWARDED score over the
+ *  axis weight from the scoring contract; the evidence band is a labeled
+ *  fact beside it. Rendering the band ceiling as the score printed 16/16 for
+ *  an axis the engine scored 15/16 and summed six chapters to 63 against a
+ *  49/100 headline (ARGUS-01). Without a scored axis (an incomplete report,
+ *  or an older payload) the chapter says so instead of inventing a number;
+ *  the headline then falls back to the recorded tier. */
 export function personDimensionChapters(
   bands: Record<string, PersonStrengthBandInput> | undefined,
+  axes?: Record<string, AxisScore>,
 ): DimensionChapter[] {
   if (!bands) return [];
+  const contractWeights = getProfile(SubjectClass.PROJECT).axes;
   return Object.entries(bands)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([axis, band]) => {
-      const tier = (band.tier ?? "").trim() || "unknown";
-      const tone = personTone(tier);
+    .map(([axis, strength]) => {
+      const tier = (strength.tier ?? "").trim() || "unknown";
       const label = PERSON_LABELS[axis] ?? axis.replace(/^P\d_/, "").replace(/_/g, " ");
-      const min = band.minScore;
-      const max = band.maxScore;
+      const min = strength.minScore;
+      const max = strength.maxScore;
+      const awarded = axes?.[axis];
+      const scored = awarded !== undefined && Number.isFinite(awarded.score);
+      const weight = (scored && Number.isFinite(awarded.weight) && awarded.weight > 0 ? awarded.weight : undefined)
+        ?? contractWeights[axis]
+        ?? max
+        ?? 0;
+      const tone = scored ? band(awarded.score, weight) : personTone(tier);
       const facts: ChapterFact[] = [];
       if (min != null && max != null && Number.isFinite(min) && Number.isFinite(max)) {
-        facts.push({ label: "Recorded range", value: `${min}–${max}` });
+        facts.push({ label: "Evidence band", value: `${min}–${max} of ${weight} pts` });
       }
       if (tier && tier !== "unknown") {
-        facts.push({ label: "Evidence strength", value: publicStrengthLabel(tier), tone });
+        facts.push({ label: "Evidence strength", value: publicStrengthLabel(tier), tone: personTone(tier) });
       }
       return {
         axis,
         eyebrow: label,
         headline: PERSON_HEADLINES[axis]?.[tone]
           ?? (tone === "pass" ? `${label}: on the record.` : tone === "caution" ? `${label}: mixed.` : `${label}: unresolved.`),
-        score: max ?? min ?? 0,
-        weight: max ?? 0,
+        score: scored ? awarded.score : null,
+        weight,
         tone,
-        lead: (band.reasons ?? []).filter(Boolean).join(" "),
+        lead: (strength.reasons ?? []).filter(Boolean).join(" "),
         facts,
       };
     });

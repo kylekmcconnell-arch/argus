@@ -218,3 +218,860 @@ chain by finding a real V3 pool's Mint-log owner and cross-checking the
 explorer's contract name (see api/nftlock.ts for the resolved table). The
 live tracing of this custody chain ships as api/nftlock.ts + the LpCustody
 panel; this note records the mechanism so the next reader doesn't re-derive it.
+
+## Pons V2 launch farms on Robinhood Chain (traced 2026-09-12 to 2026-09-14)
+
+Four tokens traced end to end from RPC transfer logs, Blockscout internal
+transactions and the verified Pons V2 contracts. Each is a different shape;
+together they set the detection recipes below. Chain id 4663, block time
+~0.101 s. Explorer `robinhoodchain.blockscout.com` is Cloudflare-gated for
+curl but serves `/api/v2` to a browser session; the RPC
+`rpc.mainnet.chain.robinhood.com` is non-archive (state reads only at head)
+and rate-limits after ~100 fast calls.
+
+**Pons V2 mechanics (verified on-chain, not from docs).** The curve contract
+mints 100% to itself and gives the deployer 1% (`launchAndBuy` on
+PonsV2LaunchAndBuy `0xe33E9E479dF8802cb0866d5d05258bEc4cF62948`). The curve
+sells 71.4% of supply and graduates at ~8,090 USDG (or the ETH equivalent);
+PonsV2GraduationExecutor `0xc7819b64a1DaEcd7ec19856D026CB14efbD89046` moves
+20.4% of supply plus the curve proceeds into a Uniswap v4 pool and 8.16% to
+PonsV2LaunchLocker `0x267444D099b10fB5Ed7c3Cc7B7c767AdcA574952`. The pool
+hook is PonsV2MemeHook `0xE5e702641Ea86F4ae6cC3cDaeD2B886f976Be044`: 5% on
+normal sells, **100% on sells by wallets that bought in the launch block**,
+and the confiscated proceeds accrue as *creator tax* claimable by the deployer
+from PonsV2FeeEscrow `0xd3AFEB2a57f70eF218Aa82451c51B2fb0416Ac9e`. Factory is
+PonsV2LaunchFactory `0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e`, deployer
+contract PonsV2LaunchDeployer `0x3711ceA4feaDE896C913C68F01Eda97Cb06D1A42`
+(already in `api/launch.ts`). Uniswap v4 PoolManager
+`0x8366a39CC670B4001A1121B8F6A443A643e40951`, UniversalRouter
+`0x8876789976decbfcbbbe364623c63652db8c0904`. USDG
+`0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168` has **6 decimals**.
+
+**The anti-snipe tax is an extraction primitive when the sniper is the
+deployer.** LEBRON (`0xd553996e73a50501a940EA771B328998a7ac2478`, launched
+2026-09-12 18:31 UTC): one wallet funded the deployer and the sniper in the
+same GasliteDrop batch; the sniper bought the whole curve plus 17% more from
+the fresh pool (88.5% of supply for 68,136 USDG) and dumped it within 5 s.
+The hook took 72,843 USDG of sell proceeds as creator tax; 11 minutes later
+the deployer claimed 127,763 USDG from FeeEscrow. Net +64k USDG paid by
+organic buyers, then bridged Robinhood -> Base via Relay and swept into
+Binance deposit addresses. A punitive tax routed to the creator is a wash
+for a self-sniper and a drain on everyone else.
+
+**Curve-phase rotation evades the tax entirely.** SYNAPSE
+(`0xE96184C99B3A3B89C907ea0753C5fDE9E3C572Ab`, 2026-09-14 03:38 UTC): the
+sniper bought 20% at block +1 through a bundler, pushed it to a sell
+executor whose every sell re-issued the tokens from the curve to a fresh
+farm wallet inside the same transaction, and the ten farm wallets sold back
+to the curve at +32 s, before graduation, where no hook exists. 0.44 ETH in,
+0.82 ETH out. The launch-block wallet ends the day with zero balance and
+zero pool interaction, so a post-graduation snipe read misses it. The read
+that catches it: launch-block buyer -> transfers to a contract -> curve
+re-issues to N wallets -> all N sell to the curve before graduation.
+
+**Fee farming with a real front end.** PRISM
+(`0x71D389c48e29996BD8e20778f87fb915c1FFDcc2`, 2026-09-02): deployer and a
+block-2 buyer (22%, sold back into the curve in 8 s) funded from one hub;
+the deployer then claimed creator fees 82 times in 11 days (~24 ETH),
+swapped 15 ETH to USDG, and routed the rest through a wallet that bridges to
+Solana via Relay. No team wallet ever held or sold the token after launch
+day; the extraction is the fee stream. Holder base was organic.
+
+**Not a farm, still a disclosure.** QUANT
+(`0x41af7e794dee45eefab49b6c387eac9368d69c4d`, 2026-07-17, custom OpenZeppelin
+ERC-20 on Uniswap v2, not Pons): 20% of supply held by the contract as a
+"clog" and sold into launch buys at a 25% launch tax with proceeds to a
+project wallet (8.4 ETH in 6 minutes), then a 4% tax to a verified
+StockPayDistributor that buys tokenized stocks for holders (117 ETH so far,
+80% to holders). Owner never renounced (`setExempt`, `removeLimits`,
+`lowerTaxes`, distributor cycler controls 0x calldata). Revenue decayed from
+95 ETH launch week to 0.07 ETH by week nine. A fair-looking distribution can
+still hide an undisclosed team sale in the first minutes.
+
+**Shared infrastructure across operators.** Buy bundlers
+`0x1e43ce0055b35373cb108e67586fd3b19ee32618` and
+`0x14b9A544e8c179Fc2040D3089dCC73bAF25aa8F9`, and sell executor
+`0xb06983db4fad9cd94efbf9088c364ebcacde1214`, are all by
+`0xCa33026341691F48A3067e22febcbd54f0cB5dE2` (6k+ txs, self-funded through
+GasliteDrop) and were used on LEBRON, SYNAPSE, and stock-token-paired Pons
+launches (AAPL, RBLX, PLTR, NFLX, NVDA, QQQ, SPY). GasliteDrop
+`0xE68d0bbc023de3fEBdA04f413db23cE9C5EA1934` `airdropETH` is the funding
+primitive for every farm seen; the sender of the batch that funded a
+deployer is the operator's hub. Hubs seen: `0xcCfb5e8F8Db1B50FFA37Ab9527D25f78e3E10Ae7`
+(LEBRON, off-ramp `0xE0BCad36FD0C2F0af1796f18AA291e232102d46C` -> Relay ->
+Base -> Binance 73 `0x3304E22DDaa22bCdC5fCa2269b418046aE7b566A`),
+`0x45f4A022Dd3758bDF8421e3293fc04F7F775Fd2F` (PRISM, off-ramp
+`0x9787CE5701F98F83a669642dE5b5dF42A6D50085` -> Relay -> Solana),
+`0xafB1D47ce1aF439C5833bB4f6Eb4978722DF2fCa` (SYNAPSE, 36 batches since
+Jul 25, daily since Sep 7, refilled by one-off wallets). Curated in
+`src/data/cabals.ts`.
+
+**Bridge attribution.** RelayDepository
+`0x4cD00E387622C35bDDB9b4c962C136462338BC31` `depositNative`; destination
+resolves keyless via `GET api.relay.link/requests/v2?hash=<deposit tx>`
+(chainId, recipient, outTx). Relay "open deposit addresses" look like fresh
+EOAs on Robinhood Chain; the real sender is `depositAddress.depositor`.
+Relay solver `0xf70da97812CB96acDF810712Aa562db8dfA3dbEF`. On Base, addresses
+that forward to Binance 73 (or to Binance Dep `0x487cab40f6D11a278fa7C442C6741Eabe44eAb5d`)
+on :x0:03 sweep ticks are Binance deposit addresses.
+
+**Detection recipes (what the scanner should measure, not conclude).**
+1. Deployer and any launch-block or block+1 buyer received ETH from the same
+   GasliteDrop `airdropETH` transaction, or from the same EOA within 2 hours
+   of launch. Measurement: shared funder tx hash. This was true on every farm
+   launch and on no organic launch checked.
+2. A launch-block buyer's tokens leave through a contract and the curve
+   re-issues tokens to >= 5 wallets inside those transactions; those wallets
+   sell to the curve before graduation. Measurement: pre-graduation sells
+   attributable to the launch-block bag as a share of supply.
+3. Creator-fee claim cadence on Pons: `PonsV2FeeEscrow.claim` count per day
+   by the deployer, and the share of claimed ETH/USDG that leaves via
+   Relay/GasliteDrop within 24 h. PRISM: 82 claims in 11 days, ~90% routed
+   out. A project treasury claiming weekly and holding reads differently.
+4. Advertised fee recipient vs the recipient set in the creation
+   transaction. SYNAPSE's docs name a treasury; the creation tx names the
+   farm deployer. Measurement: address mismatch, reported as a mismatch.
+5. On custom-contract launches, supply retained by the token contract at
+   mint and sold on buys before "graduation" (QUANT `clogAmount`), with
+   swap-back ETH going to a project wallet rather than holders.
+6. Same-second first activity: deployer and sniper first transactions in the
+   same block or second, both against SwapRouter02 / UniversalRouter, is the
+   cheapest early tell (LEBRON: both at 17:30:28).
+
+## Daily honeypot factory on Robinhood Chain (traced 2026-09-14, $DOGEGPT)
+
+Not a launchpad token: EOA `0x8fc191daa5ac8eb3b30066ffa554d999fe35885e`
+deploys an unverified custom ERC-20 (3.3 KB, `owner()` reads zero, has
+`renounceOwnership`) straight to a Uniswap v2 WETH pair, keeps every LP unit
+in its own wallet, and calls a custom `actionPair(...)` on the token right
+after. Result on `0x26becab467bf74a3e09c095c30427acbd6544608`: 101 buys and
+0 sells in six hours, +24,800% on the chart, ~$79k "liquidity". `eth_call`
+of `transfer(pair, amount)` from three holders: succeeds only from the
+deployer-funded wallet `0x10d28597…`, reverts from the others; transfers to
+a plain EOA succeed for everyone, so it is a sell-path whitelist, not a
+transfer lock. Cadence: JUGGERNAUT 09-11, EMBERCAT 09-12, STONKINU 09-13,
+ZZZCAT 09-13, DOGEGPT 09-14, each preceded by
+`removeLiquidityETHSupportingFeeOnTransferTokens` on the previous one and
+followed by a LiFi/Across bridge out. GoPlus for chain 4663 returned an
+empty holder set and `lp_holder_count: 1` with the zero address "locked",
+which is wrong: LP `balanceOf(deployer)` is 100%. Do not trust the keyless
+LP read on this chain; read the pair contract. Cheapest tells, in order:
+zero sells against dozens of buys on a pair younger than a day; LP token
+supply held by the deployer; a deployer whose prior creations all show
+`removeLiquidity` in their last hours; `eth_call` sell-path simulation from
+a non-deployer holder. All curated in `src/data/cabals.ts`
+(`rh-honeypot-factory-8fc191`).
+
+## Two more Robinhood Chain launch venues (read 2026-09-14, $FIH and $WRESTLER)
+
+Neither is Pons, and both read as plain "uniswap" on DexScreener.
+
+- **LaunchLocker factory.** $FIH (`0x4b3a3ff4…`) was created by
+  `0xd9ec2db5f3d1b236843925949fe5bd8a3836fccb` (unverified, ~93k txs by
+  September) which mints 100% of supply, seeds a Uniswap v3 WETH pool, and
+  moves the position NFT (Uniswap V3 Positions NFT-V1
+  `0x73991a25c818bf1f1128deaab1492d45638de0d3`) to a verified `LaunchLocker`
+  `0x7f03effbd7ceb22a3f80dd468f67ef27826acd85`, all in the creation tx.
+  Factory and locker share creator `0x7e035fb048a31e0481b88074557415b1c187242b`.
+  Detection: token creator == that factory; LP custody == `ownerOf(tokenId)`
+  on the NFPM resolving to the LaunchLocker. Launch read for FIH: first buy
+  at block +38, no same-block cluster, 72 buyers in the first hour, deployer
+  bought 2% at +3.5 min and later sold. Organic.
+- **o1 Launchpad (first read as "RWAERC20LaunchpadFactory").** $WRESTLER
+  (`0xab528169…`) was created through
+  `0xce9c48cfa068947f77738c81be406b53338e5b0d` (creator `0xaa8d6f5a…`),
+  which Blockscout verifies under the source name `RWAERC20LaunchpadFactory`
+  and which o1's own contract registry lists as the current Robinhood Launch
+  Factory (identified 2026-09-16, see the o1 section below). It pools the
+  full supply into a Uniswap v4 pool quoted in a tokenized stock (GLXY) with
+  no bonding curve; the supply custodian `0x0310cfebe1d7a69f2414f6595bbe9d17c5342acc`
+  is the o1 Launch Hook. Blockscout's `getcontractcreation` reports the
+  one-shot Launch Token Deployer (`0xf86dfdb6…`) as `contractFactory` for it,
+  so the server matches both the factory and the token deployer. Launch read:
+  first buy at +183, 5 buyers in the first hour, pool still 94% full after an
+  hour; the volume came with the Altcoinist calls from Sep 7. Organic.
+
+o1 is now in the `VENUES` table (`o1`) with server-side factory detection
+on Robinhood; the LaunchLocker factory still waits for a second token before
+it gets a venue entry. Both launches stay recorded in `src/data/cabals.ts`
+(`altcoinist-ring`).
+
+## o1 Launchpad (o1.exchange), read 2026-09-16 via $BRAINARM on Base
+
+One `launchpad-v4-minimal` suite on Base, Robinhood Chain, Monad and Arc, run
+by Jerry Pan (@stambouli_o1, @o1_exchange). Same model everywhere: no
+bonding curve, the creation tx mints the full supply and pools all of it into
+a Uniswap v4 pool under the o1 Launch Hook, quoted in ETH, USDC/USDG or a
+tokenized stock. Liquidity is documented as permanent; creator rights are fee
+claims only. Every swap pays 1%: creator 50 bps, platform 30 bps, referrer
+20 bps. Launch fee 0.001 ETH, anti-snipe window 20 seconds, optional atomic
+Dev Buy through the Launch-Buy Adapter.
+
+- **Contracts.** Machine-readable registry:
+  `https://docs.o1.exchange/launchpad/reference/launch-contract-suites.json`
+  (current and four historical suites per chain; o1 asks indexers to keep
+  every suite). Robinhood current: Launch Factory `0xce9c48cf…`, Hook
+  `0x0310cfeb…`, Fee Escrow `0xc5444b41…`, Launch Token Deployer
+  `0xf86dfdb6…`. Base current: Launch Factory
+  `0x1176122eb77ad6a2339322cda7c4d7ea9bfa63dc`, Hook `0x1f91c998…`, Fee
+  Escrow `0xb3f11a3fb06a88059b7f7f423ec0dda506356866`, Announcement
+  Registry `0xab1243c9…`. Platform fee receiver `0x1caa1962…`.
+- **Base tokens are native B20 assets.** The o1 factory calls Base's genesis
+  B20 Factory `0xb20f0000…0000`; the token lands at a system address
+  `0xb2000000…` with `eth_getCode` = `0xef` (one byte) and no creator or
+  creation tx on Blockscout (Basescan: "System Contract"). There is no custom
+  token code, no owner and no sell-path surface, so honeypot reads do not
+  apply; judge the launch on flows. The `0xb2` prefix marks the B20 standard,
+  which other apps also use, so it is not an o1 fingerprint. Recognise a Base
+  o1 launch by the creation tx calling the o1 Launch Factory (selector
+  `0x3feab1d8`) or by Fee Escrow `claimFor` activity for the token.
+- **Fee-farm read ($BRAINARM, `0xb2000000000000000000005a0c125da6cf531d01`).**
+  Launched 2026-09-14 22:14:45 UTC by thefear.base.eth (`0x010f94ba…`, a
+  Uniswap-wallet EIP-7702 account), whose launch tweet carried a referral
+  link to its own address, so it takes 70 of the 100 bps on every trade. Ten
+  `claimFor` calls between 09-15 02:30 and 09-16 04:10 UTC pulled 1.68 ETH
+  (about $4,000 against a $340k cap); the claims arrive as v4 ERC-6909 burns
+  paid out as internal ETH transfers, so Blockscout's tx list misses them.
+  Proceeds left through relayed 7702 executions (Multicall3 to the account's
+  execute) into two fresh wallets that swapped to USDC and hold 1,436.9 and
+  966.6 USDC plus 0.417 ETH. First buy landed at block +10 (20 s, the
+  anti-snipe boundary), 2.7x supply turnover in the first hour. Detection
+  recipe: creator address == referrer in the launch link, Fee Escrow claim
+  cadence of a few hours, proceeds to fresh wallets. Same shape as the Pons
+  PRISM farm, with the fee taken from the pool instead of a sell tax.
+- **Insider check.** jesse.base.eth (`0x2211d1d0…`, Jesse Pollak's Coinbase
+  Smart Wallet, paymaster-sponsored user operations) bought 0.0112% of
+  BRAINARM for 0.0102 ETH on 2026-09-15 16:40 UTC between three other small
+  memecoin buys. A Base insider buying pocket change through Base App is
+  their routine, not a team signal, and no Base or Coinbase staff account
+  posted about the token.
+
+## PumpSwap drained-pool factory behind a pump.fun launch ($PARK, Solana, read 2026-09-16)
+
+$PARK / STONKS PARK (`7gKKy2p1SaMkRFPX7caF96YpfuMMpDj82ZpjaffuvaU5`, a Token-2022
+pump.fun mint created 2026-09-15 14:41:13 UTC, graduated to PumpSwap after 22
+hours with the LP burned) looked like a content project: daily animated
+episodes, a website, $598 of DexScreener ads. The wallet trail says otherwise.
+Curated in `src/data/cabals.ts` (`sol-park-pumpswap-pool-factory`).
+
+- **The creator wallet is a fee sink for other people's pools.** On PumpSwap,
+  `create_pool` takes a `coin_creator` account (account index 21 in the
+  current instruction layout) that receives the creator share of every swap
+  fee. Ten throwaway wallets (each alive for under an hour) opened pools
+  between 14:50 and 21:32 UTC on launch day depositing 191 to 451 SOL each
+  (3,781 SOL in total), all naming the PARK creator `CBbRS6xr…` as
+  `coin_creator`. Each pool drew 61 to 345 trades in 2 to 26 minutes and was
+  then drained to 0.00 SOL. The base tokens carry fake launchpad address
+  suffixes (`…pump`, `…bonk`, `…moon`, `…BAGS`) and generated names, and
+  DexScreener still quotes multi-million market caps for them on zero
+  liquidity. Ten further pools traded on 09-16 paying fees to the same vault.
+  Nobody routes creator fees to a stranger: the factory and the "dev" are one
+  operator.
+- **Detection recipe.** Pull `getSignaturesForAddress` for the token creator
+  and decode every transaction that touches the PumpSwap program
+  (`pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA`) but was not signed by the
+  creator. A creator that appears as an account in `create_pool` or swap
+  transactions for other mints is a coin-creator fee sink; check those pools'
+  WSOL vaults (`getTokenAccountsByOwner(pool, WSOL)`) for the drained-to-zero
+  signature. The pump.fun API returns 404 for these mints because they never
+  had a curve.
+- **Launch bundle.** The bonding-curve account
+  (`7fQP9eZk6xPVULLETYEfcHFQYSA1sbYQnd3BxJWMeD6C`) is the cheap history
+  source (3,880 txs versus 40,000+ on the mint after graduation). 43 buys in
+  the first 20 slots took 44.65% of supply. Eight fresh wallets (5 to 9 txs
+  each) were funded about 1.05 SOL apiece from five high-throughput hubs
+  between 09:42 and 10:01 UTC, five hours before the 14:41 launch; five of
+  them bought an identical 0.811% in slot +13 and all but one exited by slot
+  +20. Fresh-from-hub funding plus identical sizing in one slot is the bundle
+  fingerprint; the hubs themselves (300 to 54,000 SOL, seeding wallets every
+  minute) read as exchange or bot-service hot wallets and do not identify the
+  operator on their own.
+- **Recycled X handle.** GMGN's rename history for @stonkspark lists 13
+  renames: twelve 2024 Solana memecoin handles and 3 deleted tweets, on an
+  account that joined May 2024 with 331 followers. A project account whose
+  previous names were all dead memecoins is a serial-launch tell independent
+  of the chain read.
+- **Tape.** 35,298 transactions in the first hour after graduation on about
+  920 holders and $26k of liquidity is bot volume; 24-hour volume of $690k
+  against a $110k market cap is the same signal in DexScreener terms.
+
+Public Solana RPCs reject `getTokenLargestAccounts` for Token-2022 mints and
+cap `getSignaturesForAddress` pagination in practice; use the bonding-curve
+account for the launch window and Solscan's holder page for the snapshot.
+
+## Pons V2 self-launch with a dividend pivot ($IDX9000, Robinhood Chain, read 2026-09-16)
+
+$IDX / IDX9000 (`0xcd4e70bfd73952123449e453f08c12e44ab89e58`) is the LEBRON shape
+with two new moves. Curated in `src/data/cabals.ts` (`rh-farm-idx9000`).
+
+- **Rehearsal launch.** The deployer (`0x5cfdc3ee…`, an EIP-7702 account funded
+  0.5 ETH from a 5,845 ETH hot wallet 73 minutes earlier) launched an
+  identical IDX (`0x8db9cbfa…`) at 04:52 UTC with a 36.4% dev buy, sold it
+  all by 04:57, claimed the tax and bridged, then launched the live token at
+  05:02:50 with a 30.11% dev buy paid in tokenized SPY. A dead twin with the
+  same name and symbol a few minutes before the live token is a deployer
+  fingerprint worth checking on every Pons scan: read the deployer's token
+  transfers for a second PonsV2LauncherToken.
+- **Dump into the curve, not the pool.** 20.1% went back into the curve inside
+  three minutes of launch (blocks +767 to +1706) and 7.5% more before
+  graduation; the last 2.5% hit the graduated pool. Each dev sell was met
+  within four blocks by a cluster of buys from wallets funded hours earlier
+  from Robinhood-scale hot wallets, so the curve absorbed the dump. Recipe:
+  align deployer sells with buy clusters in the following four blocks.
+- **Creator-fee redirect.** At 16:37 UTC, three minutes before the last bridge
+  exit, the deployer called `PonsV2LaunchFactory.transferCreatorFeeRecipient`
+  and pointed the fee stream at an escrow created through Pons's own
+  `EscrowProxy` (`0x70e95cc5…`, deployed by the same address as
+  PonsV2LaunchLocker, 68k txs). That escrow pays the 5% sell tax to holders
+  in SPY every 90 minutes. A "fees go to holders" claim on a Pons token is
+  therefore checkable: look for that call and for `Claimed` events on the
+  recipient escrow. Here the claim became true only after the operator had
+  taken its 2.59 ETH.
+- **Brand after exit.** index9000.xyz was registered 66 minutes after the
+  deployer's last transaction, the X account posts lore every two hours and
+  follows only the Pons team and Robinhood, and a paid caller (@YusufGemz)
+  pushed the token from a $227k to a $435k cap the next day. The BNB Chain
+  address that received the bridged proceeds also exists on Robinhood Chain,
+  is a serial Pons sniper since July, and bought back 0.39% nine minutes
+  before the domain was registered. Same key on two chains is the one hard
+  link between the exit and the marketing phase.
+- **Who buys now.** 18.5% of supply in 24 hours through RobinHoodSettler, the
+  Robinhood app's swap router, into fresh 7702 app wallets; sells come from
+  aggregator and MEV contracts and the July sniper farm. When the settler is
+  the only buyer, the bid is retail from a call channel.
+
+## KOL call backtest: @YusufGemz (read 2026-09-17)
+
+Method: 57 posts scraped from the profile (2026-08-31 to 2026-09-16), every
+post naming a ticker with a bullish claim counted as a call at its post
+time, ticker resolved to the deepest DexScreener pool, price taken from
+GeckoTerminal hourly candles (close of the candle containing the post),
+returns measured at +24 h close, the +24 h high, +72 h close and the last
+candle on 2026-09-17. Repeat calls on the same token count separately
+because each one asks followers to buy again. 28 of 31 calls priced;
+$PAPERGIRL had no pool and two posts were commentary without a ticker.
+
+| Call (UTC) | Token | +24h | +24h high | +72h | Now |
+| --- | --- | --- | --- | --- | --- |
+| 2026-08-31 09:40 | SIRIUS | -75% | +17% | -38% | -80% |
+| 2026-08-31 16:12 | CASHCAT | -2% | +19% | +36% | -1% |
+| 2026-09-01 15:30 | UPTOBER | -5% | +26% | -2% | -32% |
+| 2026-09-02 14:53 | UBIK | -18% | +27% | +16% | +151% |
+| 2026-09-02 18:14 | OPTIMUS | +30% | +87% | +58% | -22% |
+| 2026-09-03 13:08 | DOGE-1 | -37% | +22% | -21% | -97% |
+| 2026-09-03 16:20 | PONS | +24% | +34% | +36% | +11% |
+| 2026-09-04 10:51 | OPTIMUS | -27% | +52% | -55% | -62% |
+| 2026-09-05 12:50 | PONS | +3% | +8% | -17% | -27% |
+| 2026-09-05 18:55 | UBIK | +15% | +30% | +46% | +28% |
+| 2026-09-05 20:14 | PONSAN | -92% | +4% | -90% | -99% |
+| 2026-09-06 14:57 | ZOLANA | -18% | +728% | -20% | -48% |
+| 2026-09-07 12:50 | UBIK | -10% | +7% | -23% | -2% |
+| 2026-09-08 08:24 | 4AI | -75% | +3% | -85% | -90% |
+| 2026-09-08 21:07 | UBIK | -13% | +24% | +2% | -16% |
+| 2026-09-11 10:37 | UBIK | +25% | +34% | -12% | -19% |
+| 2026-09-11 15:23 | OPTIMUS | -6% | +32% | -8% | +96% |
+| 2026-09-12 11:05 | UBIK | -17% | +25% | -38% | -34% |
+| 2026-09-12 11:52 | DOGE-1 | -18% | +40% | -83% | -91% |
+| 2026-09-12 12:09 | CASHCAT | -9% | +3% | -7% | +17% |
+| 2026-09-13 14:32 | INDEX | +0% | +15% | -10% | +1% |
+| 2026-09-13 16:28 | UBIK | -24% | +0% | -37% | -29% |
+| 2026-09-14 14:56 | BEM | -23% | +6% | -30% | -30% |
+| 2026-09-14 20:12 | IDX | +201% | +346% | +429% | +429% |
+| 2026-09-16 01:34 | LONG | -66% | +56% | -65% | -65% |
+| 2026-09-16 11:11 | IDX | +16% | +75% | +16% | +16% |
+| 2026-09-16 12:50 | LIFT | -69% | +60% | -69% | -69% |
+| 2026-09-16 17:09 | IDX | -21% | +9% | -21% | -21% |
+
+Medians: +24 h -15%, +72 h -18%, now -25%. 20 of 28 calls were under water
+at +72 h and still are. Seven calls printed a +50% high inside 24 h, which is
+the window a caller's own exit needs; the only call that held was the first
+$IDX mention on 2026-09-14 20:12 UTC, posted when the token was a $80k cap
+four hours after its domain was registered, and his source for it was "my
+$SPX friend" and "Quant told me". Tokens he says he "called early in the YG
+cabal" (his private Telegram) read worst in public: $PONSAN -99%, $4AI -90%,
+$DOGE-1 -97%, $SIRIUS -80%. The "no paid deal" disclaimer appears once, on
+$4AI, the day after its launch.
+
+Reading for ARGUS: a call from this account is a distribution event, not a
+discovery. Score it as K2 exit-liquidity behaviour with the private-group
+front-run pattern (public post after the private call, "already up Nx"),
+and treat any token he touches in its first day as one being sold to his
+audience.
+
+Wallet search: for seven of his Robinhood calls (UBIK, OPTIMUS, PONSAN, 4AI,
+IDX, CASHCAT, INDEX) every wallet that received the token in the eight hours
+before the public post was collected and intersected. After removing
+contracts, routers and bots with more than 5,000 transactions, no wallet
+bought a meaningful size (0.05% of supply or more) ahead of three or more of
+his calls, and only two drained EIP-7702 wallets did so ahead of two
+(0x52a5e2e0… on OPTIMUS and PONSAN, 0x40efc800… on UBIK and PONSAN). The
+intersection missed him because the threshold was set at three calls: the
+FomoScan read below gives him a wallet, and that wallet sits in the IDX and
+PONSAN pre-call sets, not in the others.
+
+Wallet found (2026-09-17, via FomoScan): FOMO account "YusufGemz" (bio
+"$500-$10K challenge", no X link stored) verified EVM wallet 0xde42eaab… and
+Solana wallet EkeSXXNq…. From the IDX Transfer logs already collected:
+
+| UTC | Direction | IDX | Counterparty |
+| --- | --- | --- | --- |
+| 09-14 16:35 | in | 7,952,438 | RelayRouterV3 0xb92fe925 (bridged buy) |
+| 09-14 16:55 | in | 3,036,553 | RelayRouterV3 |
+| 09-14 17:17 | out | 10,988,991 | 0xff218593 (his second wallet) |
+| 09-14 17:22 to 17:42 | in | 5,524,642 | RelayRouterV3, three buys |
+| 09-14 19:19 | out | 5,524,643 | 0xff218593 |
+| 09-14 19:58 | in | 6,294,052 | RelayRouterV3 |
+| 09-14 20:12 | | | first public $IDX call |
+| 09-15 18:46 to 09-16 13:15 | out | 6,089,100 | 0xff218593, five moves |
+
+The second wallet 0xff218593… is an EIP-7702 account (delegate 0xe8b12077…,
+57 txs, 0.47 ETH) that received IDX only from him and from router
+0x8366a39c…, and sold 23.8M IDX in round 1,000,000-token lots to contract
+0x36dc95f1… from 2026-09-15 14:32 UTC, eighteen hours after the first call,
+through the second (09-16 11:11) and third (09-16 17:09) calls. He therefore
+held about 22.8M IDX (2.3% of supply) at the moment of the call he framed as
+a tip from "my $SPX friend", and the position was liquidated into the demand
+the three calls created. This is the K2 pattern with the wallet attached.
+The PONSAN pre-call receipt (555K tokens) is small and the other five calls
+do not show this wallet, so the Robinhood-app fresh-wallet reading may still
+hold for those.
+
+## FomoScan cross-comparison of the registry (run 2026-09-17)
+
+FomoScan (api.fomoscan.sh) indexes FOMO (fomo.family) trader accounts: the
+wallet each account verified for itself, the X account it links, cash-flow
+numbers and posted "theses". PR #462 wires it in as provider `fomoscan`
+(server/adapters/fomoscan.ts) and adds scripts/fomoscan-sweep.ts. First
+sweep, results in eval/fomoscan/:
+
+- Handles (13 registry accounts, 13,750 CU): three are FOMO traders with
+  verified wallets: Altcoinist (Solana DVFYHVKF…, EVM 0xccdeb774…),
+  lowcap_hunter (Solana 4CH1wgHq…, EVM 0x517b826b…, X link stored) and
+  YusufGemz (Solana EkeSXXNq…, EVM 0xde42eaab…). The ten project and
+  cofounder handles are not on FOMO. All three traders are net cash-out on
+  FOMO (Altcoinist -$7.6k all time, lowcap_hunter -$32.7k on $1.4M volume,
+  YusufGemz -$985 on $94k), which is FomoScan's sold-minus-bought figure,
+  not realized profit.
+- Wallets (84 registry wallets plus 216 traced wallets, 74,750 CU): zero
+  resolve to a FOMO trader. Deployers, snipers, hubs, fee sinks and the
+  IDX launch-bundle buyers are not FOMO identities. One registry address is
+  a stored prefix (0x252e7031, rh-farm-prism) and could not be queried.
+- Theses (28 registry launches, 7,000 CU): 13 launches carry FOMO posts.
+  Altcoinist wrote 8 of the FIH and WRESTLER theses himself. $IDX collected
+  25 theses in five hours on 2026-09-17 (08:40 to 13:42 UTC) in English,
+  Chinese and Hebrew with the same "imaginary benchmark" framing, from
+  accounts with no other thesis on our launches: a paid or scripted wave
+  three days after the operator's exit. $PRISM theses turn from "dev is
+  shipping" to "smells like a rug pull" on 2026-09-16 and tag @ogle and
+  @unipcs as hoped-for backers. $DOGEGPT's four theses are all "can't sell".
+
+Method notes: FOMO handles are not X handles, so a record binds to a
+subject only when FOMO's stored X link (a username or a full x.com URL)
+names the audited handle; name-only matches are recorded as such. Wallets
+from FomoScan enter the registry as `kol-wallet` with FomoScan named in the
+evidence, and as InvestigatorAttributed in audits, never SelfDoxxed.
+FomoScan's own unit accounting ran about fifteen percent above the
+documented prices (132,000 units left after 103,000 by list price), so
+budgets should carry that margin.
+
+## Base serial deployer: fees without a dump (BaseCat creator, read 2026-09-17)
+
+A question about who sold the apple-emoji token 0xb200...36601 on Base turned
+into a full read of the wallet behind it, 0x48c7ab8f. The wallet is indexed as
+`base-b20-basecat-creator`. Three things are worth keeping.
+
+**The identity link is the sender, and only the sender.** The same wallet sent
+the createLaunch for the apple token (o1 Launchpad, 2026-09-08) and for BASECAT
+(B20 launchpad, 2026-08-15), and it is the recipient of the fee claims. That is
+what ties the two launches together, and it is enough here because the wallet
+has 572 transactions of its own and is the fee beneficiary, so it is not
+behaving as a relayer.
+
+Corrected 2026-09-20: this section originally claimed the embedded calldata tag
+`bc_4raffiaj`, which appears in both launches and in all 169 fee-claim calls,
+was a creator identifier and therefore corroborated the link. It is not. The
+Zuckasaurus launch on 2026-08-28 (0xb200...9ec01, B20 factory 0xff70918e)
+carries the identical tag and was sent by 0x58d0fdcb, an unrelated serial
+launcher with 35 launches, no shared funder and no shared sweep wallet. The tag
+is a client or referral code shared across many creators on these factories.
+Treat it as a launch-client fingerprint, useful for grouping launches by the
+tool that made them, never as evidence that two launches share an operator.
+
+**Fee income, no supply.** The wallet took no allocation at any launch, never
+held BASECAT at all, and sold nothing into any of its own pools. Its income is
+creator fees: 233.234 ETH from BASECAT across 169 claims, measured by balance
+delta at each claim block because the Blockscout internal-transaction index
+returns only 19 of them. The gap is large enough to matter. The indexed view
+showed 28 ETH of income against 266 ETH of outflow, which is how the shortfall
+was noticed at all. On the apple token the fees accrue in AAPLc, the tokenized
+Apple stock the pool is paired against, and 16.87 of the 17.62 AAPLc collected
+went back into buying the token and burning it: 39,119,746 tokens, 3.91 percent
+of supply, still at the burn address. Proceeds leave through a sweep wallet
+0x60578f65 and the Relay depository.
+
+**Two attribution traps, both worth remembering.**
+
+- *ERC-4337 bundlers look like whales.* Resolving each sale to its transaction
+  sender produced a tidy cluster of 48 wallets with a 0x4337 vanity prefix
+  holding 48 percent of sells. They are bundler operators submitting `handleOps`
+  to the EntryPoint at 0x4337084d, so they appear as the sender of other
+  people's trades. Walking the token graph instead, hop by hop through the
+  routers inside each transaction, gives 1,415 sellers with the top ten at 11
+  percent.
+- *Bridge solvers look like a common funder.* Twenty-one of the forty largest
+  sellers, together 75 percent of supply sold, were funded by the same wallet
+  that had also sent the creator 5.5 ETH. That wallet, 0xf70da978, made 640 ETH
+  payouts to 285 distinct addresses in a three-hour window while calling the
+  Relay router and deposit contracts. It is a bridge filler paying out everyone
+  who bridges into Base, and it carries no attribution weight. This is the same
+  rule the Robinhood hot wallets taught: a shared funder is not an operator
+  link.
+
+The series itself reads as volume with one hit: ten tokens deployed through an
+unverified deployer between 2026-07-21 and 2026-08-12 and abandoned at the mint
+with no pool and no transfers, two launchpad launches that never traded, the
+apple token down 97.6 percent from a high set five hours after launch, and
+BASECAT alive a month later at about 615,000 USD of liquidity and 487,000 USD
+of daily volume.
+
+## Machi Big Brother and $TAIWAN: promote, sell, rotate (read 2026-09-17)
+
+Indexed as `rh-machi-taiwan`. The question was who sold $TAIWAN on Robinhood
+Chain and whether @machibigbrother was among them. He was, and he also created
+the token.
+
+**Identity.** The launch transaction came from machibigbrother.eth, resolved
+independently through ENS, so the deployer identification does not depend on
+FomoScan at all. He confirmed it on X on 2026-09-01 and again on 09-03. The
+second wallet, the one that did most of the selling, comes from FomoScan: the
+FOMO account `machibigbrother` carries a verified EVM wallet and a Solana
+wallet. FOMO stores no X link for that account, so the binding rests on the
+account name, and no direct transfer connects that address to
+machibigbrother.eth. The circumstantial case is strong: the FOMO account with
+his name speaks for a token his public wallet deployed.
+
+**The sequence.** He bought 24.9M tokens for about 19,500 USD across both
+wallets between 09-01 and 09-07, posting bullish theses while buying, including
+"We are building the world's largest $TSM reserve. Long your longs." on 09-06.
+Neither wallet holds any TSM; the reserve accumulates in the pool. His last
+bullish post on the token was 09-07 04:03 and his first sale was 09-09 13:51.
+He sold 6.9M tokens for about 3,900 USD and still holds 1.7 percent of supply,
+leaving him roughly 15,000 USD down.
+
+**The rotation.** Every sale from the FomoScan wallet bridged out: Relay
+requests show all six going from chain 4663 to Solana, arriving as USDC,
+1,206.42 USDC in total. His Solana wallet holds all four Solana tokens he
+posted theses about on 09-13 and 09-14, and two of them were first acquired
+after the proceeds landed: HneTUS79 on 09-10 17:22 and AmPojoiS on 09-12 22:04.
+So the money moved from the token he created and promoted into tokens he then
+promoted.
+
+**What the broader seller set does not show.** The decline was not one exit.
+Attributing every sale by walking router hops gives 5,373 selling wallets, the
+top ten holding 6.6 percent of sell flow, and his own wallet ranked 238th. For
+the token he promoted next on Robinhood Chain, 362 of 7,446 buyers had
+previously sold $TAIWAN, 16.5 percent of that token's buy volume. That is not
+evidence of coordination: the token launched on 09-14, after most $TAIWAN
+selling, so the ordering is forced, and there is no control showing what
+overlap two unrelated tokens on this chain would produce. Treat it as a base
+rate to beat, not a finding.
+
+**Method note for Robinhood Chain.** Uniswap v4 nets its settlements, so
+transfers into the PoolManager are only the residual delta and attributing
+sells to that address misses almost everything. The real sink is the swap hub
+0x8366a39c, and router layers nest several deep: the largest apparent seller
+was a forwarder that received from 596 sources and passed 100 percent onward.
+Classify every candidate by `eth_getCode` first, treat contracts as
+infrastructure to walk through, and remember that EIP-7702 accounts carry code
+but are user wallets. Log queries also need care: the launch window exceeds the
+10,000-log cap and needs recursive splitting, and address-less queries time
+out.
+
+## Fee farming as the business model ($wire / wire bot, Robinhood Chain, read 2026-09-20)
+
+Indexed as `rh-wirebot-fee-farm`. A token can be clean at launch and still be
+built to extract, and this one shows the shape of it.
+
+**The launch gives you nothing to flag.** On 2026-07-17 the deployer paid
+0.0205 ETH to factory 0x0c37a24f, which has launched roughly 1,896 tokens. There
+was no bonding curve: the whole billion went straight into the pair in the
+launch transaction, and the deployer's only allocation was 14,395,208 tokens,
+1.44 percent, bought at the same moment as everyone else. No honeypot, no tax,
+no liquidity pull, nothing a contract scanner would return.
+
+**The extraction is the fee stream.** The launchpad pays creator fees in the
+token itself. Over two months the deployer claimed 84,349,332 tokens, 8.43
+percent of supply, across 210 payments worth about 52,000 USD at the prices on
+the days they landed, and it was still claiming on the day of this read. Its
+visible transaction history is almost nothing but those claims: 260 of them,
+plus a single setFeeRedirect call.
+
+**The deployer never sells, which is the point.** It has zero attributed sales
+across 314,399 transfers. It forwards to 0xf7b84493, which sells into the pair
+and passes the remainder to 0xa58bdd0a, which sells as well, about 78,000 USD
+between them at sale-time prices. Anyone checking the creator wallet for sell
+pressure finds a clean record. The pressure is two hops away.
+
+**Separate the operator read from the token read.** The token is down 99
+percent from its 2026-07-21 peak, including 84 percent across 09-18 and 09-19,
+but that fall was 886 wallets selling with the top ten at 29.5 percent and the
+deployer selling nothing in the window. Over the token's life 12,378 wallets
+have sold with the top ten at 9.7 percent, which is a genuinely dispersed
+market. The fee stream is a constant drag on it, not the trigger for the crash.
+The cluster is indexed nefarious for the extraction and the routing; the launch
+outcome is recorded as fee-farmed rather than dumped.
+
+**Watch for namesakes.** A different token also called Wire
+(0x15f3d1ba06aeeb26470bf4995305f58082a20859, account wireonrh) launched on the
+same chain on 2026-09-18. Two tokens sharing a name on one chain is a reason to
+confirm the address before any read, and portfolio tools will resolve the
+ticker to whichever pair they rank first.
+
+## Volume launching on Base: 35 tokens, three alive (read 2026-09-20)
+
+Indexed as `base-b20-serial-launcher-58d0fdcb`. A second Base wallet running
+the same business as the BaseCat creator, at five times the launch count and a
+fraction of the hit rate.
+
+**The shape.** 35 createLaunch transactions between 2026-07-17 and 2026-09-15
+across both B20 factories and the o1 factory. Thirty-two have no live pair and
+holder counts in the low single digits; Sparkplug (81 holders) and Zuckasaurus
+(52) barely trade, and O1DOLL (319 holders, about 43,900 USD of liquidity) is
+the only one with depth. Names borrow identity (ELON, COINBASE, COBIE, BALD)
+and repeat within days (TRILLIONS, BAPU and MACBOOK each twice), which is what
+volume launching looks like when the cost of a launch is a rounding error.
+
+**The income is fees, in ETH.** 125 claims delivering 10.0776 ETH, measured by
+balance delta at each claim block rather than from the explorer's internal
+index, swept to a single controller wallet that has taken 13.36 ETH. No
+allocation at any launch, and no trace of the deployer ever holding or selling
+one of its own tokens. Because the factories pay these fees in ETH rather than
+in the launched token, the stream costs holders nothing directly, which is the
+distinction from `rh-wirebot-fee-farm` where the same model is paid in-token
+and sold into the market. Recorded as unestablished rather than nefarious on
+that basis.
+
+**Address poisoning in the funder list.** The controller wallet
+0x85ce0965...ed7b is shadowed by two lookalikes, 0x85ceef79...ed7b and
+0x85cea55c...1d7b, that match at both ends and appear in the deployer's
+counterparty list on zero-value transfers. Reading the first and last four
+characters of an address is how a cluster gets attributed to the wrong wallet;
+compare the whole string.
+
+**Zuckasaurus itself is the least interesting part.** Launched 2026-08-28
+against tokenized Meta stock, no creator allocation, 1,000,000,000 straight to
+the pool, the deployer absent from its transfer ledger, top holder 3.0 percent,
+and its only listed link is a news article about a Facebook privacy mascot.
+The token is a shell; the wallet behind it is the record worth keeping.
+
+## The in-token fee model has a second instance ($LEMON, read 2026-09-20)
+
+Indexed as `rh-lemonfun-fee-farm`, related to `rh-wirebot-fee-farm`. Two
+Robinhood Chain tokens, launched eight days apart through the same launchpad
+family (factories 0x2ba793fd and 0x0c37a24f, both taking selector 0x686399cb),
+run the identical extraction. This is a model, not a one-off, and it is worth
+treating as a named pattern when scanning that chain.
+
+**The shared shape.** No bonding curve; the whole supply goes to the pair in
+the launch transaction; the deployer's only allocation is a slice it buys there
+(2.0 percent on LEMON, 1.44 percent on wire). Nothing a contract scanner
+flags. The launchpad then pays creator fees **in the token**, and that stream
+is the business: 4.69 percent of supply on LEMON across about 396 payments,
+8.43 percent on wire across 210.
+
+**The routing is what makes it findable and what makes it deliberate.** On both
+tokens the deployer's own sales into the pool are zero. LEMON's deployer pushed
+57M tokens to five wallets; four forwarded everything to the swap router
+0xbdbae060 and the fifth sold 22.8M straight into the pair. Every one of them
+is empty now. Checking the creator address for sell pressure returns a clean
+record on both tokens, which is the point of the arrangement.
+
+**Detection recipe.** On a Robinhood Chain token, take the deployer, sum
+inbound transfers from any single contract that is not the pair, and express it
+as a share of supply. A recurring in-token credit from one contract is a fee
+stream. Then follow the deployer's outbound transfers one hop: if the
+recipients' balances are zero and their outflows land on a router or the pair,
+the stream is being sold and the creator's own record will look clean. Do not
+stop at the deployer.
+
+**One difference worth recording.** LEMON's operator burned 10,000,000 tokens,
+1 percent of supply, out of the stream. The wire bot operator burned nothing.
+It does not change the read, but it is the only point either operator has in
+its favour.
+
+## A build that checks out ($MERRYMEN, Robinhood Chain, read 2026-09-20)
+
+Worth recording because it is the counter-example to everything else indexed on
+this chain, and because the failure mode is different from a scam.
+
+**The code is real.** `millw14/merrymen`, TypeScript, created 2026-07-10, four
+days before the token. 989 commits, 961 from the lead and six other
+contributors, 66 stars, 20 forks, 15 open issues, 17 MB. Weekly commits over
+the last month ran 114, 239, 210, 201 and it was pushed on the day of the read.
+It ships artifacts rather than promises: an npm package with 42 versions and 92
+downloads in the week, a Windows installer at 111 downloads, an Android demo at
+143, Linux AppImages, plus live hosted app and docs. Added to
+`eval/shipping-backtest.json` as the first robinhood-chain subject.
+
+**On-chain it is clean.** The full billion went factory to launch contract to
+pool. The deployer never received a single token, holds none, and has no fee
+stream; the token contract holds 6,784 tokens, so there is no clog or tax
+reserve. None of the extraction patterns recorded elsewhere on this chain.
+
+**The disclosures are better than most audits.** The token page states the
+product is free without the token, that the token buys perks only, and that
+there is no buyback, no burn, no revenue share and no promised return. The
+governance page says in its own words that voting is a signalling process, not
+binding on-chain execution, and that holding confers no share of revenue,
+profit or ownership. Tier thresholds (10k, 100k, 1M for 10, 25 and 50 percent
+off the performance fee) are in the repo, not only in the copy.
+
+**Four discrepancies, all minor, none of them extraction.** No LICENSE file in
+the repo despite MIT claimed on the site and in package.json. The npm package
+was last published 2026-08-02 while the repo commits daily, so the installable
+artifact trails the source by weeks. The token page and the token's on-chain
+name claim it was "launched via Virtuals", which could not be verified: the
+launch factory 0xd4ccbfa3 has a nonce of 2 and is not a busy launchpad. The
+team is pseudonymous.
+
+**The lesson for scoring.** A clean operator and a token worth holding are
+separate questions, and this record exists to keep them separate. The token's
+only function is a discount on a performance fee from a platform whose
+measurable usage is about 90 installs a week and roughly 1,150 followers.
+There is no mechanism that converts product success into token value, so a 72
+percent drawdown from the 09-10 peak on 4,950 USD of daily volume is consistent
+with nothing being wrong with the project. Do not let shipping evidence carry a
+token thesis it cannot support, and do not read a falling chart on a real build
+as evidence of a farm.
+
+## A clean distribution with the fee-farm routing inside it ($MEME, Robinhood Chain, read 2026-09-21)
+
+Indexed as `rh-meme-amc`, intent `unestablished`. Launched 2026-09-03 through
+factory 0x22e99278, the $TAIWAN venue, which mints the full billion to hook
+0xeb7c0347 and then to the shared DopplerHookInitializer 0x4e346895. That
+contract holds inventory in about 21,000 tokens, so a transfer from it is a
+launchpad payout, not an operator link.
+
+**The holder side is as clean as this chain gets.** 31,023 holders and about
+3.04M transfers. The top ten non-pool holders own 14.96 percent of supply and
+the largest non-pool holder, at 3.87 percent, is a custody proxy carrying more
+than 20 unrelated tokens. The deployer's first buy came 371 blocks after
+launch, so it is not a launch-block snipe.
+
+**The deployer side repeats the wire and LEMON routing.** A 0.1 ETH buy of
+1.18 percent of supply, then a creator fee paid in the token: 28 claims of
+selector 0x817db73b totalling 5.01M, still running on 2026-09-21. None of it
+went to the pool from the deployer. It went one hop out to wallets that are all
+empty now. One sold 5.0M into the PoolManager and the others bridged 6.08M out
+through Relay. The recipe from the LEMON section finds it in two queries.
+
+**Why unestablished and not nefarious.** The routing is the same, the size is
+not. The stream is 0.50 percent of supply against 4.69 percent on LEMON and
+8.43 percent on wire, and it has decayed from 3.87M on 2026-09-04 to under
+17,000 per claim. On those two tokens the fee stream was the business. Here it
+reads as a creator cashing launchpad fees quietly on a token that trades on
+its own. Revisit if the claims grow again or a new wallet starts selling in
+size.
+
+**The AMC narrative has no AMC behind it.** From 2026-09-19 the project account
+pitched $MEME as a way to "fix" AMC ahead of the 2026-09-24 annual meeting. No
+project address holds a meaningful balance of tokenized AMC 0x05a3d1cd. The
+AMC in this ecosystem sits in the AMC/MEME pool as liquidity, about 2.0M USD
+of MEME's 4.22M headline liquidity. Liquidity cannot be voted. Treat a token
+pitched as a vehicle for shareholder action as unbacked unless a treasury
+address holding the stock is named and checkable.
+
+**Explorer trap.** Blockscout indexes this token's symbol as AMC while the
+contract returns MEME and has no rename function. Any balance view on the
+explorer lists it beside the real stock token. Read `symbol()` from the
+contract before trusting an explorer label on this chain.
+
+## A clean launch with no business behind it ($AILE, Solana, read 2026-09-22)
+
+Deliberately not a cabal entry, for the same reason as $MERRYMEN: there is no
+cluster to record. The point of the section is that a token can pass every
+mechanical check and still be carrying a valuation its own numbers do not
+support.
+
+**Everything mechanical is clean.** A pump.fun launch on the Token-2022
+program, created 2026-09-11 19:24 UTC, graduated to PumpSwap thirteen minutes
+later. Token-2022 is where transfer fees, transfer hooks and permanent
+delegates would sit, so check the extension list rather than assuming: this one
+carries only a metadata pointer and the metadata. Mint authority, freeze
+authority and metadata update authority are all null.
+
+**The creator never sold, and this is checkable in one query.** The creator
+wallet bought 348,534 tokens, 0.035 percent of supply, for 0.0231 SOL at
+launch. Its token account has 570 signatures and exactly one of them succeeded:
+that buy. The other 569 failed and moved nothing. Balance today is the same
+348,535. Pull the creator's token account signature list and count the
+successes before repeating any claim that a dev dumped.
+
+**The usage page is the finding.** The project publishes its own network
+totals, and they read: 975 requests, 21.4M tokens and **4.80 USD of settled
+value** across all time since 2026-08-17, generating 0.70 USD of protocol fee.
+One day, 09-13, carries 16.0M of the 21.4M tokens in 44 requests. The token
+peaked at a 490,109 USD market cap on 2026-09-20 and sits at about 35,800 USD
+with 285 holders and 16,700 USD of liquidity. A buyback announced 2026-09-21,
+funded by the settlement fee, is drawing on a lifetime pool of 0.70 USD.
+Credit where it is due: most projects at this stage do not publish this at all,
+and it was linked from the footer.
+
+**The business model needs the supply side to break its own contracts.**
+Lenders rent out AI subscriptions and API keys they already pay for, and the
+catalogue advertises Claude model access at 20 to 35 percent below list.
+Reselling or sharing access is prohibited by the major providers' terms and
+they enforce it by terminating accounts. That is not one bad listing, it is the
+inventory the marketplace is built on. Scaling the lender side raises the odds
+of enforcement against it.
+
+**Who actually sold, and a funder signal that is a false positive.** The
+current top ten are not the sellers; nine of them bought from the pool after
+graduation, four of those on 09-19 and 09-20 immediately before the peak, and
+none bought on the bonding curve. The sellers are earlier buyers who exited in
+full: the top hundred traders realised about 110,900 USD, accumulating between
+4,300 and 145,000 USD of market cap and distributing between 94,000 and
+320,000. Several of the winners shared a funding address, which normally means
+a coordinated cluster. It holds 5,094 SOL and processes roughly 436,000
+transactions a day, so it is a trading terminal's relay account. Profile a
+shared funder's transaction rate before calling it a ring. The same trap exists
+on Robinhood Chain, where the exchange's own hot wallets fund thousands of
+unrelated user wallets.
+
+## Machi exits $TAIWAN in full, and a correction (re-read 2026-09-23)
+
+The 2026-09-17 read of `rh-machi-taiwan` has been overtaken. Three things it
+recorded are no longer true, and one was wrong when written.
+
+**He did have creator income.** The entry said he took no creator allocation.
+That was true at the mint, but on 09-19 07:18 the deployer received 5,886,504
+tokens, 0.59 percent of supply, from the shared launchpad fee contract
+0x4e346895. A token paying no allocation at launch can still pay the creator
+later. Check the deployer's inbound transfers from the fee contract across the
+whole life of the token, not just the launch window.
+
+**He bought before he sold, and the buy moved the price.** In the same hour as
+the fee claim he took 19,108,118 more through the Robinhood app settler in six
+transactions. The hourly candle went from 0.00014663 to 0.00018609, up 27
+percent on 36,158 USD of volume, against about 1,000 USD the day before.
+
+**Then he exited everything.** On 09-23 00:00:34 UTC the deployer sold all
+33,994,623 in one transaction, routed into TSM and out as 27,125 STANDARD,
+roughly 5,350 USD. The price did not move: the hour closed up 0.3 percent. A
+3.4 percent supply position on this token is only worth about 5,000 USD, so
+size in supply terms says little about price impact once a token is down 92
+percent. The FomoScan wallet had already emptied its last 8,000,001 through the
+Relay router between 09-18 and 09-20. Both wallets now read zero.
+
+**What changes and what does not.** Across both wallets he acquired 49,909,964
+tokens, 5.0 percent of supply, and sold all of it. In the 09-17 to 09-23 window
+he is the largest single seller at 17.3 percent of sell flow, where the earlier
+read had him 238th. But he is still roughly 15,000 USD down on the token, he
+posted nothing about it during the exit window, and the 92 percent collapse
+happened on 09-11, twelve days before he sold. Intent stays unestablished.
+
+**Router lines are not sellers.** The two largest sell-flow lines in the window
+are UniversalRouter 0x88767899 at 21.7 percent and RelayRouterV3 0xb92fe925 at
+14.6 percent. Both are infrastructure carrying other people's trades, and the
+Relay line contains his own FomoScan wallet's 8,000,001. Attribute through the
+hops before ranking sellers, or the routers take the top of every table.

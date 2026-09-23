@@ -92,10 +92,14 @@ const statusCounts = (status: ProviderUsageStatus) => ({
   cached: status === "cached" ? 1 : 0,
 });
 
-const aggregateStatus = (line: Pick<LedgerLine, "calls" | "succeeded" | "failed" | "cached">): ProviderUsageStatus => {
-  if (line.succeeded === line.calls) return "succeeded";
-  if (line.failed === line.calls) return "failed";
+// A cache hit is a successful answer that cost nothing, so a line mixing live
+// and cached reads is healthy, not "partial". Only a line where every attempt
+// came from cache reports "cached", and only failed or partial attempts can
+// pull a line down.
+export const aggregateStatus = (line: Pick<LedgerLine, "calls" | "succeeded" | "failed" | "cached">): ProviderUsageStatus => {
   if (line.cached === line.calls) return "cached";
+  if (line.succeeded + line.cached === line.calls) return "succeeded";
+  if (line.failed === line.calls) return "failed";
   return "partial";
 };
 

@@ -103,6 +103,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const scanMcap = num(req.query.mcap);
   const chain = typeof req.query.chain === "string" ? req.query.chain.trim() : "";
   const address = typeof req.query.address === "string" ? req.query.address.trim() : "";
+  // kind=equity: the caller is asking about a listed STOCK ticker, which has no
+  // chain or contract address to bind on. Equity rows bind by exact base ticker
+  // instead, and any row that carries an on-chain identity is a crypto namesake
+  // of the stock symbol and is dropped.
+  const kind = typeof req.query.kind === "string" && req.query.kind.trim().toLowerCase() === "equity"
+    ? "equity"
+    : "crypto";
 
   const base = process.env.CHART_SIGNALS_URL;
   const token = process.env.CHART_SIGNALS_TOKEN;
@@ -125,9 +132,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // one row per timeframe: prefer the USD pair, then USDT, else first seen
     const byTf = new Map<string, UpstreamRow>();
     const pref = (t: string) => (t.endsWith("-USD") ? 0 : t.endsWith("-USDT") ? 1 : 2);
+    const equityRowBinds = (raw: UpstreamRow): boolean => {
+      const hasOnchainIdentity = (typeof raw.chain === "string" && raw.chain.trim() !== "")
+        || (typeof raw.address === "string" && raw.address.trim() !== "");
+      if (hasOnchainIdentity) return false;
+      const base = String(raw.ticker ?? "").toUpperCase().split("-")[0];
+      return base === symbol;
+    };
+    const cryptoRowBinds = (raw: UpstreamRow): boolean =>
+      Boolean(chain && address && typeof raw.chain === "string" && typeof raw.address === "string"
+        && assetIdentity(raw.chain, raw.address) === assetIdentity(chain, address));
     for (const raw of d.rows as UpstreamRow[]) {
-      if (!raw || !chain || !address || typeof raw.chain !== "string" || typeof raw.address !== "string"
-        || assetIdentity(raw.chain, raw.address) !== assetIdentity(chain, address)) continue;
+      if (!raw || !(kind === "equity" ? equityRowBinds(raw) : cryptoRowBinds(raw))) continue;
       const tf = String(raw.timeframe ?? "");
       const cur = byTf.get(tf);
       if (!cur || pref(String(raw.ticker ?? "")) < pref(String(cur.ticker ?? ""))) byTf.set(tf, raw);
@@ -136,7 +152,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // namesake guard: the scanned token and the listed asset must be the same
     // order of magnitude, or the ticker match is a different asset entirely
     let rows = [...byTf.values()];
-    if (!rows.length) return res.status(200).json({ available: true, covered: false, binding: "unresolved", note: "Chart candidates could not be bound to this chain and contract address." });
+    if (!rows.length) {
+      return res.status(200).json({
+        available: true, covered: false, binding: "unresolved",
+        note: kind === "equity"
+          ? "Chart candidates could not be bound to this equity ticker."
+          : "Chart candidates could not be bound to this chain and contract address.",
+      });
+    }
     if (scanMcap != null && scanMcap > 0) {
       rows = rows.filter((row) => {
         const feedCap = num(row.market_cap_usd);

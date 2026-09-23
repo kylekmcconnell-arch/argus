@@ -8,7 +8,7 @@ import { buildReport, SUBJECTS } from "../data/subjects";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
+vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }), useOptionalArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
 // The promoted production lane renders the connection workspace, which needs
 // the real entity-key canonicalizer; only the connection lookup is stubbed.
@@ -197,9 +197,12 @@ describe("favorable person report with adverse leads about the subject", () => {
   it("never publishes absence as an all-clear when a provisional PASS has open critical coverage", () => {
     render(provisionalPassWithOpenCriticalCheck());
 
+    // The saved verdict stays labelled provisional beside the score, and the
+    // brief names the exact required check that is still open.
+    expect(container.querySelector(".score-card")?.textContent).toContain("Provisional");
     const decisionCanvas = container.querySelector("#report-summary")?.textContent ?? "";
-    expect(decisionCanvas).toContain("PROVISIONAL");
-    expect(decisionCanvas).toContain("Required report checks");
+    expect(container.querySelector('#report-summary aside[aria-label="Required report checks"]')).not.toBeNull();
+    expect(decisionCanvas).toContain("Still open");
     expect(decisionCanvas).toContain("Sanctions screening");
     expect(concernsText()).not.toContain("No adverse findings");
     expect(concernsText()).toContain("1 decision-critical check remains open or unrecorded");
@@ -249,8 +252,8 @@ describe("favorable person report with adverse leads about the subject", () => {
     expect(container.querySelector("#publishable-findings")).toBeNull();
     // The verdict and the score are the engine's, and an uncorroborated lead
     // never touches either.
-    expect(container.querySelector("span.display")?.textContent).toBe("PASS");
-    expect(container.textContent).toContain("82");
+    expect(container.querySelector(".score-card .badge")?.textContent).toContain("Pass");
+    expect(container.querySelector(".score-card .score-number")?.textContent).toContain("82");
   });
 
   it("does not describe a subject lead as an item about a related company", () => {

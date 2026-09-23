@@ -4,6 +4,7 @@
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
 import { AUDIT_STREAM_INACTIVITY_TIMEOUT_MS } from "./investigationRuntime";
+import { setPanelToken } from "./panelToken";
 import type { ResearchIntent } from "./researchDirector";
 
 export interface ProviderStatus {
@@ -37,14 +38,26 @@ export async function probeBackend(timeoutMs = 8000): Promise<ProviderStatus[] |
   return null;
 }
 
+/**
+ * Why a live stream ended without a dossier.
+ *  - "rejected": the server rejected the launch or sent an `error` event.
+ *    A duplicate claim is excluded: its original request may still be running.
+ *  - "stream_dropped": the connection died or went silent while the server
+ *    was still working. The route keeps collecting and persists on its own
+ *    schedule, so the client must not read this as "nothing was produced".
+ */
+export type LiveFailureKind = "rejected" | "stream_dropped";
+export interface LiveFailure { kind: LiveFailureKind }
+
 export interface LiveHandlers {
   onStep: (step: TraceStep) => void;
   onDone: (dossier: Dossier) => void;
-  onError: (err: string) => void;
+  onError: (err: string, failure?: LiveFailure) => void;
 }
 
 // Streams /api/audit via fetch + manual SSE parsing (EventSource can't be
-// aborted as cleanly and we want a single GET). Returns an abort function.
+// aborted as cleanly). Launch with POST so transport retries do not treat a
+// paid scan as an idempotent read. The run key still protects against replay.
 //
 // Resilience: the audit MUST reach a terminal state. The backend can die mid
 // stream (function duration cap, network drop) without ever sending a `done` or
@@ -60,6 +73,7 @@ export function streamAudit(
   intent: ResearchIntent = "investment_due_diligence",
   seed?: { tokenAddress?: string; tokenChain?: string; tokenSymbol?: string },
   creditKey: string = crypto.randomUUID(),
+  serverToken = false,
 ): () => void {
   const ctrl = new AbortController();
   let settled = false;
@@ -73,7 +87,7 @@ export function streamAudit(
   const armWatchdog = () => {
     if (watchdog) clearTimeout(watchdog);
     watchdog = setTimeout(() => {
-      settle(() => h.onError("timed out: the audit stream stopped responding"));
+      settle(() => h.onError("timed out: the audit stream stopped responding", { kind: "stream_dropped" }));
       ctrl.abort();
     }, AUDIT_STREAM_INACTIVITY_TIMEOUT_MS);
   };
@@ -88,10 +102,14 @@ export function streamAudit(
         params.set("chain", seed.tokenChain);
         if (seed.tokenSymbol) params.set("symbol", seed.tokenSymbol);
       }
+      if (serverToken && !priv) params.set("tokenExecution", "server");
       const res = await fetch(`/api/audit?${params.toString()}`, {
+        method: "POST",
+        cache: "no-store",
         signal: ctrl.signal,
         headers: { accept: "text/event-stream" },
       });
+      if (settled) return;
       if (!res.ok || !res.body) {
         const body = await res.json().catch(() => null) as { message?: unknown; error?: unknown; remainingCredits?: unknown } | null;
         const reason = typeof body?.message === "string"
@@ -99,7 +117,12 @@ export function streamAudit(
           : body?.error === "credit_budget_exhausted"
             ? "You have no investigation credits left. Ask a workspace owner to add credits before starting another scan."
             : `The investigation service returned ${res.status}. No report was created.`;
-        settle(() => h.onError(reason));
+        // A replay means the original request owns the run and may still be
+        // collecting. Recover its saved result; do not launch another audit.
+        const alreadyClaimed = res.status === 409 && body?.error === "scan_run_already_claimed";
+        settle(() => h.onError(alreadyClaimed
+          ? "This scan already started. Reconnecting to its saved result."
+          : reason, { kind: alreadyClaimed ? "stream_dropped" : "rejected" }));
         return;
       }
       armWatchdog();
@@ -108,7 +131,7 @@ export function streamAudit(
       let buf = "";
       for (;;) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || settled) break;
         armWatchdog();
         buf += decoder.decode(value, { stream: true });
         const chunks = buf.split("\n\n");
@@ -118,22 +141,26 @@ export function streamAudit(
           const dataLine = /data: ([\s\S]+)/.exec(chunk)?.[1];
           if (!ev || !dataLine) continue;
           const data = JSON.parse(dataLine);
-          if (ev === "step") h.onStep(data as TraceStep);
+          if (settled) break;
+          if (ev === "credits") setPanelToken((data as { panelToken?: string })?.panelToken);
+          else if (ev === "step") h.onStep(data as TraceStep);
           else if (ev === "done") settle(() => h.onDone(data as Dossier));
-          else if (ev === "error") settle(() => h.onError(data?.error ?? "error"));
+          else if (ev === "error") settle(() => h.onError(data?.error ?? "error", { kind: "rejected" }));
         }
+        if (settled) { await reader.cancel().catch(() => undefined); return; }
       }
       // Stream closed. If we never saw a done/error event, the backend ended
       // early — surface it instead of leaving the UI spinning forever.
-      settle(() => h.onError("the audit stream closed before finishing. Please retry."));
+      settle(() => h.onError("the audit stream closed before finishing. The server is still collecting.", { kind: "stream_dropped" }));
     } catch (e) {
-      if ((e as Error).name !== "AbortError") settle(() => h.onError(String(e)));
+      if ((e as Error).name !== "AbortError") settle(() => h.onError(String(e), { kind: "stream_dropped" }));
     } finally {
       if (watchdog) clearTimeout(watchdog);
     }
   })();
 
   return () => {
+    settled = true;
     if (watchdog) clearTimeout(watchdog);
     ctrl.abort();
   };

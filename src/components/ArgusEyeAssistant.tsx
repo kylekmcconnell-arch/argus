@@ -9,7 +9,7 @@ import {
 } from "@phosphor-icons/react";
 import type { BasicFactLead } from "../data/evidence";
 import type { Investigation } from "../lib/investigation";
-import { CHALLENGE_EVENT, type ChallengeDetail } from "../lib/challenge";
+import { CHALLENGE_ASK_EVENT, type ChallengeDetail } from "../lib/challenge";
 import { projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 
 interface EyeAnswer {
@@ -262,8 +262,8 @@ export function ArgusEyeAssistant({
       setOpen(true);
       window.setTimeout(() => inputRef.current?.focus(), 0);
     };
-    window.addEventListener(CHALLENGE_EVENT, onChallenge);
-    return () => window.removeEventListener(CHALLENGE_EVENT, onChallenge);
+    window.addEventListener(CHALLENGE_ASK_EVENT, onChallenge);
+    return () => window.removeEventListener(CHALLENGE_ASK_EVENT, onChallenge);
   }, []);
 
   const ask = async (preset?: string) => {

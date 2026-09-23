@@ -35,10 +35,61 @@ export function defiLlamaLookupName(name: string): string {
   return normalized.replace(/\s+protocol$/i, "").trim() || normalized;
 }
 
+/**
+ * Slug candidates from the subject's own identity surfaces, strongest first.
+ * A display name is decoration ("Definitive | DeFi for institutions" slugs to
+ * nothing DeFiLlama knows), while the official domain's label and the X handle
+ * are identity: definitive.fi -> "definitive" is exactly the slug that carried
+ * Definitive's $4.1M BlockTower seed while the display-name guess missed it.
+ * Discovery only; the caller still identity-joins whatever document comes back.
+ */
+export function defiLlamaSlugCandidates(
+  name: string,
+  officialWebsite?: string | null,
+  handle?: string | null,
+): string[] {
+  const out: string[] = [];
+  const push = (value: string) => {
+    const slug = defiLlamaSlug(value);
+    if (slug && !out.includes(slug)) out.push(slug);
+  };
+  push(defiLlamaLookupName(name));
+  if (officialWebsite?.trim()) {
+    try {
+      const host = new URL(/^https?:\/\//i.test(officialWebsite) ? officialWebsite : `https://${officialWebsite}`).hostname;
+      const label = host.toLowerCase().replace(/^www\./, "").split(".")[0];
+      if (label) push(label);
+    } catch { /* not a candidate */ }
+  }
+  const cleanHandle = (handle ?? "").replace(/^@/, "").trim();
+  if (cleanHandle) push(cleanHandle);
+  return out.slice(0, 3);
+}
+
+/**
+ * Resolve which candidate slug DeFiLlama actually knows, spending at most one
+ * bounded read per candidate (the per-scan memo absorbs the repeats when the
+ * collectors fetch the same document again). Returns the first slug whose
+ * protocol document exists; null when none does or the provider is down.
+ */
+export async function resolveDefiLlamaSlug(
+  candidates: string[],
+  fetcher: typeof fetch = deadlineFetch,
+): Promise<string | null> {
+  for (const slug of candidates) {
+    const result = await fetchProtocol(slug, fetcher);
+    if (result.ok) return slug;
+    if (!result.notFound) return null; // outage: stay fail-visible, never guess on
+  }
+  return null;
+}
+
 type ProtocolDocument = {
   name?: unknown;
   symbol?: unknown;
   gecko_id?: unknown;
+  twitter?: unknown;
+  url?: unknown;
   currentChainTvls?: unknown;
   tvl?: unknown;
   raises?: unknown;
@@ -208,6 +259,16 @@ export interface ProtocolTvl {
   chainBreakdown: { chain: string; tvlUsd: number }[];
   geckoId: string | null;
   /**
+   * The protocol document's own identity surfaces: its listed X handle and
+   * official site. A tokenless protocol has no CoinGecko id to join on, but an
+   * exact match of BOTH of these against the audited subject's provider-
+   * resolved handle and official domain is the same identity doctrine the
+   * token binding uses (dexIdentity), so free protocol evidence no longer
+   * exists only for token-bearing projects.
+   */
+  officialTwitter: string | null;
+  officialUrl: string | null;
+  /**
    * First date in DeFiLlama's TVL series. Phrase user-facing claims as "TVL
    * history since YYYY": the series start can be backfilled when an old
    * protocol is listed late, so it bounds, not proves, protocol age.
@@ -356,6 +417,10 @@ export async function collectProtocolTvl(
       chains: chainBreakdown.map((entry) => entry.chain),
       chainBreakdown,
       geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
+      officialTwitter: typeof data.twitter === "string" && data.twitter.trim()
+        ? data.twitter.trim().replace(/^@/, "")
+        : null,
+      officialUrl: typeof data.url === "string" && data.url.trim() ? data.url.trim() : null,
       firstRecordedAt,
       change30dPct,
       trend,
@@ -533,6 +598,9 @@ export interface ProtocolFunding {
   name: string;
   /** CoinGecko identity carried by the same protocol document. */
   geckoId: string | null;
+  /** The protocol document's own X handle and official site (see ProtocolTvl). */
+  officialTwitter: string | null;
+  officialUrl: string | null;
   rounds: FundingRound[];
   /** sum of known round amounts */
   totalRaisedUsd: number;
@@ -624,6 +692,10 @@ export async function collectProtocolFunding(
       slug,
       name: typeof result.data.name === "string" ? result.data.name : projectName,
       geckoId: typeof result.data.gecko_id === "string" ? result.data.gecko_id : null,
+      officialTwitter: typeof result.data.twitter === "string" && result.data.twitter.trim()
+        ? result.data.twitter.trim().replace(/^@/, "")
+        : null,
+      officialUrl: typeof result.data.url === "string" && result.data.url.trim() ? result.data.url.trim() : null,
       rounds,
       totalRaisedUsd,
       leadInvestors,

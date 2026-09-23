@@ -218,7 +218,7 @@ export function scanSolidity(files: SourceFile[]): CodeFlag[] {
       // mint under owner control
       if (/^_?mint/i.test(fn.name) && fn.gated)
         push("owner-mint", "high", "Owner-callable mint",
-          `\`${fn.name}()\` lets the privileged wallet create new supply at will - holders can be diluted to zero.`, f.path, fn.start, raw);
+          `\`${fn.name}()\` is gated by an access-control modifier, so whoever holds that role could mint new supply. Authorization unresolved: reading the source does not establish that the role is still reachable.`, f.path, fn.start, raw);
 
       // settable fees, bounded or not
       if (/^set.*(fee|tax)s?/i.test(fn.name) && fn.gated) {

@@ -121,6 +121,7 @@ const freezeNewsOutcome = (
   news: NewsOutcome,
   capturedAt: string,
   provisionalNameQuery: boolean,
+  screenedName: string,
 ): void => {
   if (news.status !== "succeeded") {
     ctx.recordCheck?.({
@@ -128,6 +129,7 @@ const freezeNewsOutcome = (
       status: "unavailable",
       note: failedCheckNote("Google News search", news.status, news.attempts),
       provider: "google-news",
+      screenedName,
     });
   } else if (provisionalNameQuery && !news.value.articles.length) {
     ctx.recordCheck?.({
@@ -135,6 +137,7 @@ const freezeNewsOutcome = (
       status: "unavailable",
       note: "single-name and handle search returned no matching article; a verified full-name search is still required",
       provider: "google-news",
+      screenedName,
     });
   } else {
     ctx.recordCheck?.({
@@ -145,10 +148,12 @@ const freezeNewsOutcome = (
         : "exact-name and exact-handle crypto press searches returned no matching article",
       provider: "google-news",
       sourceCount: news.value.articles.length,
+      screenedName,
     });
   }
   for (const article of news.value.articles) {
     if (!article.url) continue;
+    const match = news.matches[(article.url ?? article.title).toLowerCase()] ?? "exact_name";
     addArtifact(ctx, {
       kind: "press",
       provider: "google-news",
@@ -157,7 +162,10 @@ const freezeNewsOutcome = (
       capturedAt,
       ...(asIso(article.publishedAt) ? { publishedAt: asIso(article.publishedAt) } : {}),
       excerpt: article.source,
-      match: news.matches[(article.url ?? article.title).toLowerCase()] ?? "exact_name",
+      match,
+      // A name-matched article belongs to the screened name; a handle match
+      // survives a later name refresh because the handle did not change.
+      ...(match === "exact_name" ? { subjectName: screenedName } : {}),
     });
   }
 };
@@ -186,6 +194,7 @@ const freezeLegalOutcome = (
         : failedCheckNote("CourtListener search", legal.status, legal.attempts),
       provider: "courtlistener",
       sourceCount: inspectableCases.length,
+      screenedName: name,
     });
   } else {
     ctx.recordCheck?.({
@@ -196,6 +205,7 @@ const freezeLegalOutcome = (
         : "CourtListener returned no case caption containing the full resolved name",
       provider: "courtlistener",
       sourceCount: exactCases.length,
+      screenedName: name,
     });
   }
   for (const item of inspectableCases) {
@@ -208,6 +218,7 @@ const freezeLegalOutcome = (
       ...(asIso(item.date) ? { publishedAt: asIso(item.date) } : {}),
       excerpt: [item.court, item.docket == null ? "" : String(item.docket)].filter(Boolean).join(" · "),
       match: "candidate",
+      subjectName: name,
     });
     addFinding(ctx, {
       finding_type: "LegalCaseNameLead",
@@ -236,6 +247,7 @@ const freezeOfacOutcome = (
       status: "unavailable",
       note: failedCheckNote("OFAC name screen", ofac.status, ofac.attempts),
       provider: "opensanctions",
+      screenedName: name,
     });
     return;
   }
@@ -247,6 +259,7 @@ const freezeOfacOutcome = (
       : `exact full-name and reversed-name screen completed against ${ofac.value.listSize.toLocaleString()} OFAC SDN names with no match`,
     provider: "opensanctions",
     sourceCount: 1,
+    screenedName: name,
   });
   addArtifact(ctx, {
     kind: "sanctions_screen",
@@ -258,6 +271,9 @@ const freezeOfacOutcome = (
       ? `Exact name/alias match for ${name}; identity requires verification.`
       : `No exact full-name or reversed-name match for ${name} across ${ofac.value.listSize} indexed names.`,
     match: ofac.value.sanctioned ? "exact_name" : "no_match",
+    // The screened name is part of the artifact identity so that a later
+    // refresh for a different resolved name is never deduplicated away.
+    subjectName: name,
     ...(ofac.indexHash ? { sourceContentHash: ofac.indexHash } : {}),
   });
   if (ofac.value.sanctioned) {
@@ -301,6 +317,7 @@ const freezeIntlSanctionsOutcome = (
       ? `Exact name or alias match for ${name} on ${matchedLists.join(", ")}; identity requires verification.`
       : `No exact full-name or reversed-name match for ${name} across the ${screenedLists.join(", ")}.`,
     match: sanctioned ? "exact_name" : "no_match",
+    subjectName: name,
   });
   if (sanctioned) {
     addFinding(ctx, {
@@ -412,6 +429,35 @@ export function resolvedOffchainName(ctx: CollectContext): string | null {
 
 /** Rerun only the identity-sensitive screens after Basic Facts resolves a full
  * name. The profile-photo provider is intentionally not called twice. */
+const sameScreenedName = (left?: string, right?: string): boolean =>
+  Boolean(left && right && left.trim().toLowerCase().replace(/\s+/g, " ") === right.trim().toLowerCase().replace(/\s+/g, " "));
+
+/**
+ * Evidence frozen by a name screen belongs to the name that was screened. Once
+ * Basic Facts resolves a different real name, a no-match sanctions artifact,
+ * name-matched press, or a court caption for the earlier name says nothing
+ * about this subject and must not survive next to (or instead of) the refresh.
+ */
+export function supersedeNameScreenEvidence(ctx: CollectContext, resolvedName: string): string[] {
+  const superseded = new Set<string>();
+  ctx.evidence.sourceArtifacts = ctx.evidence.sourceArtifacts.filter((artifact) => {
+    const nameScreen = (artifact.kind === "sanctions_screen" && artifact.provider === "opensanctions")
+      || (artifact.kind === "legal_case" && artifact.provider === "courtlistener")
+      || (artifact.kind === "press" && artifact.provider === "google-news" && artifact.match === "exact_name");
+    if (!nameScreen || !artifact.subjectName || sameScreenedName(artifact.subjectName, resolvedName)) return true;
+    superseded.add(artifact.subjectName);
+    return false;
+  });
+  if (superseded.size) {
+    ctx.evidence.findings = ctx.evidence.findings.filter((finding) =>
+      !(["SanctionsNameLead", "LegalCaseNameLead"].includes(finding.finding_type)
+        && [...superseded].some((name) => finding.claim.startsWith(`${name} `))));
+  }
+  return [...superseded];
+}
+
+/** Rerun only the identity-sensitive screens after Basic Facts resolves a full
+ * name. The profile-photo provider is intentionally not called twice. */
 export async function refreshResolvedNameOffchain(ctx: CollectContext): Promise<AdapterRunResult> {
   const name = resolvedRealName(ctx);
   if (!name) return { state: "skipped", detail: "no newly resolved full name" };
@@ -422,6 +468,7 @@ export async function refreshResolvedNameOffchain(ctx: CollectContext): Promise<
     detail: `Refreshing exact-name news, US court, and OFAC outcomes for ${name}.`,
     tone: "neutral",
   });
+  supersedeNameScreenEvidence(ctx, name);
   const [news, legal, ofac, intlSanctions] = await Promise.all([
     collectNews(name, ctx.handle),
     collectLegalCases(name),
@@ -432,7 +479,7 @@ export async function refreshResolvedNameOffchain(ctx: CollectContext): Promise<
   recordAttempts(legal.attempts);
   recordAttempts(ofac.attempts);
   recordAttempts(intlSanctions.attempts);
-  freezeNewsOutcome(ctx, news, capturedAt, false);
+  freezeNewsOutcome(ctx, news, capturedAt, false, name);
   freezeLegalOutcome(ctx, legal, name, capturedAt);
   freezeOfacOutcome(ctx, ofac, name, capturedAt);
   freezeIntlSanctionsOutcome(ctx, intlSanctions, name, capturedAt);
@@ -484,7 +531,7 @@ export const offchainAdapter: Adapter = {
     if (ofac) recordAttempts(ofac.attempts);
     if (intlSanctions) recordAttempts(intlSanctions.attempts);
 
-    freezeNewsOutcome(ctx, news, capturedAt, incompleteSingleNameQuery(ctx, name));
+    freezeNewsOutcome(ctx, news, capturedAt, incompleteSingleNameQuery(ctx, name), name ?? ctx.evidence.profile.display_name);
 
     if (legal && name) freezeLegalOutcome(ctx, legal, name, capturedAt);
 

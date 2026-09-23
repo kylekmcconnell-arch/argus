@@ -134,8 +134,14 @@ export function analyzeContent(retrieval: Retrieval): Recon {
     const label = (url.match(/\/\/(?:www\.)?([^/]+)/)?.[1] ?? url).replace(/^www\./, "");
     socialSet.set(url.toLowerCase(), { label, url });
   }
-  // protocol-less social links: x.com/foo, t.me/bar
-  for (const m of socialScan.matchAll(/\b((?:x\.com|twitter\.com|t\.me|discord\.gg)\/[A-Za-z0-9_]{2,40})\b/gi)) {
+  // protocol-less social links: x.com/foo, t.me/bar, www.linkedin.com/company/baz.
+  // LinkedIn and GitHub belong here too — a footer that writes them without a
+  // scheme (or that only survives as reader-recovered text) was invisible to
+  // the full-URL scan, which is how Dynex's "Find us on LinkedIn" was missed.
+  // The lookbehind keeps this to genuinely bare mentions: a full URL (or a
+  // www.-prefixed one) is already handled above, and re-matching its tail here
+  // produced the same account twice under two spellings.
+  for (const m of socialScan.matchAll(/(?<![./\w@])(?:www\.)?((?:x\.com|twitter\.com|t\.me|discord\.gg|github\.com)\/[A-Za-z0-9_.-]{2,40}|linkedin\.com\/(?:company|in|school)\/[A-Za-z0-9._%-]{2,60})\b/gi)) {
     const url = "https://" + m[1];
     if (SHARE_INTENT.test(url)) continue;
     if (!socialSet.has(url.toLowerCase())) socialSet.set(url.toLowerCase(), { label: m[1].split("/")[0], url });

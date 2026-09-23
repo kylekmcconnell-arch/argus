@@ -5,7 +5,27 @@
 // or quote-token identity (VIRTUAL, flETH). Pons has NO client fingerprint -
 // it is resolved server-side from the token's creator contract.
 import { describe, expect, it } from "vitest";
-import { matchVenue, genericQuoteNote } from "./launch";
+import { launchVenueForOfficialDomain, matchVenue, genericQuoteNote } from "./launch";
+
+describe("launchVenueForOfficialDomain", () => {
+  it("recognizes a venue subject by exact apex domain, www-tolerant", () => {
+    const venue = launchVenueForOfficialDomain("o1.exchange");
+    expect(venue).toMatchObject({
+      name: "o1",
+      matchedDomain: "o1.exchange",
+      lpDisposition: "locked",
+      platformPaysCreator: true,
+    });
+    expect(venue?.chains).toContain("robinhood");
+    expect(launchVenueForOfficialDomain("www.pump.fun")?.name).toBe("pump.fun");
+  });
+
+  it("never binds on brand similarity or subdomains of other apexes", () => {
+    expect(launchVenueForOfficialDomain("o1-exchange.io")).toBeNull();
+    expect(launchVenueForOfficialDomain("pump.fun.scam.example")).toBeNull();
+    expect(launchVenueForOfficialDomain("")).toBeNull();
+  });
+});
 
 describe("matchVenue", () => {
   it("detects pump.fun by mint vanity suffix regardless of dexId", () => {

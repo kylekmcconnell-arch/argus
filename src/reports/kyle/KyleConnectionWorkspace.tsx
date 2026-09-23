@@ -92,7 +92,7 @@ const CLUSTER_BOUNDS: Record<Cluster, { x: [number, number]; y: [number, number]
   social: { x: [66, 92], y: [78, 93], columns: 4 },
 };
 
-const ADVISOR_ROLE = /\b(?:advisor|adviser|advisory|board|backer|investor|fund|incubator|venture partner)\b/i;
+const ADVISOR_ROLE = /\b(?:advisor|adviser|advisory|board|backer|investor|fund|incubator|venture partner|backed[- ]by)\b/i;
 
 function normalizedIdentity(value?: string | null): string {
   return (value ?? "").trim().replace(/^@/, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -280,10 +280,14 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
 
   // Older saved dossiers sometimes preserve an advisor in the corroboration
   // ledger without promoting it into organizationRelationships. Keep the graph
-  // consistent with the report, but only elevate corroborated relationships.
+  // consistent with the report, but only elevate FULLY corroborated
+  // relationships: PartiallyCorroborated is reachable through a follow-back or
+  // a single mention, and a celebrity the project once quoted must never
+  // appear under "Advisors & backers" on that alone (#459). Partial claims
+  // stay in the corroboration table, where their verdict is spelled out.
   for (const testimonial of dossier.evidence?.testimonials ?? []) {
     const verdict = String(testimonial.corroboration_verdict ?? "");
-    if (verdict !== "Corroborated" && verdict !== "PartiallyCorroborated") continue;
+    if (verdict !== "Corroborated") continue;
     const relation = testimonial.claimed_relationship ?? "advisor";
     if (!isAdvisorRelationship(relation)) continue;
     const label = testimonial.claimed_endorser_name ?? testimonial.claimed_endorser_handle;
@@ -303,7 +307,7 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
       image: testimonial.claimed_endorser_handle ? xAvatar(testimonial.claimed_endorser_handle) : null,
       relation: relation.replaceAll("_", " "),
       direct: true,
-      confidence: verdict === "Corroborated" ? "High" : "Moderate",
+      confidence: "High",
       sources: [
         ...(source ? [{ label: "Corroboration source", url: source }] : []),
         ...(xSource ? [{ label: "X profile", url: xSource }] : []),

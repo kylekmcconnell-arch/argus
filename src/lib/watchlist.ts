@@ -69,16 +69,52 @@ export function removeWatch(id: string) {
 // Pull the shared watchlist down and merge into local (an item another analyst
 // watched appears here too). Local removals stick because removeWatch deletes
 // the shared row as well.
+/**
+ * Shared rows are written by other analysts' clients (possibly older builds)
+ * and by the server, so they are validated before they reach every browser's
+ * localStorage: a row without a kind, label, or a snapshot verdict crashed the
+ * Watchlist page for everyone until it was removed by hand.
+ */
+export function parseSharedWatchItem(value: unknown): WatchItem | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== "string" || !row.id.trim()) return null;
+  if (row.kind !== "person" && row.kind !== "token") return null;
+  if (typeof row.label !== "string" || !row.label.trim()) return null;
+  const snapshot = row.snapshot;
+  if (!snapshot || typeof snapshot !== "object") return null;
+  const snap = snapshot as Record<string, unknown>;
+  if (typeof snap.verdict !== "string" || !snap.verdict.trim()) return null;
+  if (snap.score !== null && snap.score !== undefined && typeof snap.score !== "number") return null;
+  return {
+    id: row.id,
+    kind: row.kind,
+    label: row.label,
+    ...(typeof row.chain === "string" ? { chain: row.chain } : {}),
+    ...(row.via === "evm" || row.via === "solana" || row.via === "dexscreener" ? { via: row.via } : {}),
+    addedAt: typeof row.addedAt === "number" && Number.isFinite(row.addedAt) ? row.addedAt : Date.now(),
+    snapshot: {
+      verdict: snap.verdict,
+      score: typeof snap.score === "number" ? snap.score : null,
+      ...(typeof snap.completenessState === "string" ? { completenessState: snap.completenessState as ReportCompletenessState } : {}),
+      ...(typeof snap.liquidityUsd === "number" ? { liquidityUsd: snap.liquidityUsd } : {}),
+      ...(typeof snap.mcap === "number" ? { mcap: snap.mcap } : {}),
+    },
+  };
+}
+
 export async function hydrateSharedWatchlist(): Promise<void> {
   try {
     const r = await fetch("/api/report?watches=1", { signal: AbortSignal.timeout(8000) });
     if (!r.ok) return;
-    const d = await r.json() as { watches?: WatchItem[] };
-    const shared: WatchItem[] = Array.isArray(d?.watches) ? d.watches : [];
+    const d = await r.json() as { watches?: unknown[] };
+    const shared = (Array.isArray(d?.watches) ? d.watches : [])
+      .map(parseSharedWatchItem)
+      .filter((w): w is WatchItem => w !== null);
     if (!shared.length) return;
     const local = getWatchlist();
     const have = new Set(local.map((w) => normalizeSubjectRef(w.id)));
-    const merged = [...local, ...shared.filter((w) => w && w.id && !have.has(normalizeSubjectRef(w.id)))];
+    const merged = [...local, ...shared.filter((w) => !have.has(normalizeSubjectRef(w.id)))];
     if (merged.length !== local.length) save(merged);
   } catch { /* stay local-only */ }
 }

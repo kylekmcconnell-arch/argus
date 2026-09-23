@@ -5,7 +5,7 @@ import { deadlineFetch } from "../providerDeadline.js";
 // Claude pull the named roster. Keyless fetch + ANTHROPIC_API_KEY for extraction.
 import { structured } from "../agent";
 import { recordCall } from "../cost";
-import { fetchPublicTextWithRecovery, type PublicTextWithRecoveryResult } from "../publicWeb";
+import { fetchPublicTextWithRecovery, readBoundedResponseText, type PublicTextWithRecoveryResult } from "../publicWeb";
 import type { TeamMember } from "./x";
 import { isPlausiblePersonRosterName } from "../../src/lib/personName";
 
@@ -21,6 +21,9 @@ const normalizedApex = (domain: string) =>
  * retry would have covered. `init` is a factory so each attempt gets a fresh
  * AbortSignal (a fired timeout signal would instantly abort the retry).
  */
+/** A team/about page or doc index is never legitimately larger than this. */
+const TEAM_PAGE_MAX_BYTES = 1_500_000;
+
 async function fetchWithOneRetry(url: string, init: () => RequestInit): Promise<Response> {
   try {
     return await deadlineFetch(url, init());
@@ -122,7 +125,11 @@ async function discoverTeamDocumentUrls(domain: string): Promise<string[]> {
         );
         return "";
       }
-      const text = await response.text();
+      const text = await readBoundedResponseText(response, TEAM_PAGE_MAX_BYTES);
+      if (text === null) {
+        recordCall("site-fetch", "team-doc-index", 0, "response_too_large", "failed");
+        return "";
+      }
       recordCall("site-fetch", "team-doc-index", 0, undefined, "succeeded");
       return text.slice(0, 250_000);
     } catch {
@@ -134,9 +141,9 @@ async function discoverTeamDocumentUrls(domain: string): Promise<string[]> {
 }
 
 export interface ProfileAnchor {
-  /** linkedin.com/in/slug (no scheme, no trailing slash) or an @handle. */
+  /** linkedin.com/in/slug (no scheme), an @handle, a t.me slug, or an email address. */
   value: string;
-  kind: "linkedin" | "x";
+  kind: "linkedin" | "x" | "telegram" | "email";
   /** Visible text of the anchor, often the person's name. */
   anchorText: string;
   /** Character offset in the source HTML, for nearest-name binding. */
@@ -296,6 +303,24 @@ export function profileAnchors(html: string): ProfileAnchor[] {
       if (seen.has(value.toLowerCase())) continue;
       seen.add(value.toLowerCase());
       out.push({ value, kind: "x", anchorText, index });
+      continue;
+    }
+    // Contact surfaces the page states for its people: a personal Telegram and
+    // a mailto address. Channel/share/bot links are not a person's DM handle.
+    const telegram = href.match(/(?:t\.me|telegram\.me)\/([A-Za-z0-9_]{4,32})(?:[/?#]|$)/i);
+    if (telegram && !/^(?:share|joinchat|addstickers|proxy)$/i.test(telegram[1])) {
+      const value = telegram[1];
+      if (seen.has(`tg:${value.toLowerCase()}`)) continue;
+      seen.add(`tg:${value.toLowerCase()}`);
+      out.push({ value, kind: "telegram", anchorText, index });
+      continue;
+    }
+    const email = href.match(/^mailto:([^\s?]+@[^\s?]+\.[^\s?]+)/i);
+    if (email) {
+      const value = email[1].toLowerCase();
+      if (seen.has(`mail:${value}`)) continue;
+      seen.add(`mail:${value}`);
+      out.push({ value, kind: "email", anchorText, index });
     }
   }
   return out;
@@ -303,6 +328,33 @@ export function profileAnchors(html: string): ProfileAnchor[] {
 
 const nameTokens = (value: string): string[] =>
   value.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 1);
+
+/**
+ * Bind a page's contact anchors (telegram, email) to a named person. Stricter
+ * than profile binding: the anchor's own text, the Telegram slug, or the email
+ * local part must carry the person's name tokens. There is deliberately NO
+ * nearest-anchor fallback here, because a page-level footer contact
+ * ("info@...", a company channel) sits near SOMEONE's name on every roster
+ * and must never become that person's personal contact.
+ */
+export function bindContactAnchor(
+  name: string,
+  anchors: readonly ProfileAnchor[],
+  kind: "telegram" | "email",
+): string | undefined {
+  const tokens = nameTokens(name).filter((token) => token.length >= 3);
+  if (!tokens.length) return undefined;
+  for (const anchor of anchors) {
+    if (anchor.kind !== kind) continue;
+    const anchorTokens = nameTokens(anchor.anchorText).join(" ");
+    const identity = kind === "email" ? anchor.value.split("@")[0].toLowerCase() : anchor.value.toLowerCase();
+    if (tokens.every((token) => anchorTokens.includes(token)) || tokens.some((token) => identity.includes(token))) {
+      return anchor.value;
+    }
+  }
+  return undefined;
+}
+
 
 /**
  * Bind a page's profile anchors to a named person: the anchor's own text, then
@@ -337,12 +389,25 @@ export function bindProfileAnchor(
 
   // Nearest anchor after the name appears in the markup, bounded so an
   // unrelated link further down the page is never adopted.
+  //
+  // A roster page puts every colleague's card within a few hundred characters
+  // of every other, so proximity alone adopted a DIFFERENT person's profile
+  // ("Konstantin Sebeo" bound to linkedin.com/in/katharina-eddins-translator),
+  // and that URL then became the identity key for the licensed employment
+  // lookup, importing a stranger's job history as this person's role
+  // continuity (ARGUS-05). Proximity may only LOCATE a profile whose own
+  // identifier already echoes the person's name; it can never supply the
+  // identity by itself. A handle that shares no name token with the person is
+  // left unbound rather than guessed.
   const namePosition = html.toLowerCase().indexOf(tokens.join(" "));
   if (namePosition < 0) return undefined;
   const near = candidates
     .filter((anchor) => Math.abs(anchor.index - namePosition) <= 1200)
     .sort((a, b) => Math.abs(a.index - namePosition) - Math.abs(b.index - namePosition))[0];
-  return near?.value;
+  if (!near) return undefined;
+  const identifier = near.value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const echoesName = tokens.some((token) => token.length >= 3 && identifier.includes(token));
+  return echoesName ? near.value : undefined;
 }
 
 export function htmlToText(html: string): string {
@@ -553,7 +618,12 @@ async function fetchPage(
   }
   let raw: string;
   try {
-    raw = await response.text();
+    const bounded = await readBoundedResponseText(response, TEAM_PAGE_MAX_BYTES);
+    if (bounded === null) {
+      recordCall("site-fetch", op, 0, "response_too_large", "failed");
+      return null;
+    }
+    raw = bounded;
   } catch {
     recordCall("site-fetch", op, 0, "response_text_error", "failed");
     return null;
@@ -652,7 +722,7 @@ const pageScore = (page: TeamPage) =>
 const TEAM_EXTRACTION_SYSTEM =
   "You extract a crypto/tech project's team roster from fetched first-party project text. " +
   "List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. " +
-  "Use the person's role in THIS project (for example founder, team member, or advisor). " +
+  "Use the person's role in THIS project, preserving the FULL title exactly as the page states it: a person listed as Co-Founder & CEO is recorded as Co-Founder & CEO, never shortened to just Co-Founder or just CEO. " +
   "When the page includes descriptive credentials or biography copy next to the person, preserve that entire phrase verbatim in biography; never split biography text into additional people. " +
   "Capture any X/Twitter handle and LinkedIn URL shown next to a person. " +
   "For every person copy the exact PAGE URL that directly states that person's role. " +
@@ -726,6 +796,11 @@ async function extractTeamFromPages(
         ?? (sourcePage?.html && sourcePage.anchors
           ? bindProfileAnchor(displayName, sourcePage.html, sourcePage.anchors, "x")
           : undefined);
+      // Contact surfaces bind under the same name-token rules as profiles: a
+      // page-level info@ or company channel never attaches to an individual
+      // unless the page itself ties it to their name.
+      const telegram = sourcePage?.anchors ? bindContactAnchor(displayName, sourcePage.anchors, "telegram") : undefined;
+      const email = sourcePage?.anchors ? bindContactAnchor(displayName, sourcePage.anchors, "email") : undefined;
       const officialPortraitUrl = sourcePage?.html && sourcePage.portraits
         ? bindOfficialPortrait(displayName, sourcePage.html, sourcePage.portraits)
         : undefined;
@@ -743,6 +818,8 @@ async function extractTeamFromPages(
         biography,
         kind,
         linkedin,
+        ...(telegram ? { telegram } : {}),
+        ...(email ? { email } : {}),
         evidence: `direct role statement on ${sourcePage.url}`,
         source: sourcePage.url,
         sourceUrl: sourcePage.url,

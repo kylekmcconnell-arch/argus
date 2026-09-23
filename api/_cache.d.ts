@@ -13,6 +13,9 @@ export function cacheGetJson<T>(key: string): Promise<T | null>;
 export function cacheSetJson(key: string, value: unknown): Promise<void>;
 export function issuePanelCostToken(organizationId: string, reportVersionId: string): string | undefined;
 export function resolvePanelCostVersion(organizationId: string, token: string | null | undefined): string | undefined;
+export function issueScanPanelToken(organizationId: string, scanRunKey: string): string | undefined;
+export type PanelGrant = { reportVersionId: string } | { scanRunKey: string };
+export function resolvePanelGrant(organizationId: string, token: string | null | undefined): PanelGrant | null;
 export function attachPanelCost(organizationId: string, reportVersionId: string | undefined, line: PanelCostLine): Promise<void>;
 export function recordProviderUsageEvent(organizationId: string, reportVersionId: string | undefined, line: PanelCostLine): Promise<void>;
 export function recordProviderUsageBatch(

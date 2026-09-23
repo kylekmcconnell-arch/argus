@@ -18,6 +18,55 @@ function xHandle(socials: { label: string; url: string }[]): string | null {
   return null;
 }
 
+// The account timeline as the API returns it, validated row by row. It crosses
+// the network, so a malformed entry is dropped rather than rendered: the panel
+// shows dates to a reader who will act on them.
+export function parseTimeline(value: unknown): NonNullable<SiteSafety["xHistory"]>["accounts"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const account = raw as Record<string, unknown>;
+    if (!Array.isArray(account.names)) return [];
+    const names = account.names.flatMap((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+      const name = entry as Record<string, unknown>;
+      if (typeof name.handle !== "string") return [];
+      return [{
+        handle: name.handle,
+        firstSeen: typeof name.firstSeen === "string" ? name.firstSeen : null,
+        lastSeen: typeof name.lastSeen === "string" ? name.lastSeen : null,
+      }];
+    });
+    return names.length ? [{ id: typeof account.id === "string" ? account.id : "", names }] : [];
+  });
+}
+
+// Prior screen names for the linked account (api/x-handle-history -> memory.lol).
+// Never throws and never blocks the scan: an archive miss returns null and the
+// rest of the site lane reports as normal.
+async function handleHistory(handle: string): Promise<SiteSafety["xHistory"]> {
+  try {
+    const r = await apiFetch(`/api/x-handle-history?handle=${encodeURIComponent(handle)}`, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    const value = (await r.json()) as unknown;
+    const d = value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+    if (!d?.available || typeof d.handle !== "string" || typeof d.status !== "string" || typeof d.note !== "string") return null;
+    if (!["renamed", "single", "unknown"].includes(d.status)) return null;
+    return {
+      handle: d.handle,
+      status: d.status as NonNullable<SiteSafety["xHistory"]>["status"],
+      priorHandles: Array.isArray(d.priorHandles) ? d.priorHandles.filter((h): h is string => typeof h === "string") : [],
+      handleReused: d.handleReused === true,
+      currentSince: typeof d.currentSince === "string" ? d.currentSince : null,
+      lastRenameSeen: typeof d.lastRenameSeen === "string" ? d.lastRenameSeen : null,
+      accounts: parseTimeline(d.accounts),
+      note: d.note,
+    };
+  } catch { return null; }
+}
+
 export async function siteSafety(socials: { label: string; url: string }[], address?: string, chain?: string): Promise<SiteSafety | null> {
   try {
     const hasX = socials.some(isX);
@@ -37,8 +86,13 @@ export async function siteSafety(socials: { label: string; url: string }[], addr
           .catch(() => null)
       : null;
 
+    // Provenance: did this account answer to a different name before? Keyless
+    // (memory.lol), so it runs whenever a handle is linked - it needs no CA and
+    // no chain, unlike the bio check above.
+    const xHistory = handle ? await handleHistory(handle) : null;
+
     const websites = socials.filter(isSite).map((s) => s.url).filter((u) => /^https?:\/\//i.test(u)).slice(0, 3);
-    if (!websites.length) return { hasX, hasWebsite: false, worst: "unknown", sites: [], xBio };
+    if (!websites.length) return { hasX, hasWebsite: false, worst: "unknown", sites: [], xBio, xHistory };
 
     const sites = (await Promise.all(websites.map(async (url) => {
       try {
@@ -51,7 +105,7 @@ export async function siteSafety(socials: { label: string; url: string }[], addr
 
     let worst: SiteSafety["worst"] = "clean";
     for (const s of sites) if ((RANK[s.verdict] ?? 0) > RANK[worst]) worst = (s.verdict as SiteSafety["worst"]);
-    return { hasX, hasWebsite: true, worst, sites, xBio };
+    return { hasX, hasWebsite: true, worst, sites, xBio, xHistory };
   } catch {
     return null;
   }

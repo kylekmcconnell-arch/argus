@@ -192,6 +192,17 @@ export const NEVER_WAIVE_CHECK_IDS: ReadonlySet<string> = new Set([
 /** Every explicitly required check must record an outcome for full clearance. */
 export const CLEARANCE_COVERAGE_FLOOR_PERCENT = 100;
 
+/**
+ * Coverage as a percentage that neither overstates nor silently truncates:
+ * floored at one decimal, so 7/8 reads 87.5 (not a truncated 87, not a
+ * rounded-up 88) and 249/250 reads 99.6, never a false 100 against a
+ * clearance floor. Consumers compare this number against the floors above.
+ */
+export function coveragePercentOf(recorded: number, applicable: number): number {
+  if (!(applicable > 0)) return 0;
+  return Math.floor((recorded / applicable) * 1000) / 10;
+}
+
 export interface ClearanceCoverage {
   applicable: number;
   recorded: number;
@@ -218,7 +229,7 @@ export function clearanceCoverage(checks: readonly ScanCheck[]): ClearanceCovera
     : [];
   const applicable = applicableRows.length;
   const recorded = recordedRows.length;
-  const recordedPercent = applicable > 0 ? Math.floor((recorded / applicable) * 100) : 0;
+  const recordedPercent = coveragePercentOf(recorded, applicable);
   const sufficient = applicable > 0 && (hasStableIds
     ? openNeverWaive.length === 0 && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT
     : recorded === applicable);
@@ -274,6 +285,30 @@ export function chainDisplayName(chain: string | undefined): string {
   const key = (chain ?? "").trim().toLowerCase();
   if (!key) return "this chain";
   return CHAIN_DISPLAY_NAMES[key] ?? `the ${key} chain`;
+}
+
+/**
+ * The development row. A frozen shipping summary closes it; a linked GitHub
+ * that could not be read leaves it unavailable; no linked repository at all is
+ * an honest unknown, never a finding: teams build in private, and the on-chain
+ * deploy trail is the read that stands in.
+ */
+function shippingCheck(dossier: TokenDossier, outcomeNotRecorded: string): ScanCheck {
+  const ship = dossier.shipping;
+  const linked = (dossier.socials ?? []).some((x) => /github\.com\//i.test(x.url));
+  if (ship && ship.grade !== "unknown") {
+    const finding = ship.grade === "stalled" || ship.market === "price-without-shipping" || ship.leadDeparted || ship.stars === "suspect" || (ship.claimsUnsupported >= 2 && ship.claimsUnsupported > ship.claimsSupported);
+    return {
+      checkId: "github-forensics",
+      decisionCritical: true,
+      label: "GitHub forensics",
+      status: finding ? "finding" : "confirmed",
+      note: `${ship.headline} ${ship.distinctHuman} human committer${ship.distinctHuman === 1 ? "" : "s"}, cadence ${ship.cadenceStatus}, code ${ship.live === "live" ? "reaching production" : ship.live === "committed-only" ? "committed only" : ship.live === "deploys-without-code" ? "shipped from an unseen source" : "production status unread"}; ${ship.reposRead} repos and ${ship.commitsRead} commits read.`,
+    };
+  }
+  if (ship) return { checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unavailable", note: "a GitHub account is linked but could not be read" };
+  if (linked) return { checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unknown", note: `a GitHub account is linked; ${outcomeNotRecorded}` };
+  return { checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unknown", note: "no public repository is linked from the project's official sources; teams that build in private are read through on-chain deploys instead" };
 }
 
 // ── Token / investigation ────────────────────────────────────────────────
@@ -333,7 +368,9 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
   );
 
   const holderCount = safety.holderCount || dossier.topHolders.length;
-  const topHolderPct = safety.topHolderPct ?? dossier.topHolders[0]?.percent ?? null;
+  // The audit's figure is already pool-excluded. The fallback for older
+  // dossiers must skip contract rows too: row 0 is usually the pool itself.
+  const topHolderPct = safety.topHolderPct ?? dossier.topHolders.find((h) => !h.isContract)?.percent ?? null;
   checks.push(
     holderCount > 0
       ? {
@@ -489,7 +526,7 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
 
   checks.push({ checkId: "documents-audits", decisionCritical: true, label: "Documents & audits", status: "unknown", note: `whitepaper, security audits, and documents; ${outcomeNotRecorded}` });
   checks.push({ checkId: "news-press", decisionCritical: true, label: "News & press", status: "unknown", note: outcomeNotRecorded });
-  checks.push({ checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unknown", note: `when a GitHub account is linked; ${outcomeNotRecorded}` });
+  checks.push(shippingCheck(dossier, outcomeNotRecorded));
   checks.push({ checkId: "trust-graph-connections", decisionCritical: true, label: "Trust-graph reconciliation", status: "unknown", note: `shared token creators or funders with flagged projects; ${outcomeNotRecorded}` });
 
   return checks;

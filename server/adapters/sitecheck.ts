@@ -36,6 +36,8 @@ export interface SiteSubstance {
   url: string;
   status: SiteSubstanceStatus;
   detail: string;
+  /** Bounded official metadata, retained as a claim, never proof of product operation. */
+  productDescription?: string;
   /** Machine-readable attribution. Coming-soon reasons are verified markers. */
   reason?: SiteSubstanceReason;
   /** How official-page bytes were obtained. Reader recovery is the same official site, not an independent source. */
@@ -158,8 +160,11 @@ function isAntiBotResponse(response: Response, body: string): boolean {
  * looking at a window and not at the whole document. With no cap the body is
  * read in full, exactly as before.
  */
-async function readBody(response: Response, maxBytes?: number): Promise<{ text: string; truncated: boolean }> {
-  if (maxBytes === undefined || !response.body) {
+/** No page ARGUS reads for substance is legitimately larger than this. */
+const SUBSTANCE_PAGE_MAX_BYTES = 1_500_000;
+
+async function readBody(response: Response, maxBytes = SUBSTANCE_PAGE_MAX_BYTES): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) {
     return { text: await response.text(), truncated: false };
   }
   const reader = response.body.getReader();
@@ -447,6 +452,7 @@ async function classifyServedPage(page: PageSuccess): Promise<SiteSubstance> {
     return {
       url: page.url,
       status: "live",
+      ...(meta.trim().length >= 24 ? { productDescription: stripText(meta).slice(0, 1200) } : {}),
       retrievalMethod,
       detail: withOfficialReaderRecovery(`live site${excerpt ? `: "${excerpt.slice(0, 80)}"` : ""}`, retrievalMethod),
     };

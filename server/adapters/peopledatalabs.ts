@@ -60,10 +60,19 @@ export async function checkLeaderDepartures(
   const out: LeaderDepartureCheck[] = [];
   for (const leader of leaders) {
     const name = (leader.name ?? "").trim();
+    // The profile URL is the strongest key this lookup takes, so it decides
+    // whose employment record comes back. Pass it only when the slug itself
+    // carries the person's name; otherwise name + company, which cannot
+    // silently resolve to a colleague (ARGUS-05).
+    const slugCarriesName = (() => {
+      const slug = (leader.linkedin ?? "").toLowerCase();
+      const tokens = name.toLowerCase().split(/\s+/).filter((token) => token.length > 2);
+      return tokens.length > 0 && tokens.every((token) => slug.includes(token));
+    })();
     const person = await enrich({
       name,
       company,
-      ...(leader.linkedin ? { profile: leader.linkedin } : {}),
+      ...(slugCarriesName && leader.linkedin ? { profile: leader.linkedin } : {}),
     });
     if (!person) continue;
     const currency = employmentCurrency(person.experience, company, name);
@@ -209,6 +218,7 @@ function parsePdlPerson(p: JsonRecord) {
       start: optionalString(x.start_date),
       end: optionalString(x.end_date),
       url: optionalString(company?.website) || optionalString(company?.linkedin_url) || null,
+      website: optionalString(company?.website) || null,
     }];
   });
   const emailCandidates: unknown[] = [
@@ -249,6 +259,18 @@ function parsePdlPerson(p: JsonRecord) {
 }
 
 const httpify = (u?: string | null) => (u ? (/^https?:\/\//.test(u) ? u : "https://" + u) : null);
+
+/** Lowercase hostname of a licensed-record website, without www; null when unparseable. */
+function registrableHost(website: string | null | undefined): string | null {
+  const raw = httpify(website);
+  if (!raw) return null;
+  try {
+    const host = new URL(raw).hostname.replace(/^www\./i, "").toLowerCase();
+    return /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(host) ? host : null;
+  } catch {
+    return null;
+  }
+}
 
 function socialHandle(value: string | null | undefined): string | null {
   if (!value?.trim()) return null;
@@ -413,6 +435,19 @@ export const peopledatalabsAdapter: Adapter = {
           ex.provider = "peopledatalabs";
           ex.evidence_origin = "deterministic";
           ex.artifact_verified = true;
+          // Same rule for the website: employment at "Aave" says nothing about
+          // aave.net. A model-supplied domain is dropped unless the licensed
+          // record's own company website agrees; the record's website replaces
+          // it. Otherwise every lead fetched from a lookalike host would verify
+          // as an official counterparty on the strength of a name match.
+          const recordDomain = registrableHost(x.website);
+          if (recordDomain) {
+            ex.domain = recordDomain;
+            ex.domain_evidence_origin = "deterministic";
+          } else if (ex.domain_evidence_origin === "model_lead" || (ex.domain && ex.evidence_origin !== "deterministic")) {
+            delete ex.domain;
+            delete ex.domain_evidence_origin;
+          }
         }
         confirmed.push(company);
       } else {

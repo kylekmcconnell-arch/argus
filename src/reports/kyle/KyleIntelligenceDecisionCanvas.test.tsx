@@ -50,10 +50,30 @@ it("explains scores immediately without turning a high score into verified evide
   expect(container.querySelector('[aria-label="How to read this score"]')?.textContent).toContain("not a percentage chance of success");
   const rows = [...container.querySelectorAll<HTMLDetailsElement>(".kyle-composition-row")];
   expect(rows.every(row => row.open)).toBe(true);
-  expect(rows[0]?.textContent).toContain("Evidence type: not recorded");
+  expect(rows[0]?.textContent).toContain("This score breakdown did not record where the evidence came from.");
   expect(rows[0]?.textContent).not.toContain("FACT");
   expect(container.querySelector('.kyle-composition-detail a')?.getAttribute("href")).toBe("#evidence-ledger");
   expect(container.querySelector('button[aria-label^="Challenge"]')).toBeNull();
+});
+
+it("explains token measurements in English instead of telemetry labels", () => {
+  act(() => root.render(<KyleIntelligenceDecisionCanvas {...props} composition={[
+    {
+      axis: "T1",
+      label: "Liquidity",
+      score: 19,
+      weight: 24,
+      rationale: "The liquidity pool holds $14,384,482, but liquidity-provider tokens are not confirmed locked. That is why it scored 19 of 24 points (5 points not earned).",
+      evidenceStrength: "measured",
+      supportCount: 1,
+    },
+  ]} />));
+  expect(container.textContent).toContain("The liquidity pool holds $14,384,482, but liquidity-provider tokens are not confirmed locked.");
+  expect(container.textContent).toContain("That is why it scored 19 of 24 points");
+  expect(container.textContent).toContain("These facts come from measurements recorded during the scan, not from the project's own claims.");
+  expect(container.textContent).not.toContain("Evidence type:");
+  expect(container.textContent).not.toContain("recorded measurements");
+  expect(container.textContent).not.toContain("LP not locked");
 });
 
 it("keeps completion separate from evidence quality and missing summaries", () => {
@@ -105,12 +125,12 @@ describe("Kyle intelligence report opening", () => {
     />));
 
     expect(container.textContent).toContain(
-      "Team and leadership has the most recorded supporting evidence. Next to check: Establish a complete independent security history.",
+      "Team and leadership is documented, with 3 saved supporting sources. No leading concern is on record.",
     );
     expect(container.textContent).not.toContain("Independent evidence remains incomplete.");
   });
 
-  it("uses verified support depth before score saturation when naming the strongest evidence", async () => {
+  it("leads with the deepest-sourced area, stated in absolute terms with no ranking language", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas
       {...props}
       favorable
@@ -121,8 +141,11 @@ describe("Kyle intelligence report opening", () => {
       ]}
     />));
 
-    expect(container.textContent).toContain("Team and leadership has the most recorded supporting evidence.");
-    expect(container.textContent).not.toContain("Product and execution has the most recorded supporting evidence.");
+    expect(container.textContent).toContain("Team and leadership is well documented, with 8 saved supporting sources.");
+    expect(container.textContent).not.toContain("Product and execution is");
+    // An investor reads this one report on its own merits: no comparative or
+    // leaderboard framing survives in the lead sentence.
+    expect(container.textContent).not.toContain("most recorded supporting evidence");
   });
 
   it("names the actual unresolved evidence area instead of hard-coding security and governance", async () => {
@@ -137,7 +160,10 @@ describe("Kyle intelligence report opening", () => {
       ]}
     />));
 
-    expect(container.textContent).toContain("Next to check: Verify current customer adoption and recurring usage.");
+    // The open-work pointer is navigation, not a verdict: it lives in Verify
+    // Next, never in the headline.
+    expect(container.textContent).not.toContain("Next to check:");
+    expect(container.textContent).toContain("Verify current customer adoption and recurring usage");
     expect(container.textContent).not.toContain("still lacks independent usage and market evidence");
     expect(container.textContent).not.toContain("still lacks independent security and governance evidence");
   });

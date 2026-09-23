@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeWhy, judgmentLine, plainScoreRationale } from "./verdictNarrative";
+import { composeWhy, explainCompositionScore, judgmentLine, plainScoreRationale } from "./verdictNarrative";
 
 const axes = [
   { key: "T1", label: "Liquidity & lock", score: 22, weight: 24, rationale: "LP burned in full at launch" },
@@ -24,6 +24,18 @@ describe("plainScoreRationale", () => {
       .toBe("The source code is verified, and ownership has been renounced.");
     expect(plainScoreRationale("$3,071,603 pooled, LP mostly in one wallet."))
       .toBe("The liquidity pool holds $3,071,603, but most liquidity-provider tokens are held in one wallet.");
+    expect(plainScoreRationale("$14,384,482 pooled, LP not locked."))
+      .toBe("The liquidity pool holds $14,384,482, but liquidity-provider tokens are not confirmed locked.");
+    expect(plainScoreRationale("verified source, owner active."))
+      .toBe("The source code is verified, and the owner still has control.");
+    expect(plainScoreRationale("149175 holders, top holder 2%."))
+      .toBe("About 149,175 wallets hold this token, and the largest holds about 2% of supply.");
+    expect(plainScoreRationale("24h vol/liquidity 0.95x, 10566 buys / 6091 sells."))
+      .toBe("In the last day, trading volume was about 0.95 times the pool size, with 10,566 buys and 6,091 sells.");
+    expect(plainScoreRationale("vol/liquidity 4.1x but price flat (0.2%): wash-trade signature."))
+      .toBe("Trading volume was 4.1 times the pool size while the price barely moved (0.2%). That pattern is a wash-trade signature, not proof of genuine demand.");
+    expect(explainCompositionScore("verified source, owner active.", 22, 26))
+      .toBe("The source code is verified, and the owner still has control. That is why it scored 22 of 26 points (4 points not earned).");
   });
 
   it("keeps an unfamiliar recorded rationale intact and makes it a sentence", () => {

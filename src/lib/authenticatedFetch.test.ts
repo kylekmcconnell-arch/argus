@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createAuthenticatedFetch,
   shouldRevalidateSession,
   type FetchLike,
 } from "./authenticatedFetch";
+import { clearPanelToken, setPanelToken } from "./panelToken";
 
 function recorder() {
   const calls: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
@@ -107,5 +108,51 @@ describe("shouldRevalidateSession", () => {
     expect(shouldRevalidateSession("token-a", null, null)).toBe(true);
     expect(shouldRevalidateSession("token-b", "token-a", null)).toBe(true);
     expect(shouldRevalidateSession(null, "token-a", null)).toBe(true);
+  });
+});
+
+describe("panel capability attachment (#356)", () => {
+  afterEach(() => clearPanelToken());
+
+  const origin = "https://argus.example";
+  const wrap = (native: FetchLike) => createAuthenticatedFetch(native, origin, () => "session-token");
+
+  it("attaches the held capability to API calls, so paid panels are admitted", async () => {
+    setPanelToken("panel-capability-abc");
+    const native = vi.fn<FetchLike>(async () => new Response(null, { status: 200 }));
+
+    await wrap(native)(`${origin}/api/cluster?address=0xabc`);
+
+    const headers = new Headers((native.mock.calls[0]?.[1] as RequestInit)?.headers);
+    expect(headers.get("x-argus-panel-token")).toBe("panel-capability-abc");
+  });
+
+  it("never overrides a capability the caller supplied", async () => {
+    // Only a component's own version-bound token names a report version for
+    // cost attribution, so it must win over the ambient one.
+    setPanelToken("ambient-capability");
+    const native = vi.fn<FetchLike>(async () => new Response(null, { status: 200 }));
+
+    await wrap(native)(`${origin}/api/cluster`, { headers: { "x-argus-panel-token": "version-bound" } });
+
+    const headers = new Headers((native.mock.calls[0]?.[1] as RequestInit)?.headers);
+    expect(headers.get("x-argus-panel-token")).toBe("version-bound");
+  });
+
+  it("sends no capability header when none is held", async () => {
+    const native = vi.fn<FetchLike>(async () => new Response(null, { status: 200 }));
+
+    await wrap(native)(`${origin}/api/cluster`);
+
+    expect(new Headers((native.mock.calls[0]?.[1] as RequestInit)?.headers).has("x-argus-panel-token")).toBe(false);
+  });
+
+  it("leaves other origins untouched", async () => {
+    setPanelToken("panel-capability-abc");
+    const native = vi.fn<FetchLike>(async () => new Response(null, { status: 200 }));
+
+    await wrap(native)("https://elsewhere.example/api/cluster");
+
+    expect(native).toHaveBeenCalledWith("https://elsewhere.example/api/cluster", undefined);
   });
 });

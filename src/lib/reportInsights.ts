@@ -137,9 +137,12 @@ export interface NoticedInputs {
   namedTeamCount?: number | null;
   /** First-party role attributions published by the project itself. */
   projectAttributedTeam?: Array<{ name: string; role?: string }>;
+  /** The frozen development read from the scan-time GitHub lane, when the scan produced one. */
+  shipping?: import("../threat/shipping").ShippingSummary | null;
   anchors?: {
     market?: string;
     team?: string;
+    development?: string;
     account?: string;
   };
 }
@@ -177,6 +180,33 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
       ? ` At least ${pct(holderAggregate.sharePct)} of supply sits across ${holderAggregate.assessedWalletCount} assessed wallet${holderAggregate.assessedWalletCount === 1 ? "" : "s"}.`
       : ` The top 10 wallets hold ${pct(holderAggregate.sharePct)}.`
     : "";
+
+  // Development: the saved GitHub read. A stall, a rally with no code behind
+  // it or a departed lead is worth the reader's attention on its own; a team
+  // shipping code that reaches production is the one positive noticed here,
+  // because it is the hardest claim to fake.
+  const ship = input.shipping;
+  if (ship && ship.grade !== "unknown") {
+    const anchor = anchors.development;
+    const who = `${ship.distinctHuman} human committer${ship.distinctHuman === 1 ? "" : "s"}`;
+    if (ship.grade === "stalled") {
+      signals.push({ id: "development-stalled", severity: "alert", headline: "Development has stalled in the linked GitHub", detail: `${ship.headline} ${ship.reposRead} repos and ${ship.commitsRead} commits read over ${ship.windowDays} days.`, anchor });
+    } else if (ship.grade === "thin") {
+      signals.push({ id: "development-thin", severity: "watch", headline: "Little visible development behind the project", detail: `${ship.headline} ${who}; ${ship.reposRead} repos read.`, anchor });
+    }
+    if (ship.market === "price-without-shipping") {
+      signals.push({ id: "development-price-without-shipping", severity: "alert", headline: "The price rose while the commits fell", detail: "Over the last quarter the token rallied while activity in the linked repositories fell: the move is not backed by visible development.", anchor });
+    }
+    if (ship.leadDeparted) {
+      signals.push({ id: "development-lead-departed", severity: "watch", headline: "The lead committer has stopped", detail: "The person who wrote most of the prior two months' commits has none in the last thirty days while the repository carried on: a departure signal, not yet a departure.", anchor });
+    }
+    if (ship.stars === "suspect") {
+      signals.push({ id: "development-stars-suspect", severity: "watch", headline: "Star growth looks bought", detail: "Stars on the flagship repository arrived in a burst outside launch month, or without the forks, watchers and contributors that organic attention brings.", anchor });
+    }
+    if ((ship.grade === "shipping-team") && (ship.live === "live" || ship.adoption === "used")) {
+      signals.push({ id: "development-shipping-team", severity: "note", headline: ship.live === "live" ? "A team is shipping and the code reaches production" : "A team is shipping and outsiders use the code", detail: `${ship.headline} ${ship.live === "live" ? "Commits are followed by on-chain deploys or package publishes." : ""}${ship.adoption === "used" ? " Outsiders contribute pull requests, issues or forks." : ""}`.trim(), anchor });
+    }
+  }
 
   if (isNum(input.lpLockedPct) && input.lpLockedPct <= 5 && !input.isConcentratedLiquidityPool) {
     signals.push({
@@ -259,8 +289,8 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
       signals.push({
         id: "supply-overhang",
         severity: "watch",
-        headline: `Only ${pct(input.circulatingPct)} of the supply is circulating`,
-        detail: `The all-token value is ${ratio.toFixed(1)}x the market cap; most of the supply has not been released yet.`,
+        headline: `${pct(100 - input.circulatingPct)} of the supply is not classified as circulating`,
+        detail: `The all-token value is ${ratio.toFixed(1)}x the market cap. This source's circulating figure is not an allocation, burn, vesting or unlock record, and does not establish when or whether the rest reaches the market.`,
         anchor: anchors.market,
         discovery: {
           factCount: 3,

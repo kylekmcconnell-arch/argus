@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import handler, { sanitizeSharedPayload } from "./shared-report";
+import handler, { sanitizeSharedPayload, sanitizeSharedReport } from "./shared-report";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 vi.mock("./_auth.js", () => ({
@@ -42,6 +42,25 @@ describe("shared-report sanitization", () => {
     expect(clean.report).toEqual({ governing_score: 89 });
     // The original payload is never mutated.
     expect(payload.cost).toEqual({ usd: 12.4 });
+  });
+
+  // 2026-09-14 deep-dive API-7: the shared response carried the analyst's
+  // display name (email local-part by default) and their raw search query.
+  it("neutralizes the analyst's name and raw query in the shared report", () => {
+    const clean = sanitizeSharedReport({
+      kind: "token",
+      ref: "ethereum:0xabc",
+      query: "kyle typed this exact search",
+      contributor: "kylekmcconnell",
+      payload: { cost: { usd: 1 }, report: { governing_score: 70 } },
+      verdict: "PASS",
+    });
+
+    expect(clean.contributor).toBe("shared");
+    expect(clean.query).toBe("ethereum:0xabc");
+    expect(clean.verdict).toBe("PASS");
+    expect((clean.payload as Record<string, unknown>).cost).toBeUndefined();
+    expect(JSON.stringify(clean)).not.toContain("kyle");
   });
 
   it("rejects malformed tokens before touching storage", async () => {

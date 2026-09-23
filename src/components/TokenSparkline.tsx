@@ -143,7 +143,7 @@ export function TokenSparkline({ address, chain, pairAddress, compact, hidePct, 
           <span style={{ color: hist.volume.changePct <= -50 ? "var(--color-caution)" : "var(--color-ink-dim)" }}>
             volume {pct(hist.volume.changePct)}{" "}
             <span className="text-ink-faint">
-              vs the prior {hist.volume.prior.candles} {unit}s{hist.volume.isFloor ? ", a floor: not every candle reported volume" : ""}
+              last {hist.volume.recent.candles} {unit}s vs the prior {hist.volume.prior.candles} {unit}s{hist.volume.isFloor ? ", a floor: not every candle reported volume" : ""}
             </span>
           </span>
         )}

@@ -1,4 +1,6 @@
 import { officialDomainBinding } from "../server/accountTokenBinding.js";
+import { recordProviderUsageEvent } from "./_cache.js";
+import { panelIdentity } from "./_panelIdentity.js";
 // Token authenticity via the project's X bio. GET /api/x-authenticity?handle=&address=&chain=
 //
 // Enigma's rule: the OFFICIAL token's contract address lives in the project's X
@@ -103,9 +105,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const chain = String(req.query.chain ?? "").toLowerCase();
   const sol = chain === "solana";
   if (!HANDLE.test(handle) || !address) { res.status(400).json({ error: "handle and address required" }); return; }
-  res.setHeader("cache-control", "s-maxage=1800, stale-while-revalidate=7200");
+  // This answer is per-subject and only reachable with a session, so a shared
+  // CDN directive let one workspace's result be served to another request.
+  res.setHeader("cache-control", "private, max-age=1800");
 
+  const identity = panelIdentity(req);
+  const twitterApiConfigured = Boolean(process.env.TWITTERAPI_KEY);
   const bio = (await bioViaTwitterApi(handle)) ?? (await bioViaApi(handle)) ?? (await bioKeyless(handle));
+  // twitterapi.io is billed per request and was spending silently: without a
+  // usage line the workspace could not see what this panel cost (#356).
+  if (identity && twitterApiConfigured) {
+    await recordProviderUsageEvent(identity.organizationId, undefined, {
+      provider: "twitterapi",
+      op: "panel:x-authenticity-bio",
+      calls: 1,
+      usd: 0.0002,
+      meta: "per-request estimate",
+      ...(identity.userId ? { initiatedBy: identity.userId } : {}),
+      status: bio == null ? "failed" : "succeeded",
+    });
+  }
   if (bio == null) {
     res.status(200).json({ available: true, handle, status: "unreadable", bioReadable: false, note: `Could not read @${handle}'s X bio (X restricts this without an API key) - verify the contract address in the project's X bio manually.` });
     return;

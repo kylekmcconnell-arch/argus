@@ -1,3 +1,4 @@
+import { readScanReceipt } from "./_scanReceipts.js";
 import { payloadTokenIdentity } from "../src/lib/tokenIdentity.js";
 import { normalizeSubjectRef } from "../src/lib/subjectRef.js";
 // Organization-scoped report projections plus immutable case versions.
@@ -38,6 +39,12 @@ import {
 export const config = { maxDuration: 20 };
 
 const TABLE = "reports";
+// Page sizes for the library reads. Each response says `truncated: true`
+// when it filled the page, so a large workspace never mistakes a cut-off
+// list for the whole store.
+const REPORT_LIST_LIMIT = 200;
+const ARCHIVED_CASE_LIMIT = 200;
+const WATCH_LIST_LIMIT = 100;
 const MAX_BODY = 1_800_000;
 const MAX_LIFECYCLE_BODY = 25_000;
 const CASE_KINDS = new Set(["person", "token", "investigation", "site"]);
@@ -399,7 +406,7 @@ async function loadArchivedReports(
   organizationId: string,
 ): Promise<JsonRecord[]> {
   const caseResponse = await fetch(
-    `${credentials.url}/rest/v1/cases?select=id,kind,canonical_ref,display_query,updated_at&organization_id=eq.${encodeURIComponent(organizationId)}&status=eq.archived&order=updated_at.desc&limit=200`,
+    `${credentials.url}/rest/v1/cases?select=id,kind,canonical_ref,display_query,updated_at&organization_id=eq.${encodeURIComponent(organizationId)}&status=eq.archived&order=updated_at.desc&limit=${ARCHIVED_CASE_LIMIT}`,
     { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
   );
   if (!caseResponse.ok) throw new Error(`archived case list failed (${caseResponse.status})`);
@@ -816,6 +823,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (req.method === "GET") {
+      if (query.has("runKey")) {
+        // Recover this owner's exact run, never whichever report happens to be
+        // active for the subject. This path cannot reserve credits or collect.
+        res.setHeader("cache-control", "private, no-store");
+        const runKey = queryString(query, "runKey");
+        const ref = normRef(queryString(query, "ref"));
+        if (!/^[A-Za-z0-9:_-]{8,180}$/.test(runKey) || !/^[a-z0-9_]{1,15}$/.test(ref)) {
+          res.status(400).json({ error: "valid_scan_identity_required" });
+          return;
+        }
+        const receipt = await readScanReceipt(auth, runKey);
+        if (receipt === "unavailable") {
+          res.status(503).json({ state: "unavailable" });
+          return;
+        }
+        if (!receipt || receipt.initiatedBy !== auth.userId || receipt.route !== "/api/audit"
+          || receipt.kind !== "person" || normRef(receipt.canonicalRef) !== ref) {
+          res.status(404).json({ state: "not_found" });
+          return;
+        }
+        if (receipt.status === "running") {
+          res.status(200).json({ state: "running" });
+          return;
+        }
+        if (!receipt.reportVersionId) {
+          res.status(200).json({ state: "failed" });
+          return;
+        }
+        const exact = await loadExactVersionReport(credentials, auth.organizationId, receipt.reportVersionId);
+        if (!exact || exact.caseStatus !== "open" || exact.report.kind !== "person"
+          || typeof exact.report.ref !== "string" || normRef(exact.report.ref) !== ref) {
+          res.status(404).json({ state: "not_found" });
+          return;
+        }
+        res.status(200).json({ state: "saved", ...exact, panelToken: issuePanelCostToken(auth.organizationId, receipt.reportVersionId) });
+        return;
+      }
       if (query.has("versionId")) {
         const reportVersionId = UUID.test(queryString(query, "versionId"))
           ? queryString(query, "versionId")
@@ -901,11 +945,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         if (requestedStatus === "archived") {
           const reports = await loadArchivedReports(credentials, auth.organizationId);
-          res.status(200).json({ available: true, reports });
+          res.status(200).json({ available: true, reports, truncated: reports.length >= ARCHIVED_CASE_LIMIT });
           return;
         }
         const response = await fetch(
-          `${credentials.url}/rest/v1/${TABLE}?select=ref,kind,query,contributor,verdict,score,ts,report_version_id,attestation_state,cost:payload->cost&${orgFilter}&kind=in.%28person%2Ctoken%2Cinvestigation%2Csite%29&order=ts.desc&limit=200`,
+          `${credentials.url}/rest/v1/${TABLE}?select=ref,kind,query,contributor,verdict,score,ts,report_version_id,attestation_state,cost:payload->cost&${orgFilter}&kind=in.%28person%2Ctoken%2Cinvestigation%2Csite%29&order=ts.desc&limit=${REPORT_LIST_LIMIT}`,
           { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
         );
         if (!response.ok) throw new Error(`report list failed (${response.status})`);
@@ -926,13 +970,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? { ...row, cost, status: "open", ...metadata }
             : { ...row, cost, status: "open" };
         });
-        res.status(200).json({ available: true, reports });
+        // A full page means the store may hold more than this response shows.
+        res.status(200).json({ available: true, reports, truncated: rows.length >= REPORT_LIST_LIMIT });
         return;
       }
 
       if (query.has("watches")) {
         const response = await fetch(
-          `${credentials.url}/rest/v1/${TABLE}?select=ref,payload,ts&${orgFilter}&kind=eq.watch&order=ts.desc&limit=100`,
+          `${credentials.url}/rest/v1/${TABLE}?select=ref,payload,ts&${orgFilter}&kind=eq.watch&order=ts.desc&limit=${WATCH_LIST_LIMIT}`,
           { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
         );
         if (!response.ok) throw new Error(`watchlist read failed (${response.status})`);
@@ -940,6 +985,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json({
           available: true,
           watches: Array.isArray(rows) ? rows.map((item) => asRecord(item.payload).item).filter(Boolean) : [],
+          truncated: Array.isArray(rows) && rows.length >= WATCH_LIST_LIMIT,
         });
         return;
       }
@@ -996,10 +1042,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const versionContext = reportVersionId
         ? await loadVersionContext(credentials, auth.organizationId, reportVersionId)
         : null;
+      // Reopening a saved report must also carry a panel capability, or every
+      // paid panel on it is refused (#356). Bound to the version being
+      // returned, so it attributes cost to the report the analyst is reading.
+      const panelCostToken = reportVersionId
+        ? issuePanelCostToken(auth.organizationId, reportVersionId)
+        : undefined;
       res.status(200).json({
         available: true,
         caseStatus: "open",
         report: report && versionContext ? { ...report, versionContext } : report,
+        ...(panelCostToken ? { panelCostToken } : {}),
       });
       return;
     }
@@ -1231,6 +1284,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(405).setHeader("Allow", "GET, POST, PATCH, DELETE").json({ error: "method_not_allowed" });
   } catch (error) {
     console.error("[report] failed", error);
-    res.status(502).json({ error: "report_store_failed", message: String(error) });
+    const detail = error instanceof Error ? error.message : String(error);
+    if (/legacy token identity needs reconciliation/i.test(detail)) {
+      // persist_report_version refuses cases stamped legacy_unknown or
+      // legacy_ambiguous by the subject-identity backfill. No writer can clear
+      // that state yet, so a retry can never succeed: say so with a code the
+      // client does not retry instead of a generic storage failure.
+      res.status(409).json({
+        error: "legacy_identity_reconciliation_required",
+        retryable: false,
+        message: "This case predates chain-scoped token identity and cannot accept new versions until a workspace owner reconciles it. Start a fresh investigation to save a new report.",
+      });
+      return;
+    }
+    // Stable code only: the raw error carried PostgREST body slices.
+    res.status(502).json({ error: "report_store_failed", message: "Report storage failed. Try again." });
   }
 }

@@ -28,7 +28,7 @@ export function GithubAssessmentInline({ a }: { a: Assessment }) {
     <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-[26px] text-[10.5px] text-ink-faint">
       <a href={`https://github.com/${a.login}`} target="_blank" rel="noreferrer" className="mono text-signal-dim underline-offset-2 hover:underline">github.com/{a.login} ↗</a>
       <span>·</span>
-      <span style={warn ? { color: "var(--color-caution)" } : undefined}>{a.originalCount} original / {a.forkCount} fork</span>
+      <span style={warn ? { color: "var(--color-caution)" } : undefined}>{a.originalCount} non-fork / {a.forkCount} fork</span>
       {a.totalStarsOnOriginals > 0 && <span>· {a.totalStarsOnOriginals}★</span>}
       {a.accountAgeYears != null && <span>· ~{Math.round(a.accountAgeYears)}y old</span>}
       {a.claimChecks.some((c) => c.grade === "contradicted" || c.grade === "unsupported") && (
@@ -53,7 +53,10 @@ export function GithubAssessment({ a }: { a: Assessment }) {
       {/* original vs fork mix - the core "is this a builder" signal */}
       <div>
         <div className="mb-1 flex items-center justify-between text-[10.5px] text-ink-faint">
-          <span>{a.originalCount} original · {a.forkCount} fork · {a.totalStarsOnOriginals}★ on originals</span>
+          {/* "Original" here means GitHub's non-fork flag over the repos that
+            were sampled, which is not the same as reviewed original code
+            (ARGUS-09). */}
+        <span>{a.originalCount} non-fork · {a.forkCount} fork · {a.totalStarsOnOriginals}★{a.repoSampleState === "sample" ? " · sampled repos" : ""}</span>
           <span>{origPct}% original</span>
         </div>
         <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: "var(--color-line-2)" }}>

@@ -9,7 +9,7 @@ import { PrivateToggle } from "./PrivateToggle";
 import { beginScan, endScan } from "../lib/activescans";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
-import type { WebPerson, WebTeamDiscoveryResult } from "../lib/investigation";
+import { isConfirmedWebTeamPerson, type WebPerson, type WebTeamDiscoveryResult } from "../lib/investigation";
 import { ProjectResearch } from "./ProjectResearch";
 import { resolveProjectToken, type ResolvedProjectToken } from "../lib/resolveProjectToken";
 import { AddInfo } from "./AddInfo";
@@ -96,11 +96,18 @@ export function reconTeamPresentation(
   discovery: WebTeamDiscoveryResult | null,
 ): {
   sitePeople: string[];
+  siteRoster: WebPerson[];
   supplementalLeads: WebPerson[];
   discoveryCopy: string;
 } {
-  const sitePeople = [...new Set(siteNames.map((name) => name.trim()).filter(Boolean))];
-  const supplementalLeads = discovery?.people ?? [];
+  // First-party roster rows (the site's own team pages, read by the same
+  // machinery every handle scan uses) belong in the standard team section,
+  // not the supplemental quarantine: the project itself published them.
+  const siteRoster = (discovery?.people ?? []).filter(isConfirmedWebTeamPerson);
+  const rosterNames = new Set(siteRoster.map((person) => person.name.trim().toLowerCase()));
+  const sitePeople = [...new Set(siteNames.map((name) => name.trim()).filter(Boolean))]
+    .filter((name) => !rosterNames.has(name.toLowerCase()));
+  const supplementalLeads = (discovery?.people ?? []).filter((person) => !isConfirmedWebTeamPerson(person));
   const discoveryCopy = !discovery?.attempted
     ? "Supplemental people discovery did not run. People outside the rendered site remain unknown."
     : discovery.completed
@@ -108,7 +115,7 @@ export function reconTeamPresentation(
         ? "Configured supplemental discovery completed. Its rows are follow-up context, not verified employment."
         : "Configured supplemental discovery completed and surfaced no additional candidates in that bounded read."
       : "Supplemental people discovery did not complete. People outside the rendered site remain unknown.";
-  return { sitePeople, supplementalLeads, discoveryCopy };
+  return { sitePeople, siteRoster, supplementalLeads, discoveryCopy };
 }
 
 function supplementalPersonLabel(person: WebPerson): string {
@@ -723,22 +730,42 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
             return (
               <div className="mt-3 panel p-4">
                 <div className="flex items-center gap-2">
-                  <span className="eyebrow">Named on the project site · {team.sitePeople.length}</span>
+                  <span className="eyebrow">Named on the project site · {team.sitePeople.length + team.siteRoster.length}</span>
                   {teamSearching && <span className="text-[11px] text-ink-faint">checking supplemental sources…</span>}
                 </div>
-                {team.sitePeople.length > 0 ? (
+                {team.sitePeople.length + team.siteRoster.length > 0 ? (
                   <div className="mt-2">
                     <p className="text-[11px] leading-snug text-ink-faint">First-party context from the rendered site, not independent identity verification.</p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {team.sitePeople.map((name) => {
-                        const person = roleOf.get(name);
-                        return (
-                          <span key={name} className="chip normal-case tracking-normal" title={person?.role ?? undefined}>
-                            {name}{person?.role ? <span className="text-ink-faint"> · {person.role}</span> : null}
-                          </span>
-                        );
-                      })}
-                    </div>
+                    {team.siteRoster.length > 0 && (
+                      <div className="mt-2 space-y-1.5">
+                        {team.siteRoster.map((person, index) => (
+                          <div key={`roster:${person.handle ?? person.name}:${index}`} className="flex items-center justify-between gap-2">
+                            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                              <span className="text-[12.5px] text-ink">{person.name}</span>
+                              <span className="text-[11px] text-ink-faint">{person.role}</span>
+                              {person.handle && <span className="mono text-[11px] text-ink-faint">{person.handle}</span>}
+                              {person.linkedin && <a href={person.linkedin} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>}
+                              {person.evidence && <span className="chip normal-case tracking-normal" title={person.evidence}>site roster</span>}
+                            </span>
+                            {person.handle && onAudit && (
+                              <button onClick={() => onAudit(person.handle!, resultPolicy.displayedPrivate)} className="btn-chip tint-signal shrink-0">Review</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {team.sitePeople.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {team.sitePeople.map((name) => {
+                          const person = roleOf.get(name);
+                          return (
+                            <span key={name} className="chip normal-case tracking-normal" title={person?.role ?? undefined}>
+                              {name}{person?.role ? <span className="text-ink-faint"> · {person.role}</span> : null}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p className="mt-1.5 text-[12.5px] text-ink-faint">The rendered site did not name a team member.</p>
@@ -777,7 +804,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
 
           {/* unified project research: news & press, documents & resources, domain
               intelligence, and GitHub forensics — the same cluster every report uses */}
-          {showCurrentIntelligence && reconHost && <ProjectResearch name={(recon.title || reconHost).split(/[:|–\u2014·]/)[0].trim() || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} record={resultPolicy.canRecord} panelCostToken={resultPolicy.panelCostToken} />}
+          {showCurrentIntelligence && reconHost && <ProjectResearch name={(recon.title || reconHost).split(/[:|–\u2014·]/)[0].trim() || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} record={resultPolicy.canRecord} sectorText={recon.title} panelCostToken={resultPolicy.panelCostToken} />}
 
           {/* off-chain operator linking: shared analytics IDs / co-registered domains / hosting */}
           {showCurrentIntelligence && reconHost && <SiteInfra key={`${reconHost}:${resultPolicy.canRecord ? "record" : "read-only"}`} domain={reconHost} record={resultPolicy.canRecord} onAudit={onAudit ? (ref) => onAudit(ref, resultPolicy.displayedPrivate) : undefined} />}

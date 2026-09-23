@@ -6,6 +6,7 @@ import {
   fetchPublicTextWithRecovery,
   fetchCompatibleResponseStatus,
   isPublicIpAddress,
+  readBoundedResponseText,
   validatedPublicUrl,
   type PinnedRequestOptions,
 } from "./publicWeb";
@@ -568,5 +569,35 @@ describe("public favicon fingerprints", () => {
     const request = vi.fn(async () => new Response(null, { status: 302, headers: { location: "http://127.0.0.1/favicon.ico" } }));
     expect(await fetchPublicAssetHash("https://example.com/favicon.ico", { request, lookup: publicLookup })).toBeNull();
     expect(request).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("bounded response reads for adapters with their own transport (ID-9)", () => {
+  const streamed = (chunks: string[], headers: Record<string, string> = {}) => new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk));
+      controller.close();
+    },
+  }), { status: 200, headers });
+
+  it("returns the text of a body under the cap", async () => {
+    expect(await readBoundedResponseText(streamed(["<p>hello ", "world</p>"]), 1_000)).toBe("<p>hello world</p>");
+  });
+
+  it("refuses a declared over-size body without reading it", async () => {
+    const response = streamed(["x"], { "content-length": "5000" });
+    expect(await readBoundedResponseText(response, 1_000)).toBeNull();
+  });
+
+  it("stops reading a streamed body the moment it outruns the cap", async () => {
+    let pulled = 0;
+    const endless = new Response(new ReadableStream({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(64 * 1024));
+      },
+    }), { status: 200 });
+    expect(await readBoundedResponseText(endless, 200 * 1024)).toBeNull();
+    expect(pulled).toBeLessThan(10);
   });
 });

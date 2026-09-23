@@ -247,6 +247,46 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(evidence.basicFacts?.some((fact) => fact.predicate === "product")).toBe(false);
   });
 
+  it("never merges a direct-subject projection into a same-value related-entity fact", () => {
+    // Regression for INT-19: the projection was absorbed into the related fact,
+    // kept its related_entity scope, and upgraded it to verified.
+    const evidence = emptyEvidence("@ponsdotfamily");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Pons",
+      symbol: "PONS",
+      rank: null,
+      address: "0x39dBED3a2bd333467115dE45665cC57F813C4571",
+      chain: "robinhood",
+      sourceUrl: "https://dexscreener.com/robinhood/0x10cc6bd38112cac182db90b6a71d8bb5939526ba",
+      capturedAt: "2026-07-24T12:19:07.351Z",
+      providers: ["dexscreener", "geckoterminal"],
+      marketCapUsd: 32_135_961,
+      liquidityUsd: 1_543_733,
+      volume24hUsd: 5_762_104,
+    };
+    evidence.basicFacts = [{
+      factId: "related-token",
+      subjectKey: "@partner",
+      predicate: "official_token",
+      value: "$PONS",
+      normalizedValue: "$pons",
+      status: "reported",
+      critical: true,
+      attributionScope: "related_entity",
+      sources: [{ url: "https://press.example/partner", title: "Partner press", sourceClass: "independent_press", relation: "supports", excerpt: "$PONS" }],
+    } as unknown as BasicFact];
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const tokenFacts = evidence.basicFacts.filter((fact) => fact.predicate === "official_token");
+    expect(tokenFacts).toHaveLength(2);
+    expect(tokenFacts.find((fact) => fact.factId === "related-token")).toMatchObject({ status: "reported", attributionScope: "related_entity" });
+    expect(tokenFacts.find((fact) => fact.factId !== "related-token")?.attributionScope ?? "direct_subject").toBe("direct_subject");
+  });
+
   it("uses the resolved project profile for identity and product without retaining namesake citations", () => {
     const evidence = emptyEvidence("@ponsdotfamily");
     evidence.roles = [SubjectClass.PROJECT];

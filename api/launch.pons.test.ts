@@ -35,6 +35,18 @@ describe("robinhoodCreatorVenue - factory via case-tolerant v1 route", () => {
     expect(await robinhoodCreatorVenue("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")).toBe("pons");
   });
 
+  it("detects an o1 Launchpad launch from the token deployer Blockscout reports ($WRESTLER shape)", async () => {
+    stub({ message: "OK", result: [{ contractCreator: "0x059ae3cd996c5a0db82783224cb19ae5dc598c5e", contractFactory: "0xf86dfDb678D8E5d932100Ef479A59fa65a82a5Eb" }] });
+    expect(await robinhoodCreatorVenue("0xab528169dcc80d68837a33b1e2b866bb7d7ee301")).toBe("o1");
+  });
+
+  it("detects an o1 launch created straight from a current or historical o1 factory", async () => {
+    stub({ message: "OK", result: [{ contractCreator: "0xabc", contractFactory: "0xcE9C48cFa068947f77738c81Be406B53338E5B0d" }] });
+    expect(await robinhoodCreatorVenue("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")).toBe("o1");
+    stub({ message: "OK", result: [{ contractCreator: "0xabc", contractFactory: "0x8B40fc20c405d47D725c9723D056a1c6f62BBccf" }] });
+    expect(await robinhoodCreatorVenue("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")).toBe("o1");
+  });
+
   it("returns null for a direct (EOA) deployment", async () => {
     stub({ message: "OK", result: [{ contractCreator: "0x1111111111111111111111111111111111111111", contractFactory: "" }] });
     expect(await robinhoodCreatorVenue("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")).toBe(null);

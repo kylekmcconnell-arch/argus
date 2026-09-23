@@ -8,6 +8,7 @@ import {
   scanPostsForRoles,
 } from "./x";
 import { enrichFirstPartyTeamAvatars } from "./teamEnrichment";
+import { reverseBioClaimIsStanding } from "./x";
 import { emptyEvidence } from "../../src/data/evidence";
 import type { CollectContext } from "./types";
 
@@ -131,6 +132,40 @@ describe.sequential("discoverReverseBioFromTwitterapi", () => {
     expect(webTeam[0].enrichmentProvider).toBe("twitterapi");
   });
 
+  it("never nominates an org from a bystander follower's bio (the MultiHopper false association)", async () => {
+    // A mere follower of the subject, with no claimed tie to it, whose OWN bio
+    // reads "CEO//Founder @SomeOtherProject ... GP at Their Own Fund VC". The
+    // fund keyword belongs to the follower's world, not the subject's. Before
+    // the claim gate, this bio was scanned for orgs and @someotherproject was
+    // published as the audited project's VC backer.
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    const fetchMock = twitterapiStub({
+      followers: [{
+        userName: "bystanderfund",
+        name: "Bystander Fund",
+        description: "CEO//Founder @someotherproject + $TOKEN. GP at Bystander VC. Advising Various, Things",
+      }],
+      followings: [{
+        userName: "alice",
+        name: "Alice",
+        description: "COO @projecthandle · @orghandle fund",
+      }],
+      profiles: {
+        orghandle: { name: "Org Fund", description: "early-stage fund" },
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const found = await discoverReverseBioFromTwitterapi("@projecthandle", "Project Handle");
+
+    const orgHandles = found.orgs.map((org) => org.handle.toLowerCase());
+    expect(orgHandles).not.toContain("@someotherproject");
+    // The claim-carrying bio still nominates its org: recall is kept where a
+    // first-party tie exists.
+    expect(orgHandles).toContain("@orghandle");
+    expect(found.team.map((member) => member.handle)).toEqual(["@alice"]);
+  });
+
   it("still finds @alice when official project posts never name anyone", async () => {
     vi.stubEnv("TWITTERAPI_KEY", "tw-key");
     const officialPosts = ["gm", "shipping v2 this week", "docs are live"];
@@ -218,5 +253,88 @@ describe("extra-check persist must not abort team collection", () => {
 describe("operatorClaimInBio · reverse-bio titles", () => {
   it("requires an @handle, never a display name alone", () => {
     expect(operatorClaimInBio("COO of Project Handle", "@projecthandle")).toBeNull();
+  });
+});
+
+describe("reverse-bio tweet text never yields a verified role (ID-3)", () => {
+  it("keeps a tweet-only role as a lead, not a first-party artifact", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    vi.stubGlobal("fetch", twitterapiStub({
+      mentions: [{
+        text: "Who is the founder of @projecthandle? Anyone know?",
+        author: { userName: "curious", name: "Curious", description: "watching @projecthandle closely" },
+      }],
+      profiles: { curious: { name: "Curious", description: "watching @projecthandle closely" } },
+    }));
+
+    const found = await discoverReverseBioFromTwitterapi("@projecthandle", "Project Handle");
+    expect(found.team).toHaveLength(1);
+    expect(found.team[0]).toMatchObject({ handle: "@curious", claimSurface: "tweet" });
+    expect(reverseBioClaimIsStanding(found.team[0])).toBe(false);
+
+    const webTeam = reverseBioTeamAsWebMembers(found.team);
+    expect(webTeam[0]).toMatchObject({ artifact_verified: false, evidence_origin: "model_lead" });
+    expect(webTeam[0].handleProvenance).toBeUndefined();
+  });
+
+  it("still promotes a standing bio claim as a first-party artifact", () => {
+    const webTeam = reverseBioTeamAsWebMembers([{
+      name: "Alice", handle: "@alice", role: "coo", kind: "team", claimSurface: "bio",
+      evidence: 'their current X bio states "COO @projecthandle"', source: "reverse-bio twitterapi",
+    }]);
+    expect(webTeam[0]).toMatchObject({ artifact_verified: true, evidence_origin: "deterministic", handleProvenance: "subject_first_party" });
+  });
+});
+
+describe("reverse-bio memo is scan-bounded and never stores an outage (ID-5 / OR-1)", () => {
+  const aliceStub = () => twitterapiStub({
+    followings: [{ userName: "alice", name: "Alice", description: "COO @projecthandle" }],
+    profiles: { alice: { name: "Alice", description: "COO @projecthandle" } },
+  });
+
+  it("re-reads the provider after resetReverseBioMemo instead of replaying the previous scan", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    const first = aliceStub();
+    vi.stubGlobal("fetch", first);
+    const before = await discoverReverseBioFromTwitterapi("@projecthandle");
+    expect(before.team.map((m) => m.handle)).toEqual(["@alice"]);
+
+    // Alice edits her bio between scans. The next scan must see it.
+    resetReverseBioMemo();
+    const second = twitterapiStub({
+      followings: [{ userName: "alice", name: "Alice", description: "Left projecthandle. Building @newco" }],
+      profiles: { alice: { name: "Alice", description: "Left projecthandle. Building @newco" } },
+    });
+    vi.stubGlobal("fetch", second);
+    const after = await discoverReverseBioFromTwitterapi("@projecthandle");
+    expect(second).toHaveBeenCalled();
+    expect(after.team).toEqual([]);
+  });
+
+  it("does not memoize a discovery produced while the provider was refusing reads", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    const outage = vi.fn(async () => new Response("rate limited", { status: 429 }));
+    vi.stubGlobal("fetch", outage);
+    const during = await discoverReverseBioFromTwitterapi("@projecthandle");
+    expect(during).toMatchObject({ team: [], unavailable: true });
+
+    // Same warm process, provider back: the empty answer must not replay.
+    const recovered = aliceStub();
+    vi.stubGlobal("fetch", recovered);
+    const later = await discoverReverseBioFromTwitterapi("@projecthandle");
+    expect(recovered).toHaveBeenCalled();
+    expect(later.team.map((m) => m.handle)).toEqual(["@alice"]);
+    expect(later.unavailable).toBeUndefined();
+  });
+
+  it("shares one in-flight read within a scan", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    const stub = aliceStub();
+    vi.stubGlobal("fetch", stub);
+    const [a, b] = await Promise.all([
+      discoverReverseBioFromTwitterapi("@projecthandle"),
+      discoverReverseBioFromTwitterapi("@PROJECTHANDLE"),
+    ]);
+    expect(a).toBe(b);
   });
 });

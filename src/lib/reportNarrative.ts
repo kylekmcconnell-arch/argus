@@ -4,13 +4,15 @@ import { neutralizeProductCopy } from "./productLanguage";
 const EVM_CONTRACT = /\b0x[a-f0-9]{40}\b/gi;
 const SOLANA_CONTRACT = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
 const URL_PATTERN = /https?:\/\/\S+/gi;
+const PRODUCT_NOUNS = /\b(?:platform|software|application|api|gateway|runtime|workspace|workspaces|marketplace|infrastructure|protocol|service|network|tool|tools)\b/i;
 const PRODUCT_VERBS = /\b(?:builds?|provides?|offers?|lets?|enables?|uses?|routes?|connects?|turns?|powers?|issues?|operates?|manages?|delivers?|gives?|trades?|swaps?|lends?|borrows?|stakes?|earns?|allocates?|automates?|supplies?|pools?|vaults?)\b/i;
 const GENERIC_IDENTITY_COPY = /\b(?:official product surface|project behind|official (?:site|website)|linked to (?:the )?(?:site|website|domain))\b/i;
 
 function hasProductMechanism(value: string): boolean {
   // A ticker-like project name (for example EARN) must not accidentally count
   // as the verb "earn". Remove only an all-caps leading label before testing.
-  return PRODUCT_VERBS.test(value.replace(/^[A-Z][A-Z0-9$._-]{1,19}\b\s*/, ""));
+  return PRODUCT_VERBS.test(value.replace(/^[A-Z][A-Z0-9$._-]{1,19}\b\s*/, ""))
+    || (value.length >= 40 && value.split(/\s+/).length >= 7 && PRODUCT_NOUNS.test(value));
 }
 
 function tidySentence(value: string): string {
@@ -47,13 +49,18 @@ function substantiallyRepeats(value: string, source: string): boolean {
 interface NarrativeProductFact {
   predicate: string;
   value?: unknown;
+  status?: string;
+  artifact_verified?: boolean;
+  evidence_origin?: string;
 }
 
-function narrativeProductFact(facts: NarrativeProductFact[] | undefined, bio: string): string {
+function narrativeProductFact(facts: NarrativeProductFact[] | undefined): string {
   return (facts ?? [])
-    .filter((fact) => fact.predicate === "product")
+    .filter((fact) => fact.predicate === "product"
+      && (fact.status === "verified" || fact.status === "corroborated")
+      && fact.artifact_verified !== false && fact.evidence_origin !== "model_lead")
     .map((fact) => typeof fact.value === "string" ? tidySentence(neutralizeProductCopy(fact.value)) : "")
-    .filter((value) => value.length >= 24 && hasProductMechanism(value) && !GENERIC_IDENTITY_COPY.test(value) && !substantiallyRepeats(value, bio))
+    .filter((value) => value.length >= 24 && hasProductMechanism(value) && !GENERIC_IDENTITY_COPY.test(value))
     .sort((left, right) => right.length - left.length)[0] ?? "";
 }
 
@@ -77,6 +84,7 @@ export interface ReportOpeningNarrativeInput {
   website?: string;
   subjectOrientation?: SubjectOrientation;
   basicFacts?: NarrativeProductFact[];
+  officialProductDescription?: { text: string; sourceUrl: string; capturedAt: string };
   projectToken?: ProjectTokenSnapshot;
 }
 
@@ -87,8 +95,23 @@ export interface ReportOpeningNarrativeInput {
  */
 export function reportOpeningNarrative(input: ReportOpeningNarrativeInput): string {
   const grokOverview = boundGrokOverview(input.subjectOrientation, input.bio);
-  const productFact = narrativeProductFact(input.basicFacts, input.bio);
-  const overview = grokOverview || productFact;
+  const productFact = narrativeProductFact(input.basicFacts);
+  let siteDescription = "";
+  const saved = input.officialProductDescription;
+  if (saved && input.website) {
+    try {
+      const source = new URL(saved.sourceUrl);
+      const official = new URL(input.website);
+      if (["https:", "http:"].includes(source.protocol) && !source.username && !source.password
+        && source.hostname.replace(/^www\./, "") === official.hostname.replace(/^www\./, "")
+        && Number.isFinite(Date.parse(saved.capturedAt))) {
+        const cleaned = tidySentence(neutralizeProductCopy(saved.text.slice(0, 1200)));
+        if (cleaned.length >= 24 && hasProductMechanism(cleaned) && !GENERIC_IDENTITY_COPY.test(cleaned)) siteDescription = cleaned;
+      }
+    } catch { /* Unbound descriptions cannot supply the overview. */ }
+  }
+  const overview = grokOverview || (siteDescription ? `According to its official website: ${siteDescription}`
+    : productFact ? `The project's published description: ${productFact}` : "");
   const tokenSentence = projectTokenSentence(input.projectToken, overview);
   if (overview) return [overview, tokenSentence].filter(Boolean).join(" ");
 
@@ -100,5 +123,5 @@ export function reportOpeningNarrative(input: ReportOpeningNarrativeInput): stri
     ? ` and its linked $${input.projectToken.symbol} token${input.projectToken.chain ? ` on ${input.projectToken.chain}` : ""}`
     : "";
   const identity = host ? `${input.name} is linked to ${host}${token}` : `${input.name} is bound to ${input.handle}${token}`;
-  return `${tidySentence(identity)} This saved report did not establish a source-backed explanation of what the product does. Rescan to refresh its first-party product description.`;
+  return `${tidySentence(identity)} This saved report did not establish a source-backed explanation of what the product does. Product research is incomplete; check the collection status before requesting another scan.`;
 }

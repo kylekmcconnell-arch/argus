@@ -15,6 +15,14 @@ describe("audit SSE liveness", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([false, true])("opts into server token completion only for a public scan (private=%s)", async priv => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('event: error\ndata: {"error":"stopped"}\n\n'));
+    vi.stubGlobal("fetch", fetcher);
+    streamAudit("@argus", priv, { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() }, "investment_due_diligence", undefined, "owned-run-123", true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(String(fetcher.mock.calls[0][0]).includes("tokenExecution=server")).toBe(!priv);
+  });
+
   it("allows a responsive audit to run past the former 195 second client cap", async () => {
     let streamController!: ReadableStreamDefaultController<Uint8Array>;
     const body = new ReadableStream<Uint8Array>({
@@ -129,7 +137,44 @@ describe("audit SSE liveness", () => {
     await vi.advanceTimersByTimeAsync(AUDIT_STREAM_INACTIVITY_TIMEOUT_MS);
 
     expect(requestSignal?.aborted).toBe(true);
-    expect(handlers.onError).toHaveBeenCalledWith("timed out: the audit stream stopped responding");
+    // A silent stream is a dropped connection, not a server rejection: the
+    // caller must keep polling for the server's own save, never relaunch.
+    expect(handlers.onError).toHaveBeenCalledWith("timed out: the audit stream stopped responding", { kind: "stream_dropped" });
     expect(handlers.onDone).not.toHaveBeenCalled();
+  });
+});
+
+describe("scan replay recovery", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it.each([
+    ["scan_run_already_claimed", "stream_dropped"],
+    ["idempotency_subject_mismatch", "rejected"],
+  ])("classifies %s without issuing a replacement request", async (error, kind) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error, message: "request conflict" }), { status: 409 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const handlers = { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() };
+    streamAudit("@example", false, handlers, undefined, undefined, "owned-run-key");
+    await vi.waitFor(() => expect(handlers.onError).toHaveBeenCalledWith(expect.any(String), { kind }));
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("creditKey=owned-run-key"), expect.objectContaining({ method: "POST", cache: "no-store" }));
+  });
+  it("ignores all events after the terminal event", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response('event: done\ndata: {"handle":"@example"}\n\nevent: step\ndata: {"token":{"address":"late"}}\n\nevent: error\ndata: {"error":"late"}\n\n')));
+    const handlers = { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() };
+    streamAudit("@example", false, handlers);
+    await vi.waitFor(() => expect(handlers.onDone).toHaveBeenCalledOnce());
+    expect(handlers.onStep).not.toHaveBeenCalled();
+    expect(handlers.onError).not.toHaveBeenCalled();
+  });
+  it("cannot finish an explicitly cancelled scan when a late response arrives", async () => {
+    let respond!: (value: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => { respond = resolve; })));
+    const handlers = { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() };
+    const cancel = streamAudit("@example", false, handlers);
+    cancel();
+    respond(new Response('event: done\ndata: {"handle":"@example"}\n\n'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(handlers.onDone).not.toHaveBeenCalled();
+    expect(handlers.onError).not.toHaveBeenCalled();
   });
 });

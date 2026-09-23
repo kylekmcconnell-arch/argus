@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { recordCall } from "../cost";
 import {
   bindOfficialPortrait,
+  bindContactAnchor,
   bindProfileAnchor,
   officialPortraitAnchors,
   profileAnchors,
@@ -315,6 +316,36 @@ describe("profile anchors on a team page", () => {
     expect(anchors.some((a) => a.value.includes("company"))).toBe(false);
   });
 
+  it("reads per-person contact anchors and binds them only by name agreement, never by position", () => {
+    const contactRoster = `
+    <div class="member">
+      <h3>Niklas Homan</h3><p>Founder &amp; Chief Executive Officer</p>
+      <a href="https://t.me/niklashoman">Telegram</a>
+      <a href="mailto:niklas@orbitgroup.ai">Email Niklas</a>
+    </div>
+    <div class="member">
+      <h3>Alexander Vermeulen</h3><p>Founder &amp; Chief Technology Officer</p>
+    </div>
+    <div class="footer">
+      <a href="mailto:info@orbitgroup.ai">Contact us</a>
+      <a href="https://t.me/orbitgroup_announcements">Announcements</a>
+      <a href="https://t.me/share?url=x">Share</a>
+    </div>`;
+    const anchors = profileAnchors(contactRoster);
+    expect(anchors.filter((a) => a.kind === "telegram").map((a) => a.value))
+      .toEqual(["niklashoman", "orbitgroup_announcements"]);
+    expect(anchors.filter((a) => a.kind === "email").map((a) => a.value))
+      .toEqual(["niklas@orbitgroup.ai", "info@orbitgroup.ai"]);
+
+    // Niklas gets HIS telegram slug and HIS address (local part carries the name).
+    expect(bindContactAnchor("Niklas Homan", anchors, "telegram")).toBe("niklashoman");
+    expect(bindContactAnchor("Niklas Homan", anchors, "email")).toBe("niklas@orbitgroup.ai");
+    // Alexander sits nearest to the footer, but a page-level contact must
+    // never become a person's personal address: no nearness fallback exists.
+    expect(bindContactAnchor("Alexander Vermeulen", anchors, "telegram")).toBeUndefined();
+    expect(bindContactAnchor("Alexander Vermeulen", anchors, "email")).toBeUndefined();
+  });
+
   it("binds a profile by nearby position, by anchor text, and by slug", () => {
     const anchors = profileAnchors(roster);
     // Anchor text is just "LinkedIn", so this one binds by proximity.
@@ -332,5 +363,26 @@ describe("profile anchors on a team page", () => {
     expect(bindProfileAnchor("Satoshi Nakamoto", roster, anchors, "linkedin")).toBeUndefined();
     // A single-token name is too weak to bind on.
     expect(bindProfileAnchor("Niklas", roster, anchors, "linkedin")).toBeUndefined();
+  });
+});
+
+describe("proximity binding cannot adopt a stranger's profile (ARGUS-05)", () => {
+  const twoPeople = `
+    <div class="card"><h3>Konstantin Sebeo</h3><p>Founder</p>
+      <a href="https://www.linkedin.com/in/katharina-eddins-translator">LinkedIn</a></div>
+    <div class="card"><h3>Katharina Eddins</h3><p>Translator</p></div>
+  `;
+
+  it("leaves a nearby profile unbound when its identifier names someone else", () => {
+    const anchors = profileAnchors(twoPeople);
+    expect(anchors.length).toBeGreaterThan(0);
+    expect(bindProfileAnchor("Konstantin Sebeo", twoPeople, anchors, "linkedin")).toBeUndefined();
+  });
+
+  it("still binds a nearby profile whose identifier echoes the person's own name", () => {
+    const own = `<div class="card"><h3>Konstantin Sebeo</h3>
+      <a href="https://www.linkedin.com/in/ksebeo">LinkedIn</a></div>`;
+    const anchors = profileAnchors(own);
+    expect(bindProfileAnchor("Konstantin Sebeo", own, anchors, "linkedin")).toBe("linkedin.com/in/ksebeo");
   });
 });

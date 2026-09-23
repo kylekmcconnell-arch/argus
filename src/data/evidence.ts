@@ -47,6 +47,14 @@ export interface GithubAssessment {
   createdAt?: string;          // account creation date (ISO)
   accountAgeYears?: number;
   publicRepos: number;
+  /** Repositories actually listed; a most-recently-pushed window, not the account. */
+  sampledRepos?: number;
+  /**
+   * "complete" when the listed repos cover the account, "sample" when they are
+   * a per_page window of a larger account, "unavailable" when the list call
+   * failed (counts below are then 0 but not measurements).
+   */
+  repoSampleState?: "complete" | "sample" | "unavailable";
   originalCount: number;       // non-fork owned repos
   forkCount: number;
   forkRatio: number;           // forks / (originals + forks), 0 when no repos
@@ -69,11 +77,17 @@ export interface SubjectProfile {
   website?: string;    // independently resolved first-party site, when available
   /**
    * Additional official websites unique-ID bound to this same X profile
-   * (twitterapi website + entity URLs from that exact profile record).
+   * (every URL in the twitterapi website field of that exact profile record).
    * Includes the primary `website` when it came from that record. Never
-   * search leads or model-suggested URLs.
+   * search leads, model-suggested URLs, or URLs typed into the bio text.
    */
   official_websites?: string[];
+  /**
+   * URLs the account typed into its bio description. Leads about the
+   * account only: a bio link is never a bind key, because any account can
+   * paste the real project's site into its bio.
+   */
+  bio_websites?: string[];
   /** What the profile website actually served when fetched (sitecheck outcome).
    * "live" means a substantial product surface was observed on the domain. */
   site_substance_status?: "live" | "coming_soon" | "unreachable" | "access_blocked" | "unavailable" | "client_rendered";
@@ -89,6 +103,8 @@ export interface SubjectProfile {
   joined: string;
   /** Raw ISO account creation time; `joined` is display-only and cannot be parsed. */
   account_created_at?: string;
+  /** Provider-frozen X user id. Stable across handle changes; the handle is not. */
+  x_user_id?: string;
   identity_confidence: IdentityConfidence;
   identity_note: string;
   /**
@@ -219,7 +235,8 @@ export interface TraceStep {
   // runner sees it mid-stream and launches the browser-side token threat scan
   // IN PARALLEL with the rest of the collection, so the full audit carries the
   // threat report without extending the critical path.
-  token?: { address: string; via: "evm" | "solana"; source: string };
+  tokenExecution?: "server";
+  token?: { address: string; via: "evm" | "solana"; source: string; binding?: "canonical" | "bio" | "promotion" };
 }
 
 /**
@@ -307,6 +324,13 @@ export interface ProjectTokenSnapshot {
   maxSupply?: number;
   liquidityUsd?: number;
   pairAddress?: string;
+  /**
+   * What the price-corroborated pool quotes in. Tokenized-stock venues
+   * (StonkBroker-class) pair tokens against stocks, so the quote side carries
+   * real exposure information; the pairing lane resolves its underlying.
+   */
+  pairQuoteSymbol?: string;
+  pairQuoteName?: string;
   /** Provider-reported creation time for the canonical DEX pair, in Unix milliseconds. */
   pairCreatedAt?: number;
   /** CoinGecko lifetime high, captured with the canonical-token snapshot. */
@@ -368,6 +392,52 @@ export interface ProtocolFundingSnapshot {
   }>;
   totalRaisedUsd: number;
   leadInvestors: string[];
+  sourceUrl: string;
+  capturedAt: string;
+}
+
+/**
+ * Frozen CryptoRank funding record: the second crypto-native raises index next
+ * to the DeFiLlama record above. The binding that admitted the record is
+ * frozen with it (exact contract-address join to the verified canonical token,
+ * or the record's own official X handle / official domain), and projection
+ * re-validates that binding before the record can feed a fact. The `access`
+ * block records which plan-tiered detail endpoints the configured key
+ * answered, so a plan gate is auditable rather than silent.
+ */
+export interface CryptoRankFundingSnapshot {
+  currencyId: number;
+  /** CryptoRank's URL key for the record. */
+  key: string;
+  name: string;
+  symbol: string | null;
+  binding:
+    | { method: "canonical_token_address"; address: string; platform: string | null }
+    | { method: "official_identity"; officialTwitter: string | null; officialUrl: string | null };
+  /** Provider flag on the bound record; true even when the rounds detail endpoint is plan-gated. */
+  hasFundingRounds: boolean;
+  rounds: Array<{
+    stage: string;
+    /** "YYYY-MM-DD", or a bare "YYYY" when the provider only knows the year. */
+    date: string | null;
+    amountUsd: number | null;
+    valuationUsd: number | null;
+    /** Token-sale terms when the index carries them: this is what makes a round readable as a token round. */
+    tokenPriceUsd?: number | null;
+    tokensForSale?: number | null;
+    /** Share of max supply sold in this round, percent. */
+    allocationOfSupplyPct?: number | null;
+    leadInvestors: string[];
+    otherInvestors: string[];
+    announcementUrl: string | null;
+  }>;
+  totalRaisedUsd: number | null;
+  /** Named backer funds from full-metadata when the rounds detail is plan-gated. */
+  funds: Array<{ name: string; isLead: boolean }>;
+  access: {
+    fundingRounds: "ok" | "plan_gated" | "unavailable";
+    fullMetadata: "ok" | "plan_gated" | "unavailable" | "not_needed";
+  };
   sourceUrl: string;
   capturedAt: string;
 }
@@ -634,6 +704,13 @@ export interface SourceArtifact {
   fundScaleTemporalState?: "current" | "historical" | "fixed_historical" | "unknown";
   fundScaleSourceCount?: number;
   fundScaleClaimId?: string;
+  /**
+   * The entity name exactly as the fetched page printed it. The strict gate
+   * requires it to equal `fundName`; a page naming "Sequoia Capital China"
+   * never verifies "Sequoia Capital". Absent only for first-person copy on a
+   * verified manager domain.
+   */
+  attributedEntityName?: string;
 }
 
 /**
@@ -811,6 +888,13 @@ export interface BasicFact {
   evidence_origin: "deterministic";
   artifact_verified: true;
   provider: "public-web";
+  /**
+   * Structured listing identity for a registry-verified public_security fact.
+   * The SEC registry row's CIK, ticker, exchange and issuer used to live only
+   * inside the frozen excerpt bytes; downstream lanes (stock health, EDGAR
+   * filings) join on these fields instead of re-parsing prose.
+   */
+  security?: { cik: number; ticker: string; exchange: string; issuer: string };
   discoveryProvider?: "claude-web-search" | "grok" | "grounded" | "argus-identity-bootstrap" | "security-audits";
   /**
    * Omitted/true: a strict single-passage fact, eligible to set enforced score
@@ -877,6 +961,10 @@ export interface WebTeamMember {
   /** Person vs linked fund/incubator/VC. Unique-id is still the handle. */
   kind?: "person" | "org";
   linkedin?: string;
+  /** Personal Telegram slug the first-party page ties to this person. */
+  telegram?: string;
+  /** Contact email the first-party page ties to this person (mailto anchor). */
+  email?: string;
   evidence?: string;
   source: string; // where it came from: web/LinkedIn search, post role-scan, X content
   /** Exact fetched page that directly supports the person's project role. */
@@ -1039,6 +1127,167 @@ export interface TokenApplicabilitySnapshot {
   determinedAt: string;
 }
 
+/**
+ * Frozen point-in-time health read of a verified listed security. The doctrine
+ * behind it: when a company's applicable market instrument is a stock, ARGUS
+ * assesses the stock's own health instead of pretending token metrics apply.
+ * Score-neutral in v1 (mode/scoringImpact mirror EvmControlRealitySnapshot):
+ * the panel renders, the scorer never sees it. Identity is double-anchored:
+ * the ticker comes from the verified SEC-registry public_security fact, and
+ * the market feed's own issuer name and instrument type must agree before the
+ * snapshot is frozen.
+ */
+export interface StockHealthSnapshot {
+  mode: "point_in_time";
+  scoringImpact: "none";
+  ticker: string;
+  issuer: string;
+  exchange: string | null;
+  currency: string | null;
+  binding: {
+    /** The verified SEC-registry fact this read is anchored to. */
+    registryFactId: string;
+    registrySourceUrl: string;
+    /** The market feed's own issuer name and instrument type, frozen as the agreement receipt. */
+    feedLongName: string | null;
+    instrumentType: string | null;
+  };
+  price: number;
+  fiftyTwoWeekHigh: number | null;
+  fiftyTwoWeekLow: number | null;
+  /** 0 = at the 52-week low, 100 = at the 52-week high. */
+  fiftyTwoWeekPositionPct: number | null;
+  change30dPct: number | null;
+  change90dPct: number | null;
+  change1yPct: number | null;
+  /** Deepest peak-to-trough decline across the captured year, as a negative percent. */
+  maxDrawdown1yPct: number | null;
+  /** Annualized close-to-close volatility over the captured year. */
+  annualizedVolatilityPct: number | null;
+  /** US convention: priced under $5. Null when the currency is not USD. */
+  pennyStock: boolean | null;
+  /** Weekly downsampled closes (about a year, ending at the latest close). */
+  trend: Array<{ date: string; close: number }>;
+  sourceUrl: string;
+  capturedAt: string;
+}
+
+/**
+ * Frozen company-registry evidence: real registries, not search leads, answer
+ * the legal-entity questions for ALL companies, crypto or not. The SEC record
+ * is joined by the CIK a verified public_security fact already carries; the
+ * Companies House / OpenCorporates records are joined by registration numbers
+ * the subject's OWN bound official site declares. Names never join.
+ */
+export interface CompanyRegistrySnapshot {
+  sec?: {
+    cik: number;
+    entityName: string;
+    tickers: string[];
+    exchanges: string[];
+    sicDescription: string | null;
+    stateOfIncorporation: string | null;
+    ein: string | null;
+    lei: string | null;
+    /** The registrant's own declared website; frozen agreement check against the subject's official domain. */
+    registrantWebsite: string | null;
+    websiteAgreesWithOfficialDomain: boolean | null;
+    latestFilings: Array<{ form: string; filedAt: string }>;
+    lastAnnualReportAt: string | null;
+    lastQuarterlyReportAt: string | null;
+    lastFilingAt: string | null;
+    sourceUrl: string;
+    capturedAt: string;
+  };
+  companiesHouse?: {
+    companyNumber: string;
+    companyName: string;
+    status: string | null;
+    type: string | null;
+    incorporatedOn: string | null;
+    jurisdiction: string | null;
+    registeredOffice: string | null;
+    /** The bound official-site page that declared this number. */
+    declaredOn: string;
+    sourceUrl: string;
+    capturedAt: string;
+  };
+  openCorporates?: {
+    jurisdiction: string;
+    companyNumber: string;
+    companyName: string;
+    status: string | null;
+    incorporatedOn: string | null;
+    companyType: string | null;
+    declaredOn: string;
+    sourceUrl: string;
+    capturedAt: string;
+  };
+  /** Every registration number the bound official site declared about itself. */
+  siteDeclaredRegistrations: Array<{
+    number: string;
+    jurisdiction: string | null;
+    sourceUrl: string;
+    excerpt: string;
+  }>;
+  capturedAt: string;
+}
+
+/**
+ * Frozen stock exposure carried by a token: either the token IS a tokenized
+ * stock (xStocks, Dinari dShares, Backed, native stock-token chains) or its
+ * price-corroborated pool QUOTES in one (StonkBroker-class venues pair tokens
+ * against stocks, including penny stocks). The underlying listed equity's
+ * health is read through the same market feed as StockHealthSnapshot and
+ * frozen score-neutral; the basis records exactly which surfaces bound the
+ * token to the stock.
+ */
+export interface TokenizedStockPairingSnapshot {
+  mode: "point_in_time";
+  scoringImpact: "none";
+  exposure: "token_is_tokenized_stock" | "quote_is_tokenized_stock";
+  /** The token-side surface that carried the stock exposure. */
+  tokenizedSymbol: string;
+  tokenizedName: string | null;
+  underlying: {
+    ticker: string;
+    feedLongName: string | null;
+    exchange: string | null;
+    currency: string | null;
+    price: number;
+    fiftyTwoWeekPositionPct: number | null;
+    change30dPct: number | null;
+    change90dPct: number | null;
+    change1yPct: number | null;
+    maxDrawdown1yPct: number | null;
+    annualizedVolatilityPct: number | null;
+    pennyStock: boolean | null;
+  };
+  basis: string[];
+  sourceUrl: string;
+  capturedAt: string;
+}
+
+/**
+ * Frozen market categorization for a company subject. ARGUS assesses all
+ * startups and businesses, not only crypto: every PROJECT report says whether
+ * the subject is a Web3 startup or a non-Web3 company, and where its token
+ * stands. Derived deterministically from the frozen token-applicability
+ * decision, identity-bound protocol records, and bound first-party text;
+ * `undetermined` is the fail-closed answer when the token identity search did
+ * not complete and no other signal speaks.
+ */
+export interface SubjectCategorySnapshot {
+  market: "web3" | "non_web3" | "undetermined";
+  /** Mirrors the token-applicability decision in reader-facing terms. */
+  tokenStanding: "live_token" | "token_planned" | "no_token" | "token_unverified";
+  /** Verified public-security fact (SEC registry class), when one exists. Orthogonal to market: a Web3 company can be listed too. */
+  publicListing?: { value: string; sourceUrl: string };
+  /** Which signals decided the category, in plain language. */
+  basis: string[];
+  determinedAt: string;
+}
+
 /** Grok first-pass read of the bound X profile + official site. Display name is never a bind key. */
 /** Product/token the COMPANY launched. Separate unique-id from the subject. */
 export interface LaunchedProductLead {
@@ -1079,6 +1328,8 @@ export interface CollectedEvidence {
   roles: SubjectClass[];
   /** Bound-artifact orientation; never a display-name guess. */
   subjectOrientation?: SubjectOrientation;
+  /** Official page text for description only; excluded from scoring packets. */
+  officialProductDescription?: { text: string; sourceUrl: string; capturedAt: string };
   ventures: Venture[];
   testimonials: Testimonial[];
   advised: AdvisedProject[];
@@ -1107,12 +1358,65 @@ export interface CollectedEvidence {
   /** A bio-declared contract the identity search completed without binding. Mutually exclusive with projectToken. */
   unresolvedProjectToken?: UnresolvedProjectTokenSnapshot;
   /**
+   * Name-alike tokens whose OWN listings claim the audited account as their
+   * social link. The listing is the deployer's claim, never the subject's:
+   * absent the subject's own bio or official site adopting the exact
+   * contract, these were launched by someone else and have nothing to do
+   * with the subject. Frozen so the report states that explicitly.
+   */
+  namesakeTokens?: Array<{
+    name: string;
+    symbol: string;
+    address: string;
+    chain: string;
+    declaredX: string;
+    sourceUrl: string;
+    liquidityUsd?: number;
+    capturedAt: string;
+  }>;
+  /**
    * Fixed-block direct RPC observations for the verified canonical EVM token.
    * This lane is point-in-time context only and has no v1 scoring impact.
    */
   evmControlReality?: EvmControlRealitySnapshot;
+  /**
+   * The audited subject IS a launch venue (its verified official domain
+   * matches a documented venue domain). A launchpad without a native token is
+   * never judged on token metrics; it is judged on the launch mechanics it
+   * imposes on every token it releases, frozen here from the venue registry.
+   */
+  launchVenueSubject?: {
+    venue: string;
+    matchedDomain: string;
+    chains: string[];
+    lpDisposition: string;
+    lpNote: string;
+    platformPaysCreator: boolean;
+    feeNote: string;
+    capturedAt: string;
+  };
+  /** Frozen point-in-time health of the verified listed security. Score-neutral context; never enters the scorer packet. */
+  stockHealth?: StockHealthSnapshot;
+  /** Frozen stock exposure behind the verified token (tokenized stock or stock-quoted pool). Score-neutral context. */
+  tokenizedStockPairing?: TokenizedStockPairingSnapshot;
+  /**
+   * The subject's OWN published backer wall ("Backed by ..."), read from the
+   * bound official site. A self-published claim: rendered with its provenance,
+   * feeds P4 as reported evidence, never a score floor.
+   */
+  siteBackers?: {
+    heading: string;
+    names: string[];
+    excerpt: string;
+    sourceUrl: string;
+    capturedAt: string;
+  };
+  /** Frozen registry records (SEC EDGAR, Companies House, OpenCorporates) joined by CIK or site-declared numbers. */
+  companyRegistry?: CompanyRegistrySnapshot;
   /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */
   protocolFunding?: ProtocolFundingSnapshot;
+  /** Frozen CryptoRank funding record; the second raises index, used when the DeFiLlama record is absent. Feeds P4 at reported tier. */
+  cryptoRankFunding?: CryptoRankFundingSnapshot;
   /** Frozen public X conversation breadth and volume. Never affects safety scoring. */
   socialActivity?: SocialActivitySnapshot;
   /**
@@ -1145,6 +1449,25 @@ export interface CollectedEvidence {
   /** Evidence-aware delegation plan frozen with the scan for auditability. */
   researchPlan?: import("../lib/researchDirector").ResearchPlan;
   /**
+   * What the scoring pass did, and why, frozen with the report.
+   *
+   * A withheld score is an honest outcome, but it used to render as a bare
+   * "N/A, not measured": the reason existed only in the live scan stream and
+   * in the in-memory provider snapshot, both gone by the time anyone reads the
+   * saved report. Freezing it here lets the report state whether the score is
+   * missing because no methodology was routed, because the decision review
+   * never ran, or because no axis carried substantive evidence.
+   */
+  scoringOutcome?: {
+    state: "executed" | "partial" | "skipped" | "failed";
+    failure?: { kind: "provider_access"; provider: "grok"; httpStatus: 401 | 403; diagnostic: string; requestId?: string };
+    missingAxes?: string[];
+    attemptedAxes?: string[];
+    /** The scan's own sentence about this outcome, verbatim. */
+    detail: string;
+    capturedAt: string;
+  };
+  /**
    * Roles the subject's own employment record has CLOSED, with the date it
    * ends. A founder who quietly stopped listing a venture is a finding no
    * team page shows; the record states the end date and nothing about why.
@@ -1162,6 +1485,8 @@ export interface CollectedEvidence {
   entityContinuity?: EntityContinuitySnapshot;
   /** Pre-scoring determination of whether P3 token conduct applies. */
   tokenApplicability?: TokenApplicabilitySnapshot;
+  /** Frozen Web3 / non-Web3 market categorization for a company subject. */
+  subjectCategory?: SubjectCategorySnapshot;
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to

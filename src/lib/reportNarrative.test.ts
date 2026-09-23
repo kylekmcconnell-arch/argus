@@ -120,3 +120,24 @@ describe("reportOpeningNarrative", () => {
     expect(summary).not.toMatch(/revolutionary|powered by|join the revolution/i);
   });
 });
+
+describe("description resilience when AI research is unavailable", () => {
+  const description = "The AI platform for models, agents and cloud computers. Build, create and run on your terms.";
+  const input = { name: "Example", handle: "@example", bio: description, website: "https://example.org" };
+  it("retains a concrete collected product fact even when it repeats the profile", () => {
+    expect(reportOpeningNarrative({ ...input, basicFacts: [productFact(description)] })).toContain("AI platform for models, agents and cloud computers");
+  });
+  it("attributes a bound saved website description without requiring an AI paraphrase", () => {
+    expect(reportOpeningNarrative({ ...input, officialProductDescription: { text: description, sourceUrl: "https://www.example.org/", capturedAt: "2026-09-22T00:00:00Z" } })).toContain("According to its official website:");
+  });
+  it("rejects mismatched domains and undated descriptions", () => {
+    for (const [sourceUrl, capturedAt] of [["https://unrelated.org", "2026-09-22"], ["https://example.org", "invalid"]]) {
+      expect(reportOpeningNarrative({ ...input, officialProductDescription: { text: description, sourceUrl, capturedAt } })).toContain("did not establish");
+    }
+  });
+});
+
+it("does not promote an unverified product lead into the published description", () => {
+  const value = "The AI platform for models, agents and cloud computers.";
+  expect(reportOpeningNarrative({ name: "Example", handle: "@example", bio: value, basicFacts: [{ ...productFact(value), status: "unanswered", artifact_verified: false, evidence_origin: "model_lead" }] })).toContain("did not establish");
+});

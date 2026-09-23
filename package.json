@@ -17,6 +17,7 @@
     "canary:offline:json": "tsx scripts/release-canary.ts --json",
     "beta:measure": "tsx scripts/beta-quality-cycle.ts",
     "canary:identity:live": "tsx scripts/canary-stani-identity.ts",
+    "fomoscan:sweep": "tsx scripts/fomoscan-sweep.ts",
     "canary:founder-verdict:live": "tsx scripts/canary-stani-verdict.ts",
     "eval:record": "tsx scripts/eval-harness.ts record",
     "eval:replay": "tsx scripts/eval-harness.ts replay",
@@ -37,6 +38,7 @@
     "@vercel/functions": "3.7.5",
     "@vercel/og": "1.0.1",
     "framer-motion": "^12.40.0",
+    "pdf-lib": "^1.17.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "tailwindcss": "^4.3.1"

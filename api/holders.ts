@@ -7,7 +7,7 @@
 // insider concentration), CONNECTED insider clusters (wallets funded from a common
 // source, collapsed into one operator), creator holdings, and LP-lock. Keyless.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { creatorSupplyPercent } from "../src/token/sources.js";
+import { creatorSupplyPercent, lockedShare } from "../src/token/sources.js";
 
 export const config = { maxDuration: 20 };
 
@@ -81,7 +81,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       concentration: { top1: sumN(1), top5: sumN(5), top10, top10NonMarket, marketPct },
       insiders: { detected: Number(d.graphInsidersDetected ?? 0), networks: nets.length, clusteredPct: insiderClusteredPct },
       creatorPct,
-      lpLockedPct: Number(d.lpLockedPct ?? 0),
+      // RugCheck reports 0 both for a pool it examined and found unlocked and
+      // for a mint it holds no market for. Null means unmeasured, never "0%
+      // locked" (the same rule the token audit applies to this field).
+      lpLockedPct: lockedShare(d.lpLockedPct, d.markets),
       rugged: !!d.rugged,
       verdict: { tone, line },
     });
