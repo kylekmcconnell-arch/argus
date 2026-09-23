@@ -15,32 +15,73 @@ concurrency:
 jobs:
   database:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    # Job-wide, not just on the start step: `supabase test db` pulls pg_prove
+    # too, and on 2026-09-23 that single ghcr.io pull failed the job after
+    # every other image had come from the mirror.
+    env:
+      SUPABASE_INTERNAL_IMAGE_REGISTRY: public.ecr.aws
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
           version: 2.109.1
 
+      # supabase start pulls ~10 images (dozens of layers) from ghcr.io in one
+      # burst. On 2026-09-23 five consecutive runs died on "toomanyrequests:
+      # allowed 44000/minute, retry-after <1ms" before a test ran - a burst
+      # limit on parallel layer downloads, which a login alone did not clear.
+      # Four measures: authenticate (per-account allowance), cap the docker
+      # daemon's parallel downloads so the burst is smaller, retry with
+      # exponential backoff instead of three quick attempts, and pull from
+      # the ECR Public mirror instead of ghcr.io (set on the start step).
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Throttle docker image downloads
+        run: |
+          set -eu
+          echo '{"max-concurrent-downloads": 2}' | sudo tee /etc/docker/daemon.json >/dev/null
+          sudo systemctl restart docker
+
       - name: Start isolated Supabase database
+        # The pinned CLI defaults to ghcr.io; the same images are mirrored to
+        # ECR Public (the registry newer CLIs default to), on a separate
+        # allowance - see the job env. Every pinned tag was checked there.
         run: |
           set -eu
           supabase stop --no-backup || true
           docker rm -f supabase_db_ARGUS 2>/dev/null || true
 
           attempt=1
-          max_attempts=3
+          max_attempts=6
+          delay=10
           until supabase start; do
             if [ "$attempt" -ge "$max_attempts" ]; then
               echo "supabase start failed after ${max_attempts} attempts"
               exit 1
             fi
-            echo "supabase start failed (attempt ${attempt}/${max_attempts}); retrying..."
+            echo "supabase start failed (attempt ${attempt}/${max_attempts}); retrying in ${delay}s..."
             supabase stop --no-backup || true
             docker rm -f supabase_db_ARGUS 2>/dev/null || true
             attempt=$((attempt + 1))
-            sleep 5
+            sleep "$delay"
+            delay=$((delay * 2))
           done
+
+      # The pinned CLI's `test db` hard-codes ghcr.io/supabase/pg_prove and
+      # ignores the registry override. Pull it from the mirror and tag it
+      # under the ghcr name so the daemon already has it.
+      - name: Stage pg_prove from the mirror
+        run: |
+          set -eu
+          delay=5
+          for try in 1 2 3 4 5; do
+            if docker pull public.ecr.aws/supabase/pg_prove:3.36; then break; fi
+            [ "$try" -eq 5 ] && exit 1
+            echo "pg_prove pull throttled (try $try); waiting ${delay}s"; sleep "$delay"; delay=$((delay * 2))
+          done
+          docker tag public.ecr.aws/supabase/pg_prove:3.36 ghcr.io/supabase/pg_prove:3.36
 
       - name: Executable Postgres persistence and activation gates
         run: npm run test:db
