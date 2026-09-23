@@ -1037,3 +1037,41 @@ transactions a day, so it is a trading terminal's relay account. Profile a
 shared funder's transaction rate before calling it a ring. The same trap exists
 on Robinhood Chain, where the exchange's own hot wallets fund thousands of
 unrelated user wallets.
+
+## Machi exits $TAIWAN in full, and a correction (re-read 2026-09-23)
+
+The 2026-09-17 read of `rh-machi-taiwan` has been overtaken. Three things it
+recorded are no longer true, and one was wrong when written.
+
+**He did have creator income.** The entry said he took no creator allocation.
+That was true at the mint, but on 09-19 07:18 the deployer received 5,886,504
+tokens, 0.59 percent of supply, from the shared launchpad fee contract
+0x4e346895. A token paying no allocation at launch can still pay the creator
+later. Check the deployer's inbound transfers from the fee contract across the
+whole life of the token, not just the launch window.
+
+**He bought before he sold, and the buy moved the price.** In the same hour as
+the fee claim he took 19,108,118 more through the Robinhood app settler in six
+transactions. The hourly candle went from 0.00014663 to 0.00018609, up 27
+percent on 36,158 USD of volume, against about 1,000 USD the day before.
+
+**Then he exited everything.** On 09-23 00:00:34 UTC the deployer sold all
+33,994,623 in one transaction, routed into TSM and out as 27,125 STANDARD,
+roughly 5,350 USD. The price did not move: the hour closed up 0.3 percent. A
+3.4 percent supply position on this token is only worth about 5,000 USD, so
+size in supply terms says little about price impact once a token is down 92
+percent. The FomoScan wallet had already emptied its last 8,000,001 through the
+Relay router between 09-18 and 09-20. Both wallets now read zero.
+
+**What changes and what does not.** Across both wallets he acquired 49,909,964
+tokens, 5.0 percent of supply, and sold all of it. In the 09-17 to 09-23 window
+he is the largest single seller at 17.3 percent of sell flow, where the earlier
+read had him 238th. But he is still roughly 15,000 USD down on the token, he
+posted nothing about it during the exit window, and the 92 percent collapse
+happened on 09-11, twelve days before he sold. Intent stays unestablished.
+
+**Router lines are not sellers.** The two largest sell-flow lines in the window
+are UniversalRouter 0x88767899 at 21.7 percent and RelayRouterV3 0xb92fe925 at
+14.6 percent. Both are infrastructure carrying other people's trades, and the
+Relay line contains his own FomoScan wallet's 8,000,001. Attribute through the
+hops before ranking sellers, or the routers take the top of every table.
