@@ -1,21 +1,7 @@
-// Wallet identity clustering. GET /api/cluster?mint=<mint>&chain=solana
-//
-// "Top 10 holders hold 40%" is only half the question. The half that matters is:
-// how many of those wallets are the SAME hand? A team that splits its supply
-// across ten fresh wallets looks decentralised on a holder chart and controls the
-// float in practice. RugCheck flags SOME insiders but doesn't label every wallet
-// and sums overlapping networks; this proves the linkage from first principles.
-//
-// We take the token's top holders (+ its deployer) and connect any two wallets by
-// the two on-chain signals that mean "same operator": (1) a SHARED FUNDER — both
-// wallets got their first SOL from the same non-exchange address (siblings seeded
-// by one hand); (2) a DIRECT TRANSFER between them. Union-find over those edges
-// yields the real distinct entities, and the combined supply each cluster controls
-// is the concentration that a per-wallet holder chart hides.
-//
-// Solana only (Helius RPC + RugCheck). Gated on HELIUS_API_KEY. Bounded + graceful.
+// Bounded Solana owner relationship tracing. Shared funding does not prove common control.
+import { buildHolderIntelligence } from "../src/lib/holderIntelligence.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { arr, isRecord, rec, type JsonRecord } from "../src/lib/json.js";
+import { arr, isRecord, rec } from "../src/lib/json.js";
 import { canSeedFunderCluster, SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses.js";
 import { describeWalletClusterTrace, type WalletClusterCoverage } from "../src/lib/walletClusterTruth.js";
 import { requireArgusAuth } from "./_auth.js";
@@ -24,7 +10,6 @@ import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 export const config = { maxDuration: 60 };
 
 const SOLADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const MAX_WALLETS = 20;   // top holders we bother to cluster (cost bound)
 const CHUNK = 5;          // per-wallet concurrency
 interface ProviderUsage { helius: number; heliusSucceeded: number; rugcheck: number; rugcheckSucceeded: number }
 
@@ -37,7 +22,6 @@ const SYSTEM = new Set<string>([
 ]);
 // A holder whose RugCheck label is market infrastructure (AMM/LP/CEX/program) is
 // liquidity or custody, not a person — exclude it from the operator analysis.
-const MARKET = /amm|dex|pool|cex|exchange|program|vault|locker|market|raydium|meteora|orca|pump/i;
 
 async function rpc(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<unknown> {
   usage.helius += 1;
@@ -192,6 +176,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (chain !== "solana") { res.status(200).json({ available: false, note: "Wallet clustering is Solana-only for now." }); return; }
   if (!key) { res.status(200).json({ mint, available: false, note: "Helius not configured; clustering unavailable." }); return; }
 
+  const deadline = Date.now() + 45000;
   const usage: ProviderUsage = { helius: 0, heliusSucceeded: 0, rugcheck: 0, rugcheckSucceeded: 0 };
   try {
     // 1. Pull the holder set + labels + creator from RugCheck (full addresses).
@@ -208,19 +193,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const poolAddresses: string[] = arr(rc.markets)
       .map((m) => { const pubkey = rec(m).pubkey; return typeof pubkey === "string" ? pubkey : null; })
       .filter((pubkey): pubkey is string => Boolean(pubkey));
-    // Property access already coerces a missing key to the string "undefined",
-    // so String() here keeps the lookup exactly where it was.
-    const isMarket = (h: JsonRecord) => { const lab = ka[String(h.address)] || ka[String(h.owner)]; return !!(lab?.type && MARKET.test(lab.type)); };
-    const holders = arr(rc.topHolders)
-      .map((entry) => rec(entry))
-      .map((h) => ({ address: String(h.owner || h.address || ""), pct: Number(h.pct ?? 0), insider: !!h.insider, market: isMarket(h) }))
-      .filter((h) => SOLADDR.test(h.address) && !h.market && !CEX[h.address] && !SYSTEM.has(h.address));
+    const rawHolders = arr(rc.topHolders).map(entry => rec(entry));
+    const holderIntelligence = buildHolderIntelligence({
+      chain, tokenAddress: mint, capturedAt: new Date().toISOString(), source: "rugcheck",
+      sourceUrl: `https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`,
+      ranked: false, aggregateOwners: true, poolAddresses, knownAccounts: ka,
+      rows: rawHolders.map(h => ({ address: String(h.address || ""), owner: String(h.owner || ""), percent: Number(h.pct) })),
+    });
+    const holders = holderIntelligence.supplyCoveredPct == null ? [] : holderIntelligence.rows
+      .filter(h => !["pool", "exchange", "locker", "burn"].includes(h.role) && !CEX[h.address] && !SYSTEM.has(h.address))
+      .map(h => ({ address: h.address, pct: h.percent,
+        insider: rawHolders.some(raw => raw.owner === h.address && raw.insider === true) }));
     const creator = typeof rc.creator === "string" && SOLADDR.test(rc.creator) ? rc.creator : null;
 
     const set: string[] = [];
     const pctOf = new Map<string, number>();
     const insiderOf = new Map<string, boolean>();
-    for (const h of holders.slice(0, MAX_WALLETS)) { if (!pctOf.has(h.address)) { set.push(h.address); pctOf.set(h.address, h.pct); insiderOf.set(h.address, h.insider); } }
+    for (const h of holders) { if (!pctOf.has(h.address)) { set.push(h.address); pctOf.set(h.address, h.pct); insiderOf.set(h.address, h.insider); } }
     if (creator && !pctOf.has(creator)) { set.push(creator); pctOf.set(creator, 0); }
     if (set.length < 2) {
       const coverage: WalletClusterCoverage = {
@@ -231,13 +220,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         providerFailed: 0,
       };
       const description = describeWalletClusterTrace({ clusters: [], coverage, directLinkLabel: "a direct SOL transfer" });
-      res.status(200).json({ mint, available: true, clusters: [], walletsAnalyzed: set.length, coverage, ...description });
+      res.status(200).json({ mint, available: true, clusters: [], walletsAnalyzed: set.length, coverage, holderIntelligence, ...description, note: `${description.note} Holder sample: ${holderIntelligence.examined}/25 observed owners; global ranking remains unconfirmed.` });
       return;
     }
 
     // 2. For each wallet, resolve its funder + its recent SOL counterparties.
     const url = `https://mainnet.helius-rpc.com/?api-key=${key}`;
-    const deadline = Date.now() + 50000;
     const profiles = await inChunks(set, CHUNK, async (w) => {
       if (Date.now() > deadline) {
         return {
@@ -359,6 +347,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       edges,
       coverage,
       ...description,
+      holderIntelligence,
+      note: `${description.note} Holder sample: ${holderIntelligence.examined}/25 observed owners; global ranking remains unconfirmed.`,
     });
   } catch (e) {
     res.status(200).json({ mint, available: false, clusters: [], error: String(e), note: "Wallet clustering failed." });

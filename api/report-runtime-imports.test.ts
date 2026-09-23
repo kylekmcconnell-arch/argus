@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // Vite resolves extensionless imports that native Node ESM rejects. Inspect
 // emitted runtime edges recursively, including shared helpers outside api/.
 describe("report API native ESM dependency graph", () => {
-  it.each(["report", "share", "gap-investigation", "x-authenticity", "v1/token", "deep-launch"])(
+  it.each(["report", "share", "gap-investigation", "x-authenticity", "v1/token", "deep-launch", "holders", "cluster", "evm-cluster"])(
     "%s has deployable transitive runtime imports",
     (route) => {
       const seen = new Set<string>();

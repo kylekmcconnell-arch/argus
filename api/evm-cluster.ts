@@ -1,14 +1,6 @@
-// EVM wallet identity clustering. GET /api/evm-cluster?address=<token>&chain=<id>
-//
-// The EVM parallel to api/cluster.ts (Solana/RugCheck). Same question — how many
-// of the "top holders" are secretly one hand? — answered with EVM sources: GoPlus
-// for the holder list (keyless) and Etherscan for each holder's first funder and
-// its transfers. Any two holders tied by a SHARED non-exchange FUNDER or a DIRECT
-// transfer are unioned into one operator; the combined supply each group controls
-// is the concentration a per-wallet holder chart hides. Returns the SAME shape as
-// the Solana endpoint so the client panel is chain-agnostic.
-//
-// EVM only. Gated on ETHERSCAN_API_KEY (GoPlus is keyless). Bounded + graceful.
+// Bounded wallet relationship tracing. Shared funding does not prove common control.
+import { buildHolderIntelligence } from "../src/lib/holderIntelligence.js";
+import { blockscoutHolders, blockscoutHolderSourceUrl, GOPLUS_UNSORTED_HOLDER_CHAINS } from "../src/token/sources.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { canSeedFunderCluster } from "../src/lib/marketAddresses.js";
 import { describeWalletClusterTrace, type WalletClusterCoverage } from "../src/lib/walletClusterTruth.js";
@@ -21,7 +13,6 @@ const CHAINID: Record<string, number> = {
   ethereum: 1, bsc: 56, base: 8453, polygon: 137, arbitrum: 42161,
   optimism: 10, avalanche: 43114, fantom: 250, linea: 59144, scroll: 534352,
 };
-const MAX_WALLETS = 20;
 const CHUNK = 4;
 interface ProviderUsage { etherscan: number; etherscanSucceeded: number; goplus: number; goplusSucceeded: number }
 const isAddr = (s: string) => /^0x[a-fA-F0-9]{40}$/.test(s);
@@ -167,6 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!chainid) { res.status(200).json({ address, chain, available: false, note: `No chain id for '${chain}'.` }); return; }
   if (!key) { res.status(200).json({ address, chain, available: false, note: "Etherscan not configured; EVM clustering unavailable." }); return; }
 
+  const deadline = Date.now() + 45000;
   const usage: ProviderUsage = { etherscan: 0, etherscanSucceeded: 0, goplus: 0, goplusSucceeded: 0 };
   try {
     // 1. Holder set from GoPlus (keyless). percent is a 0..1 fraction.
@@ -175,25 +167,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const gd = gr && gr.ok ? ((await gr.json().catch(() => null)) as any) : null;
     if (gd != null) usage.goplusSucceeded += 1;
     const tok = gd?.result?.[lc(address)] ?? gd?.result?.[address] ?? null;
-    if (!tok) {
-      res.status(200).json({
-        address,
-        chain,
-        available: false,
-        clusters: [],
-        walletsAnalyzed: 0,
-        note: "GoPlus returned no holder record, so EVM wallet links were not measured.",
-      });
-      return;
-    }
-    const creator = typeof tok.creator_address === "string" && isAddr(tok.creator_address) ? lc(tok.creator_address) : null;
-    const holders = (tok.holders ?? [])
-      .map((h: any) => ({ address: lc(String(h.address || "")), pct: Number(h.percent || 0) * 100, isContract: Number(h.is_contract) === 1, tag: String(h.tag || "") }))
-      .filter((h: any) => isAddr(h.address) && !h.isContract && !h.tag && !SKIP.has(h.address));
-
+    const explorer = await blockscoutHolders(chain, address);
+    const holderIntelligence = buildHolderIntelligence({
+      chain, tokenAddress: address, capturedAt: new Date().toISOString(),
+      source: explorer?.length ? "blockscout" : "goplus",
+      sourceUrl: explorer?.length ? blockscoutHolderSourceUrl(chain, address) : `https://api.gopluslabs.io/api/v1/token_security/${chainid}?contract_addresses=${address}`,
+      ranked: Boolean(explorer?.length) || !GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain),
+      rows: explorer?.length ? explorer : (Array.isArray(tok?.holders) ? tok.holders : []).map((h: any) => ({
+        address: String(h.address || ""), percent: Number(h.percent) * 100,
+        isContract: Number(h.is_contract) === 1, tag: String(h.tag || ""),
+      })),
+    });
+    const creator = typeof tok?.creator_address === "string" && isAddr(tok.creator_address) ? lc(tok.creator_address) : null;
+    // Inspect the shared top-25 sample before excluding positively identified infrastructure.
+    // Unknown contracts and arbitrary tags are not evidence of infrastructure.
+    const holders = holderIntelligence.supplyCoveredPct == null ? [] : holderIntelligence.rows
+      .filter(h => !["pool", "exchange", "locker", "burn"].includes(h.role) && !SKIP.has(lc(h.address)))
+      .map(h => ({ address: lc(h.address), pct: h.percent }));
     const set: string[] = [];
     const pctOf = new Map<string, number>();
-    for (const h of holders.slice(0, MAX_WALLETS)) if (!pctOf.has(h.address)) { set.push(h.address); pctOf.set(h.address, h.pct); }
+    for (const h of holders) if (!pctOf.has(h.address)) { set.push(h.address); pctOf.set(h.address, h.pct); }
     if (creator && !SKIP.has(creator) && !pctOf.has(creator)) { set.push(creator); pctOf.set(creator, 0); }
     if (set.length < 2) {
       const coverage: WalletClusterCoverage = {
@@ -208,13 +201,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         coverage,
         directLinkLabel: "a direct token or native-currency transfer",
       });
-      res.status(200).json({ address, chain, available: true, clusters: [], walletsAnalyzed: set.length, coverage, ...description });
+      res.status(200).json({ address, chain, available: true, clusters: [], walletsAnalyzed: set.length, coverage, holderIntelligence, ...description, note: `${description.note} Holder sample: ${holderIntelligence.examined}/25 (${holderIntelligence.status}).` });
       return;
     }
 
     // 2. Each holder's funder + in-set counterparties.
     const inSet = new Set(set);
-    const deadline = Date.now() + 50000;
     const profiles = await inChunks(set, CHUNK, async (w) => Date.now() > deadline
       ? {
           wallet: w,
@@ -295,6 +287,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       edges,
       coverage,
       ...description,
+      holderIntelligence,
+      note: `${description.note} Holder sample: ${holderIntelligence.examined}/25 (${holderIntelligence.status}).`,
     });
   } catch (e) {
     res.status(200).json({ address, chain, available: false, clusters: [], error: String(e), note: "EVM wallet clustering failed." });

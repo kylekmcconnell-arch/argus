@@ -1,11 +1,4 @@
-// Creator & insider clustering (#9): the deep, on-demand answer to "how many of
-// the 'separate' top holders are secretly one hand?" Reuses Argus's existing,
-// proven wallet-clustering endpoints — /api/cluster (Solana/Helius) and
-// /api/evm-cluster (EVM/Etherscan) — which union wallets tied by a shared funder
-// or a direct transfer, and mark when the token's creator is inside a cluster.
-// Keyed + slow (up to ~60s), so the UI loads it lazily after the verdict, the
-// way nlyra gates "Bundle Detection" behind a button.
-
+// On-demand wallet relationship traces; links do not establish common control.
 import type { InsiderCluster } from "./types";
 
 export async function insiderClusters(chain: string, address: string): Promise<InsiderCluster | null> {
@@ -17,7 +10,7 @@ export async function insiderClusters(chain: string, address: string): Promise<I
     if (!res.ok) return null;
     const d = (await res.json()) as {
       available?: boolean;
-      clusters?: { size: number; combinedPct: number; sharedFunders?: string[]; includesCreator?: boolean; wallets?: string[] }[];
+      clusters?: { size: number; combinedPct: number; sharedFunders?: string[]; includesCreator?: boolean; wallets?: Array<string | { address: string; pct?: number }> }[];
       note?: string;
     };
     if (!d.available) return null;
@@ -26,7 +19,7 @@ export async function insiderClusters(chain: string, address: string): Promise<I
       combinedPct: c.combinedPct,
       sharedFunders: c.sharedFunders ?? [],
       includesCreator: !!c.includesCreator,
-      wallets: c.wallets ?? [],
+      wallets: (c.wallets ?? []).map(w => typeof w === "string" ? w : w.address),
     }));
     // The endpoint sorts largest-first.
     const largest = clusters[0];
