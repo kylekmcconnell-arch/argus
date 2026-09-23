@@ -6,6 +6,7 @@ import arkham from "./arkham";
 import evm from "./evm-deployer";
 import flow from "./arkham-money-flow";
 import burns from "./burns";
+import nftlock from "./nftlock";
 const address = `0x${"1".repeat(40)}`;
 async function run(handler: (req: never, res: never) => Promise<unknown>, query = { address, chain: "ethereum" } as Record<string, string>) {
   let body: Record<string, unknown> = {};
@@ -20,13 +21,17 @@ describe("forensic provider outages", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("rate limit", { status: 429 })));
     expect(await run(arkham)).toMatchObject({ available: false });
     expect(cacheSetJson).not.toHaveBeenCalled();
-    expect(attachPanelCost).toHaveBeenCalledWith("org", "version", expect.objectContaining({ status: "failed" }));
+    expect(attachPanelCost).toHaveBeenCalledWith("org", "version", expect.objectContaining({
+      status: "failed",
+      meta: "subscription/keyed;http_429",
+    }));
   });
   it("treats Etherscan HTTP-200 NOTOK as failed provider work", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ status: "0", message: "NOTOK", result: "Max rate limit reached" }))));
     expect(await run(evm)).toMatchObject({ available: false });
     expect(attachPanelCost).toHaveBeenCalledWith("org", "version", expect.objectContaining({ status: "failed" }));
     expect(await run(burns)).toMatchObject({ available: false });
+    expect(await run(nftlock, { address, chain: "base" })).toMatchObject({ available: false });
   });
   it("does not cache money flow when only one read completes", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url) => String(url).includes("transfers") ? new Response("error", { status: 503 }) : new Response("{}")));
