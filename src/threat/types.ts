@@ -243,8 +243,14 @@ export interface LaunchProvenance {
   // creator doing with it?
   creatorFees: {
     platformPays: boolean;
+    // What the venue pays the creator in. "token" or "mixed" means every fee
+    // claim hands the creator fresh supply of the launched token: a structural
+    // fact about the venue, disclosed as a note and never scored on its own.
+    // Optional so cached scans frozen before this field existed still parse.
+    asset?: "quote" | "token" | "mixed" | "none" | "unknown";
     claimCount: number | null; // observed claims (null = couldn't observe)
     claimedUsd: number | null;
+    claimedTokens?: number | null; // observed claims in the launched token
     usage: "lp-add" | "buyback-burn" | "buyback" | "hold" | "dump" | "unknown";
     note: string;
   } | null;
