@@ -8,11 +8,12 @@ const failures = [];
 const requireValue = (condition, message) => { if (!condition) failures.push(message); };
 
 requireValue(context.schemaVersion === 1, "schemaVersion must be 1");
-requireValue(context.contractVersion === "2026-08-21.1", "contractVersion drifted");
+requireValue(context.contractVersion === "2026-09-18.1", "contractVersion drifted");
 requireValue(context.project?.canonicalRepository === context.repository?.name, "project repository mapping drifted");
 requireValue(context.authority?.source === "github-default-branch", "source authority must be the GitHub default branch");
 requireValue(context.authority?.engineeringHandoff === "github", "engineering handoff must be GitHub");
 requireValue(context.authority?.runtimeContext === "oenbot", "runtime context must remain OENBOT");
+requireValue(context.authority?.personalApprovalGates === "none", "personal approval gates must stay off (owner decision 2026-09-09)");
 requireValue(context.routing?.dashboard === "kylekmcconnell-arch/oenbot-dashboard-source", "dashboard route drifted");
 requireValue(context.routing?.unknown === "needs-routing", "unknown work must fail closed");
 requireValue(["canonical-product", "legacy-source-mirror", "oenbot-managed-artifact"].includes(context.repository?.role), "repository role is invalid");
@@ -40,6 +41,8 @@ for (const [provider, relfile] of Object.entries(context.providerEntrypoints || 
 const contract = readFileSync(resolve(root, "AGENTS.md"), "utf8");
 requireValue(contract.includes("oenbot-agent-contract:v1"), "AGENTS.md marker is missing");
 requireValue(contract.includes("node scripts/validate-agent-context.mjs"), "AGENTS.md preflight is missing");
+requireValue(contract.includes("## No personal approval gates"), "AGENTS.md is missing the no-personal-approval-gates rule");
+requireValue(!/awaiting [A-Z][a-z]+('s)? (approval|sign-off)/u.test(contract), "AGENTS.md must not reinstate a personal approval gate");
 
 if (failures.length) {
   process.stderr.write(`${failures.map(value => `- ${value}`).join("\n")}\n`);
@@ -52,4 +55,5 @@ process.stdout.write([
   `Normal product work: ${context.routing.normalProductWork}`,
   "Engineering handoff: GitHub issue -> branch -> draft PR -> protected default branch",
   "Runtime context and approvals: OENBOT / existing guarded workflows",
+  "Personal approval gates: none (automated checks are the only gate)",
 ].join("\n") + "\n");
