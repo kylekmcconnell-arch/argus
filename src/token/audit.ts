@@ -471,6 +471,18 @@ function handleFromUrl(url?: string): string | null {
 const isBurnAddr = (a?: string) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
 const isBurnTag = (t?: string) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
 
+/** DexScreener v3/v4 tapes often ship millions of USD volume with a handful of
+ *  swaps. Those counts are not a trading-authenticity signal. */
+function poolTapeUsable(volumeUsd: number, buys: number, sells: number, liquidityUsd: number): boolean {
+  if (![volumeUsd, buys, sells, liquidityUsd].every((value) => Number.isFinite(value) && value >= 0)) return false;
+  const trades = buys + sells;
+  if (trades === 0) return volumeUsd <= 0;
+  if (volumeUsd <= 0) return false;
+  if (trades < 8 && volumeUsd >= 50_000) return false;
+  if (liquidityUsd > 0 && volumeUsd / trades > liquidityUsd) return false;
+  return true;
+}
+
 // --- normalize EVM safety from GoPlus + honeypot.is ---
 function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null, tokenAddress?: string): NormalizedSafety {
   const s = sim;
@@ -742,7 +754,11 @@ async function runTokenAudit(
   // thin meme tokens, so it is NOT wash trading on its own — the signature is
   // heavy churn with the price going nowhere (volume that does not move price).
   const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
-  const washSignature = pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
+  // v3/v4 DexScreener feeds often report millions of volume with a handful of
+  // swaps. Those counts are not an authenticity signal and must not appear as
+  // "1 buys / 2 sells".
+  const tapeUsable = poolTapeUsable(vol24, buys, sells, liquidityUsd);
+  const washSignature = tapeUsable && pair.priceChange?.h24 != null && Number.isFinite(pair.priceChange.h24) && volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
   step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
 
   // ---- safety (chain-specific) ----
@@ -841,7 +857,11 @@ async function runTokenAudit(
     // definitive receipt that buying and selling occurred. It does not waive
     // blacklist, pause, tax-change, or balance-change controls; those make the
     // completed check a finding below.
-    safety = recordObservedTradeability(safety, { buys24h: buys, sells24h: sells, liquidityUsd });
+    safety = recordObservedTradeability(safety, {
+      buys24h: tapeUsable ? buys : 0,
+      sells24h: tapeUsable ? sells : 0,
+      liquidityUsd,
+    });
     const evmCreator = gp?.creator_address?.trim();
     const evmOwner = gp?.owner_address?.trim();
     // GoPlus's creator record for a launchpad token is the FACTORY that minted
@@ -896,7 +916,7 @@ async function runTokenAudit(
   // Independent evidence that holders can actually sell: a honeypot cannot
   // produce genuine sell transactions against deep liquidity, and cannot be
   // listed on many centralized venues. Both signals are keyless.
-  const provablySellable = sells >= 10 && liquidityUsd >= 250_000;
+  const provablySellable = tapeUsable && sells >= 10 && liquidityUsd >= 250_000;
   const broadlyTraded = (cg?.cexCount ?? 0) >= 5 || provablySellable;
 
   if (s.available) {
@@ -1282,9 +1302,12 @@ async function runTokenAudit(
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
   if (washSignature) aT5 = 2; // churn without price movement = manufactured volume
-  else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
+  else if (tapeUsable && total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
+  const t5Tape = tapeUsable
+    ? `, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h)`
+    : " (DexScreener 24h volume; swap counts for this pool were incomplete)";
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x${t5Tape}.` });
 
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
