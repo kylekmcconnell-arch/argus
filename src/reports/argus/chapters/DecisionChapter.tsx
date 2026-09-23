@@ -8,12 +8,33 @@ import type { LensView, ReportView, ScoreView, SourceCard } from "../view";
 import { ScoreTable } from "./ScoresChapter";
 import { QuestionRows } from "./EvidenceChapter";
 
-export function IdentityShortcuts({ view }: { view: ReportView }) {
+export type DecisionView = Pick<ReportView, "subjectName" | "avatarUrl" | "eyebrow" | "category" | "productLabel" | "summary" | "website" | "xHandle" | "token" | "primary" | "tokenScore" | "issues" | "lenses" | "researchStatus" | "checkRail" | "leadBanner" | "metrics"> & { evidence: Pick<ReportView["evidence"], "collection" | "questions">; methodologyHref?: string | undefined; additionalLinks?: Array<{ label: string; url: string }> | undefined };
+
+export function IdentityShortcuts({ view }: { view: Pick<DecisionView, "xHandle" | "website" | "token" | "additionalLinks"> }) {
   const xUrl = xHandleUrl(view.xHandle);
   const token = view.token;
   const pool = token ? dexscreenerUrl(token.chain, token.pairAddress ?? token.address) : null;
   const explorer = token ? tokenExplorer(token.chain, token.address) : null;
-  if (!xUrl && !view.website && !token) return null;
+  const linkKey = (value: string) => {
+    const url = new URL(value);
+    return /^(www\.)?(x|twitter)\.com$/.test(url.hostname)
+      ? `x:${url.pathname.replace(/\/$/, "").toLowerCase()}`
+      : url.href.replace(/\/$/, "");
+  };
+  const seen = new Set([xUrl, view.website, pool, explorer?.url].filter(Boolean).flatMap(url => {
+    try { return [linkKey(url!)]; } catch { return []; }
+  }));
+  const extra = (view.additionalLinks ?? []).filter(link => {
+    try {
+      const url = new URL(link.url);
+      if (!["http:", "https:"].includes(url.protocol)) return false;
+      const key = linkKey(url.href);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    } catch { return false; }
+  });
+  if (!xUrl && !view.website && !token && !extra.length) return null;
   return (
     <div className="token-access">
       <div className="quick-links">
@@ -21,6 +42,7 @@ export function IdentityShortcuts({ view }: { view: ReportView }) {
         {view.website && <ExtLink href={view.website}>Website</ExtLink>}
         {pool && <ExtLink href={pool}>DexScreener</ExtLink>}
         {explorer && <ExtLink href={explorer.url}>{explorer.name}</ExtLink>}
+        {extra.map(link => <ExtLink key={link.url} href={link.url}>{link.label === "site" ? new URL(link.url).hostname.startsWith("docs.") ? "Docs" : new URL(link.url).hostname : link.label}</ExtLink>)}
       </div>
       {token && (
         <div className="contract-access">
@@ -44,7 +66,7 @@ function ScoreCard({ score }: { score: ScoreView }) {
     <article className={`score-card ${score.id === "token" ? "token" : "company"} tone-${score.tone}`}>
       <span className="eyebrow">{score.eyebrow}</span>
       <div className="score-number">{shown ? score.score : "–"}<span>{shown ? "/100" : ""}</span></div>
-      <Badge tone={score.tone}>{score.deferredReason ? score.verdictWord : `${score.verdictWord} · saved verdict`}</Badge>
+      <Badge tone={score.tone}>{score.deferredReason || score.score == null ? score.verdictWord : `${score.verdictWord} · saved verdict`}</Badge>
       <div className="score-line"><i style={{ width: `${shown ? Math.max(0, Math.min(100, score.score ?? 0)) : 0}%` }} /></div>
       {score.status && <p className="score-status">{score.status}</p>}
       <p className="score-foot">{score.deferredReason ?? score.withheldReason ?? score.foot}</p>
@@ -159,7 +181,7 @@ function useChecklist(storageKey: string) {
   return { checked, toggle };
 }
 
-function Brief({ view, lens, setLens, onRescan }: { view: ReportView; lens: LensView; setLens: (key: LensView["key"]) => void; onRescan?: () => void }) {
+function Brief({ view, lens, setLens, onRescan, supplement }: { view: DecisionView; lens: LensView; setLens: (key: LensView["key"]) => void; onRescan?: () => void; supplement?: ReactNode }) {
   const report = useArgusReport();
   const { checked, toggle } = useChecklist(`argus-report-checklist:${report.reportVersionId ?? report.auditId}`);
   const reviewed = lens.tasks.filter((task) => checked.has(`${lens.key}:${task.id}`)).length;
@@ -278,7 +300,7 @@ function Brief({ view, lens, setLens, onRescan }: { view: ReportView; lens: Lens
                 </p>
               )}
               {view.checkRail && view.checkRail.applicable > 0 && (
-                <p><a href="#scan-methodology">See finished checks and data gaps</a></p>
+                <p><a href={view.methodologyHref ?? "#scan-methodology"}>See finished checks and data gaps</a></p>
               )}
               {view.checkRail && view.checkRail.open.length > 0 && (
                 <>
@@ -294,11 +316,12 @@ function Brief({ view, lens, setLens, onRescan }: { view: ReportView; lens: Lens
           )}
         </div>
       </div>
+      {supplement}
     </section>
   );
 }
 
-export function DecisionChapter({ view, before, after, onRescan }: { view: ReportView; before?: ReactNode; after?: ReactNode; onRescan?: () => void }) {
+export function DecisionChapter({ view, before, after, onRescan, briefSupplement, afterScores, onLensChange }: { view: DecisionView; briefSupplement?: ReactNode; onLensChange?: (key: LensView["key"]) => void; afterScores?: ReactNode; before?: ReactNode; after?: ReactNode; onRescan?: () => void }) {
   const report = useArgusReport();
   const [lensKey, setLensKey] = useState<LensView["key"]>("Investor");
   const lens = view.lenses.find((item) => item.key === lensKey) ?? view.lenses[0];
@@ -325,11 +348,12 @@ export function DecisionChapter({ view, before, after, onRescan }: { view: Repor
             {view.summary}
           </p>
         </div>
-        <div className={`scores-pair${scores.length === 1 ? " single" : ""}`} data-report-score={view.tokenScore ? "dual" : "prominent"}>
+        <div className={`scores-pair${scores.length === 1 ? " single" : ""}`} data-report-score={scores.length > 1 ? "dual" : "prominent"}>
           {scores.map((score) => <ScoreCard key={score.id} score={score} />)}
         </div>
       </section>
       <ScorePanels scores={scores} />
+      {afterScores}
 
       {reviewable.length > 0 && (
         <>
@@ -365,7 +389,7 @@ export function DecisionChapter({ view, before, after, onRescan }: { view: Repor
         />
       )}
 
-      {lens && <Brief view={view} lens={lens} setLens={setLensKey} onRescan={onRescan} />}
+      {lens && <Brief view={view} lens={lens} setLens={key => { setLensKey(key); onLensChange?.(key); }} onRescan={onRescan} supplement={briefSupplement} />}
 
       {view.metrics.length > 0 && (
         <div className="metric-strip" style={{ "--metric-count": Math.min(4, view.metrics.length) } as React.CSSProperties}>

@@ -559,3 +559,16 @@
   .argus-rd .hero, .argus-rd .brief-grid { grid-template-columns: 1fr 1fr; }
   .argus-rd { background: #fff; }
 }
+
+/* Embedded contract evidence uses the approved reading surfaces as well. */
+.argus-rd .threat-record { padding-bottom: 24px; font-family: var(--rd-sans, "DM Sans", sans-serif); }
+.argus-rd .threat-record .panel { background: var(--rd-paper); border: 1px solid var(--rd-line); border-radius: 7px; box-shadow: none; padding: 24px; }
+.argus-rd .launch-panel h2 { font-family: "Young Serif", Georgia, serif; font-weight: 400; font-size: 24px; margin-bottom: 8px; }
+.argus-rd .launch-panel p { font-family: "DM Sans", sans-serif; font-size: 13px; line-height: 1.7; }
+.argus-rd .launch-facts { margin-top: 18px; }
+.launch-fact { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr); gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--color-line); }
+.launch-fact:last-child { border-bottom: 0; }
+.launch-fact dt { font-size: 13px; font-weight: 500; }
+.launch-fact dd { margin: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }
+.argus-rd .launch-fact .mono { font-family: "DM Sans", sans-serif; }
+@media (max-width: 560px) { .launch-fact { grid-template-columns: 1fr; gap: 5px; } .argus-rd .threat-record .panel { padding: 18px; } }

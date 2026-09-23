@@ -1,14 +1,14 @@
-# Partial investigations: presentation and context repair
+# Restore token and investigation report presentation
 
-Issue: #520. Base reviewed: main at 0bdbdfb6 (#517). Presentation revision: 2026-09-23.3.
+Issues: #520 and #523. Base reviewed: main at 0bdbdfb6 (#517). Presentation revision: 2026-09-23.4.
 
 ## Findings
 
-The approved September 18 design was implemented for principal project reports in #479 (September 19), using the new `DecisionChapter`, score cards and chapter components. The token/investigation migration in #480 (September 20, 0e32e679) instead wrapped existing panels in the new `ArgusReportShell`. Its commit message explicitly says the existing panels were kept verbatim and legacy numbered chapters retained. Those paths still call `InvestigationDecisionCanvas` and `LegacySection` rather than the principal report's new chapter components.
+The approved September 18 design was implemented for principal project reports in #479 (September 19), using the new `DecisionChapter`, score cards and chapter components. The token/investigation migration in #480 (September 20, 0e32e679) instead wrapped existing panels in the new `ArgusReportShell`. Its commit message explicitly says the existing panels were kept verbatim and legacy numbered chapters retained. Those paths called `InvestigationDecisionCanvas` inside the new shell rather than the principal report's new Decision chapter.
 
 This is the origin of the hybrid design. The reviewed #515–#517 scanner changes did not introduce it. Missing project-account evidence additionally removes the second legacy score and makes the difference more pronounced. Calling this the current renderer does not establish parity with the approved design: that earlier diagnosis was too narrow.
 
-**This PR repairs evidence presentation, not the incomplete design migration.** Restoring the approved experience requires adapting token and investigation data to the same approved chapter components, preserving forensic functions behind the specified disclosures, and checking each report kind against the September 18 reference. It must not be accepted as design restoration merely because tests pass.
+The repair now adapts token and investigation data to the existing approved `DecisionChapter`. It removes the duplicated cover, snapshot box, legacy score canvas and action row from the Decision chapter. Deeper legacy case detail remains behind the same inline disclosure pattern used by principal reports. Other forensic chapters retain their existing tools; this is not a claim that every deep panel has been rebuilt.
 
 Contextual diligence PR #513 was still open at review time despite successful checks. It is distinct from this repair and was not part of the deployed main branch inspected here. A shipping summary must distinguish merged, deployed, and externally delivered analysis.
 
@@ -22,6 +22,10 @@ Several defects were reproducible from source and synthetic fixtures:
 - The production score renderer did not consume the reason supplied for an unavailable secondary score.
 
 ## Changes
+
+Both contract-entry report paths now reuse the principal report's title, identity shortcuts, two rectangular score cards, inline score exploration, decision brief, perspective controls and independent challenges. Official project and token websites retain their distinct links, alongside community and documentation links. Contract copying, secure snapshot sharing, export and current-data opt-in remain available. Missing project assessments render as unassessed, never as a measured zero.
+
+Saved status and incomplete-evidence notices use the approved ReviewBanner. The Launch panel uses readable definition rows; embedded threat panels use the report's paper surfaces. Fee denomination and observed conduct are unchanged. A development-only preview exercises token, complete and partial investigation, principal and synthetic launch states without running a scan.
 
 The two-score layout now keeps a clearly withheld project score when the embedded project assessment is absent. It displays the saved explanation, without inventing a score. A bound, retrieved website self-description can supply product context independently of an X-account audit; unbound model-suggested sites cannot.
 
@@ -41,6 +45,6 @@ The product should treat official research notes as evidence candidates: bind th
 
 ## Verification and rollout
 
-Full offline quality suite: source-of-truth checks passed; 7/7 canaries and 21/21 calibration cases passed; 5,238 tests passed with one expected failure; client, server and API type checks passed. A synthetic partial investigation was inspected in Chrome with production report styling. No live paid scan or saved-report mutation was used for verification.
+Full offline quality suite: source-of-truth checks passed; 7/7 canaries and 21/21 calibration cases passed; 5,242 tests passed with one expected failure; client, server and API type checks passed. Chrome visual checks covered token and investigation Decision chapters, a partial investigation at 390px with no page overflow, inline score expansion/focus return, the shared-report challenge gate, and a clearly labelled synthetic Launch panel. The existing principal report was checked for layout continuity. Regression tests require the new score cards and reject the duplicated legacy header/canvas on initial render; adapter tests preserve capped scores, measured zero versus missing evidence, provisional coverage and official links. No live paid scan or saved-report mutation was used for verification.
 
 Deploy only through the protected repository checks. Roll back by reverting this repair. Presentation version identifies the changed wording/layout separately from frozen evidence. After deployment, inspect an existing partial report for layout and contradictory-claim repairs; test identity recovery only as an explicitly initiated new report version with verified project sources.
