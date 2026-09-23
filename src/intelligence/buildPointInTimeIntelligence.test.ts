@@ -1782,7 +1782,7 @@ describe("buildPointInTimeIntelligence", () => {
 
     expect(states).toMatchObject({
       "project.product": "partial",
-      "project.control": "partial",
+      "project.control": "unresolved",
       "project.audit": "unavailable",
       "project.treasury": "unresolved",
       "project.governance": "not_collected",

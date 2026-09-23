@@ -386,3 +386,23 @@ describe("proximity binding cannot adopt a stranger's profile (ARGUS-05)", () =>
     expect(bindProfileAnchor("Konstantin Sebeo", own, anchors, "linkedin")).toBe("linkedin.com/in/ksebeo");
   });
 });
+
+describe("homepage-only roster", () => {
+  it("extracts pseudonymous leaders beyond the marketing prefix with exact roles", async () => {
+    const sourceUrl = "https://fixture.example/";
+    const text = `${"Marketing text. ".repeat(900)} The team Enigma CEO // Founder. JRA COO // Cofounder. Alex CBO // Cofounder.`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => String(input) === sourceUrl
+      ? new Response(`<html><body>${text}</body></html>`, { headers: { "content-type": "text/html" } })
+      : new Response("not found", { status: 404 })));
+    structuredMock.mockResolvedValue({ people: [
+      { name: "Enigma", role: "CEO // Founder", source_url: sourceUrl },
+      { name: "JRA", role: "COO // Cofounder", source_url: sourceUrl },
+      { name: "Alex", role: "CBO // Cofounder", source_url: sourceUrl },
+    ] });
+    const { fetchTeamPage } = await import("./teampage");
+    const team = await fetchTeamPage("fixture.example", "Fixture");
+    expect(team.map((member) => member.name)).toEqual(["Enigma", "JRA", "Alex"]);
+    expect(team.every((member) => member.sourceUrl === sourceUrl)).toBe(true);
+    expect(structuredMock.mock.calls[0][1]).toContain("Alex CBO // Cofounder");
+  });
+});

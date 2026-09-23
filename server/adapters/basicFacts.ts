@@ -196,12 +196,12 @@ const PROJECT_QUESTIONS: readonly QuestionTemplate[] = [
   { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events are publicly documented, who are they attributed to, and what is each event's current stated status?" },
   { batch: "structure_risk", predicate: "security_incident", question: "What material hacks, exploits, breaches, thefts, user losses, emergency pauses, or recovery outcomes are publicly documented? Return each event with an exact date, amount, attribution, current status, and direct source.", critical: true },
   { batch: "structure_risk", predicate: "governance", question: "What formal governance process is documented?", critical: true },
-  { batch: "structure_risk", predicate: "control", question: "Who has practical control through ownership, boards, voting power, admin keys, multisigs, or treasury authority?" },
-  { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit related-party arrangements or conflicts of interest are disclosed?" },
+  { batch: "structure_risk", predicate: "control", question: "Who can mint, freeze, upgrade, move pooled user funds or change contract permissions? Include boards or voting control only where that structure actually exists." },
+  { batch: "structure_risk", predicate: "conflict_of_interest", question: "Are there documented transactions with insider-controlled counterparties or overlapping financial interests that affect users? Name the arrangement and its source; do not infer a conflict from team membership alone." },
   { batch: "structure_risk", predicate: "tokenomics", question: "What token allocation or supply disclosures are published?" },
   { batch: "structure_risk", predicate: "vesting", question: "What vesting, lockup, or unlock schedule is published?" },
   { batch: "structure_risk", predicate: "treasury", question: "What treasury assets, reports, wallets, or controls are disclosed?" },
-  { batch: "structure_risk", predicate: "audit", question: "Which independent security audits or reviews are published?", critical: true },
+  { batch: "structure_risk", predicate: "audit", question: "Which audits cover deployed custom contracts, bridges or live products? Distinguish launchpad program audits from project-specific reviews; a standard token alone does not require a separate audit.", critical: true },
 ];
 
 const PERSON_QUESTIONS: readonly QuestionTemplate[] = [
@@ -1218,6 +1218,9 @@ function discoveryPrompt(
     targetedIdentityInstruction,
     projectLeadershipInstruction,
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
+    "Read the official homepage, About/story page, docs and footer for all named operators, including pseudonyms. Preserve the stated role and source; do not require LinkedIn or invent a legal name. Separate project founding, original token launch, migrations, historical products and future product launches. A replacement contract creation date is not the project founding date.",
+    "Record explicit fair-launch/launchpad origin, product stage, and any later funding independently. A venture affiliation or backer statement is not a funding round or a raised amount. Optional treasury, governance, allocation and vesting disclosures are not mandatory for a fair launch. Published supply and FDV ratios do not prove absence of locks or minting rights.",
+    "Security audit scope must distinguish a standard launchpad program from bespoke token code, bridges and products. Prelaunch products have no production audit expectation yet; alpha/beta products with live funds still require security assessment. Legal events require a named, attributed event and procedural status; no event found is not an allegation. Related-party conflicts mean documented overlapping financial interests or counterparties controlled by insiders, not merely founders working together.",
     "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, partners, integrations, tokens, networks, or products in one value.",
     // ARGUS locates the value verbatim in the fetched page, so a composed phrase

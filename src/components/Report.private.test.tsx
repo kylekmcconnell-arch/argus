@@ -3805,3 +3805,32 @@ describe("legacy person report coverage truth", () => {
       .not.toContain("Promoted-token performance");
   });
 });
+
+it("shows the report ID above the report and supports a challenge for an individual open question", () => {
+  const base = buildReport(SUBJECTS[1]);
+  const dossier: Dossier = { ...base, intelligence: { ...base.intelligence!, questions: [{
+    id: "project.audit", domain: "security", prompt: "Which audits cover deployed custom code?", state: "unresolved", materiality: "important",
+    basis: "Research was incomplete; no adverse finding is established.", sourceRefs: [], answerRefs: [],
+  }] } };
+  act(() => root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />));
+  expect(container.querySelector('[data-report-header-identity="true"]')?.textContent).toContain(dossier.report.audit_id);
+  const evidenceButton = [...container.querySelectorAll('button')].find((button) => button.textContent === "Evidence & method")!;
+  act(() => evidenceButton.click());
+  const row = container.querySelector('.question')!;
+  expect(row.textContent).toContain("Research was incomplete");
+  const challenge = row.querySelector('button[aria-label^="Challenge this:"]') as HTMLButtonElement;
+  expect(challenge).toBeTruthy();
+  act(() => challenge.click());
+  expect(row.querySelector('form')).toBeTruthy();
+  expect(dossier.report.governing_score).toBe(base.report.governing_score);
+});
+
+it("renders supply correctly in the project summary without rewriting saved evidence", () => {
+  const base = buildReport(SUBJECTS[1]);
+  const what = "A multichain DTF platform that supplies builders and communities with decentralized token funds.";
+  const dossier = { ...base, subjectOrientation: { kind: "PROJECT" as const, what, audience: "builders", boundHandle: base.handle, boundDomain: "example.com", sourceUrls: ["https://example.com"] } };
+  act(() => root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />));
+  expect(container.textContent).not.toContain("supplie builders");
+  expect(container.textContent).toContain("supply builders");
+  expect(dossier.subjectOrientation.what).toBe(what);
+});

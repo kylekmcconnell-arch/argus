@@ -712,6 +712,7 @@ var Audit = class {
   display_name;
   organizationSubject = false;
   tokenApplicability;
+  projectAxisTreatments = {};
   ventures = [];
   testimonials = [];
   advisedProjects = [];
@@ -944,8 +945,10 @@ var Audit = class {
         if (classForAxis(ax) === role) axes[ax] = a;
       }
       const omitTokenConduct = role === "PROJECT" /* PROJECT */ && (this.tokenApplicability?.axisTreatment === "not_applicable" || this.tokenApplicability?.axisTreatment === "deferred");
-      const expectedAxes = Object.keys(getProfile(role).axes).filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct"));
-      const axisApplicability = role === "PROJECT" /* PROJECT */ && this.tokenApplicability ? { P3_token_conduct: structuredClone(this.tokenApplicability) } : void 0;
+      const contextAxes = role === "PROJECT" /* PROJECT */ ? this.projectAxisTreatments : {};
+      for (const axis of Object.keys(contextAxes)) delete axes[axis];
+      const expectedAxes = Object.keys(getProfile(role).axes).filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct") && !contextAxes[axis]);
+      const axisApplicability = role === "PROJECT" /* PROJECT */ ? { ...structuredClone(contextAxes), ...this.tokenApplicability ? { P3_token_conduct: structuredClone(this.tokenApplicability) } : {} } : void 0;
       const applicableWeight = expectedAxes.reduce((sum, axis) => sum + (getProfile(role).axes[axis] ?? 0), 0);
       const caps = effectiveCaps(role);
       const triggered = [
@@ -2413,6 +2416,253 @@ function portfolioRelationshipBinding(artifact, evidence) {
   return null;
 }
 
+// src/intelligence/archetypes.ts
+function factSourceHasEligibleArtifact(source2) {
+  if (source2.artifactVerified !== true) return false;
+  const hasPublicUrl = /^https?:\/\/[^\s]+$/i.test(source2.url ?? "");
+  const hasFrozenHash = /^[a-f0-9]{64}$/i.test(source2.contentHash ?? "");
+  return hasPublicUrl || hasFrozenHash;
+}
+function supportingFactSources(fact) {
+  return fact.sources.map((source2, originalIndex) => ({ source: source2, originalIndex })).filter(({ source: source2 }) => source2.relation === "supports").sort(
+    (left, right) => left.source.url.localeCompare(right.source.url) || (left.source.capturedAt ?? "").localeCompare(right.source.capturedAt ?? "") || left.source.provider.localeCompare(right.source.provider) || left.source.contentHash.localeCompare(right.source.contentHash) || left.originalIndex - right.originalIndex
+  );
+}
+function factSupportSourceId(factId3, sortedIndex) {
+  return `fact:${factId3}:support:${String(sortedIndex + 1).padStart(2, "0")}`;
+}
+function factSupportSourceRefs(fact, verifiedOnly = false) {
+  return supportingFactSources(fact).map(({ source: source2 }, sortedIndex) => ({ source: source2, id: factSupportSourceId(fact.factId, sortedIndex) })).filter(({ source: source2 }) => !verifiedOnly || factSourceHasEligibleArtifact(source2)).map(({ id }) => id);
+}
+function contradictingFactSources(fact) {
+  return fact.sources.map((source2, originalIndex) => ({ source: source2, originalIndex })).filter(({ source: source2 }) => source2.relation === "contradicts").sort(
+    (left, right) => left.source.url.localeCompare(right.source.url) || (left.source.capturedAt ?? "").localeCompare(right.source.capturedAt ?? "") || left.source.provider.localeCompare(right.source.provider) || left.source.contentHash.localeCompare(right.source.contentHash) || left.originalIndex - right.originalIndex
+  );
+}
+function factContradictionSourceId(factId3, sortedIndex) {
+  return `fact:${factId3}:contradiction:${String(sortedIndex + 1).padStart(2, "0")}`;
+}
+function factContradictionSourceRefs(fact, verifiedOnly = false) {
+  return contradictingFactSources(fact).map(({ source: source2 }, sortedIndex) => ({ source: source2, id: factContradictionSourceId(fact.factId, sortedIndex) })).filter(({ source: source2 }) => !verifiedOnly || factSourceHasEligibleArtifact(source2)).map(({ id }) => id);
+}
+var ARCHETYPE_RULES = [
+  {
+    archetype: "dex",
+    patterns: [/\bdecentralized exchange\b/i, /\bdex\b/i, /\bautomated market maker\b/i, /\bamm\b/i]
+  },
+  {
+    archetype: "lending",
+    patterns: [/\blending protocol\b/i, /\bborrowing protocol\b/i, /\bmoney market\b/i]
+  },
+  {
+    archetype: "stablecoin",
+    patterns: [
+      /^\s*(?:an?\s+)?(?:[a-z0-9-]+\s+){0,3}stablecoin\b(?!\s+(?:lending|exchange|trading|payments?|bridge|dex)\b)/i,
+      /\b(?:is|issues?|mints?)\s+(?:an?\s+)?(?:[a-z0-9-]+\s+){0,4}stablecoin\b/i,
+      /\bstablecoin\s+(?:issuer|asset|token|protocol)\b/i
+    ]
+  },
+  {
+    archetype: "bridge",
+    patterns: [/\bcross[ -]chain bridge\b/i, /\btoken bridge\b/i, /\bbridge protocol\b/i]
+  },
+  { archetype: "layer_1", patterns: [/\blayer[ -]?1\b/i, /\bl1 blockchain\b/i] },
+  { archetype: "layer_2", patterns: [/\blayer[ -]?2\b/i, /\bl2 network\b/i, /\brollup\b/i] },
+  { archetype: "staking", patterns: [/\brestaking\b/i, /\bliquid staking\b/i, /\bstaking protocol\b/i] },
+  {
+    archetype: "derivatives",
+    patterns: [/\bderivatives?\b/i, /\bperpetuals?\b/i, /\boptions protocol\b/i, /\bfutures exchange\b/i]
+  },
+  {
+    archetype: "exchange_or_custody",
+    patterns: [
+      /\bcentralized exchange\b/i,
+      /\bdigital asset exchange\b/i,
+      /\bcrypto(?:currency)? exchange\b/i,
+      /\bcustod(?:y|ian)\b/i
+    ]
+  },
+  {
+    archetype: "oracle_or_data",
+    patterns: [/\boracle network\b/i, /\bdata availability\b/i, /\bblockchain indexer\b/i, /\brpc provider\b/i]
+  },
+  { archetype: "payments", patterns: [/\bpayments? protocol\b/i, /\bpayments? network\b/i, /\bpayment processor\b/i] },
+  { archetype: "launchpad", patterns: [/\blaunchpad\b/i, /\btoken launch platform\b/i] },
+  { archetype: "gaming_or_nft", patterns: [/\bweb3 gaming\b/i, /\bblockchain game\b/i, /\bnft marketplace\b/i] }
+];
+function isDirectSubjectFact(fact) {
+  return fact.attributionScope === void 0 || fact.attributionScope === "direct_subject";
+}
+function factTargetsAuditedSubject(fact, auditedHandle) {
+  if (!isDirectSubjectFact(fact)) return false;
+  try {
+    return normalizeHandle(fact.subjectKey) === normalizeHandle(auditedHandle);
+  } catch {
+    return false;
+  }
+}
+function isStrictSourceBackedFact(fact) {
+  return (fact.status === "verified" || fact.status === "corroborated") && isDirectSubjectFact(fact) && fact.evidence_origin === "deterministic" && fact.artifact_verified === true && fact.floorEligible !== false && fact.providerProjection !== true && !fact.sources.some((source2) => source2.relation === "contradicts") && fact.sources.some((source2) => source2.relation === "supports" && factSourceHasEligibleArtifact(source2));
+}
+var RELATIONAL_CONTEXT = /\b(?:for|with|using|via|through|integrates?|supports?|depends\s+on|secured\s+by|powered\s+by)\b/i;
+var IDENTITY_VERB = /\b(?:is|are|operates?|runs?|provides?|offers?|builds?|issues?|serves\s+as)\b/gi;
+var IDENTITY_CLAUSE_BOUNDARY = /^(?:\s*$|\s*[,.;:()]|\s+\b(?:and|for|with|using|via|through|that|which|where|built|deployed|operating|running|serving|supporting|secured|powered)\b)/i;
+var PRODUCT_HEAD_CONTINUATION = /^\s+(?:(?:protocol|network|platform|exchange|marketplace|asset|token|coin|blockchain|application|app|system|scaling\s+solution|trading\s+venue)\b\s*){1,2}/i;
+function hasProductHeadBoundary(suffix) {
+  if (IDENTITY_CLAUSE_BOUNDARY.test(suffix)) return true;
+  const continuation = suffix.match(PRODUCT_HEAD_CONTINUATION);
+  return continuation ? IDENTITY_CLAUSE_BOUNDARY.test(suffix.slice(continuation[0].length)) : false;
+}
+function matchesSubjectIdentity(value, pattern) {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  const matcher = new RegExp(pattern.source, flags);
+  for (const match of value.matchAll(matcher)) {
+    const index = match.index ?? -1;
+    if (index < 0) continue;
+    const suffix = value.slice(index + match[0].length);
+    if (!hasProductHeadBoundary(suffix)) continue;
+    const prefix = value.slice(0, index);
+    if (index <= 24 && !RELATIONAL_CONTEXT.test(prefix)) return true;
+    const verbs = [...prefix.matchAll(IDENTITY_VERB)];
+    const verb = verbs.at(-1);
+    if (!verb || verb.index == null) continue;
+    const between = prefix.slice(verb.index + verb[0].length);
+    if (between.length <= 80 && !RELATIONAL_CONTEXT.test(between)) return true;
+  }
+  return false;
+}
+function uniqueSorted(values) {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+function classifyProductFacts(facts, auditedHandle) {
+  const matches = /* @__PURE__ */ new Map();
+  for (const fact of facts) {
+    if (fact.predicate !== "product" || !factTargetsAuditedSubject(fact, auditedHandle) || !isStrictSourceBackedFact(fact)) continue;
+    for (const rule of ARCHETYPE_RULES) {
+      if (!rule.patterns.some((pattern) => matchesSubjectIdentity(fact.value, pattern))) continue;
+      const sourceRefs = factSupportSourceRefs(fact, true);
+      const existing = matches.get(rule.archetype);
+      if (existing) {
+        existing.sourceRefs = uniqueSorted([...existing.sourceRefs, ...sourceRefs]);
+      } else {
+        matches.set(rule.archetype, {
+          archetype: rule.archetype,
+          confidence: "strict_source_backed",
+          sourceRefs,
+          matchedText: fact.value
+        });
+      }
+    }
+  }
+  return [...matches.values()].sort((left, right) => left.archetype.localeCompare(right.archetype));
+}
+function classifyProjectArchetypes(evidence) {
+  const forms = [];
+  if (evidence.projectToken) {
+    forms.push({
+      form: "token",
+      evidenceState: "verified",
+      sourceRefs: ["snapshot:project-token"]
+    });
+  }
+  if (evidence.protocolTvl) {
+    forms.push({
+      form: "protocol",
+      evidenceState: "measured",
+      sourceRefs: ["snapshot:protocol-tvl"]
+    });
+  }
+  const strictLegalFacts = (evidence.basicFacts ?? []).filter(
+    (fact) => fact.predicate === "legal_entity" && factTargetsAuditedSubject(fact, evidence.profile.handle) && isStrictSourceBackedFact(fact)
+  );
+  if (evidence.companyEnrichment?.identityMatch === "official_domain" || strictLegalFacts.length > 0) {
+    forms.push({
+      form: "company",
+      evidenceState: strictLegalFacts.length > 0 ? "verified" : "reported_context",
+      sourceRefs: uniqueSorted([
+        ...evidence.companyEnrichment?.identityMatch === "official_domain" ? ["snapshot:company-enrichment"] : [],
+        ...strictLegalFacts.flatMap((fact) => factSupportSourceRefs(fact, true))
+      ])
+    });
+  }
+  forms.sort((left, right) => left.form.localeCompare(right.form));
+  const matches = classifyProductFacts(evidence.basicFacts ?? [], evidence.profile.handle);
+  if (matches.length === 1) {
+    return { forms, archetypes: { state: "resolved", primary: matches[0].archetype, matches } };
+  }
+  if (matches.length > 1) {
+    return { forms, archetypes: { state: "hybrid", primary: null, matches } };
+  }
+  if (evidence.protocolTvl) {
+    return {
+      forms,
+      archetypes: {
+        state: "generic",
+        primary: "generic_protocol",
+        matches: [{
+          archetype: "generic_protocol",
+          confidence: "structural_generic",
+          sourceRefs: ["snapshot:protocol-tvl"]
+        }]
+      }
+    };
+  }
+  return { forms, archetypes: { state: "insufficient", primary: null, matches: [] } };
+}
+
+// src/lib/projectDiligenceContext.ts
+function deriveProjectDiligenceContext(evidence, determinedAt) {
+  const boundFacts = (evidence.basicFacts ?? []).filter((fact) => factTargetsAuditedSubject(fact, evidence.profile.handle));
+  const facts = boundFacts.filter((fact) => (fact.status === "verified" || fact.status === "corroborated") && fact.artifact_verified === true && fact.evidence_origin === "deterministic" && !fact.sources.some((source2) => source2.relation === "contradicts"));
+  const official = (fact) => fact.sources.filter((source2) => source2.artifactVerified && source2.relation === "supports" && source2.sourceClass === "official_subject" && /^https?:\/\//.test(source2.url));
+  const fair = facts.filter((fact) => ["tokenomics", "official_token", "funding", "launched"].includes(fact.predicate)).flatMap(official).filter((source2) => /\b(?:fair[- ]launch(?:ed)?|launched (?:on|via) pump\.fun)\b/i.test(source2.excerpt) && !/\b(?:not|never|no longer)\b.{0,25}\b(?:fair[- ]launch|launched)\b/i.test(source2.excerpt));
+  const product = facts.filter((fact) => ["product", "launched"].includes(fact.predicate));
+  const prelaunch = product.flatMap(official).filter((source2) => /\b(?:product|platform|protocol|app|mainnet)\b.{0,65}\b(?:coming soon|not yet live|not launched|pre[- ]launch|in development)\b/i.test(source2.excerpt));
+  const live = product.some((fact) => /\b(?:is live|now live|live on mainnet|accepts deposits|holds user funds)\b/i.test([fact.value, ...official(fact).map((s) => s.excerpt)].join(" ")));
+  const context2 = {
+    version: "2026-09-23.1",
+    launch: fair.length ? "fair_launch" : "unknown",
+    productStage: prelaunch.length && !live ? "prelaunch" : "unknown",
+    sourceUrls: [...new Set([...fair, ...prelaunch].map((source2) => source2.url))],
+    axes: {},
+    optionalQuestions: []
+  };
+  const has = (...predicates) => boundFacts.some((fact) => predicates.includes(fact.predicate));
+  const adverse = evidence.findings.some((finding) => finding.polarity === -1 && finding.evidence_origin !== "model_lead" && finding.artifact_verified === true);
+  if (context2.launch === "fair_launch") {
+    for (const predicate of ["funding", "investor", "governance", "treasury", "vesting", "legal_entity", "public_security", "conflict_of_interest"]) {
+      if (!has(predicate)) context2.optionalQuestions.push(predicate);
+    }
+    if (!has("funding", "investor", "partnership") && !evidence.siteBackers?.names.length && !evidence.webTeam?.some((member) => member.kind === "org" || /\b(?:advisor|backer|investor|partner)\b/i.test(member.role)) && !evidence.protocolFunding?.rounds.length && !evidence.companyEnrichment?.funding?.rounds.length && !adverse) {
+      context2.axes.P4_backing_and_partners = {
+        state: "contextual_project",
+        axisTreatment: "not_applicable",
+        reason: "A source-disclosed fair launch does not require venture funding or named backers. No financing or operating relationship is established to assess on this axis.",
+        evidence: fair.map((source2) => source2.url),
+        determinedAt
+      };
+    }
+  }
+  if (context2.productStage === "prelaunch") {
+    if (!has("traction", "security_incident") && !evidence.protocolTvl && !adverse) {
+      context2.axes.P5_traction_and_liveness = {
+        state: "contextual_project",
+        axisTreatment: "deferred",
+        reason: "The official source describes the product as not yet launched. Production usage is deferred; live token and security checks remain applicable.",
+        evidence: prelaunch.map((source2) => source2.url),
+        determinedAt
+      };
+    }
+    for (const predicate of ["launched", "traction"]) if (!has(predicate)) context2.optionalQuestions.push(predicate);
+  }
+  return context2;
+}
+function projectQuestionContext(predicate, context2) {
+  if (!context2.optionalQuestions.includes(predicate)) return null;
+  if (predicate === "traction" || predicate === "launched") return "The product is described as prelaunch. A production launch date or usage history is not required yet; this does not describe the live token's age.";
+  return "Optional disclosure for a source-disclosed fair launch. Its absence is not an adverse finding or a requirement to obtain venture funding, adopt corporate governance, or publish private treasury accounts. Any specific disclosed commitments remain assessable.";
+}
+
 // src/graph/network.ts
 var EVM_ADDRESS = /^0x[0-9a-f]+$/i;
 var SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -2635,200 +2885,6 @@ var AXIS_LABELS = {
 };
 function axisLabel(k) {
   return AXIS_LABELS[k] ?? k.replace(/^[A-Z]{1,3}\d+_/, "").replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
-}
-
-// src/intelligence/archetypes.ts
-function factSourceHasEligibleArtifact(source2) {
-  if (source2.artifactVerified !== true) return false;
-  const hasPublicUrl = /^https?:\/\/[^\s]+$/i.test(source2.url ?? "");
-  const hasFrozenHash = /^[a-f0-9]{64}$/i.test(source2.contentHash ?? "");
-  return hasPublicUrl || hasFrozenHash;
-}
-function supportingFactSources(fact) {
-  return fact.sources.map((source2, originalIndex) => ({ source: source2, originalIndex })).filter(({ source: source2 }) => source2.relation === "supports").sort(
-    (left, right) => left.source.url.localeCompare(right.source.url) || (left.source.capturedAt ?? "").localeCompare(right.source.capturedAt ?? "") || left.source.provider.localeCompare(right.source.provider) || left.source.contentHash.localeCompare(right.source.contentHash) || left.originalIndex - right.originalIndex
-  );
-}
-function factSupportSourceId(factId3, sortedIndex) {
-  return `fact:${factId3}:support:${String(sortedIndex + 1).padStart(2, "0")}`;
-}
-function factSupportSourceRefs(fact, verifiedOnly = false) {
-  return supportingFactSources(fact).map(({ source: source2 }, sortedIndex) => ({ source: source2, id: factSupportSourceId(fact.factId, sortedIndex) })).filter(({ source: source2 }) => !verifiedOnly || factSourceHasEligibleArtifact(source2)).map(({ id }) => id);
-}
-function contradictingFactSources(fact) {
-  return fact.sources.map((source2, originalIndex) => ({ source: source2, originalIndex })).filter(({ source: source2 }) => source2.relation === "contradicts").sort(
-    (left, right) => left.source.url.localeCompare(right.source.url) || (left.source.capturedAt ?? "").localeCompare(right.source.capturedAt ?? "") || left.source.provider.localeCompare(right.source.provider) || left.source.contentHash.localeCompare(right.source.contentHash) || left.originalIndex - right.originalIndex
-  );
-}
-function factContradictionSourceId(factId3, sortedIndex) {
-  return `fact:${factId3}:contradiction:${String(sortedIndex + 1).padStart(2, "0")}`;
-}
-function factContradictionSourceRefs(fact, verifiedOnly = false) {
-  return contradictingFactSources(fact).map(({ source: source2 }, sortedIndex) => ({ source: source2, id: factContradictionSourceId(fact.factId, sortedIndex) })).filter(({ source: source2 }) => !verifiedOnly || factSourceHasEligibleArtifact(source2)).map(({ id }) => id);
-}
-var ARCHETYPE_RULES = [
-  {
-    archetype: "dex",
-    patterns: [/\bdecentralized exchange\b/i, /\bdex\b/i, /\bautomated market maker\b/i, /\bamm\b/i]
-  },
-  {
-    archetype: "lending",
-    patterns: [/\blending protocol\b/i, /\bborrowing protocol\b/i, /\bmoney market\b/i]
-  },
-  {
-    archetype: "stablecoin",
-    patterns: [
-      /^\s*(?:an?\s+)?(?:[a-z0-9-]+\s+){0,3}stablecoin\b(?!\s+(?:lending|exchange|trading|payments?|bridge|dex)\b)/i,
-      /\b(?:is|issues?|mints?)\s+(?:an?\s+)?(?:[a-z0-9-]+\s+){0,4}stablecoin\b/i,
-      /\bstablecoin\s+(?:issuer|asset|token|protocol)\b/i
-    ]
-  },
-  {
-    archetype: "bridge",
-    patterns: [/\bcross[ -]chain bridge\b/i, /\btoken bridge\b/i, /\bbridge protocol\b/i]
-  },
-  { archetype: "layer_1", patterns: [/\blayer[ -]?1\b/i, /\bl1 blockchain\b/i] },
-  { archetype: "layer_2", patterns: [/\blayer[ -]?2\b/i, /\bl2 network\b/i, /\brollup\b/i] },
-  { archetype: "staking", patterns: [/\brestaking\b/i, /\bliquid staking\b/i, /\bstaking protocol\b/i] },
-  {
-    archetype: "derivatives",
-    patterns: [/\bderivatives?\b/i, /\bperpetuals?\b/i, /\boptions protocol\b/i, /\bfutures exchange\b/i]
-  },
-  {
-    archetype: "exchange_or_custody",
-    patterns: [
-      /\bcentralized exchange\b/i,
-      /\bdigital asset exchange\b/i,
-      /\bcrypto(?:currency)? exchange\b/i,
-      /\bcustod(?:y|ian)\b/i
-    ]
-  },
-  {
-    archetype: "oracle_or_data",
-    patterns: [/\boracle network\b/i, /\bdata availability\b/i, /\bblockchain indexer\b/i, /\brpc provider\b/i]
-  },
-  { archetype: "payments", patterns: [/\bpayments? protocol\b/i, /\bpayments? network\b/i, /\bpayment processor\b/i] },
-  { archetype: "launchpad", patterns: [/\blaunchpad\b/i, /\btoken launch platform\b/i] },
-  { archetype: "gaming_or_nft", patterns: [/\bweb3 gaming\b/i, /\bblockchain game\b/i, /\bnft marketplace\b/i] }
-];
-function isDirectSubjectFact(fact) {
-  return fact.attributionScope === void 0 || fact.attributionScope === "direct_subject";
-}
-function factTargetsAuditedSubject(fact, auditedHandle) {
-  if (!isDirectSubjectFact(fact)) return false;
-  try {
-    return normalizeHandle(fact.subjectKey) === normalizeHandle(auditedHandle);
-  } catch {
-    return false;
-  }
-}
-function isStrictSourceBackedFact(fact) {
-  return (fact.status === "verified" || fact.status === "corroborated") && isDirectSubjectFact(fact) && fact.evidence_origin === "deterministic" && fact.artifact_verified === true && fact.floorEligible !== false && fact.providerProjection !== true && !fact.sources.some((source2) => source2.relation === "contradicts") && fact.sources.some((source2) => source2.relation === "supports" && factSourceHasEligibleArtifact(source2));
-}
-var RELATIONAL_CONTEXT = /\b(?:for|with|using|via|through|integrates?|supports?|depends\s+on|secured\s+by|powered\s+by)\b/i;
-var IDENTITY_VERB = /\b(?:is|are|operates?|runs?|provides?|offers?|builds?|issues?|serves\s+as)\b/gi;
-var IDENTITY_CLAUSE_BOUNDARY = /^(?:\s*$|\s*[,.;:()]|\s+\b(?:and|for|with|using|via|through|that|which|where|built|deployed|operating|running|serving|supporting|secured|powered)\b)/i;
-var PRODUCT_HEAD_CONTINUATION = /^\s+(?:(?:protocol|network|platform|exchange|marketplace|asset|token|coin|blockchain|application|app|system|scaling\s+solution|trading\s+venue)\b\s*){1,2}/i;
-function hasProductHeadBoundary(suffix) {
-  if (IDENTITY_CLAUSE_BOUNDARY.test(suffix)) return true;
-  const continuation = suffix.match(PRODUCT_HEAD_CONTINUATION);
-  return continuation ? IDENTITY_CLAUSE_BOUNDARY.test(suffix.slice(continuation[0].length)) : false;
-}
-function matchesSubjectIdentity(value, pattern) {
-  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
-  const matcher = new RegExp(pattern.source, flags);
-  for (const match of value.matchAll(matcher)) {
-    const index = match.index ?? -1;
-    if (index < 0) continue;
-    const suffix = value.slice(index + match[0].length);
-    if (!hasProductHeadBoundary(suffix)) continue;
-    const prefix = value.slice(0, index);
-    if (index <= 24 && !RELATIONAL_CONTEXT.test(prefix)) return true;
-    const verbs = [...prefix.matchAll(IDENTITY_VERB)];
-    const verb = verbs.at(-1);
-    if (!verb || verb.index == null) continue;
-    const between = prefix.slice(verb.index + verb[0].length);
-    if (between.length <= 80 && !RELATIONAL_CONTEXT.test(between)) return true;
-  }
-  return false;
-}
-function uniqueSorted(values) {
-  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
-}
-function classifyProductFacts(facts, auditedHandle) {
-  const matches = /* @__PURE__ */ new Map();
-  for (const fact of facts) {
-    if (fact.predicate !== "product" || !factTargetsAuditedSubject(fact, auditedHandle) || !isStrictSourceBackedFact(fact)) continue;
-    for (const rule of ARCHETYPE_RULES) {
-      if (!rule.patterns.some((pattern) => matchesSubjectIdentity(fact.value, pattern))) continue;
-      const sourceRefs = factSupportSourceRefs(fact, true);
-      const existing = matches.get(rule.archetype);
-      if (existing) {
-        existing.sourceRefs = uniqueSorted([...existing.sourceRefs, ...sourceRefs]);
-      } else {
-        matches.set(rule.archetype, {
-          archetype: rule.archetype,
-          confidence: "strict_source_backed",
-          sourceRefs,
-          matchedText: fact.value
-        });
-      }
-    }
-  }
-  return [...matches.values()].sort((left, right) => left.archetype.localeCompare(right.archetype));
-}
-function classifyProjectArchetypes(evidence) {
-  const forms = [];
-  if (evidence.projectToken) {
-    forms.push({
-      form: "token",
-      evidenceState: "verified",
-      sourceRefs: ["snapshot:project-token"]
-    });
-  }
-  if (evidence.protocolTvl) {
-    forms.push({
-      form: "protocol",
-      evidenceState: "measured",
-      sourceRefs: ["snapshot:protocol-tvl"]
-    });
-  }
-  const strictLegalFacts = (evidence.basicFacts ?? []).filter(
-    (fact) => fact.predicate === "legal_entity" && factTargetsAuditedSubject(fact, evidence.profile.handle) && isStrictSourceBackedFact(fact)
-  );
-  if (evidence.companyEnrichment?.identityMatch === "official_domain" || strictLegalFacts.length > 0) {
-    forms.push({
-      form: "company",
-      evidenceState: strictLegalFacts.length > 0 ? "verified" : "reported_context",
-      sourceRefs: uniqueSorted([
-        ...evidence.companyEnrichment?.identityMatch === "official_domain" ? ["snapshot:company-enrichment"] : [],
-        ...strictLegalFacts.flatMap((fact) => factSupportSourceRefs(fact, true))
-      ])
-    });
-  }
-  forms.sort((left, right) => left.form.localeCompare(right.form));
-  const matches = classifyProductFacts(evidence.basicFacts ?? [], evidence.profile.handle);
-  if (matches.length === 1) {
-    return { forms, archetypes: { state: "resolved", primary: matches[0].archetype, matches } };
-  }
-  if (matches.length > 1) {
-    return { forms, archetypes: { state: "hybrid", primary: null, matches } };
-  }
-  if (evidence.protocolTvl) {
-    return {
-      forms,
-      archetypes: {
-        state: "generic",
-        primary: "generic_protocol",
-        matches: [{
-          archetype: "generic_protocol",
-          confidence: "structural_generic",
-          sourceRefs: ["snapshot:protocol-tvl"]
-        }]
-      }
-    };
-  }
-  return { forms, archetypes: { state: "insufficient", primary: null, matches: [] } };
 }
 
 // src/intelligence/buildPointInTimeIntelligence.ts
@@ -4357,7 +4413,7 @@ function questionState(entry, facts, auditedHandle) {
   }
   const states = entry.providerRuns.map((run) => run.state);
   if (states.includes("partial")) {
-    return { state: "partial", basis: "At least one frozen collection pass completed only partially.", matchingFacts };
+    return { state: matchingFacts.length ? "reported" : "unresolved", basis: "Research was incomplete. This is a collection gap, not evidence of a missing disclosure or an adverse finding.", matchingFacts };
   }
   if (states.some((state) => state === "succeeded" || state === "completed_empty")) {
     return { state: "unresolved", basis: "A bounded collection pass completed without a source-backed answer.", matchingFacts };
@@ -4482,8 +4538,11 @@ function buildQuestions(evidence, measurements, archetypes, forms) {
     [fact.factId, fact],
     [`fact:${fact.factId}`, fact]
   ]));
+  const diligenceContext = evidence.projectDiligenceContext ?? deriveProjectDiligenceContext(evidence, evidence.profile.profile_captured_at ?? "unknown");
   for (const entry of evidence.basicFactQuestionLedger ?? []) {
     const assessment = questionState(entry, facts, evidence.profile.handle);
+    const applicabilityReason = !assessment.matchingFacts.length ? projectQuestionContext(entry.predicate, diligenceContext) : null;
+    const applicabilityRefs = applicabilityReason ? facts.filter((fact) => factTargetsAuditedSubject(fact, evidence.profile.handle) && fact.sources.some((source2) => diligenceContext.sourceUrls.includes(source2.url))).flatMap((fact) => factSupportSourceRefs(fact)).filter((ref) => sourceIds.has(ref)) : [];
     const matchingFactIds = new Set(assessment.matchingFacts.map((fact) => fact.factId));
     const answerRefs = uniqueSorted2(entry.answerRefs.filter((reference) => {
       const referencedFact = factByAnswerRef.get(reference);
@@ -4495,11 +4554,11 @@ function buildQuestions(evidence, measurements, archetypes, forms) {
       id: entry.questionId,
       domain: domainForPredicate(entry.predicate),
       prompt: entry.question,
-      materiality: entry.critical ? "critical" : "important",
-      state: assessment.state,
-      basis: assessment.basis,
+      materiality: applicabilityReason ? "context" : entry.predicate === "audit" && diligenceContext.productStage === "prelaunch" ? "important" : entry.critical ? "critical" : "important",
+      state: applicabilityReason ? "not_applicable" : assessment.state,
+      basis: applicabilityReason || assessment.basis,
       answerRefs,
-      sourceRefs: uniqueSorted2([...factRefs, ...contradictionRefs])
+      sourceRefs: uniqueSorted2([...factRefs, ...contradictionRefs, ...applicabilityRefs])
     });
   }
   const existing = new Map(questions.map((question, index) => [question.id, index]));
@@ -4570,7 +4629,12 @@ function buildQuestions(evidence, measurements, archetypes, forms) {
     });
     existing.set(definition.id, questions.length - 1);
   }
-  return questions.sort((left, right) => left.id.localeCompare(right.id));
+  return questions.map((question) => {
+    const reason = projectQuestionContext(question.id.split(".").at(-1) ?? "", diligenceContext);
+    if (!reason || question.answerRefs.length || question.sourceRefs.length) return question;
+    const sourceRefs = facts.filter((fact) => factTargetsAuditedSubject(fact, evidence.profile.handle) && fact.sources.some((source2) => diligenceContext.sourceUrls.includes(source2.url))).flatMap((fact) => factSupportSourceRefs(fact)).filter((ref) => sourceIds.has(ref));
+    return { ...question, state: "not_applicable", materiality: "context", basis: reason, sourceRefs };
+  }).sort((left, right) => left.id.localeCompare(right.id));
 }
 function coverageState(questions, measurements) {
   const openQuestions = questions.filter(
@@ -7708,6 +7772,7 @@ function assembleDossier(ev, live) {
   const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name, organizationSubject: isOrganizationAccount(ev) });
   a.setIdentity(ev.profile.identity_confidence);
   a.setTokenApplicability(ev.tokenApplicability);
+  a.projectAxisTreatments = structuredClone(ev.projectDiligenceContext?.axes ?? {});
   graphAudit.setIdentity(ev.profile.identity_confidence);
   const governingEligible = (row) => row.evidence_origin !== "model_lead" && row.artifact_verified !== false;
   const meaningfulTeamValue = (value) => Boolean(value.trim()) && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(value.trim());
@@ -8020,6 +8085,7 @@ function assembleDossier(ev, live) {
     ...ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {},
     ...ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {},
     ...ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {},
+    ...ev.projectDiligenceContext ? { projectDiligenceContext: structuredClone(ev.projectDiligenceContext) } : {},
     ...ev.launchVenueSubject ? { launchVenueSubject: structuredClone(ev.launchVenueSubject) } : {},
     ...ev.stockHealth ? { stockHealth: structuredClone(ev.stockHealth) } : {},
     ...ev.tokenizedStockPairing ? { tokenizedStockPairing: structuredClone(ev.tokenizedStockPairing) } : {},
@@ -8996,7 +9062,8 @@ var PROJECT_SCORING_POLICY = [
   "Anchor WITHIN each band by evidence density and independence: verification from several independent sources at demonstrated scale belongs at the top of its band, single-source or partial verification belongs low in it. A subject with top-tier verified scale, institutional corroboration, and a multi-year verified operating record should score at the top of whatever band its evidence justifies; do not park overwhelming verification at the band midpoint.",
   "If an axis has neither affirmative evidence nor verified adverse evidence, do not score it at zero. Mark it unscored and publish the investigation as INCOMPLETE. A zero is a severe assessment, not a synonym for missing data.",
   "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
-  "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
+  "Assess each project against its disclosed launch model and product stage. Fair launches do not require venture funding, corporate boards, public treasury accounts or bespoke allocation schedules. Optional disclosures can add evidence; their absence is not misconduct. A prelaunch or alpha/beta label does not prove safety: assess deployed custom code, bridges, admin keys and user funds in scope. A launchpad audit covers only its documented program/version, not every product launched through it. Equal reported FDV and market cap do not prove unlocked ownership, no future minting, or no vesting. Separate historical products from current products and token launch dates from company founding dates.",
+  "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing optional whitepaper or a standalone audit for a standard launchpad token is not a weakness. Assess audits against deployed custom code and live user-fund exposure, and assess a prelaunch product against its disclosed development stage.",
   "P3 token conduct is governed by the frozen tokenApplicability state established before scoring. verified_live_token and historical_token_lineage are assessed; lineage means the analyst must consider predecessor names, contracts, migrations, and current status together. confirmed_tokenless removes P3 as not applicable and normalizes the project score over the remaining 80 weighted points. prelaunch_token_deferred also removes P3 without penalty until a token is live. unresolved_token_identity keeps P3 unresolved and the overall project verdict provisional. Never infer applicability from biography wording, never award clean-conduct points for lacking a token, and never penalize a tokenless business for having no token history.",
   "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
   "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end because no positive backing signal was verified on that axis only, never as counter-evidence against any other axis.",
@@ -11468,6 +11535,7 @@ function serializeAnalystEvidencePacket(input, options) {
     profileAuthenticity: compactProfileAuthenticity(input.profileAuthenticity),
     trustGraphScreen: compactTrustGraphScreen(input.trustGraphScreen),
     projectToken: input.projectToken && typeof input.projectToken === "object" && !Array.isArray(input.projectToken) ? compactProjectToken(input.projectToken) : void 0,
+    projectDiligenceContext: input.projectDiligenceContext && typeof input.projectDiligenceContext === "object" ? compactObject(input.projectDiligenceContext, 4) : void 0,
     tokenApplicability: input.tokenApplicability && typeof input.tokenApplicability === "object" && !Array.isArray(input.tokenApplicability) ? compactObject(input.tokenApplicability, 2) : void 0,
     // Findings stay ahead of descriptive context in the budget. This prevents a
     // long social corpus from hiding the material facts that govern a verdict.
@@ -16875,6 +16943,8 @@ async function fetchPage(url, expectedApex, purpose = "roster", recoverOfficialT
 }
 var roleEvidencePattern = (role) => {
   if (/founder/i.test(role)) return /\b(?:co-?founders?|founders?|started|founded)\b/i;
+  if (/\bcoo\b/i.test(role)) return /\b(?:coo|chief operating officer)\b/i;
+  if (/\bcbo\b/i.test(role)) return /\b(?:cbo|chief business officer)\b/i;
   if (/\bcto\b|technology/i.test(role)) return /\b(?:cto|chief technology officer)\b/i;
   if (/\bceo\b|executive/i.test(role)) return /\b(?:ceo|chief executive officer)\b/i;
   if (/advisor|adviser/i.test(role)) return /\b(?:advisor|adviser)\b/i;
@@ -16917,6 +16987,17 @@ var canonicalSourceUrl = (value) => {
   }
 };
 var pageScore = (page) => (/\/(?:team|leadership|founders?|people)(?:[/.?#-]|$)/i.test(page.url) ? 100 : 0) + (/\b(?:co-?founders?|founders?)\b/i.test(page.text) ? 70 : 0) + (/\/(?:tokenomics|governance|transparency)(?:[/.?#-]|$)/i.test(page.url) ? 35 : 0) + Math.min(20, page.text.length / 1e3);
+function teamExtractionText(text2) {
+  if (text2.length <= 1e4) return text2;
+  const windows = [...text2.matchAll(/\b(?:co[- ]?founder|ceo|coo|cto|cbo|our team|the team|leadership)\b/gi)].map((match) => ({ start: Math.max(0, match.index - 350), end: Math.min(text2.length, match.index + 900) }));
+  const merged = [];
+  for (const window of windows) {
+    const last = merged.at(-1);
+    if (last && window.start <= last.end) last.end = Math.max(last.end, window.end);
+    else merged.push(window);
+  }
+  return [text2.slice(0, 1e3), ...merged.map(({ start, end }) => text2.slice(start, end))].join("\n[section]\n").slice(0, 15e3);
+}
 var TEAM_EXTRACTION_SYSTEM = "You extract a crypto/tech project's team roster from fetched first-party project text. List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. Use the person's role in THIS project, preserving the FULL title exactly as the page states it: a person listed as Co-Founder & CEO is recorded as Co-Founder & CEO, never shortened to just Co-Founder or just CEO. When the page includes descriptive credentials or biography copy next to the person, preserve that entire phrase verbatim in biography; never split biography text into additional people. Capture any X/Twitter handle and LinkedIn URL shown next to a person. For every person copy the exact PAGE URL that directly states that person's role. Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
 var TEAM_EXTRACTION_TOOL = {
   name: "record_team",
@@ -16947,7 +17028,7 @@ async function extractTeamFromPages(pages, projectName2, requireProjectInPassage
   if (!pages.length) return [];
   const selectedPages = [...pages].sort((a, b) => pageScore(b) - pageScore(a) || b.text.length - a.text.length).slice(0, 3);
   const corpus = selectedPages.map((page) => `PAGE ${page.url}:
-${page.text.slice(0, 5e3)}`).join("\n\n");
+${teamExtractionText(page.text)}`).join("\n\n");
   const out = await structured(
     TEAM_EXTRACTION_SYSTEM,
     `Project${projectName2 ? ` ${projectName2}` : ""} first-party team evidence:
@@ -17044,6 +17125,7 @@ async function fetchTeamPage(domain, projectName2, dependencies = {}) {
     pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex, "roster", recoverOfficialText)))).filter(Boolean);
   }
   const homePage = await fetchPage(`https://${apex}/`, apex, "credits", recoverOfficialText, true) ?? await fetchPage(`https://www.${apex}/`, apex, "credits", recoverOfficialText, true);
+  if (homePage && /\b(?:founder|cofounder|ceo|coo|cbo|cto|our team|the team)\b/i.test(homePage.text) && !pages.some((page) => canonicalSourceUrl(page.url) === canonicalSourceUrl(homePage.url))) pages.push(homePage);
   const apexLabel = apex.split(".")[0];
   const creditSeen = /* @__PURE__ */ new Set();
   const creditTeam = [...pages, ...homePage ? [homePage] : []].flatMap((page) => scanPageTextForCredits(page.text, page.url, projectName2, page.anchors)).filter((person) => {
@@ -23330,12 +23412,12 @@ var PROJECT_QUESTIONS2 = [
   { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events are publicly documented, who are they attributed to, and what is each event's current stated status?" },
   { batch: "structure_risk", predicate: "security_incident", question: "What material hacks, exploits, breaches, thefts, user losses, emergency pauses, or recovery outcomes are publicly documented? Return each event with an exact date, amount, attribution, current status, and direct source.", critical: true },
   { batch: "structure_risk", predicate: "governance", question: "What formal governance process is documented?", critical: true },
-  { batch: "structure_risk", predicate: "control", question: "Who has practical control through ownership, boards, voting power, admin keys, multisigs, or treasury authority?" },
-  { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit related-party arrangements or conflicts of interest are disclosed?" },
+  { batch: "structure_risk", predicate: "control", question: "Who can mint, freeze, upgrade, move pooled user funds or change contract permissions? Include boards or voting control only where that structure actually exists." },
+  { batch: "structure_risk", predicate: "conflict_of_interest", question: "Are there documented transactions with insider-controlled counterparties or overlapping financial interests that affect users? Name the arrangement and its source; do not infer a conflict from team membership alone." },
   { batch: "structure_risk", predicate: "tokenomics", question: "What token allocation or supply disclosures are published?" },
   { batch: "structure_risk", predicate: "vesting", question: "What vesting, lockup, or unlock schedule is published?" },
   { batch: "structure_risk", predicate: "treasury", question: "What treasury assets, reports, wallets, or controls are disclosed?" },
-  { batch: "structure_risk", predicate: "audit", question: "Which independent security audits or reviews are published?", critical: true }
+  { batch: "structure_risk", predicate: "audit", question: "Which audits cover deployed custom contracts, bridges or live products? Distinguish launchpad program audits from project-specific reviews; a standard token alone does not require a separate audit.", critical: true }
 ];
 var PERSON_QUESTIONS3 = [
   { batch: "identity", predicate: "official_identity", question: "What is this person's source-backed public identity?", critical: true },
@@ -24163,6 +24245,9 @@ function discoveryPrompt(ctx, questions, phase = "primary") {
     targetedIdentityInstruction,
     projectLeadershipInstruction,
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
+    "Read the official homepage, About/story page, docs and footer for all named operators, including pseudonyms. Preserve the stated role and source; do not require LinkedIn or invent a legal name. Separate project founding, original token launch, migrations, historical products and future product launches. A replacement contract creation date is not the project founding date.",
+    "Record explicit fair-launch/launchpad origin, product stage, and any later funding independently. A venture affiliation or backer statement is not a funding round or a raised amount. Optional treasury, governance, allocation and vesting disclosures are not mandatory for a fair launch. Published supply and FDV ratios do not prove absence of locks or minting rights.",
+    "Security audit scope must distinguish a standard launchpad program from bespoke token code, bridges and products. Prelaunch products have no production audit expectation yet; alpha/beta products with live funds still require security assessment. Legal events require a named, attributed event and procedural status; no event found is not an allegation. Related-party conflicts mean documented overlapping financial interests or counterparties controlled by insiders, not merely founders working together.",
     "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, partners, integrations, tokens, networks, or products in one value.",
     // ARGUS locates the value verbatim in the fetched page, so a composed phrase
@@ -31497,6 +31582,13 @@ var validContract = (platform, value) => {
   if (platform === "solana") return SOLANA_ADDRESS5.test(address) ? address : null;
   return PLATFORM_CHAIN[platform] && EVM_ADDRESS4.test(address) ? address : null;
 };
+function registryDeployments(details, sourceUrl2, capturedAt) {
+  const platforms = isRecord4(details.platforms) ? details.platforms : {};
+  return Object.entries(platforms).flatMap(([platform, value]) => {
+    const address = validContract(platform, value);
+    return address ? [{ chain: PLATFORM_CHAIN[platform], address, sourceUrl: sourceUrl2, capturedAt }] : [];
+  });
+}
 function canonicalContract(details) {
   const platforms = isRecord4(details.platforms) ? details.platforms : {};
   const native = cleanText2(details.asset_platform_id);
@@ -32563,6 +32655,17 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     const declared = await collectProfileDeclaredToken(ctx, profileDeclaredToken);
     if (declared.state === "matched" && declared.snapshot) {
       const snapshot2 = declared.snapshot;
+      const platform = CHAIN_PLATFORM[snapshot2.chain];
+      const registry = platform ? await coinByContract(platform, snapshot2.address) : null;
+      if (registry?.state === "ok" && registryContractMatchingDeclared(registry.details, profileDeclaredToken)?.chain === snapshot2.chain) {
+        const id2 = cleanText2(registry.details.id);
+        if (id2) {
+          snapshot2.coingeckoId = id2;
+          const registryIdentity = verifyIdentity(ctx, registry.details);
+          if (registryIdentity?.homepage) snapshot2.homepage = registryIdentity.homepage;
+          snapshot2.registryDeployments = registryDeployments(registry.details, `https://www.coingecko.com/en/coins/${encodeURIComponent(id2)}`, captureTimestamp());
+        }
+      }
       ctx.evidence.projectToken = snapshot2;
       ctx.recordCheck?.({
         id: "project-token-identity",
@@ -32594,7 +32697,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
         source: "twitterapi / dexscreener",
         tone: "good"
       });
-      return { state: "executed", detail: declared.detail, attempts: declared.attempts };
+      return { state: "executed", detail: declared.detail, attempts: declared.attempts + (platform ? 1 : 0) };
     }
     declaredOutcome = { candidate: profileDeclaredToken, result: declared };
     ctx.emit({
@@ -32943,6 +33046,7 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     ...identity.officialX ? { officialX: identity.officialX } : {},
     sourceUrl: coinSourceUrl,
     capturedAt: collectedAt,
+    registryDeployments: registryDeployments(details, coinSourceUrl, collectedAt),
     producerSources: {
       identity: { provider: "coingecko", sourceUrl: coinSourceUrl, capturedAt: collectedAt },
       ...hasMarketRead ? {
@@ -33619,7 +33723,7 @@ function projectProviderBackedBasicFacts(evidence) {
     if (member.artifact_verified !== true || member.evidence_origin !== "deterministic" || member.provider !== "team-page" && member.provider !== "twitterapi" && member.provider !== "monid" || !member.sourceUrl || !member.name.trim()) continue;
     const predicates = [];
     if (/\b(?:co[- ]?founder|founder|creator)\b/i.test(member.role)) predicates.push("founder");
-    if (/\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(member.role)) predicates.push("executive");
+    if (/\b(?:ceo|cto|coo|cfo|cbo|chief|president|director|head|lead|operator|core team)\b/i.test(member.role)) predicates.push("executive");
     if (!predicates.length) continue;
     const identityKey = member.handle?.replace(/^@/, "").toLowerCase() || normalizeValue(member.name);
     const excerpt = member.provider === "monid" ? `${member.name} is listed as ${member.role} in a professional record for the company matched to the project's official website.${member.evidence ? ` ${member.evidence}` : ""}` : member.evidence?.trim() || `${member.name} is listed as ${member.role} by the project's fetched ${member.source}.`;
@@ -33664,7 +33768,8 @@ function projectProviderBackedBasicFacts(evidence) {
     });
     projected.push(makeFact(evidence, "official_token", `$${token.symbol.toUpperCase()}`, [tokenSource], token.name));
     const protocolFootprint = token.deployedChains?.length && evidence.protocolTvl?.sourceUrl && indexedProtocolRecordMatch(evidence, evidence.protocolTvl) ? evidence.protocolTvl : void 0;
-    const chainFootprint = protocolFootprint ? `${protocolFootprint.chains.length} chains incl. ${protocolFootprint.chains.slice(0, 4).join(", ")}` : token.chain;
+    const deployments = token.registryDeployments ?? [];
+    const chainFootprint = protocolFootprint ? `${protocolFootprint.chains.length} chains incl. ${protocolFootprint.chains.slice(0, 4).join(", ")}` : [.../* @__PURE__ */ new Set([token.chain, ...deployments.map((row) => row.chain)])].join(", ");
     const networkSources = protocolFootprint ? [source({
       url: protocolFootprint.sourceUrl,
       title: "DeFiLlama protocol chain footprint",
@@ -33672,7 +33777,14 @@ function projectProviderBackedBasicFacts(evidence) {
       capturedAt: protocolFootprint.capturedAt,
       provider: "defillama",
       sourceClass: "regulatory_or_onchain"
-    })] : [tokenSource];
+    })] : [tokenSource, ...deployments.map((row) => source({
+      url: row.sourceUrl,
+      title: "CoinGecko token deployment",
+      provider: "coingecko",
+      excerpt: `CoinGecko lists ${row.address} on ${row.chain} for this exact-contract-bound token. This does not establish product deployment or bridge security.`,
+      capturedAt: row.capturedAt,
+      sourceClass: "regulatory_or_onchain"
+    }))];
     projected.push(makeFact(
       evidence,
       "network",
@@ -37627,6 +37739,17 @@ function applySiteSubstanceOutcome(ctx, domain, site) {
     });
     return;
   }
+  if (site.status === "coming_soon" && site.reason === "coming_soon") {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "reported",
+      note: `${domain}: the official page discloses a prelaunch surface. Production availability is not established; this is not adverse evidence.`,
+      provider: "site-fetch",
+      sourceCount: 1
+    });
+    ctx.emit({ phase: "P2 \xB7 Substance", label: "Product stage disclosed", detail: site.detail, source: "site-fetch", tone: "neutral" });
+    return;
+  }
   if (verifiedNotLive) {
     ctx.recordCheck?.({
       id: "project-product-substance",
@@ -37781,7 +37904,7 @@ function uniqueIdConfirmedForFounderFollowup(member, subjectHandle) {
 }
 async function coldIntake(ctx, profileAlreadyResolved = false) {
   if (!profileAlreadyResolved) await resolveProfile(ctx);
-  const siteUrl = canonicalPublicProfileWebsite(ctx.evidence.profile.website) ?? void 0;
+  const siteUrl = canonicalPublicProfileWebsite(ctx.evidence.profile.website) ?? canonicalPublicProfileWebsite(ctx.evidence.projectToken?.homepage) ?? void 0;
   const bioDomain = bioWebsiteDomain(ctx.evidence.profile.bio);
   const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   const [hist, { corpus, foundWallets }, registration, siteSubstance] = await Promise.all([
@@ -41173,6 +41296,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     organizationSubject: isOrganizationAccount(evidence)
   });
   evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
+  if (evidence.roles.includes("PROJECT" /* PROJECT */)) evidence.projectDiligenceContext = deriveProjectDiligenceContext(evidence, (/* @__PURE__ */ new Date()).toISOString());
   evidence.subjectCategory = deriveSubjectCategory(evidence);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
@@ -41215,6 +41339,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     projectToken: evidence.projectToken,
     entityContinuity: evidence.entityContinuity ? [evidence.entityContinuity] : [],
     tokenApplicability: evidence.tokenApplicability,
+    projectDiligenceContext: evidence.projectDiligenceContext,
     // The scale of the venture a founder verifiably founded is scoreable
     // evidence about them (F2/F4). It was collected and then dropped before.
     ventureToken: evidence.ventureToken,
@@ -41228,7 +41353,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
   });
   const analystStartedAt = startRuntimeStage("analyst");
   if (analystAvailable()) {
-    const requestedAxes = axisCatalog(evidence.roles).filter(({ axis, role }) => !(role === "PROJECT" /* PROJECT */ && axis === "P3_token_conduct" && (evidence.tokenApplicability?.axisTreatment === "not_applicable" || evidence.tokenApplicability?.axisTreatment === "deferred")));
+    const requestedAxes = axisCatalog(evidence.roles).filter(({ axis, role }) => !(role === "PROJECT" /* PROJECT */ && evidence.projectDiligenceContext?.axes[axis])).filter(({ axis, role }) => !(role === "PROJECT" /* PROJECT */ && axis === "P3_token_conduct" && (evidence.tokenApplicability?.axisTreatment === "not_applicable" || evidence.tokenApplicability?.axisTreatment === "deferred")));
     const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
     const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson, requestedAxes);
     const projectStrengthBands = deriveProjectStrengthBands(evidenceJson, requestedAxes);

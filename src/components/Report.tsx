@@ -1829,8 +1829,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     ?? report.role_reports[0];
   const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
   const tokenAxisApplicability = governingRoleReport?.axis_applicability?.P3_token_conduct;
-  const tokenAxisExcluded = tokenAxisApplicability?.axisTreatment === "not_applicable"
-    || tokenAxisApplicability?.axisTreatment === "deferred";
+  const excludedAxes = Object.entries(governingRoleReport?.axis_applicability ?? {}).filter(([, treatment]) =>
+    treatment.axisTreatment === "not_applicable" || treatment.axisTreatment === "deferred");
   const compositionRows = [
     ...governingAxes.map(([axis, a]) => ({
     axis,
@@ -1843,17 +1843,17 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     questionCount: a.gaps?.length,
     evidenceHref: f.projectStrengthBands ? `#dimension-${axis}` as const : undefined,
     })),
-    ...(tokenAxisExcluded ? [{
-      axis: "P3_token_conduct",
-      label: "Token design and conduct",
+    ...excludedAxes.map(([axis, treatment]) => ({
+      axis,
+      label: diligenceAreaLabel(axis),
       score: 0,
       weight: 0,
-      rationale: tokenAxisApplicability.reason,
+      rationale: treatment.reason,
       evidenceHref: null,
-      applicability: tokenAxisApplicability.axisTreatment as "not_applicable" | "deferred",
-      sublabel: tokenAxisApplicability.axisTreatment === "deferred" ? "deferred until launch" : "not applicable",
-      countsLine: `Project score normalized over ${governingRoleReport?.applicable_weight ?? 80} applicable points.`,
-    }] : []),
+      applicability: treatment.axisTreatment as "not_applicable" | "deferred",
+      sublabel: treatment.axisTreatment === "deferred" ? "deferred until launch" : "not applicable",
+      countsLine: `Project score normalized over ${governingRoleReport?.applicable_weight ?? 100} applicable points.`,
+    })),
   ];
   const linkedTokenDossier = f.threat?.dossier;
   const tokenPairCreatedAt = linkedTokenDossier?.pairCreatedAt ?? f.projectToken?.pairCreatedAt ?? null;

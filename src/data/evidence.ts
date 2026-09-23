@@ -292,6 +292,10 @@ export interface ProjectTokenSnapshot {
    * name-alike protocol can never lend its footprint to a token.
    */
   deployedChains?: string[];
+  /** Additional token deployments in an exact-contract-bound registry record.
+   * These are registry attributions, not proof that a bridge or product is safe. */
+  registryDeployments?: Array<{ chain: string; address: string; sourceUrl: string; capturedAt: string }>;
+
   homepage?: string;
   officialX?: string;
   /**
@@ -1486,6 +1490,7 @@ export interface CollectedEvidence {
   entityContinuity?: EntityContinuitySnapshot;
   /** Pre-scoring determination of whether P3 token conduct applies. */
   tokenApplicability?: TokenApplicabilitySnapshot;
+  projectDiligenceContext?: import("../lib/projectDiligenceContext").ProjectDiligenceContext;
   /** Frozen Web3 / non-Web3 market categorization for a company subject. */
   subjectCategory?: SubjectCategorySnapshot;
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)

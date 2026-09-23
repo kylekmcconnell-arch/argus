@@ -45,6 +45,7 @@ import { teamCandidateSourceMatchesIdentity } from "../src/lib/teamCandidateIden
 import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 import { captureTimestamp } from "./captureTime";
+import { deriveProjectDiligenceContext } from "../src/lib/projectDiligenceContext";
 import { deriveTokenApplicability } from "./tokenApplicability";
 import { launchVenueForOfficialDomain } from "../src/threat/launch";
 import { deriveSubjectCategory } from "./subjectCategory";
@@ -816,6 +817,17 @@ export function applySiteSubstanceOutcome(
     return;
   }
 
+  // An honest coming-soon disclosure is a stage statement, not a failed
+  // promise to operate. Any contradictory live-product claim is evaluated
+  // separately against its own sources.
+  if (site.status === "coming_soon" && site.reason === "coming_soon") {
+    ctx.recordCheck?.({ id: "project-product-substance", status: "reported",
+      note: `${domain}: the official page discloses a prelaunch surface. Production availability is not established; this is not adverse evidence.`,
+      provider: "site-fetch", sourceCount: 1 });
+    ctx.emit({ phase: "P2 · Substance", label: "Product stage disclosed", detail: site.detail, source: "site-fetch", tone: "neutral" });
+    return;
+  }
+
   // SiteNotLive is reserved for direct, served-page evidence. Access blocks,
   // HTTP errors, and DNS/transport failures are collection gaps, never adverse
   // evidence about whether the product exists.
@@ -1036,7 +1048,8 @@ export function uniqueIdConfirmedForFounderFollowup(
 // Exported for tests.
 export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
   if (!profileAlreadyResolved) await resolveProfile(ctx);
-  const siteUrl = canonicalPublicProfileWebsite(ctx.evidence.profile.website) ?? undefined;
+  const siteUrl = canonicalPublicProfileWebsite(ctx.evidence.profile.website)
+    ?? canonicalPublicProfileWebsite(ctx.evidence.projectToken?.homepage) ?? undefined;
   const bioDomain = bioWebsiteDomain(ctx.evidence.profile.bio);
   const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
 
@@ -5901,6 +5914,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     organizationSubject: isOrganizationAccount(evidence),
   });
   evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
+  if (evidence.roles.includes(SubjectClass.PROJECT)) evidence.projectDiligenceContext = deriveProjectDiligenceContext(evidence, new Date().toISOString());
   // Market categorization rides on the applicability decision: every company
   // report states Web3 vs non-Web3 so the reader knows which metric families
   // applied. Deterministic, identity-bound inputs only; fails to
@@ -5949,6 +5963,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     projectToken: evidence.projectToken,
     entityContinuity: evidence.entityContinuity ? [evidence.entityContinuity] : [],
     tokenApplicability: evidence.tokenApplicability,
+    projectDiligenceContext: evidence.projectDiligenceContext,
     // The scale of the venture a founder verifiably founded is scoreable
     // evidence about them (F2/F4). It was collected and then dropped before.
     ventureToken: evidence.ventureToken,
@@ -5969,6 +5984,8 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     // model-discovered leads remain visible to investigators, but are absent from
     // both the subject scorer and contradiction analyzer context.
     const requestedAxes = axisCatalog(evidence.roles).filter(({ axis, role }) => !(
+      role === SubjectClass.PROJECT && evidence.projectDiligenceContext?.axes[axis]
+    )).filter(({ axis, role }) => !(
       role === SubjectClass.PROJECT
       && axis === "P3_token_conduct"
       && (evidence.tokenApplicability?.axisTreatment === "not_applicable"

@@ -1,3 +1,4 @@
+import { projectQuestionGuidance } from "../../../lib/projectDiligenceContext";
 import { useMemo, useState, type ReactNode } from "react";
 import { DisclosureButton, InlinePanel } from "../disclosure";
 import { useArgusReport } from "../context";
@@ -18,6 +19,13 @@ export function QuestionRows({ questions, filter }: { questions: QuestionView[];
             <small>{question.domain.replace(/_/g, " ")}{question.materiality === "critical" ? " · decision-critical" : ""}</small>
           </div>
           {question.prompt}
+          {projectQuestionGuidance(question.id) && <p className="subtle-note">{projectQuestionGuidance(question.id)}</p>}
+          <p className="subtle-note">{question.basis || "No answer basis was retained for this saved question. Missing evidence is not an adverse finding."}</p>
+          {question.sources?.map((source) => (
+            <p key={source.id} className="subtle-note">{source.url ? <ExtLink href={source.url}>{source.title}</ExtLink> : source.title}{source.excerpt ? `: ${source.excerpt}` : ""}</p>
+          ))}
+          <ChallengeButton target={{ id: findingId("evidence", question.id), title: question.prompt, claim: `${questionStatusLabel(question.state)}: ${question.prompt} ${question.basis ?? ""}` }} />
+          <ChallengePanel target={{ id: findingId("evidence", question.id), title: question.prompt, claim: `${questionStatusLabel(question.state)}: ${question.prompt} ${question.basis ?? ""}` }} />
         </div>
       ))}
     </>
@@ -70,7 +78,7 @@ function SourceCardView({ source }: { source: SourceCard }) {
   );
 }
 
-const QUESTION_FILTERS = ["All", "Partly answered", "Not established", "Not checked", "Source unavailable", "Reported", "Answered"] as const;
+const QUESTION_FILTERS = ["All", "Partly answered", "Not established", "Not checked", "Source unavailable", "Reported", "Answered", "Not applicable"] as const;
 
 export function EvidenceChapter({ view, legacy, current }: { view: ReportView; legacy?: ReactNode; current?: ReactNode }) {
   const evidence = view.evidence;

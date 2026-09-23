@@ -655,6 +655,8 @@ async function fetchPage(
 
 const roleEvidencePattern = (role: string): RegExp => {
   if (/founder/i.test(role)) return /\b(?:co-?founders?|founders?|started|founded)\b/i;
+  if (/\bcoo\b/i.test(role)) return /\b(?:coo|chief operating officer)\b/i;
+  if (/\bcbo\b/i.test(role)) return /\b(?:cbo|chief business officer)\b/i;
   if (/\bcto\b|technology/i.test(role)) return /\b(?:cto|chief technology officer)\b/i;
   if (/\bceo\b|executive/i.test(role)) return /\b(?:ceo|chief executive officer)\b/i;
   if (/advisor|adviser/i.test(role)) return /\b(?:advisor|adviser)\b/i;
@@ -719,6 +721,20 @@ const pageScore = (page: TeamPage) =>
   + (/\/(?:tokenomics|governance|transparency)(?:[/.?#-]|$)/i.test(page.url) ? 35 : 0)
   + Math.min(20, page.text.length / 1000);
 
+/** Keep role-bearing sections even when marketing copy consumes the prefix. */
+export function teamExtractionText(text: string): string {
+  if (text.length <= 10000) return text;
+  const windows = [...text.matchAll(/\b(?:co[- ]?founder|ceo|coo|cto|cbo|our team|the team|leadership)\b/gi)]
+    .map((match) => ({ start: Math.max(0, match.index - 350), end: Math.min(text.length, match.index + 900) }));
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const window of windows) {
+    const last = merged.at(-1);
+    if (last && window.start <= last.end) last.end = Math.max(last.end, window.end);
+    else merged.push(window);
+  }
+  return [text.slice(0, 1000), ...merged.map(({ start, end }) => text.slice(start, end))].join("\n[section]\n").slice(0, 15000);
+}
+
 const TEAM_EXTRACTION_SYSTEM =
   "You extract a crypto/tech project's team roster from fetched first-party project text. " +
   "List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. " +
@@ -763,7 +779,7 @@ async function extractTeamFromPages(
   const selectedPages = [...pages]
     .sort((a, b) => pageScore(b) - pageScore(a) || b.text.length - a.text.length)
     .slice(0, 3);
-  const corpus = selectedPages.map((page) => `PAGE ${page.url}:\n${page.text.slice(0, 5000)}`).join("\n\n");
+  const corpus = selectedPages.map((page) => `PAGE ${page.url}:\n${teamExtractionText(page.text)}`).join("\n\n");
   const out = await structured<{ people: { name: string; role: string; biography?: string; twitter?: string; linkedin?: string; source_url: string }[] }>(
     TEAM_EXTRACTION_SYSTEM,
     `Project${projectName ? ` ${projectName}` : ""} first-party team evidence:\n\n${corpus}`,
@@ -890,11 +906,12 @@ export async function fetchTeamPage(
   if (!pages.length && fallbackCandidates.length) {
     pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex, "roster", recoverOfficialText)))).filter(Boolean) as TeamPage[];
   }
-  // The homepage never qualifies as a roster page, but its footer is where a
-  // one-person project credits its builder (the Clutch Markets case). Fetch it
-  // for the deterministic credit scan only — it is never fed to the LLM lane.
+  // Many projects publish their entire roster on the homepage. Preserve the
+  // same direct-role verification used for dedicated team pages.
   const homePage = await fetchPage(`https://${apex}/`, apex, "credits", recoverOfficialText, true)
     ?? await fetchPage(`https://www.${apex}/`, apex, "credits", recoverOfficialText, true);
+  if (homePage && /\b(?:founder|cofounder|ceo|coo|cbo|cto|our team|the team)\b/i.test(homePage.text)
+    && !pages.some((page) => canonicalSourceUrl(page.url) === canonicalSourceUrl(homePage.url))) pages.push(homePage);
   const apexLabel = apex.split(".")[0];
   const creditSeen = new Set<string>();
   const creditTeam = [...pages, ...(homePage ? [homePage] : [])]

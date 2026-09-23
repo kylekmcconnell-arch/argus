@@ -490,6 +490,14 @@ const validContract = (platform: string, value: unknown): string | null => {
   return PLATFORM_CHAIN[platform] && EVM_ADDRESS.test(address) ? address : null;
 };
 
+export function registryDeployments(details: JsonRecord, sourceUrl: string, capturedAt: string): NonNullable<ProjectTokenSnapshot["registryDeployments"]> {
+  const platforms = isRecord(details.platforms) ? details.platforms : {};
+  return Object.entries(platforms).flatMap(([platform, value]) => {
+    const address = validContract(platform, value);
+    return address ? [{ chain: PLATFORM_CHAIN[platform], address, sourceUrl, capturedAt }] : [];
+  });
+}
+
 function canonicalContract(details: JsonRecord): ContractIdentity | null {
   const platforms = isRecord(details.platforms) ? details.platforms : {};
   const native = cleanText(details.asset_platform_id);
@@ -1942,6 +1950,19 @@ export async function collectProjectTokenIdentity(
     const declared = await collectProfileDeclaredToken(ctx, profileDeclaredToken);
     if (declared.state === "matched" && declared.snapshot) {
       const snapshot = declared.snapshot;
+      // A successful exact-address DEX match establishes identity, not complete
+      // chain coverage. Enrich through the same contract, never a ticker match.
+      const platform = CHAIN_PLATFORM[snapshot.chain];
+      const registry = platform ? await coinByContract(platform, snapshot.address) : null;
+      if (registry?.state === "ok" && registryContractMatchingDeclared(registry.details, profileDeclaredToken)?.chain === snapshot.chain) {
+        const id = cleanText(registry.details.id);
+        if (id) {
+          snapshot.coingeckoId = id;
+          const registryIdentity = verifyIdentity(ctx, registry.details);
+          if (registryIdentity?.homepage) snapshot.homepage = registryIdentity.homepage;
+          snapshot.registryDeployments = registryDeployments(registry.details, `https://www.coingecko.com/en/coins/${encodeURIComponent(id)}`, captureTimestamp());
+        }
+      }
       ctx.evidence.projectToken = snapshot;
       ctx.recordCheck?.({
         id: "project-token-identity",
@@ -1979,7 +2000,7 @@ export async function collectProjectTokenIdentity(
         source: "twitterapi / dexscreener",
         tone: "good",
       });
-      return { state: "executed", detail: declared.detail, attempts: declared.attempts };
+      return { state: "executed", detail: declared.detail, attempts: declared.attempts + (platform ? 1 : 0) };
     }
     // A declared contract with no DEX market does not end the identity
     // search. The bio may name a stale or migrated contract while CoinGecko
@@ -2422,6 +2443,7 @@ export async function collectProjectTokenIdentity(
     ...identity.officialX ? { officialX: identity.officialX } : {},
     sourceUrl: coinSourceUrl,
     capturedAt: collectedAt,
+    registryDeployments: registryDeployments(details, coinSourceUrl, collectedAt),
     producerSources: {
       identity: { provider: "coingecko", sourceUrl: coinSourceUrl, capturedAt: collectedAt },
       ...(hasMarketRead

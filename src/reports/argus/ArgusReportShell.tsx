@@ -291,6 +291,7 @@ function ShellBody(props: ArgusReportShellProps & {
               <><a href={props.savedHref} target="_blank" rel="noreferrer" title="Open the exact saved report. New checks shown later do not change its score.">SAVED REPORT</a>{" · "}</>
             )}
             {props.savedLine}
+            <span data-report-header-identity="true"> · Report {props.runtime.auditId}{props.runtime.caseLabel ? ` · Case ${props.runtime.caseLabel}` : ""}</span>
           </span>
           {issues.length > 0 && (
             <DisclosureButton id="audit" className="textbtn">

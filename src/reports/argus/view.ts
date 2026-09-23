@@ -78,6 +78,8 @@ export interface QuestionView {
   prompt: string;
   state: IntelligenceQuestion["state"];
   materiality?: IntelligenceQuestion["materiality"];
+  basis?: string;
+  sources?: SourceCard[];
 }
 
 export interface PersonCardView {

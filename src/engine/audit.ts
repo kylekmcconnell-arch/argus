@@ -72,7 +72,7 @@ export interface RoleReport {
   dox_bonus: number;
   axes: Record<string, AxisScore>;
   /** Why a normal methodology axis was assessed, waived, deferred, or left provisional. */
-  axis_applicability?: Record<string, TokenApplicabilitySnapshot>;
+  axis_applicability?: Record<string, TokenApplicabilitySnapshot | import("../lib/projectDiligenceContext").ProjectAxisTreatment>;
   /** Maximum applicable weighted points before normalization to 100. */
   applicable_weight?: number;
   score_coverage?: ScoreCoverage;
@@ -372,6 +372,7 @@ export class Audit {
   display_name?: string;
   organizationSubject = false;
   tokenApplicability?: TokenApplicabilitySnapshot;
+  projectAxisTreatments: Record<string, import("../lib/projectDiligenceContext").ProjectAxisTreatment> = {};
 
   private ventures: Venture[] = [];
   private testimonials: Testimonial[] = [];
@@ -719,10 +720,12 @@ export class Audit {
       const omitTokenConduct = role === SubjectClass.PROJECT
         && (this.tokenApplicability?.axisTreatment === "not_applicable"
           || this.tokenApplicability?.axisTreatment === "deferred");
+      const contextAxes = role === SubjectClass.PROJECT ? this.projectAxisTreatments : {};
+      for (const axis of Object.keys(contextAxes)) delete axes[axis];
       const expectedAxes = Object.keys(getProfile(role).axes)
-        .filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct"));
-      const axisApplicability = role === SubjectClass.PROJECT && this.tokenApplicability
-        ? { P3_token_conduct: structuredClone(this.tokenApplicability) }
+        .filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct") && !contextAxes[axis]);
+      const axisApplicability = role === SubjectClass.PROJECT
+        ? { ...structuredClone(contextAxes), ...(this.tokenApplicability ? { P3_token_conduct: structuredClone(this.tokenApplicability) } : {}) }
         : undefined;
       const applicableWeight = expectedAxes.reduce((sum, axis) =>
         sum + (getProfile(role).axes[axis] ?? 0), 0);
