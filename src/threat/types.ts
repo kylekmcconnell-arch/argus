@@ -233,6 +233,7 @@ export interface RegistryVerification {
 // (LP add / buyback-burn = bullish; dump = bearish) a first-class signal.
 export interface LaunchProvenance {
   kind: "launchpad" | "fair-launch" | "unknown";
+  attribution?: { state: "confirmed" | "candidate" | "unresolved"; basis: string; candidate: string | null };
   venue: string | null; // e.g. "pump.fun", "bonk.fun", "bags", "virtuals", "pons"
   // Bonding-curve state. null = not curve-based or unknown.
   onCurve: boolean | null;

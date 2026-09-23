@@ -13302,7 +13302,7 @@ var VENUES = [
     // Uniswap v2 pool QUOTED IN VIRTUAL.
     dexIds: [],
     quoteIs: ["VIRTUAL"],
-    quoteNoteFor: (q) => q === "VIRTUAL" ? "bonded to VIRTUAL - the floor is denominated in the Virtuals protocol token, so this token carries VIRTUAL's beta on top of its own" : null,
+    quoteNoteFor: (q) => q === "VIRTUAL" ? "quoted in VIRTUAL - its dollar value depends on both the token/VIRTUAL exchange rate and VIRTUAL's price; this does not establish a price floor" : null,
     lpOnGraduation: "locked",
     lpNote: "Virtuals auto-stakes graduated LP under a 10-year lock (the pool's LP majority sits in a 'Staked ... by Virtuals' contract) - not creator-pullable",
     platformPaysCreator: true,

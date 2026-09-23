@@ -464,7 +464,7 @@ export function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]
   return (
     <section className="mt-4 panel p-4 launch-panel" aria-label="Launch mechanics">
       <h2 className="display-sm text-[18px] leading-tight text-ink">Launch</h2>
-      <p className="mt-0.5 text-[11.5px] text-ink-faint">How this token came to market - the venue's mechanics decide what "locked liquidity" even means here.</p>
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">How this token came to market - venue mechanics provide context; this pool's custody needs its own evidence.</p>
       <dl className="launch-facts">
         {row("Venue", launch.kind === "fair-launch"
           ? "Fair launch - listed directly on a DEX, no launchpad"
@@ -475,6 +475,7 @@ export function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]
             ? <span style={{ color: "var(--color-pass)" }}>graduated - curve completed, liquidity migrated</span>
             : "state unknown")}
         {launch.quote && row("Bonded to", <span className="flex flex-col items-start gap-0.5"><span className="mono text-ink">{launch.quote}</span>{launch.quoteNote && <span>{launch.quoteNote}</span>}</span>)}
+        {launch.attribution && row("Attribution", `${launch.attribution.state}: ${launch.attribution.basis}`)}
         {launch.lpNote && row("LP custody", launch.lpNote)}
         {cf && cf.platformPays && cf.asset && cf.asset !== "unknown" && row("Paid in", cf.asset === "quote" ? `the quote asset${launch.quote ? ` (${launch.quote})` : ""}` : cf.asset === "token" ? "the token itself" : cf.asset === "mixed" ? `the token and ${launch.quote ?? "the quote asset"}` : "no standing creator fee")}
         {cf && cf.platformPays && row("Creator fees", (

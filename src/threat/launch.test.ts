@@ -106,3 +106,23 @@ describe("genericQuoteNote", () => {
     expect(genericQuoteNote("BONK", true)).toMatch(/volatile token/);
   });
 });
+
+describe("corroborated launch origin", () => {
+  it("does not turn a copyable suffix into confirmed provenance or a fair launch", async () => {
+    const { resolveVenueEvidence } = await import("./launch");
+    const result = resolveVenueEvidence("base", "0x1111111111111111111111111111111111111ba3", "uniswap", "ETH", null);
+    expect(result.venue).toBeNull();
+    expect(result.attribution).toMatchObject({ state: "candidate", candidate: "bankr" });
+    expect(resolveVenueEvidence("base", "0x1111111111111111111111111111111111111111", "uniswap", "ETH", null).attribution.state).toBe("unresolved");
+  });
+  it("prefers observed factory identity over a conflicting suffix", async () => {
+    const { resolveVenueEvidence } = await import("./launch");
+    const result = resolveVenueEvidence("robinhood", "0x1111111111111111111111111111111111111ba3", "uniswap", "ETH", { creatorVenue: "pons" });
+    expect(result.venue?.name).toBe("pons");
+    expect(result.attribution.state).toBe("confirmed");
+  });
+  it("rejects a server venue on an unsupported chain", async () => {
+    const { resolveVenueEvidence } = await import("./launch");
+    expect(resolveVenueEvidence("ethereum", "0x1111111111111111111111111111111111111111", "uniswap", "ETH", { creatorVenue: "long" }).venue).toBeNull();
+  });
+});
