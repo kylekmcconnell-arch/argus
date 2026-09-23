@@ -1,5 +1,8 @@
 # Launchpad study: what was done, what was not, and what it changes
 
+
+> **Audit correction (2026-09-24):** This is a historical research record, not proof of completed collection or current product behavior. The required holder target is **25**. Address suffixes are candidate venue clues, not proof of origin; generic platform mechanics do not prove a particular pool is locked or immune to withdrawal. Creator fee denomination is a note, never a demerit: adverse conduct requires observed claims and sales. Volume/depth ratios are screening signals, not proof of manipulation. Comparative rug/extraction rankings require a defined population, period and outcome methodology, which this study did not supply. See `docs/launchpads/COLLECTION.md` and issue #525 for remaining collection work. Historical claims below must be corroborated before reuse.
+
 Written 2026-09-23 after PRs #510 and #511 merged into Argus main. A record of decisions already taken; the study itself is in [`docs/launchpads/`](../launchpads/README.md).
 
 ## 1. What was done
