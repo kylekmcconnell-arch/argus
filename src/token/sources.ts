@@ -3,8 +3,8 @@
 //   - DexScreener: market, liquidity, volume, txns, age, socials.
 //   - GoPlus: contract safety (honeypot, mint authority, ownership, tax, holders).
 
-import { HOLDER_TARGET } from "../lib/holderIntelligence";
-import { retryFetch, retryFetchWithFreshTimeout } from "../lib/retry";
+import { HOLDER_TARGET } from "../lib/holderIntelligence.js";
+import { retryFetch, retryFetchWithFreshTimeout } from "../lib/retry.js";
 
 export interface DexPair {
   chainId: string;

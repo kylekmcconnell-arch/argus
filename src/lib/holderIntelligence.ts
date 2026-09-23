@@ -1,6 +1,6 @@
-import { CABAL_REGISTRY_VERSION, findCabalWallets } from "../data/cabals";
-import { classifyMarketAddress } from "./marketAddresses";
-import { tokenSubjectIdentity } from "./tokenIdentity";
+import { CABAL_REGISTRY_VERSION, findCabalWallets } from "../data/cabals.js";
+import { classifyMarketAddress } from "./marketAddresses.js";
+import { tokenSubjectIdentity } from "./tokenIdentity.js";
 
 export const HOLDER_TARGET = 25;
 export interface HolderObservation {
