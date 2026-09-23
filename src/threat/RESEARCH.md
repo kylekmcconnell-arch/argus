@@ -985,3 +985,55 @@ address holding the stock is named and checkable.
 contract returns MEME and has no rename function. Any balance view on the
 explorer lists it beside the real stock token. Read `symbol()` from the
 contract before trusting an explorer label on this chain.
+
+## A clean launch with no business behind it ($AILE, Solana, read 2026-09-22)
+
+Deliberately not a cabal entry, for the same reason as $MERRYMEN: there is no
+cluster to record. The point of the section is that a token can pass every
+mechanical check and still be carrying a valuation its own numbers do not
+support.
+
+**Everything mechanical is clean.** A pump.fun launch on the Token-2022
+program, created 2026-09-11 19:24 UTC, graduated to PumpSwap thirteen minutes
+later. Token-2022 is where transfer fees, transfer hooks and permanent
+delegates would sit, so check the extension list rather than assuming: this one
+carries only a metadata pointer and the metadata. Mint authority, freeze
+authority and metadata update authority are all null.
+
+**The creator never sold, and this is checkable in one query.** The creator
+wallet bought 348,534 tokens, 0.035 percent of supply, for 0.0231 SOL at
+launch. Its token account has 570 signatures and exactly one of them succeeded:
+that buy. The other 569 failed and moved nothing. Balance today is the same
+348,535. Pull the creator's token account signature list and count the
+successes before repeating any claim that a dev dumped.
+
+**The usage page is the finding.** The project publishes its own network
+totals, and they read: 975 requests, 21.4M tokens and **4.80 USD of settled
+value** across all time since 2026-08-17, generating 0.70 USD of protocol fee.
+One day, 09-13, carries 16.0M of the 21.4M tokens in 44 requests. The token
+peaked at a 490,109 USD market cap on 2026-09-20 and sits at about 35,800 USD
+with 285 holders and 16,700 USD of liquidity. A buyback announced 2026-09-21,
+funded by the settlement fee, is drawing on a lifetime pool of 0.70 USD.
+Credit where it is due: most projects at this stage do not publish this at all,
+and it was linked from the footer.
+
+**The business model needs the supply side to break its own contracts.**
+Lenders rent out AI subscriptions and API keys they already pay for, and the
+catalogue advertises Claude model access at 20 to 35 percent below list.
+Reselling or sharing access is prohibited by the major providers' terms and
+they enforce it by terminating accounts. That is not one bad listing, it is the
+inventory the marketplace is built on. Scaling the lender side raises the odds
+of enforcement against it.
+
+**Who actually sold, and a funder signal that is a false positive.** The
+current top ten are not the sellers; nine of them bought from the pool after
+graduation, four of those on 09-19 and 09-20 immediately before the peak, and
+none bought on the bonding curve. The sellers are earlier buyers who exited in
+full: the top hundred traders realised about 110,900 USD, accumulating between
+4,300 and 145,000 USD of market cap and distributing between 94,000 and
+320,000. Several of the winners shared a funding address, which normally means
+a coordinated cluster. It holds 5,094 SOL and processes roughly 436,000
+transactions a day, so it is a trading terminal's relay account. Profile a
+shared funder's transaction rate before calling it a ring. The same trap exists
+on Robinhood Chain, where the exchange's own hot wallets fund thousands of
+unrelated user wallets.
