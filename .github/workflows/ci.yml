@@ -44,6 +44,29 @@ jobs:
           echo '{"max-concurrent-downloads": 2}' | sudo tee /etc/docker/daemon.json >/dev/null
           sudo systemctl restart docker
 
+      # The pinned CLI resolves images to ghcr.io regardless of the override
+      # in some runs (observed 2026-09-23), and `test db` hard-codes
+      # ghcr.io/supabase/pg_prove. Stage every pinned image from the ECR
+      # mirror with backoff and tag it under the ghcr name, so the daemon
+      # already holds whatever name the CLI asks for. A miss here is not
+      # fatal: supabase start keeps its own retry loop.
+      - name: Stage Supabase images from the mirror
+        run: |
+          set -u
+          images="postgres:17.6.1.143 postgres-meta:v0.96.6 logflare:1.46.0 storage-api:v1.62.5 realtime:v2.112.6 vector:0.53.0-alpine imgproxy:v3.8.0 mailpit:v1.30.2 gotrue:v2.192.0 edge-runtime:v1.74.2 studio:2026.07.06-sha-66cf431 postgrest:v14.14 pg_prove:3.36"
+          for image in $images; do
+            delay=5
+            for try in 1 2 3 4 5; do
+              if docker pull "public.ecr.aws/supabase/$image" >/dev/null 2>&1; then
+                docker tag "public.ecr.aws/supabase/$image" "ghcr.io/supabase/$image"
+                echo "staged $image"
+                break
+              fi
+              echo "pull of $image throttled (try $try); waiting ${delay}s"
+              sleep "$delay"; delay=$((delay * 2))
+            done
+          done
+
       - name: Start isolated Supabase database
         # The pinned CLI defaults to ghcr.io; the same images are mirrored to
         # ECR Public (the registry newer CLIs default to), on a separate
@@ -68,20 +91,6 @@ jobs:
             sleep "$delay"
             delay=$((delay * 2))
           done
-
-      # The pinned CLI's `test db` hard-codes ghcr.io/supabase/pg_prove and
-      # ignores the registry override. Pull it from the mirror and tag it
-      # under the ghcr name so the daemon already has it.
-      - name: Stage pg_prove from the mirror
-        run: |
-          set -eu
-          delay=5
-          for try in 1 2 3 4 5; do
-            if docker pull public.ecr.aws/supabase/pg_prove:3.36; then break; fi
-            [ "$try" -eq 5 ] && exit 1
-            echo "pg_prove pull throttled (try $try); waiting ${delay}s"; sleep "$delay"; delay=$((delay * 2))
-          done
-          docker tag public.ecr.aws/supabase/pg_prove:3.36 ghcr.io/supabase/pg_prove:3.36
 
       - name: Executable Postgres persistence and activation gates
         run: npm run test:db
