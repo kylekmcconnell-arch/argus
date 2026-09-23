@@ -209,14 +209,20 @@ async function bankrDopplerCheck(token: string): Promise<boolean> {
 // native B20 assets minted through the chain's genesis B20 Factory, so
 // getcontractcreation names the B20 factory for every B20 asset, o1 or not.
 // What IS o1-specific is the suite's Announcement Registry: the launch tx
-// writes the token into it, so a log on that registry whose indexed topics
-// carry the token address is an o1 launch receipt. Registry address from o1's
-// machine-readable suite registry (docs.o1.exchange/launchpad/reference/
-// launch-contract-suites.json, lastUpdatedAt 2026-09-16, suite
-// base-mainnet-launchpad-v4-minimal). Historical Base suites can be added the
-// same way when a token from one surfaces.
+// emits CreatorRegistered(address indexed token, address indexed creator) on
+// it, so a log on that registry whose first indexed topic is the token is an
+// o1 launch receipt (layout read off $SPIKE's launch tx 0x90db666c…, suite
+// "timestamp v2", 2026-08-13). Every Base suite from o1's machine-readable
+// registry (docs.o1.exchange/launchpad/reference/launch-contract-suites.json,
+// lastUpdatedAt 2026-09-18), current first: a historical suite still hosts
+// live pools - $SPIKE traded $5M on the 2026-07 suite six weeks after o1 had
+// moved on - so a token from one must still resolve to o1.
 const O1_BASE_ANNOUNCEMENT_REGISTRIES = [
-  "0xab1243c97a37361115d5cef7666bf49ad2fb6baa",
+  "0xab1243c97a37361115d5cef7666bf49ad2fb6baa", // launchpad-v4-minimal (current)
+  "0x7ce9c6d4d0dce30895e5e35798954947071029c0",
+  "0x4fa46c840df1d11b20750c08390f7dabfe0e1cca",
+  "0xabdcbe060724b9bef5a2daad017d9ea3ed72de28", // timestamp v2 ($SPIKE)
+  "0xa6bb57abd6d26cf862e6aab84f2bcd51210a060e",
 ];
 // B20 system-address prefix (Base-native asset standard). Gates the log probe:
 // a non-B20 Base token cannot be an o1 launch, so it never spends the calls.
@@ -226,23 +232,21 @@ export async function o1BaseAnnouncementVenue(token: string, etherscanKey: strin
   if (!B20_SYSTEM_ADDRESS.test(token)) return null;
   const paddedToken = `0x${"0".repeat(24)}${token.slice(2).toLowerCase()}`;
   for (const registry of O1_BASE_ANNOUNCEMENT_REGISTRIES) {
-    // The event layout is not pinned, so both plausible indexed positions are
-    // tried; a miss on both is "not attributed", never a guess.
-    for (const topicPosition of ["topic1", "topic2"] as const) {
-      try {
-        const q = new URLSearchParams({
-          chainid: "8453", module: "logs", action: "getLogs",
-          address: registry, [topicPosition]: paddedToken,
-          fromBlock: "0", toBlock: "latest", page: "1", offset: "1",
-          apikey: etherscanKey,
-        });
-        const r = await fetch(`https://api.etherscan.io/v2/api?${q}`, { signal: AbortSignal.timeout(9000) });
-        if (!r.ok) continue;
-        const d = (await r.json()) as { result?: unknown };
-        if (Array.isArray(d.result) && d.result.length > 0) return "o1";
-      } catch {
-        continue;
-      }
+    // One call per suite, token pinned to the first indexed topic; a miss on
+    // every suite is "not attributed", never a guess.
+    try {
+      const q = new URLSearchParams({
+        chainid: "8453", module: "logs", action: "getLogs",
+        address: registry, topic1: paddedToken,
+        fromBlock: "0", toBlock: "latest", page: "1", offset: "1",
+        apikey: etherscanKey,
+      });
+      const r = await fetch(`https://api.etherscan.io/v2/api?${q}`, { signal: AbortSignal.timeout(9000) });
+      if (!r.ok) continue;
+      const d = (await r.json()) as { result?: unknown };
+      if (Array.isArray(d.result) && d.result.length > 0) return "o1";
+    } catch {
+      continue;
     }
   }
   return null;
