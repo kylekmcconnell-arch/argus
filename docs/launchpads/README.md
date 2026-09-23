@@ -1,6 +1,9 @@
 # Launchpad landscape study — working document
 Started 2026-09-23. All figures are point-in-time reads with the source named. Anything not verified is marked UNVERIFIED.
 
+> **Audit correction (2026-09-24):** This is a historical research record, not proof of completed collection or current product behavior. The required holder target is **25**. Address suffixes are candidate venue clues, not proof of origin; generic platform mechanics do not prove a particular pool is locked or immune to withdrawal. Creator fee denomination is a note, never a demerit: adverse conduct requires observed claims and sales. Volume/depth ratios are screening signals, not proof of manipulation. Comparative rug/extraction rankings require a defined population, period and outcome methodology, which this study did not supply. See `docs/launchpads/COLLECTION.md` and issue #525 for remaining collection work. Historical claims below must be corroborated before reuse.
+
+
 ## 0. Scope and honesty note
 Eight platforms across three chains. A full index of every launched project with 15-holder identity scans on 25×3×3 tokens per platform is ~2,000 token scans and tens of thousands of wallet lookups; this document builds the landscape, verifies mechanics and contracts, assesses native tokens, sweeps the leading projects and runs identity checks on a sample. It is structured to be extended.
 
