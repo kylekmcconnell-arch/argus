@@ -135,10 +135,12 @@ export async function threatScan(
       : launch.graduated
         ? "graduated - curve completed"
         : launch.kind === "fair-launch" ? "direct DEX listing" : "state unknown";
+    const feeAsset = launch.creatorFees?.asset;
+    const paidIn = feeAsset === "token" ? " · creator paid in the token" : feeAsset === "mixed" ? " · creator paid in token + quote" : "";
     emit?.({
       phase: "ARGUS · Launch",
       label: launch.venue ?? "Fair launch",
-      detail: `${state}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${launch.lpNote ? ` · ${launch.lpNote}` : ""}`,
+      detail: `${state}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${paidIn}${launch.lpNote ? ` · ${launch.lpNote}` : ""}`,
       tone: "neutral",
     });
   }
@@ -605,7 +607,11 @@ export function judge( // exported for unit tests only
     } else if (cf.usage === "buyback") {
       positives.push(`Creator claims ${launch.venue} fees and buys the token back. ${cf.note}`);
     } else if (cf.usage === "dump" && !established) {
-      soft(8); warnings.push(`Creator claims ${launch.venue} fee revenue and sells it - fees are an income stream, not a reinvestment. ${cf.note}`);
+      // The warning is for conduct, never for the venue's fee model: a
+      // claimer who keeps drawing fees and selling them, with no buyback or
+      // burn balancing the claims (the claim tracer in api/launch.ts).
+      const cadence = cf.claimCount != null && cf.claimCount > 0 ? ` across ${cf.claimCount} claim${cf.claimCount === 1 ? "" : "s"}` : "";
+      soft(8); warnings.push(`Creator keeps claiming ${launch.venue} fees${cadence} and selling them${cf.asset === "token" || cf.asset === "mixed" ? " - on this venue the claims arrive in the token, so each one is supply sold into holders" : ""}, with no buyback or burn balancing it. ${cf.note}`);
     }
   }
   if (launch?.snipe && !established && !migration?.isPostMigrationToken) {
@@ -898,7 +904,7 @@ export function buildChecks( // exported for unit tests only
         : "pass",
       launch == null || launch.kind === "unknown" ? "Venue not identified"
         : launch.kind === "fair-launch" ? `Fair launch - listed directly on ${d.dexId}${launch.quote ? ` vs ${launch.quote}` : ""}`
-        : `${launch.venue}${launch.onCurve ? ` - on curve${launch.curveProgressPct != null ? ` (${launch.curveProgressPct.toFixed(0)}%)` : ""}` : launch.graduated ? " - graduated" : ""}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${launch.creatorFees && launch.creatorFees.usage !== "unknown" ? ` · creator fees: ${launch.creatorFees.usage}` : ""}`),
+        : `${launch.venue}${launch.onCurve ? ` - on curve${launch.curveProgressPct != null ? ` (${launch.curveProgressPct.toFixed(0)}%)` : ""}` : launch.graduated ? " - graduated" : ""}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${launch.creatorFees && launch.creatorFees.usage !== "unknown" ? ` · creator fees: ${launch.creatorFees.usage}${launch.creatorFees.claimCount ? ` (${launch.creatorFees.claimCount} claims)` : ""}` : ""}${launch.creatorFees?.asset === "token" ? " · creator paid in the token" : launch.creatorFees?.asset === "mixed" ? " · creator paid in token + quote" : ""}`),
     chk("tax", "market", "Buy/sell tax & destination",
       na ? "na" : s.sellTax >= 15 && !tk.tax.destinations.includes("rwa-distribution") ? "fail" : tk.tax.tone === "good" ? "pass" : s.sellTax > 5 ? "warn" : "pass",
       na ? "Unchecked" : tk.tax.note),

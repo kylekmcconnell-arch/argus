@@ -476,10 +476,11 @@ function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]["launc
             : "state unknown")}
         {launch.quote && row("Bonded to", <span className="flex flex-col items-end gap-0.5"><span className="mono text-ink">{launch.quote}</span>{launch.quoteNote && <span>{launch.quoteNote}</span>}</span>)}
         {launch.lpNote && row("LP custody", launch.lpNote)}
+        {cf && cf.platformPays && cf.asset && cf.asset !== "unknown" && row("Paid in", cf.asset === "quote" ? `the quote asset${launch.quote ? ` (${launch.quote})` : ""}` : cf.asset === "token" ? "the token itself" : cf.asset === "mixed" ? `the token and ${launch.quote ?? "the quote asset"}` : "no standing creator fee")}
         {cf && cf.platformPays && row("Creator fees", (
           <span className="flex flex-col items-end gap-0.5">
             <span style={{ color: cfGood ? "var(--color-pass)" : cf.usage === "dump" ? "var(--color-caution)" : undefined }}>
-              {cf.usage === "unknown" ? (cf.claimCount != null && cf.claimCount > 0 ? `${cf.claimCount} claim${cf.claimCount === 1 ? "" : "s"} observed - usage untraced` : "platform pays creator fees - claims not observed") : cf.usage.replace(/-/g, " ")}
+              {cf.usage === "unknown" ? (cf.claimCount != null && cf.claimCount > 0 ? `${cf.claimCount} claim${cf.claimCount === 1 ? "" : "s"} observed - usage untraced` : "platform pays creator fees - claims not observed") : `${cf.usage.replace(/-/g, " ")}${cf.claimCount ? ` · ${cf.claimCount} claim${cf.claimCount === 1 ? "" : "s"}` : ""}${cf.claimedTokens ? ` · ${Math.round(cf.claimedTokens).toLocaleString()} tokens` : ""}`}
             </span>
             {cf.note && <span>{cf.note}</span>}
           </span>

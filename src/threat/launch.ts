@@ -42,6 +42,14 @@ interface Venue {
   lpNote: string;
   platformPaysCreator: boolean;
   feeNote: string;
+  /**
+   * What the creator is paid in. "quote" is the pool's quote asset (SOL, ETH,
+   * USDG, a tokenized stock); "token" or "mixed" means fee claims hand the
+   * creator fresh supply of the launched token, so every claim is a sell
+   * decision. Disclosed as a note only; abuse is judged on observed claims.
+   * Sources: docs/launchpads/ (read 2026-09-23).
+   */
+  creatorFeeAsset: NonNullable<LaunchProvenance["creatorFees"]>["asset"];
 }
 
 // The venue table. lpOnGraduation/lpNote describe the PLATFORM MECHANISM for a
@@ -63,6 +71,7 @@ const VENUES: Venue[] = [
     lpNote: "graduation moves liquidity into pump.fun's own AMM (PumpSwap) with the migration LP burned - the creator cannot pull it",
     platformPaysCreator: true,
     feeNote: "pump.fun pays creators a tiered share of trading fees (claimable on-chain), on the curve and after graduation",
+    creatorFeeAsset: "quote",
   },
   {
     // bonk.fun / LetsBonk. The bonk suffix is the brand's default but NOT
@@ -77,6 +86,7 @@ const VENUES: Venue[] = [
     lpNote: "graduates to Raydium CPMM at 85 SOL raised with ~100% of the migration LP burned (current LetsBonk config)",
     platformPaysCreator: true,
     feeNote: "current LetsBonk config sets the creator fee to 0 - platform fees partly buy BONK; older launches had a creator share",
+    creatorFeeAsset: "quote",
   },
   {
     // Raydium LaunchLab family (shared curve program): LetsBonk without the
@@ -90,6 +100,7 @@ const VENUES: Venue[] = [
     lpNote: "LaunchLab graduates into Raydium CPMM; migration LP is burned and/or locked per platform config (creator LP, where any, is a locked fee-rights NFT - principal can't be pulled)",
     platformPaysCreator: true,
     feeNote: "creator fee share is per-platform (Bankr pays 50% of the 1% trade fee; current LetsBonk pays 0)",
+    creatorFeeAsset: "quote",
   },
   {
     name: "bags",
@@ -101,6 +112,7 @@ const VENUES: Venue[] = [
     lpNote: "Bags curves on Meteora DBC and graduates into Meteora DAMM v2 with the LP locked - creators claim fees on the locked position, not principal",
     platformPaysCreator: true,
     feeNote: "~1% of trading volume routed to the creator (and any fee-shared X account) in perpetuity, via the Bags fee-share program",
+    creatorFeeAsset: "quote",
   },
   {
     name: "moonit",
@@ -111,6 +123,7 @@ const VENUES: Venue[] = [
     lpNote: "Moonit (DexScreener's launchpad, ex-Moonshot) migrates graduated liquidity into platform-managed Meteora/Raydium pools",
     platformPaysCreator: false,
     feeNote: "no standing creator fee stream",
+    creatorFeeAsset: "none",
   },
   {
     // Generic Meteora DBC curve dexId: Believe and other DBC launchpads (Bags
@@ -123,6 +136,7 @@ const VENUES: Venue[] = [
     lpNote: "Meteora DBC curve; graduates into a locked DAMM v2 position (fee-claim-only, principal locked)",
     platformPaysCreator: true,
     feeNote: "DBC platforms typically split trading fees with the creator (Believe: 50/50), claimed via the DBC program",
+    creatorFeeAsset: "quote",
   },
   {
     name: "boop",
@@ -132,6 +146,7 @@ const VENUES: Venue[] = [
     lpNote: "Boop graduates (~400 SOL mcap) into a platform-managed Raydium pool; the platform is largely dormant in 2026",
     platformPaysCreator: true,
     feeNote: "post-graduation fees distributed to BOOP stakers with a creator cut",
+    creatorFeeAsset: "quote",
   },
   {
     name: "virtuals",
@@ -147,6 +162,7 @@ const VENUES: Venue[] = [
     lpNote: "Virtuals auto-stakes graduated LP under a 10-year lock (the pool's LP majority sits in a 'Staked ... by Virtuals' contract) - not creator-pullable",
     platformPaysCreator: true,
     feeNote: "1% trading fee routed to fund the agent/creator (inference budget), not a claimable LP-fee stream",
+    creatorFeeAsset: "quote",
   },
   {
     name: "flaunch",
@@ -158,6 +174,7 @@ const VENUES: Venue[] = [
     lpNote: "Flaunch LP is managed by the protocol's v4 hook and cannot be extracted; a fee share feeds an automated buyback wall",
     platformPaysCreator: true,
     feeNote: "creator revenue share is configurable 0-100% of trading fees (paid in flETH) - a high creator cut is by-design here, not a red flag",
+    creatorFeeAsset: "quote",
   },
   {
     name: "clanker",
@@ -171,10 +188,13 @@ const VENUES: Venue[] = [
     lpNote: "full supply is pooled at deploy and the LP position is held by Clanker's locker; trading fees stream to the configured recipients",
     platformPaysCreator: true,
     feeNote: "1% pool fee split to configured recipients (deployer/interface e.g. Bankr) - claimable by the fee admin",
+    creatorFeeAsset: "mixed",
   },
   {
-    // Bankr on Base/Robinhood runs on Doppler protocol (post-Clanker era). No
-    // client fingerprint (no suffix, per-user 4337 deployer wallets) - resolved
+    // Bankr on Base/Robinhood runs on Doppler protocol (post-Clanker era,
+    // 2026-02-10 onward). Doppler-era Bankr tokens carry the vanity suffix
+    // ...ba3 on both chains (verified on musebook, Agrippa, museic, Nautilo,
+    // Euler and GME on Robinhood, 2026-09-23); tokens without it are resolved
     // server-side via Bankr's public per-token API. Custody verified on-chain
     // ($KUPO): the entire supply pools into a Uniswap V4 multicurve position
     // held book-entry INSIDE the Doppler initializer/hook - no position NFT
@@ -185,23 +205,96 @@ const VENUES: Venue[] = [
     domains: ["bankr.bot"],
     chain: "evm",
     chains: ["base", "robinhood"],
+    mintSuffix: /ba3$/i,
     lpOnGraduation: "locked",
     lpNote: "liquidity is locked book-entry inside Doppler's V4 multicurve initializer - no position NFT, no unlock path; creator and platform can only collect fees, never principal",
     platformPaysCreator: true,
-    feeNote: "0.7% pool fee split 95% creator / 5% Doppler, streamed forever; watch the creator's fee-claim wallet for dumping, and the optional premint (up to 15%, 1yr vest, 30-day cliff)",
+    feeNote: "1.75% all-in swap fee: creator 0.665%, LP leg 0.285% compounding into the locked position, Bankr 0.475%, BNKR buyback 0.2375%, Doppler ~0.09%; the launch fee starts at 80% and decays to that over ~10 seconds. Creator fees arrive as a mix of the launched token and the quote unless the launch opted into quote-only, plus an optional 15% premint (1yr vest, 30-day cliff) - watch the creator's claim wallet (docs/launchpads/bankr.md)",
+    creatorFeeAsset: "mixed",
   },
   {
     name: "pons",
+    domains: ["ponsfamily.com"],
     chain: "evm",
     chains: ["robinhood"],
-    // Pons pools read as plain uniswap v3/WETH on DexScreener - detection is
-    // the token's CREATOR contract (PonsLaunchFactory), checked server-side in
-    // /api/launch via Blockscout. No client-side fingerprint exists.
+    // Pons v2 (the only generation still launching): bonding curve into a
+    // Uniswap v4 pool under the Pons MemeHook, which reads as plain uniswap
+    // on DexScreener - detection is the token's CREATOR contract (the v2
+    // LaunchDeployer), checked server-side in /api/launch via Blockscout.
     dexIds: [],
     lpOnGraduation: "locked",
-    lpNote: "the liquidity position is transferred to the Pons launch locker at launch (PonsLaunchLocker on v1, PonsV2LaunchLocker on v2) - permanent custody, no unlock path for principal. On v2 the curve sells 71.4% of supply, graduation moves 20.4% plus the curve proceeds into a Uniswap v4 pool and 8.16% into the locker (verified 2026-09-12)",
+    lpNote: "the curve sells 71.4% of supply and graduation seeds a single full-range Uniswap v4 position with the reserved 28.6% plus everything the curve raised, minted straight into the Pons LaunchLocker - permanent custody with no withdraw function, and any leftover supply is locked there too (docs v2, read 2026-09-23)",
     platformPaysCreator: true,
-    feeNote: "v1: 1% pool fee split ~70% creator / 30% protocol inside the locked position. v2: the PonsV2MemeHook takes 5% on sells and 100% on sells by launch-block buyers, and both accrue as creator tax the deployer claims from PonsV2FeeEscrow - so a deployer who snipes their own launch recycles the tax; watch claim cadence and where the claimed ETH/USDG goes (RESEARCH.md, Pons V2 launch farms)",
+    feeNote: "1% base fee on the curve and the pool split 30% protocol / 70% creator, plus an optional creator tax of up to 10% that goes entirely to the creator, all denominated in the quote asset (ETH, USDG or the paired stock) and claimed from the FeeEscrow. The anti-snipe is a buy-side tax that opens at 99% and decays to zero over the first five seconds, with the creator's own launch-and-buy exempt - so a creator can still be first in. Watch the claim cadence and where the claimed quote goes (docs/launchpads/pons.md)",
+    creatorFeeAsset: "quote",
+  },
+  {
+    // Pons v1 (2026-07-13 to 2026-09-10; launching now disabled). Fixed
+    // supply straight into a locked Uniswap V3 pool, no curve. Its 1% pool
+    // fee accrued in BOTH the token and WETH inside the locked position, and
+    // the creator's share was paid out in kind - the origin of the in-token
+    // creator fee farms indexed in cabals.ts (wire bot, LEMON, MOTION).
+    // Server-only: resolved from the v1 factory addresses.
+    name: "pons v1",
+    chain: "evm",
+    chains: ["robinhood"],
+    dexIds: [],
+    lpOnGraduation: "locked",
+    lpNote: "the V3 position was transferred to the PonsLaunchLocker at launch - permanent custody, no unlock path for principal (verified on MOTION, position 232213)",
+    platformPaysCreator: true,
+    feeNote: "1% V3 pool fee split 70% creator / 30% protocol (90/10 on the legacy factory), accrued in both the token and WETH and paid to the creator in kind through the locker - MOTION's deployer received 85 such payments. A creator who forwards the token leg to fresh wallets that sell is the wire bot / LEMON pattern (docs/launchpads/pons.md)",
+    creatorFeeAsset: "mixed",
+  },
+  {
+    // LONG (app.long.xyz) on Robinhood Chain: an integrator on Whetstone's
+    // Doppler protocol, launching straight into a Uniswap v4 pool quoted in a
+    // Robinhood Stock Token, ETH, USDG or $AI. The trusted token factory mines
+    // every address to end in ...1e18 (verified on AI, MEME, TAIWAN, MONITOR,
+    // BONER; 56,242 such tokens by 2026-09-23). LongLauncher v1
+    // 0x22e99278... (paused) and v2 0x1eEF016F....
+    name: "long",
+    domains: ["long.xyz", "app.long.xyz"],
+    chain: "evm",
+    chains: ["robinhood"],
+    mintSuffix: /1e18$/i,
+    lpOnGraduation: "locked",
+    lpNote: "no curve phase: the full supply is pooled into a Uniswap v4 multicurve position held book-entry inside Doppler's initializer in the creation tx - no position NFT, no unlock path, no migration; the creator's rights are fee claims only",
+    platformPaysCreator: true,
+    feeNote: "the Rehype hook opens at an 80% swap fee decaying to 1.12% over ten seconds and routes 71-100% of that hook fee to LONG's own wallet; the creator is a 95% beneficiary of only the 0.1-0.2% Uniswap LP fee, paid in BOTH pool tokens through the initializer's collectFees - so every creator claim is part launched-token, and the observed pattern is to forward it to fresh wallets and sell (TAIWAN, MEME). Watch the claim cadence and the one-hop destinations (docs/launchpads/long.md)",
+    creatorFeeAsset: "mixed",
+  },
+  {
+    // Any other Doppler-protocol integrator on Base/Robinhood: same Airlock,
+    // token factory and initializer as LONG and Bankr, no client fingerprint.
+    // Server-only: resolved from the Doppler token factory as the creating
+    // contract. Custody and fee-asset mechanics are the protocol's, not the
+    // integrator's, so they hold here too.
+    name: "doppler",
+    chain: "evm",
+    chains: ["base", "robinhood"],
+    dexIds: [],
+    lpOnGraduation: "locked",
+    lpNote: "Doppler protocol launch: the full supply sits in a Uniswap v4 position held book-entry inside the DopplerHookInitializer - no position NFT, no unlock path, no migration",
+    platformPaysCreator: true,
+    feeNote: "Doppler pays the pool's fee beneficiaries (the creator, 95% by default) in both pool tokens via collectFees on the initializer; the integrator's own hook fee and split are set per launch",
+    creatorFeeAsset: "mixed",
+  },
+  {
+    // StonkBrokers (stonkbrokers.cash) on Robinhood Chain: one Smart Launch
+    // V2 pad per quote asset (WETH, STONKBROKER, USDG, GME, NVDA, AAPL, SPCX,
+    // USO, yBTC) with a virtual-reserve curve, bonding into a permanently
+    // locked Uniswap V3 / Slipstream position in the Safety Deposit Box.
+    // Server-only: resolved from the pad addresses as the creating contract.
+    name: "stonkbrokers",
+    domains: ["stonkbrokers.cash", "stonkbrokers.io", "stonkbrokers.wtf"],
+    chain: "evm",
+    chains: ["robinhood"],
+    dexIds: [],
+    lpOnGraduation: "locked",
+    lpNote: "at bond the raise plus a 50% fee reserve mint a full-range position straight into the Safety Deposit Box as a permanent lock; the lock NFT only collects fees (80% to the creator) and principal is never withdrawable",
+    platformPaysCreator: true,
+    feeNote: "every curve tax splits 16.5% creator / 16.5% protocol / 16.5% StockBooster / 0.5% referral / 50% LP reserve, paid in the lane's quote asset; anti-snipe modes open at up to 99% tax decaying 1% per minute, which in the v1 era taxed launch buyers 85.8% on WALL. Creator keeps up to 50% of supply unlocked unless vested - read the team-overhang badge (docs/launchpads/stonkbrokers.md)",
+    creatorFeeAsset: "quote",
   },
   {
     // o1 Launchpad (o1.exchange): one launchpad-v4-minimal suite on Base,
@@ -223,6 +316,7 @@ const VENUES: Venue[] = [
     lpNote: "no curve phase: the full supply is pooled into a Uniswap v4 pool under the o1 launch hook in the creation tx and o1 documents the liquidity as permanent - creator rights are fee claims only, so an LP-pull is not the exit path here; the deployer's optional atomic Dev Buy and the 20-second anti-snipe window are the launch-block variables to read",
     platformPaysCreator: true,
     feeNote: "1% per swap split creator 50 bps / platform 30 bps / referrer 20 bps, claimed from the suite's Fee Escrow (claimFor) as ETH or the quote asset; a creator who sets their own address as referrer takes 70 bps of every trade. Watch the claim cadence and where the claimed ETH goes - $BRAINARM's creator claimed 1.68 ETH in 10 claims over 26 hours and parked it as USDC in two fresh wallets (RESEARCH.md, o1 Launchpad)",
+    creatorFeeAsset: "quote",
   },
   {
     name: "four.meme",
@@ -235,6 +329,7 @@ const VENUES: Venue[] = [
     lpNote: "graduates to PancakeSwap V2 with the LP tokens burned by the platform",
     platformPaysCreator: false,
     feeNote: "no ongoing creator fee stream",
+    creatorFeeAsset: "none",
   },
   {
     name: "flap.sh",
@@ -247,6 +342,7 @@ const VENUES: Venue[] = [
     lpNote: "bonding curve migrates into a platform-created pool on fill; supports tax tokens and tokenized-stock dividend vaults by design",
     platformPaysCreator: true,
     feeNote: "platform fee model; tax-token launches are expected here - a token-level tax is not automatically a rug signal on flap.sh",
+    creatorFeeAsset: "unknown",
   },
 ];
 
@@ -254,15 +350,30 @@ interface LaunchApiResponse {
   creatorVenue?: string;
   snipe?: LaunchProvenance["snipe"];
   pumpfun?: { complete?: boolean; curvePct?: number | null };
+  // Server-side read of the creator's fee claims on venues that pay in the
+  // launched token (Doppler integrators, Pons v1): how many claims, how much,
+  // and what the claimer did with it. See api/launch.ts creatorFeeUsage.
+  creatorFees?: {
+    claimer: string | null;
+    claimCount: number;
+    claimedTokens: number;
+    soldTokens: number;
+    burnedTokens: number;
+    boughtBackTokens: number;
+    heldTokens: number;
+    usage: NonNullable<LaunchProvenance["creatorFees"]>["usage"];
+    note: string;
+  } | null;
 }
 
-async function fromApi(chain: string, address: string, pairAddress?: string): Promise<LaunchApiResponse | null> {
+async function fromApi(chain: string, address: string, pairAddress?: string, symbol?: string): Promise<LaunchApiResponse | null> {
   try {
     // The audited pool's address lets the snipe trace identify the pool
     // directly instead of guessing it from transfer fan-out (a pre-pool
     // airdrop from the deployer otherwise reads as the pool).
     const pair = pairAddress && /^0x[0-9a-f]{40}$/i.test(pairAddress) ? `&pair=${encodeURIComponent(pairAddress.toLowerCase())}` : "";
-    const r = await apiFetch(`/api/launch?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}${pair}`, { signal: AbortSignal.timeout(20000) });
+    const sym = symbol && /^[A-Za-z0-9_$.-]{1,16}$/.test(symbol) ? `&symbol=${encodeURIComponent(symbol)}` : "";
+    const r = await apiFetch(`/api/launch?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}${pair}${sym}`, { signal: AbortSignal.timeout(20000) });
     if (!r.ok) return null;
     const value: unknown = await r.json();
     return value && typeof value === "object" && !Array.isArray(value)
@@ -330,6 +441,18 @@ export function launchVenueNames(): string[] {
   return VENUES.map((venue) => venue.name);
 }
 
+/**
+ * The fee-asset disclosure. A venue that pays its creators in the launched
+ * token is a fact about the venue: every claim hands the creator fresh supply
+ * and a sell decision. It is stated as a note and never scored; the scan
+ * scores only what the claimer is observed doing with it.
+ */
+export function creatorFeeAssetNote(venue: string, asset: NonNullable<LaunchProvenance["creatorFees"]>["asset"], quote: string | null): string | null {
+  if (asset === "token") return `Creator rewards on ${venue} are paid in the token itself - each claim is new supply in the creator's hands. That is how the venue works, not a finding; the finding is what the creator does with the claims.`;
+  if (asset === "mixed") return `Creator rewards on ${venue} arrive as a mix of the token and ${quote ?? "the quote asset"} - each claim carries a token leg the creator can sell. That is how the venue works, not a finding; the finding is what the creator does with the claims.`;
+  return null;
+}
+
 // Quote-asset ramifications that hold regardless of venue.
 export function genericQuoteNote(quote: string, sol: boolean): string | null {
   const q = quote.toUpperCase();
@@ -351,7 +474,7 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
     const quote = pair?.quoteToken?.symbol ?? null;
     const dexId = (d.dexId || pair?.dexId || "").toLowerCase();
 
-    const api = await fromApi(d.chain, d.address, d.pairAddress);
+    const api = await fromApi(d.chain, d.address, d.pairAddress, d.symbol);
     // Client fingerprints first; the server's creator-contract check (Blockscout)
     // catches the venues that leave no client-visible trace (Pons reads as plain
     // uniswap/WETH - only the token's creator address gives it away).
@@ -389,12 +512,27 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
       }
       out.creatorFees = {
         platformPays: venue.platformPaysCreator,
+        asset: venue.creatorFeeAsset,
         claimCount: null,
         claimedUsd: null,
+        claimedTokens: null,
         usage: "unknown",
         note: venue.feeNote,
       };
+      // The server's claim trace, when it ran: observed conduct beats the
+      // venue's default. A venue that pays in the token is a note; a creator
+      // who keeps claiming and selling it is the warning.
+      const cf = api?.creatorFees;
+      if (cf && cf.claimCount > 0) {
+        out.creatorFees.claimCount = cf.claimCount;
+        out.creatorFees.claimedTokens = cf.claimedTokens;
+        out.creatorFees.claimedUsd = d.priceUsd != null && Number.isFinite(d.priceUsd) ? cf.claimedTokens * d.priceUsd : null;
+        out.creatorFees.usage = cf.usage;
+        out.creatorFees.note = `${cf.note} ${venue.feeNote}`;
+      }
       out.quoteNote = (quote && venue.quoteNoteFor?.(quote)) || (quote ? genericQuoteNote(quote, sol) : null);
+      const feeAssetNote = creatorFeeAssetNote(venue.name, venue.creatorFeeAsset, quote);
+      if (feeAssetNote) out.notes.push(feeAssetNote);
     } else if (out.kind === "fair-launch") {
       out.quoteNote = quote ? genericQuoteNote(quote, sol) : null;
       out.notes.push("No launchpad signature (mint suffix, dexId, quote) - launched directly on the DEX.");
