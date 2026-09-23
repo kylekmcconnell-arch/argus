@@ -4,7 +4,11 @@ Issue: #520. Base reviewed: main at 0bdbdfb6 (#517). Presentation revision: 2026
 
 ## Findings
 
-The production lane still uses the promoted narrative renderer. The recent #515–#517 changes do not replace that renderer. The token-first path previously omitted its second score whenever a project account audit was absent, producing a substantially different opening for thin-identity tokens. This explains the observed fallback; it does not establish which upstream lookup failed.
+The approved September 18 design was implemented for principal project reports in #479 (September 19), using the new `DecisionChapter`, score cards and chapter components. The token/investigation migration in #480 (September 20, 0e32e679) instead wrapped existing panels in the new `ArgusReportShell`. Its commit message explicitly says the existing panels were kept verbatim and legacy numbered chapters retained. Those paths still call `InvestigationDecisionCanvas` and `LegacySection` rather than the principal report's new chapter components.
+
+This is the origin of the hybrid design. The reviewed #515–#517 scanner changes did not introduce it. Missing project-account evidence additionally removes the second legacy score and makes the difference more pronounced. Calling this the current renderer does not establish parity with the approved design: that earlier diagnosis was too narrow.
+
+**This PR repairs evidence presentation, not the incomplete design migration.** Restoring the approved experience requires adapting token and investigation data to the same approved chapter components, preserving forensic functions behind the specified disclosures, and checking each report kind against the September 18 reference. It must not be accepted as design restoration merely because tests pass.
 
 Contextual diligence PR #513 was still open at review time despite successful checks. It is distinct from this repair and was not part of the deployed main branch inspected here. A shipping summary must distinguish merged, deployed, and externally delivered analysis.
 
