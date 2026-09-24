@@ -1,6 +1,6 @@
 # Export evidence and reference acceptance
 
-Follow-up to #537 and #538. The document serializer omitted team social links and holder intelligence and stated identity was resolved through the roster. It now preserves safe recorded X/LinkedIn/Telegram/email links, separates source access from identity, excludes model-found identity links, and carries captured holder rows with coverage, dates and registry/provider attribution. Exporting a frozen report never reads current workspace research or providers.
+Follow-up to #537 and #538. Presentation 2026-09-24.3 includes the full-width Decision coverage row. The document serializer omitted team social links and holder intelligence and stated identity was resolved through the roster. It now preserves safe recorded X/LinkedIn/Telegram/email links, separates source access from identity, excludes model-found identity links, and carries captured holder rows with coverage, dates and registry/provider attribution. Exporting a frozen report never reads current workspace research or providers.
 
 A named acceptance matrix covers person sources/failures, non-X research, namesakes, private/shared/saved/export paths, Catalyst registry records, SPIKE B20 handling, rank 25 and partial holder history. Required verify CI invokes the matrix in addition to the existing full tests, canaries and calibration. Missing named tests fail the acceptance command. These are offline semantic/interaction checks, not proof of live provider coverage or screenshot equivalence on every device.
 
