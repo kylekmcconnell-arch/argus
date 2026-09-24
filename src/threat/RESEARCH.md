@@ -1149,9 +1149,13 @@ validated conduct evidence. Receipt-level decoding and inventory attribution
 remain outstanding.
 
 High reported turnover against current depth is an anomaly, not proof of wash
-trading. The registry contains 13 of the reported 31 tokens and eight wallet
-addresses. Its cohort intent is unestablished; the missing 18 token addresses,
-full wallet population and participant-level evidence have not been recovered.
+trading. The runtime index initially contained 13 tokens and eight wallets.
+The archived attribution file contains 32 direct deployments in the reported
+date window, now indexed with 33 reported deployer/funder wallets. This does
+not reconcile the claimed 31-token membership or establish participant-level
+conduct. The archive corrects BET/JEV: BET is 0x1df7abb9d130e373f00bb1edec798cd4194a3845;
+JEV is 0x675279fe3259dcd20b1520399d2977dad042bf3f. Fresh metadata reads
+returned HTTP 403 and the public RPC returned HTTP 429; these records retain archived, not live-verified provenance.
 Shared bytecode, token names or funding infrastructure alone do not prove one
 controller. Do not automatically exclude this cohort from ranked coverage.
 

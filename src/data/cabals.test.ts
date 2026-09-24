@@ -94,12 +94,14 @@ describe("lookups", () => {
   });
 });
 
-it("does not turn the partial turnover cohort into proven nefarious control", () => {
+it("recovers the archived direct-deployment cohort without declaring nefarious control", () => {
   const cohort = CABALS.find(c => c.id === "rh-volume-ring-2026-09-22")!;
   expect(cohort.intent).toBe("unestablished");
-  expect(cohort.launches).toHaveLength(13);
-  expect(cohort.wallets).toHaveLength(8);
-  expect(cohort.summary).toContain("only 13 token addresses and eight wallets");
+  expect(cohort.launches).toHaveLength(32);
+  expect(cohort.wallets).toHaveLength(33);
+  expect(cohort.summary).toContain("not a fresh chain audit");
+  expect(findCabalLaunch("robinhood", "0x1df7abb9d130e373f00bb1edec798cd4194a3845")?.launch.symbol).toBe("BET");
+  expect(findCabalLaunch("robinhood", "0x675279fe3259dcd20b1520399d2977dad042bf3f")?.launch.symbol).toBe("JEV");
 });
 
 it("joins recovered Catalyst launches and infrastructure without declaring malicious control", () => {
