@@ -1,3 +1,5 @@
+import { CABALS } from "../data/cabals";
+import { buildHolderIntelligence } from "./holderIntelligence";
 import { describe, it, expect } from "vitest";
 import { reportToHtml, reportFilename } from "./reportExport";
 import { publicCaseLabel } from "./caseLabel";
@@ -212,4 +214,30 @@ describe("reportFilename", () => {
   it("falls back to a stable base when no handle exists", () => {
     expect(reportFilename({ handle: "" } as Dossier, "doc", AUG_13)).toBe("audit_2026-08-13_Argus_Forensic_due_diligence.doc");
   });
+});
+
+it("exports social links and source-read gaps without claiming identity is resolved", () => {
+  const html = reportToHtml({ ...first, report: { ...first.report, governing_role: "FOUNDER" as Dossier["report"]["governing_role"] }, webTeam: [{ name: "Ada Example", role: "Founder", source: "team-page", handle: "https://x.com/ada_example", linkedin: "https://linkedin.com/in/ada-example" }] });
+  expect(html).toContain('href="https://x.com/ada_example"');
+  expect(html).toContain('href="https://linkedin.com/in/ada-example"');
+  expect(html).toContain("Link recorded; read status unknown");
+  expect(html).not.toContain("resolved through the named team");
+});
+it("export does not promote model-found social accounts to verified contacts", () => {
+  const html = reportToHtml({ ...first, report: { ...first.report, governing_role: "FOUNDER" as Dossier["report"]["governing_role"] }, webTeam: [{ name: "Ada Example", role: "Founder", source: "search", handle: "@guessed", linkedin: "https://linkedin.com/in/ada-example", identity_link_evidence_origin: "model_lead" }] });
+  expect(html).not.toContain('href="https://x.com/guessed"');
+  expect(html).not.toContain('href="https://linkedin.com/in/ada-example"');
+});
+
+it("preserves rank-25 registry attribution and explicit partial coverage in exports", () => {
+  const wallet = CABALS.flatMap(c => c.wallets).find(w => w.chain === "robinhood" && w.address.length === 42)!;
+  const rows = Array.from({ length: 24 }, (_, i) => ({ address: `0x${(i + 100).toString(16).padStart(40, "0")}`, percent: 1 }));
+  const snapshot = buildHolderIntelligence({ chain: "robinhood", tokenAddress: `0x${"a".repeat(40)}`, capturedAt: "2026-09-24T12:00:00Z", source: "fixture", ranked: true, rows: [...rows, { address: wallet.address, percent: 0.1 }] });
+  const dossier = { ...first, holderProfile: { ...first.holderProfile, holderIntelligence: snapshot } } as Dossier;
+  const html = reportToHtml(dossier);
+  expect(html).toContain("25/25 addresses examined");
+  expect(html).toContain(snapshot.rows[24].address);
+  expect(html).toContain("historical attribution, not proof");
+  const partial = reportToHtml({ ...dossier, holderProfile: { ...dossier.holderProfile!, holderIntelligence: { ...snapshot, examined: 10, status: "partial", rows: snapshot.rows.slice(0,10) } } });
+  expect(partial).toContain("10/25 addresses examined; partial coverage");
 });

@@ -7,6 +7,16 @@ import { personResearchIdentity } from "../src/lib/personResearch.js";
 import type { WebTeamMember } from "../src/data/evidence.js";
 export const config = { maxDuration: 120 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export function savedPersonContext(payload: unknown, name: string, role: string): { member: WebTeamMember; company: string } | null {
+  const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const root = record(payload);
+  const containers = [root, record(root.projectAccount), record(record(root.token).projectAccount)];
+  const matches = containers.flatMap(container => Array.isArray(container.webTeam)
+    ? container.webTeam.filter((row): row is WebTeamMember => Boolean(row && typeof row === "object" && row.name === name && row.role === role && row.kind !== "org"))
+      .map(member => ({ member, company: typeof container.display_name === "string" ? container.display_name : "" })) : []);
+  return matches.length === 1 ? matches[0] : null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("cache-control", "private, no-store");
   if (!["GET", "POST"].includes(req.method ?? "")) { res.status(405).end(); return; }
@@ -20,10 +30,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!credentials) { res.status(503).json({ error: "storage_unavailable" }); return; }
   try {
     const loaded = await loadExactVersionReport(credentials, auth.organizationId, versionId);
-    const payload = loaded?.report.payload as { webTeam?: WebTeamMember[]; display_name?: string } | undefined;
-    const matches = payload?.webTeam?.filter(member => member.name === name && member.role === role && member.kind !== "org") ?? [];
-    if (matches.length !== 1) { res.status(404).json({ error: "unique_saved_person_required" }); return; }
-    const member = matches[0]; const memberKey = JSON.stringify([name, role]);
+    const context = savedPersonContext(loaded?.report.payload, name, role);
+    if (!context) { res.status(404).json({ error: "unique_saved_person_required" }); return; }
+    const member = context.member; const memberKey = JSON.stringify([name, role]);
     const identityKey = personResearchIdentity(member);
     const headers = serviceHeaders(credentials.key);
     const query = new URLSearchParams({ organization_id: `eq.${auth.organizationId}`, report_version_id: `eq.${versionId}`, member_key: `eq.${memberKey}`, order: "created_at.desc", limit: "5", select: "id,status,payload,created_at" });
@@ -51,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
     const reservation = await reserveSupplementalBudget(auth, "/api/person-research");
     if (!reservation.allowed) { await finish("failed"); rejectSupplementalReservation(res, reservation); return; }
-    const result = await collectPersonResearch(member, payload?.display_name ?? "", key);
+    const result = await collectPersonResearch(member, context.company, key);
     await recordProviderUsageBatch(auth.organizationId, versionId, auth.userId, [{ provider: "serper", op: "person-background", calls: result.searches.length, usd: result.searches.length * 0.001, status: result.searches.some(row => row.status === "failed") ? "partial" : "succeeded", idempotencyKey: runId, meta: "At most four searches; list-price estimate, not a settled invoice." }]);
     await finish("complete", result);
     res.status(200).json({ runId, result });

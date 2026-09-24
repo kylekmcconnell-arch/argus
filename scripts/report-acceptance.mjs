@@ -1,0 +1,10 @@
+import { readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const matrix = JSON.parse(readFileSync(new URL("../config/report-acceptance.json", import.meta.url), "utf8"));
+const paths = [...new Set(matrix.cases.flatMap(item => item.tests))];
+for (const path of paths) if (!existsSync(path)) throw new Error(`Required report acceptance test missing: ${path}`);
+for (const item of matrix.cases) console.log(`Report acceptance: ${item.name}`);
+console.log(matrix.limits);
+const result = spawnSync(process.execPath, ["node_modules/vitest/vitest.mjs", "run", ...paths], { stdio: "inherit", env: { ...process.env, TZ: "UTC" } });
+if (result.error) throw result.error;
+process.exit(result.status ?? 1);

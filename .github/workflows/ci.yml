@@ -114,6 +114,9 @@ jobs:
       - name: Tests (engine port fidelity + golden-set calibration)
         run: npm test
 
+      - name: Report acceptance (people, shared views, exports and holders)
+        run: npm run acceptance:reports
+
       - name: Calibration (verdict drift table)
         run: npm run calibrate
 

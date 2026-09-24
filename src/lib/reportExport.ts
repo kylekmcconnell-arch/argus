@@ -1,3 +1,5 @@
+import { personContacts, safeHttpUrl } from "../reports/argus/model";
+import { personSourceCoverage } from "./personSourceCoverage";
 import { presentPublicReport } from "./reportPresentation";
 // Export a rendered audit to a portable document. Two dependency-free targets:
 //   • PDF      - render a print-styled standalone page and hand it to the browser's
@@ -99,19 +101,21 @@ function identityBlock(d: Dossier): string {
   const conf = d.report.identity_confidence ?? "Unknown";
   const team = d.report.governing_role !== "KOL" ? d.webTeam ?? [] : [];
   if (team.length > 0) {
-    const rows = team
-      .map(
-        (p) => `
-        <tr>
-          <td>${esc(p.name)}${p.handle ? ` <span class="mono dim">${esc(p.handle)}</span>` : ""}</td>
-          <td>${esc(p.role ?? "")}</td>
-          <td class="dim">${esc(p.evidence ?? "")}${p.source ? ` (${esc(p.source)})` : ""}</td>
-        </tr>`,
-      )
-      .join("");
+    const rows = team.map((p) => {
+      const member = p.identity_link_evidence_origin === "model_lead"
+        ? { ...p, handle: p.handleProvenance === "subject_first_party" ? p.handle : undefined, linkedin: undefined }
+        : p;
+      const contacts = personContacts(member);
+      const links = (["x", "linkedin", "telegram", "email"] as const).flatMap(key => contacts[key]
+        ? [`<a href="${esc(contacts[key]!.url)}">${esc(key === "x" ? "X" : key === "linkedin" ? "LinkedIn" : key)}: ${esc(contacts[key]!.label)}</a>`] : []);
+      const coverage = personSourceCoverage(member, { x: contacts.x?.url, linkedin: contacts.linkedin?.url });
+      return `<tr><td>${esc(p.name)}${links.length ? `<p>${links.join("<br/>")}</p>` : "<p>No social link retained.</p>"}</td>
+        <td>${esc(p.role ?? "")}</td><td class="dim">${esc(p.evidence ?? "")}${p.source ? ` (${esc(p.source)})` : ""}
+        ${coverage.map(row => `<p><strong>${esc(row.label)}: ${esc(row.access)}</strong><br/>${esc(row.identity)}<br/>${esc(row.coverage)}<br/>${row.capturedAt ? `Checked ${esc(row.capturedAt)}` : "No source-check time recorded."}<br/>Next action: ${esc(row.nextAction)}</p>`).join("")}</td></tr>`;
+    }).join("");
     return section(
       "Identity",
-      `<p class="note"><span class="pill">${esc(conf)}</span> resolved through the named team.</p>
+      `<p class="note"><span class="pill">${esc(conf)}</span> saved identity assessment. Roster references and profile access are distinct from independent identity verification.</p>
        <table><thead><tr><th>Person</th><th>Role</th><th>Evidence</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
   }
@@ -119,6 +123,18 @@ function identityBlock(d: Dossier): string {
     "Identity",
     `<p class="note"><span class="pill">${esc(conf)}</span> ${esc(d.identity_note ?? "")}</p>`,
   );
+}
+
+function holderIntelligenceBlock(d: Dossier): string {
+  const snapshot = d.holderProfile?.holderIntelligence;
+  if (!snapshot) return "";
+  const source = safeHttpUrl(snapshot.sourceUrl);
+  return section("Holder intelligence", `<p>${snapshot.examined}/25 addresses examined; ${esc(snapshot.status)} coverage. ${snapshot.matched} addresses matched the saved registry.</p>
+    <p>${esc(snapshot.chain)} · ${esc(snapshot.tokenAddress)} · Captured ${esc(snapshot.capturedAt)} · ${esc(snapshot.ranking)} · ${esc(snapshot.source)}</p>
+    <p>Registry matches are historical attribution, not proof of current ownership or coordination. Appearance in or disappearance from captured ranks does not establish a buy or exit.</p>
+    ${snapshot.notes.map(note => `<p class="note">${esc(note)}</p>`).join("")}
+    <table><thead><tr><th>Rank / address</th><th>Supply share / role</th><th>Recorded attribution</th></tr></thead><tbody>${snapshot.rows.map(row => `<tr><td>${row.rank}. ${esc(row.address)}</td><td>${snapshot.supplyCoveredPct == null ? "Unmeasured" : `${row.percent.toFixed(2)}%`} · ${esc(row.role)}</td><td>${row.matches.map(match => `${esc(match.name)} (${esc(match.role)}): ${esc(match.evidence)}`).join("<br/>") || "No registry match recorded."}${(row.identities ?? []).map(identity => `<p>${esc(identity.provider)}: ${esc(identity.label || identity.state)} · ${esc(identity.capturedAt)}. Provider attribution.</p>`).join("")}</td></tr>`).join("")}</tbody></table>
+    <p>Registry version ${esc(snapshot.registryVersion)}.</p>${source ? `<p><a href="${esc(source)}">Recorded holder source</a></p>` : ""}`);
 }
 
 function contradictionsBlock(d: Dossier): string {
@@ -516,6 +532,7 @@ ${printScript}
   ${subjectBlock(d)}
   ${verdictBanner(d)}
   ${identityBlock(d)}
+  ${holderIntelligenceBlock(d)}
   ${contradictionsBlock(d)}
   ${roleBreakdown(d)}
   ${venturesBlock(d)}
