@@ -66,3 +66,7 @@ it("does not publish an empty cohort as zero return or complete coverage",()=>{
 it("uses predeclared event patterns instead of selecting them from later outcomes",()=>{
   expect(registerShadowCohort([saved(20),saved(21,true)],{...policy,patterns:["share-decreased"]},policy.windowEnd).candidates).toEqual([]);
 });
+
+it("withholds numerical overflow instead of publishing an infinite quoted return",()=>{
+  expect(evaluateShadowCohort(register(),[point(21,1),point(22,1e308)],evaluatedAt).outcomes[0].status).toBe("unusable-exit");
+});

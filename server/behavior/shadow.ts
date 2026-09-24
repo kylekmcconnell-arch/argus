@@ -130,20 +130,26 @@ export function evaluateShadowCohort(input: ShadowCohort, points: ShadowMarketPo
     if(!exit) return {...receipts,status:"missing-exit" as const};
     if(exit.quality!=="corroborated" || exit.liquidityUsd<policy.minimumLiquidityUsd) return {...receipts,status:"unusable-exit" as const};
     const ratio=exit.priceUsd/entry.priceUsd;
-    if(!Number.isFinite(ratio)) return {...receipts,status:"unusable-exit" as const};
-    return {...receipts,status:"measured" as const,grossReturnPct:(ratio-1)*100,
-      assumptionAdjustedReturnPct:(ratio*(1-policy.assumedRoundTripCostBps/10000)-1)*100};
+    const grossReturnPct=(ratio-1)*100, assumptionAdjustedReturnPct=(ratio*(1-policy.assumedRoundTripCostBps/10000)-1)*100;
+    if(!Number.isFinite(grossReturnPct) || !Number.isFinite(assumptionAdjustedReturnPct)) return {...receipts,status:"unusable-exit" as const};
+    return {...receipts,status:"measured" as const,grossReturnPct,assumptionAdjustedReturnPct};
   });
   const measured=outcomes.filter(row=>row.status==="measured");
   const matured=outcomes.filter(row=>row.status!=="pending");
+  const prospectiveMeasured=measured.filter(row=>row.prospective);
+  const mean=(rows:typeof measured)=>{
+    if(!rows.length) return null;
+    const value=rows.reduce((sum,row)=>sum+row.grossReturnPct!/rows.length,0);
+    return Number.isFinite(value)?value:null;
+  };
   return {version:1,cohortHash:cohort.hash,marketInputHash:hash(points),evaluatedAt,status:"research-only" as const,
     totalCandidates:outcomes.length,uniqueTokens:new Set(cohort.candidates.map(row=>`${row.chain}:${row.token}`)).size,
     prospectiveCandidates:outcomes.filter(row=>row.prospective).length,matured:matured.length,measured:measured.length,
     missingOrUnusable:matured.length-measured.length,
     coveragePct:matured.length?100*measured.length/matured.length:null,
-    measuredProspective:measured.filter(row=>row.prospective).length,
-    meanMeasuredProspectiveGrossReturnPct:measured.some(row=>row.prospective)?measured.filter(row=>row.prospective).reduce((sum,row)=>sum+row.grossReturnPct!,0)/measured.filter(row=>row.prospective).length:null,
-    meanMeasuredGrossReturnPct:measured.length?measured.reduce((sum,row)=>sum+row.grossReturnPct!,0)/measured.length:null,
+    measuredProspective:prospectiveMeasured.length,
+    meanMeasuredProspectiveGrossReturnPct:mean(prospectiveMeasured),
+    meanMeasuredGrossReturnPct:mean(measured),
     outcomes,limitations:["Workspace-selected observations, not the complete launch population or an independent control cohort.",
       "Retrospectively registered candidates are marked and cannot establish prospective performance.",
       "Missing and unusable outcomes remain in coverage; measured-only returns can suffer survivorship bias.",
