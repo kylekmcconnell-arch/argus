@@ -7,3 +7,5 @@ A named acceptance matrix covers person sources/failures, non-X research, namesa
 Validation: 169 checks across 15 reference suites passed locally before full quality/build. Full protected CI is required before merge. Rollback is code-only; no migration and no historical report mutation.
 
 Final local quality: 5,371 tests passed with one existing expected failure, all type projects, offline canaries/calibration and production build. The named acceptance command is also an explicit step in protected verify CI.
+
+Embedded project facets now resolve background research from the exact parent snapshot (root projectAccount or token.projectAccount), keeping company context and rejecting ambiguous duplicate members. This closes a route mismatch found during acceptance review.

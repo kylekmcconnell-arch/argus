@@ -4,7 +4,7 @@ vi.mock("./_auth.js", () => ({ requireArgusAuth: mocks.auth, serviceCredentials:
 vi.mock("./report.js", () => ({ loadExactVersionReport: mocks.load }));
 vi.mock("./_cache.js", () => ({ recordProviderUsageBatch: mocks.cost }));
 vi.mock("../server/personResearch.js", () => ({ collectPersonResearch: mocks.collect }));
-import handler from "./person-research";
+import handler, { savedPersonContext } from "./person-research";
 const version = "00000000-0000-4000-8000-000000000123";
 const auth = { organizationId: "org-a", userId: "user-a" };
 function response() { const r = { status: vi.fn(), json: vi.fn(), setHeader: vi.fn(), end: vi.fn() }; r.status.mockReturnValue(r); return r; }
@@ -45,4 +45,11 @@ it("successful research is separately persisted and metered against the source v
   const completion = JSON.parse(fetcher.mock.calls[1][1].body);
   expect(completion.status).toBe("complete");
   expect(fetcher.mock.calls.every(call => !String(call[0]).includes('/report_versions'))).toBe(true);
+});
+
+it("resolves people inside frozen project facets without using the token name as company context", () => {
+  const projectAccount = { display_name: "Actual Company", webTeam: [{ name: "Ada", role: "Founder" }] };
+  expect(savedPersonContext({ display_name: "Token", projectAccount }, "Ada", "Founder")?.company).toBe("Actual Company");
+  expect(savedPersonContext({ token: { projectAccount } }, "Ada", "Founder")?.company).toBe("Actual Company");
+  expect(savedPersonContext({ ...projectAccount, projectAccount }, "Ada", "Founder")).toBeNull();
 });
