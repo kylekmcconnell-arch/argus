@@ -18,6 +18,87 @@ var GROK_ANALYST_MODEL = process.env.ARGUS_GROK_ANALYST_MODEL || process.env.ARG
 var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
+// src/lib/subjectRef.ts
+var EVM_ADDRESS = /^0x[0-9a-f]{40}$/i;
+var SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function normalizeSubjectRef(value) {
+  const clean = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
+  const qualified = clean.match(/^([a-z0-9_-]+):(.+)$/i);
+  if (qualified && (EVM_ADDRESS.test(qualified[2]) || SOLANA_ADDRESS.test(qualified[2]) || !/^https?$/i.test(qualified[1]) && /^[A-Za-z0-9._-]{10,128}$/.test(qualified[2]))) {
+    return `${qualified[1].toLowerCase()}:${EVM_ADDRESS.test(qualified[2]) ? qualified[2].toLowerCase() : qualified[2]}`;
+  }
+  if (SOLANA_ADDRESS.test(clean)) return clean;
+  if (EVM_ADDRESS.test(clean)) return clean.toLowerCase();
+  return clean.toLowerCase();
+}
+
+// src/lib/tokenIdentity.ts
+var aliases = { eth: "ethereum", "1": "ethereum", "8453": "base", "42161": "arbitrum", "10": "optimism", "137": "polygon", "56": "bsc", "43114": "avalanche" };
+function tokenSubjectIdentity(chain, address) {
+  if (typeof chain !== "string" || typeof address !== "string") return null;
+  const rawChain = chain.trim().toLowerCase();
+  const network = aliases[rawChain] ?? rawChain;
+  const clean = address.trim();
+  if (!/^[a-z0-9_-]{1,40}$/.test(network)) return null;
+  const evm = /^0x[0-9a-f]{40}$/i.test(clean);
+  const evmNetwork = /^(ethereum|base|arbitrum|optimism|polygon|bsc|avalanche|fantom|cronos|linea|scroll|mantle|zksync|blast|celo|gnosis|sonic|abstract|pulsechain|berachain|unichain|opbnb|polygonzkevm)$/.test(network);
+  if (network === "solana" ? !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(clean) : evmNetwork ? !evm : !/^[A-Za-z0-9._-]{10,128}$/.test(clean)) return null;
+  const normalized = evm ? normalizeSubjectRef(clean) : clean;
+  return { chain: network, address: normalized, ref: `${network}:${normalized}` };
+}
+
+// src/lib/holderEnrichment.ts
+function attachHolderIdentities(snapshot, batch) {
+  const validTime = Number.isFinite(Date.parse(batch?.capturedAt));
+  if (!validTime || batch?.chain !== snapshot.chain || batch.provider !== "arkham" || batch.scope !== "provider-address-label" || !["complete", "partial", "unavailable", "not-configured"].includes(batch.state) || !Array.isArray(batch.rows) || batch.rows.length > 25) return snapshot;
+  const requested = new Set(snapshot.rows.map((row) => tokenSubjectIdentity(snapshot.chain, row.address)?.ref));
+  const readings = /* @__PURE__ */ new Map();
+  for (const row of batch.rows) {
+    const id = tokenSubjectIdentity(batch.chain, row?.address);
+    if (!id || !requested.has(id.ref) || readings.has(id.ref) || !["reported", "unlabelled", "unavailable"].includes(row.state)) return snapshot;
+    readings.set(id.ref, row);
+  }
+  const rows = snapshot.rows.map((row) => {
+    const reading = readings.get(tokenSubjectIdentity(snapshot.chain, row.address).ref);
+    return { ...row, identities: [{
+      provider: "arkham",
+      capturedAt: batch.capturedAt,
+      sourceUrl: "https://api.arkm.com/intelligence/address_enriched/batch/all",
+      scope: batch.scope,
+      state: reading?.state === "reported" && (typeof reading.label !== "string" || !reading.label.trim()) ? "unavailable" : reading?.state ?? "unavailable",
+      ...reading?.state === "reported" && typeof reading.label === "string" && reading.label.trim() ? {
+        label: reading.label.slice(0, 200),
+        ...typeof reading.entityType === "string" ? { entityType: reading.entityType.slice(0, 80) } : {},
+        ...typeof reading.twitter === "string" ? { twitter: reading.twitter.slice(0, 100) } : {}
+      } : {}
+    }] };
+  });
+  const answered = rows.filter((row) => row.identities[0].state !== "unavailable").length;
+  const state = batch.state === "not-configured" ? "not-configured" : !answered ? "unavailable" : answered === rows.length ? "complete" : "partial";
+  return { ...snapshot, rows, enrichment: { ...snapshot.enrichment, arkham: state } };
+}
+async function enrichHolderSnapshot(snapshot, collect) {
+  if (!snapshot.rows.length) return snapshot;
+  try {
+    const enriched = attachHolderIdentities(snapshot, await collect(snapshot.chain, snapshot.rows.map((row) => row.address)));
+    return enriched === snapshot ? { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } } : enriched;
+  } catch {
+    return { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } };
+  }
+}
+function holderIdentityRoute(fetchImpl2 = fetch) {
+  return async (chain, addresses) => {
+    const response = await fetchImpl2("/api/holder-enrichment", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chain, addresses }),
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (!response.ok) throw new Error("Holder enrichment unavailable");
+    return await response.json();
+  };
+}
+
 // src/data/cabals.ts
 var RH = "robinhood";
 var SOL = "solana";
@@ -1281,35 +1362,6 @@ function classifyMarketAddress(address, context2 = {}) {
     return { label: known?.name?.trim() || "exchange", kind: "exchange" };
   }
   return null;
-}
-
-// src/lib/subjectRef.ts
-var EVM_ADDRESS = /^0x[0-9a-f]{40}$/i;
-var SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-function normalizeSubjectRef(value) {
-  const clean = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
-  const qualified = clean.match(/^([a-z0-9_-]+):(.+)$/i);
-  if (qualified && (EVM_ADDRESS.test(qualified[2]) || SOLANA_ADDRESS.test(qualified[2]) || !/^https?$/i.test(qualified[1]) && /^[A-Za-z0-9._-]{10,128}$/.test(qualified[2]))) {
-    return `${qualified[1].toLowerCase()}:${EVM_ADDRESS.test(qualified[2]) ? qualified[2].toLowerCase() : qualified[2]}`;
-  }
-  if (SOLANA_ADDRESS.test(clean)) return clean;
-  if (EVM_ADDRESS.test(clean)) return clean.toLowerCase();
-  return clean.toLowerCase();
-}
-
-// src/lib/tokenIdentity.ts
-var aliases = { eth: "ethereum", "1": "ethereum", "8453": "base", "42161": "arbitrum", "10": "optimism", "137": "polygon", "56": "bsc", "43114": "avalanche" };
-function tokenSubjectIdentity(chain, address) {
-  if (typeof chain !== "string" || typeof address !== "string") return null;
-  const rawChain = chain.trim().toLowerCase();
-  const network = aliases[rawChain] ?? rawChain;
-  const clean = address.trim();
-  if (!/^[a-z0-9_-]{1,40}$/.test(network)) return null;
-  const evm = /^0x[0-9a-f]{40}$/i.test(clean);
-  const evmNetwork = /^(ethereum|base|arbitrum|optimism|polygon|bsc|avalanche|fantom|cronos|linea|scroll|mantle|zksync|blast|celo|gnosis|sonic|abstract|pulsechain|berachain|unichain|opbnb|polygonzkevm)$/.test(network);
-  if (network === "solana" ? !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(clean) : evmNetwork ? !evm : !/^[A-Za-z0-9._-]{10,128}$/.test(clean)) return null;
-  const normalized = evm ? normalizeSubjectRef(clean) : clean;
-  return { chain: network, address: normalized, ref: `${network}:${normalized}` };
 }
 
 // src/lib/holderIntelligence.ts
@@ -3461,7 +3513,7 @@ async function runTokenAudit(input, emit, opts) {
     isContract: h.is_contract === 1 || h.is_contract === "1",
     marketKind: classifyMarketAddress(h.address ?? h.account ?? "", { poolAddresses, knownAccounts })?.kind
   })).filter((h) => h.address);
-  const holderIntelligence = buildHolderIntelligence({
+  let holderIntelligence = buildHolderIntelligence({
     chain,
     tokenAddress: address,
     capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -3473,6 +3525,9 @@ async function runTokenAudit(input, emit, opts) {
     poolAddresses,
     ...knownAccounts ? { knownAccounts } : {}
   });
+  if (opts?.enrichHolders || arkhamProviderEnabled()) {
+    holderIntelligence = await enrichHolderSnapshot(holderIntelligence, opts?.enrichHolders ?? holderIdentityRoute(fetcher));
+  }
   if (chain === "solana" && rugcheck?.topHolders?.length) {
     topHolders = holderIntelligence.rows.map((row) => ({ address: row.address, percent: row.percent }));
   }

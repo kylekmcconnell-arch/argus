@@ -1,3 +1,4 @@
+import { providerAddressKey } from "../src/lib/providerAddress.js";
 // Shared Arkham risk-briefing core.
 //
 // Arkham's risk briefing answers WHY a wallet is risky: the seed->target
@@ -225,7 +226,7 @@ async function postBatch(
   const rows = new Map<string, Record<string, unknown>>();
   for (const [address, row] of Object.entries(container)) {
     if (row && typeof row === "object" && !Array.isArray(row)) {
-      rows.set(address.toLowerCase(), row as Record<string, unknown>);
+      rows.set(providerAddressKey(address), row as Record<string, unknown>);
     }
   }
   return { outcome: "answered", rows, status: response.status };

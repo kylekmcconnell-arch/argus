@@ -145,7 +145,7 @@ describe("Case Brief middleware policy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("allows a viewer to read tenant-scoped alerts without consuming analyst quota", async () => {
+  it.each(["alerts", "holder-history", "holder-alerts"])("allows a viewer to read tenant-scoped %s without consuming analyst quota", async (route) => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         id: "00000000-0000-4000-8000-000000000010",
@@ -159,7 +159,7 @@ describe("Case Brief middleware policy", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await middleware(new Request(
-      "https://argus.example/api/alerts",
+      `https://argus.example/api/${route}`,
       { headers: { authorization: "Bearer viewer-token" } },
     ));
 

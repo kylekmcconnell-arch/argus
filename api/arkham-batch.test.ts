@@ -9,48 +9,48 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Arkham batch reads", () => {
   it("sends one call for many addresses and keys rows case-insensitively", async () => {
     const fetchMock = vi.fn(async () => json({ addresses: {
-      "0xAAA": { arkhamEntity: { name: "Binance", type: "cex" } },
-      "0xBBB": { contract: true, arkhamLabel: { name: "Some Token" } },
+      "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": { arkhamEntity: { name: "Binance", type: "cex" } },
+      "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB": { contract: true, arkhamLabel: { name: "Some Token" } },
     } }));
     vi.stubGlobal("fetch", fetchMock);
-    const result = await fetchAddressLabelsBatch(["0xAAA", "0xBBB", "0xCCC"], "key");
+    const result = await fetchAddressLabelsBatch(["0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"], "key");
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toContain("/intelligence/address_enriched/batch");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(String(init.body))).toEqual({ addresses: ["0xAAA", "0xBBB", "0xCCC"] });
-    expect(result.rows.get("0xaaa")).toMatchObject({ name: "Binance", isCex: true, isContract: false });
-    expect(result.rows.get("0xbbb")?.isContract).toBe(true);
-    expect(result.rows.has("0xccc")).toBe(false);
+    expect(JSON.parse(String(init.body))).toEqual({ addresses: ["0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"] });
+    expect(result.rows.get("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")).toMatchObject({ name: "Binance", isCex: true, isContract: false });
+    expect(result.rows.get("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")?.isContract).toBe(true);
+    expect(result.rows.has("0xcccccccccccccccccccccccccccccccccccccccc")).toBe(false);
   });
 
   it("reads isUserAddress:false as a contract", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => json({ addresses: { "0xAAA": { isUserAddress: false } } })));
-    expect((await fetchAddressLabelsBatch(["0xAAA"], "key")).rows.get("0xaaa")?.isContract).toBe(true);
+    vi.stubGlobal("fetch", vi.fn(async () => json({ addresses: { "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": { isUserAddress: false } } })));
+    expect((await fetchAddressLabelsBatch(["0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"], "key")).rows.get("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")?.isContract).toBe(true);
   });
 
   it("accepts a bare address-keyed risk response", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({
-      "0xAAA": { risk_level: "SEVERE", max_score: 100, mixer_score: 100, is_seed: true },
+      "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA": { risk_level: "SEVERE", max_score: 100, mixer_score: 100, is_seed: true },
     })));
-    const result = await fetchAddressRiskBatch(["0xAAA"], "key");
-    expect(result.rows.get("0xaaa")).toMatchObject({ level: "SEVERE", score: 100, isSeed: true });
-    expect(result.rows.get("0xaaa")?.categoryScores).toEqual([{ category: "mixer", score: 100 }]);
+    const result = await fetchAddressRiskBatch(["0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"], "key");
+    expect(result.rows.get("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")).toMatchObject({ level: "SEVERE", score: 100, isSeed: true });
+    expect(result.rows.get("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")?.categoryScores).toEqual([{ category: "mixer", score: 100 }]);
   });
 
   it.each([402, 403])("separates an unentitled add-on (%i) from provider failure", async (status) => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ error: "nope" }, status)));
-    expect(await fetchAddressRiskBatch(["0xAAA"], "key")).toMatchObject({ outcome: "unentitled", status });
+    expect(await fetchAddressRiskBatch(["0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"], "key")).toMatchObject({ outcome: "unentitled", status });
   });
 
   it.each([429, 500, 503])("reports other HTTP failures as unavailable (%i)", async (status) => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ error: "nope" }, status)));
-    expect((await fetchAddressRiskBatch(["0xAAA"], "key")).outcome).toBe("unavailable");
+    expect((await fetchAddressRiskBatch(["0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"], "key")).outcome).toBe("unavailable");
   });
 
   it("reports transport failure as unavailable and spends no call on an empty list", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network down"); }));
-    expect((await fetchAddressLabelsBatch(["0xAAA"], "key")).outcome).toBe("unavailable");
+    expect((await fetchAddressLabelsBatch(["0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"], "key")).outcome).toBe("unavailable");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     expect(await fetchAddressRiskBatch([], "key")).toMatchObject({ outcome: "answered", calls: 0 });
@@ -73,7 +73,7 @@ describe("Arkham risk-path seed labelling", () => {
       ? json({ arkhamEntity: { name: "Tornado.Cash", type: "mixer" } })
       : json(paths));
     vi.stubGlobal("fetch", fetchMock);
-    const result = await fetchAddressRiskPaths("0xAAA", "key");
+    const result = await fetchAddressRiskPaths("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "key");
     expect(result.calls).toBe(3);
     expect(result.paths[0].seedName).toBe("Tornado.Cash");
   });
@@ -81,7 +81,7 @@ describe("Arkham risk-path seed labelling", () => {
   it("uses a supplied batch labeller in the audit lane", async () => {
     const fetchMock = vi.fn(async () => json(paths));
     vi.stubGlobal("fetch", fetchMock);
-    const result = await fetchAddressRiskPaths("0xAAA", "key", async (seeds) => ({
+    const result = await fetchAddressRiskPaths("0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "key", async (seeds) => ({
       names: new Map(seeds.map((seed) => [seed.toLowerCase(), { name: `entity ${seed}` }])),
       calls: 1,
       succeeded: 1,
@@ -90,4 +90,12 @@ describe("Arkham risk-path seed labelling", () => {
     expect(result.calls).toBe(2);
     expect(fetchMock).toHaveBeenCalledOnce();
   });
+});
+
+it("preserves Solana case in the actual provider response map", async () => {
+  const address = "So11111111111111111111111111111111111111112";
+  vi.stubGlobal("fetch", vi.fn(async () => json({ addresses: { [address]: { arkhamEntity: { name: "Wrapped SOL account" } } } })));
+  const result = await fetchAddressLabelsBatch([address], "key");
+  expect(result.rows.get(address)?.name).toBe("Wrapped SOL account");
+  expect(result.rows.has(address.toLowerCase())).toBe(false);
 });

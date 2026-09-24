@@ -86,10 +86,10 @@ describe("FomoScan is asked only when it can answer", () => {
   it("never resolves a wallet unless the caller opts into the 50,000 CU price", async () => {
     vi.stubEnv("FOMOSCAN_API_KEY", "fsk_live_secret");
     const fetchImpl = vi.fn(async () => json(user())) as unknown as typeof fetch;
-    const off = await fetchFomoUserByWallet("0xabc", { fetchImpl });
+    const off = await fetchFomoUserByWallet("0xAbCdEf0123456789AbCdEf0123456789AbCdEf01", { fetchImpl });
     expect(off.state).toBe("skipped");
     expect(fetchImpl).not.toHaveBeenCalled();
-    const on = await fetchFomoUserByWallet("0xabc", { fetchImpl, allowExpensive: true });
+    const on = await fetchFomoUserByWallet("0xAbCdEf0123456789AbCdEf0123456789AbCdEf01", { fetchImpl, allowExpensive: true });
     expect(on.state).toBe("hit");
     expect(on.cu).toBe(FOMOSCAN_CU.walletHit);
   });
@@ -207,4 +207,10 @@ describe("fomoscanAdapter attaches attributed wallets without overclaiming", () 
     expect(failed).toMatchObject({ state: "failed", attempts: 1 });
     expect((failed as { detail: string }).detail).toContain("no compute units");
   });
+});
+
+it("rejects a mismatched Fomo wallet and reserves the potential hit cost", async () => {
+  vi.stubEnv("FOMOSCAN_API_KEY", "fixture");
+  const result = await fetchFomoUserByWallet("0x1111111111111111111111111111111111111111", {allowExpensive:true,fetchImpl:vi.fn(async()=>json(user())) as typeof fetch});
+  expect(result).toMatchObject({state:"unavailable",value:null,cu:FOMOSCAN_CU.walletHit});
 });

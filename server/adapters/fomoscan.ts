@@ -1,3 +1,4 @@
+import { providerAddressKey } from "../../src/lib/providerAddress.js";
 // FomoScan Identity API: FOMO (fomo.family) trader handle <-> verified wallet
 // resolution, on-chain trading numbers per handle, and the "thesis" posts a
 // trader makes about a token. https://api.fomoscan.sh/docs
@@ -332,18 +333,23 @@ export async function fetchFomoUserByHandle(handle: string, opts: FetchOptions =
  */
 export async function fetchFomoUserByWallet(address: string, opts: FetchOptions & { allowExpensive?: boolean } = {}): Promise<FomoResult<FomoUser>> {
   const a = address.trim();
-  if (!a) return failure("skipped");
+  if (!/^0x[0-9a-f]{40}$/i.test(a) && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) return failure("skipped");
   if (!opts.allowExpensive) {
     return { state: "skipped", value: null, cu: 0, note: "Wallet-to-trader resolution costs 50,000 compute units and is off unless explicitly enabled." };
   }
   const res = await call(`/v2/user/wallet/${encodeURIComponent(a)}`, opts);
-  if ("error" in res) { recordCall(FOMOSCAN_PROVIDER, "user-by-wallet", 0, res.error, "failed"); return failure(res.error); }
+  if ("error" in res) { recordCall(FOMOSCAN_PROVIDER, "user-by-wallet", 0, res.error, "failed"); return failure(res.error, res.error === "unavailable" ? FOMOSCAN_CU.walletHit : 0); }
   if (res.status === 404) {
     recordCall(FOMOSCAN_PROVIDER, "user-by-wallet", 0, `${FOMOSCAN_CU.walletMiss} CU miss`);
     return { state: "miss", value: null, cu: FOMOSCAN_CU.walletMiss, note: `FomoScan holds no FOMO trader for wallet ${a}.` };
   }
   const user = res.status === 200 ? parseUser(res.json) : null;
-  if (!user) { recordCall(FOMOSCAN_PROVIDER, "user-by-wallet", 0, `http ${res.status}`, "failed"); return failure("unavailable"); }
+  if (!user) { recordCall(FOMOSCAN_PROVIDER, "user-by-wallet", 0, `http ${res.status}`, "failed"); return failure("unavailable", res.status === 200 ? FOMOSCAN_CU.walletHit : 0); }
+  const bound = /^0x[0-9a-f]{40}$/i.test(a) ? user.evmAddress === providerAddressKey(a) : user.solanaAddress === a;
+  if (!bound) {
+    recordCall(FOMOSCAN_PROVIDER, "user-by-wallet", 0, "identity mismatch; reserved wallet-hit CU", "failed");
+    return { state: "unavailable", value: null, cu: FOMOSCAN_CU.walletHit, note: "FomoScan returned an account without the requested wallet. No identity was attached; the maximum hit cost is reserved." };
+  }
   recordCall(FOMOSCAN_PROVIDER, "user-by-wallet", 0, `${FOMOSCAN_CU.walletHit} CU`);
   return { state: "hit", value: user, cu: FOMOSCAN_CU.walletHit, note: `FomoScan resolves wallet ${a} to FOMO account ${user.handle}${user.twitter ? ` (X @${user.twitter})` : ""}.` };
 }
