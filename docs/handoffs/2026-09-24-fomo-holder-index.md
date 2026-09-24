@@ -11,3 +11,5 @@ The Fomo person adapter no longer attaches a wallet on a same-name FOMO account 
 No bulk collection or production import ran for this change. The index initially contributes no observations until an authorized receipt is imported. Paid collection remains gated by a numerical CU cap. This closes the ingestion path, not complete holder coverage or validated trading signals.
 
 Validation includes exact chain/address joins, rank 25, immutable originals, stale/future receipts, storage tenant isolation, unavailable versus missing records, named identity rejection, and executable database privilege/immutability checks. Protected CI and production migration/deployment gate release. Rollback removes the read/import entry points; append-only receipts can remain archived.
+
+Follow-up validation requires a 20-byte EVM address on every non-Solana Fomo receipt, including custom-chain names. The generic token identifier accepts broader formats for custom chains, so it was insufficient on its own at this provider boundary. Regression cases cover both the importer and frozen-evidence validation.
