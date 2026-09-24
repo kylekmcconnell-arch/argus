@@ -2,6 +2,12 @@ import { fetchPublicText } from "./publicWeb.js";
 import type { PersonResearchResult } from "../src/lib/personResearch.js";
 import type { WebTeamMember } from "../src/data/evidence.js";
 
+export function researchExcerpt(text: string, name: string): string {
+  const plain = text.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+  const at = plain.toLowerCase().indexOf(name.toLowerCase());
+  return plain.slice(Math.max(0, at - 240), Math.max(0, at - 240) + 1800);
+}
 const quoted = (s: string) => `"${s.replace(/["\\\r\n]/g, " ").slice(0, 120)}"`;
 export function personResearchQuestions(member: Pick<WebTeamMember, "name" | "linkedin" | "handle">, company: string) {
   const identity = `${quoted(member.name)} ${quoted(company)}`;
@@ -38,7 +44,7 @@ export async function collectPersonResearch(member: WebTeamMember, company: stri
   for (const source of result.sources.filter(source => !/(^|\.)(linkedin\.com|x\.com|twitter\.com)$/.test(new URL(source.url).hostname)).slice(0, 3)) {
     try {
       const page = await deps.read(source.url);
-      if (page.status === "ok") { source.access = "page_read"; source.excerpt = page.text.slice(0, 1800); source.contentHash = page.contentHash; source.capturedAt = page.capturedAt; }
+      if (page.status === "ok") { source.access = "page_read"; source.excerpt = researchExcerpt(page.text, member.name); source.contentHash = page.contentHash; source.capturedAt = page.capturedAt; }
       else source.access = "unavailable";
     } catch { source.access = "unavailable"; }
   }
