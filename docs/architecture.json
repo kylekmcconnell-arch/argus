@@ -375,5 +375,10 @@
   "An adverse all-clear is scoped only to named screens with a recorded checked-empty outcome; zero completed clean screens or any open decision-critical coverage cannot produce an absence claim",
   "Offline replay owns every outbound transport: global fetch and pinned public-web HTTP/HTTPS reads pass through the same frozen ledger, and an uncovered replay request fails closed without DNS or a native socket",
   "Social activity is immutable and score-neutral: only a bound official project handle may start the query; post counts and unique author breadth stay distinct; capped author pagination publishes minimums and withholds concentration plus the activity score; no social metric may alter the safety verdict, readiness or calibration"
- ]
+ ],
+ "behaviorEvaluation": {
+  "implementation": "server/behavior/shadow.ts",
+  "command": "npm run behavior:shadow -- register|evaluate",
+  "state": "Offline research-only. Preregistered observation patterns, source availability time, immutable candidate set, dated same-pool quotes, missing-outcome coverage and separate prospective summary. No predictive alert activation or provider requests."
+ }
 }
