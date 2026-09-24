@@ -1209,6 +1209,121 @@ var SOL = "solana";
 var BASE = "base";
 var CABALS = [
   {
+    "id": "base-catalyst-suite-2026-09-23",
+    "name": "Base Catalyst launch suite",
+    "kind": "infra",
+    "intent": "unestablished",
+    "summary": "Six market registrations on 2026-09-23 were recovered from the same Base registry. Their successful launch transactions share a sender and factory. Catalyst\u2019s receipt identifies a USDC pair, hook and liquidity seeder. Shared infrastructure and a launch sender do not establish malicious intent, beneficial ownership, custody guarantees or project quality. Fee escrow, payout routing and subsequent conduct remain unverified.",
+    "firstSeen": "2026-09-23",
+    "lastSeen": "2026-09-24",
+    "wallets": [
+      {
+        "chain": "base",
+        "address": "0xe45ab753c9fe96913b1e221e472426770771a95a",
+        "role": "deployer",
+        "label": "Sender of the six observed registration transactions",
+        "evidence": "All six successful transactions listed in docs/launchpads/receipts/catalyst-2026-09-24.json have this sender; read Base Blockscout 2026-09-24. Transaction sender is not a verified real-world identity."
+      },
+      {
+        "chain": "base",
+        "address": "0x4d958575d15cb719f1caf65af04c0fd749e63f69",
+        "role": "launch-contract",
+        "label": "Factory / launch transaction target",
+        "evidence": "Catalyst mint recipient and launch transaction target in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+      },
+      {
+        "chain": "base",
+        "address": "0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "role": "launch-contract",
+        "label": "Market registry",
+        "evidence": "MarketRegistered event, log 61 in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+      },
+      {
+        "chain": "base",
+        "address": "0xfd2823fbf019e9d4a121544590e00705fdae80f0",
+        "role": "launch-contract",
+        "label": "Liquidity seeder",
+        "evidence": "ModifyLiquidity sender in logs 64\u201371 and MarketSeeded emitter at log 73 in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+      },
+      {
+        "chain": "base",
+        "address": "0x0d5d83c5a1d27654d12670bb07461971a5aba8cc",
+        "role": "launch-contract",
+        "label": "Pool hook",
+        "evidence": "Initialize hooks field in log 62 in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+      }
+    ],
+    "accounts": [],
+    "launches": [
+      {
+        "chain": "base",
+        "address": "0xca7a1e31b36779cf32acb18714ab26982cf36b05",
+        "symbol": "CATALYST",
+        "name": "CATALYST",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0xf0bac62dd4fd04dc26c9bc9ded68f16c515ab71c09bb87e8e546b7ce83c0ccb9; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0, block 51681332, registry log 61, 2026-09-23T08:26:51.000000Z; successful sender/target read 2026-09-24."
+      },
+      {
+        "chain": "base",
+        "address": "0xca7a365c7f33a04874ff621bd6b68043c034014e",
+        "symbol": "APPLEOG",
+        "name": "APPLEOG",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0xe69166e6da4b5cbbb9d7f2b6f9bb9b56a26d58f587c16cb465180a33ccc3135f; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0xbdf5bda7d907344c2d8f20105d6083177707775f58553266b3d4a26976e576b5, block 51696917, registry log 129, 2026-09-23T17:06:21.000000Z; successful sender/target read 2026-09-24."
+      },
+      {
+        "chain": "base",
+        "address": "0xca7a011bd9d2c2aa82a4367c71e713ea0e78f75d",
+        "symbol": "MUSEVERSE",
+        "name": "MUSEVERSE",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0xc50d25dccf38db0e3d2714b748f21937dac37b2ec1e37c9c53a6e0e52d7bf0e7; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0x33c0cb2cf6bade6593b3f1722e4f608f9900c76bb04fa0d89f698c3031847a2e, block 51697158, registry log 664, 2026-09-23T17:14:23.000000Z; successful sender/target read 2026-09-24."
+      },
+      {
+        "chain": "base",
+        "address": "0xca7ac088485c7c68f81eb60614f200797905aaa2",
+        "symbol": "BASEDPRIVACY",
+        "name": "BASEDPRIVACY",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0x5c3e216e0629d47f3e1d75bcc5e58923dab108494379f937bd4af607d70b5203; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0xe1705f079a97168a913c3ec3b975b996d15cc82e5c9d33482de3935c93d43b89, block 51697539, registry log 871, 2026-09-23T17:27:05.000000Z; successful sender/target read 2026-09-24."
+      },
+      {
+        "chain": "base",
+        "address": "0xca7ae68bbc9437cd5b93e543533b7a8e375d66bc",
+        "symbol": "GROKCOIN",
+        "name": "GROKCOIN",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0xda8fb1006b6838f3435aa7e6266860dcaf2606300391e3005e7326cbbfa334f7; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0x7a8cf60d88cefebdd585393d772b0c6e1c821acb3b0f658a1e8cdc5760303f37, block 51698300, registry log 577, 2026-09-23T17:52:27.000000Z; successful sender/target read 2026-09-24."
+      },
+      {
+        "chain": "base",
+        "address": "0xca7a548d5a73bb396fafe229447643ef1082fe0d",
+        "symbol": "BASEDGPUS",
+        "name": "BASEDGPUS",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0xe025a4f7554cab8213cabebfde59511316d7283a3e99596ad82f1968940a76cc; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0x9c8773cb1a7fba82e1f74cdd6c57e4ba4903826a3344406fc407c69a187c675b, block 51698390, registry log 368, 2026-09-23T17:55:27.000000Z; successful sender/target read 2026-09-24."
+      }
+    ]
+  },
+  {
     id: "rh-lemonfun-fee-farm",
     name: "$LEMON (Lemon.fun) creator fee farm",
     kind: "launch-farm",
@@ -1375,10 +1490,10 @@ var CABALS = [
   },
   {
     id: "rh-volume-ring-2026-09-22",
-    name: "Robinhood Chain wash-volume ring of 2026-09-22",
+    name: "Robinhood Chain turnover-anomaly cohort of 2026-09-22",
     kind: "launch-farm",
-    intent: "nefarious",
-    summary: "Thirty-one tokens deployed directly from thirty-two fresh wallets on 2026-09-21 to 23, no launchpad, that report 1.9M to 23M USD of daily volume on zero to 300,000 USD of liquidity: volume-to-liquidity ratios of 100 to 5,000 times, and four (a fake BTC, GREEN, FCAT, SHIB) showing millions of volume on no liquidity at all. Three bytecode templates cover 21 of them, several are name-clones of real tokens (musebook, Agrippa, HOOD6900, BTC, SHIB), the deployers have nonces of 5 to 18 and most are drained to zero after use, and template B is chain-funded from one pot: JEV's deployer sent RIG's 16.09 ETH and NODIUM's received 12.85 ETH. The tokens have no product, no socials and no organic holders; the volume exists to game the chain's top-by-volume rankings on GeckoTerminal and DexScreener. Any scan of one of these tokens should warn, and any volume ranking on this chain must exclude them.",
+    intent: "unestablished",
+    summary: "Research reported 31 tokens and 32 wallets; this registry indexes only 13 token addresses and eight wallets. The recorded observations include unusually high daily volume relative to current liquidity, reused bytecode templates, duplicated names and specific funding links. These are investigation leads: neither aggregate turnover nor shared templates establish wash trading, common control of the whole cohort, or an intent to defraud. Missing addresses and transaction-level trading evidence remain outstanding. Do not treat this partial index as a complete ring or automatically exclude its tokens from rankings.",
     firstSeen: "2026-09-21",
     lastSeen: "2026-09-23",
     wallets: [
@@ -42175,6 +42290,19 @@ function deployerWalletAddress(d) {
   if (d.deployerAttribution?.method === FACTORY_ATTRIBUTION_METHOD) return null;
   return d.deployer;
 }
+async function resolveTokenSystem(chain, address, fetchImpl2 = fetch) {
+  if (chain !== "base" || !/^0xb20[0-9a-f]{37}$/i.test(address)) return void 0;
+  try {
+    const r = await fetchImpl2(`/api/bytecode?address=${encodeURIComponent(address)}&chain=base`, { signal: AbortSignal.timeout(12e3) });
+    if (!r.ok) return void 0;
+    const data = await r.json();
+    if (!data || typeof data !== "object") return void 0;
+    const result = data;
+    return result.available === true && result.system === "b20" && result.chain === chain && String(result.address).toLowerCase() === address.toLowerCase() ? "b20" : void 0;
+  } catch {
+    return void 0;
+  }
+}
 async function resolveEvmCreatorKind(chain, creator, fetchImpl2 = fetch) {
   const origin = globalThis.location?.origin;
   if (!origin && !hasThreatApiContext()) return "unknown";
@@ -42259,37 +42387,24 @@ async function screenAddressSanctions(chain, addresses, fetchImpl2 = fetch) {
   }
 }
 function washSignatureFor(m) {
-  const vol = Number.isFinite(m.vol24) ? Math.max(0, m.vol24) : 0;
-  const liq = Number.isFinite(m.liquidityUsd) ? Math.max(0, m.liquidityUsd) : 0;
+  const volumeKnown = Number.isFinite(m.vol24) && m.vol24 >= 0;
+  const depthKnown = Number.isFinite(m.liquidityUsd) && m.liquidityUsd >= 0;
+  const vol = volumeKnown ? m.vol24 : 0;
+  const liq = depthKnown ? m.liquidityUsd : 0;
+  const ratio = liq > 0 ? vol / liq : 0;
   const txns = (m.buys ?? 0) + (m.sells ?? 0);
-  const ratio = liq > 0 ? vol / liq : vol > 0 ? Number.POSITIVE_INFINITY : 0;
-  const rx = Number.isFinite(ratio) ? `${ratio.toFixed(ratio >= 100 ? 0 : 1)}x` : "unbounded";
-  const money = (n) => `$${Math.round(n).toLocaleString()}`;
-  if (liq < 1e3 && vol >= 1e4) {
-    return {
-      wash: true,
-      ratio,
-      rationale: `${money(vol)} of 24h volume on ${money(liq)} of liquidity: volume without a pool to carry it, a fake-volume signature.`,
-      claim: `${money(vol)} of 24h volume is reported against ${money(liq)} of liquidity. No pool that shallow can host that trading; the volume is fabricated or the pool was drained after it. A fake-volume signature.`
-    };
-  }
-  if (ratio >= 100 && txns >= 20) {
-    return {
-      wash: true,
-      ratio,
-      rationale: `vol/liquidity ${rx} in 24h: the pool turned over ${rx} its depth and is still standing, a cycled-volume signature.`,
-      claim: `Volume is ${rx} liquidity in 24h (${money(vol)} on ${money(liq)}). A pool cycled a hundred times its depth in a day without being drained is being traded against itself; treat the volume as manufactured until the buyers are shown to be distinct wallets.`
-    };
-  }
-  if (m.pc24 != null && Number.isFinite(m.pc24) && ratio >= 15 && Math.abs(m.pc24) < 10 && txns >= 50) {
-    return {
-      wash: true,
-      ratio,
-      rationale: `vol/liquidity ${ratio.toFixed(1)}x but price flat (${m.pc24.toFixed(1)}%): wash-trade signature.`,
-      claim: `Volume is ${ratio.toFixed(0)}x liquidity in 24h while the price moved only ${m.pc24.toFixed(1)}%: a wash-trading or fake-volume signature.`
-    };
-  }
-  return { wash: false, ratio: Number.isFinite(ratio) ? ratio : 0, rationale: "", claim: "" };
+  const lowDepth = volumeKnown && vol >= 1e4 && (!depthKnown || liq < 1e3);
+  const turnover = ratio >= 100 && txns >= 20;
+  const churn = ratio >= 15 && m.pc24 != null && Number.isFinite(m.pc24) && Math.abs(m.pc24) < 10 && txns >= 50;
+  if (!lowDepth && !turnover && !churn) return { wash: false, anomaly: false, ratio, rationale: "", claim: "" };
+  const rationale = lowDepth ? `Liquidity anomaly: $${Math.round(vol).toLocaleString()} reported 24h volume; ${depthKnown ? `$${Math.round(liq).toLocaleString()} current pool liquidity` : "current pool liquidity unavailable"}. Volume/depth ratio is ${liq > 0 ? `${ratio.toFixed(1)}x` : "not measurable"}.` : `Turnover anomaly: 24h volume/current liquidity ${ratio.toFixed(1)}x${churn ? ` with ${m.pc24.toFixed(1)}% net price change` : ""}.`;
+  return {
+    wash: false,
+    anomaly: true,
+    ratio,
+    rationale,
+    claim: `${rationale} Daily volume and current depth cover different observation periods. Check historical liquidity and participant-level trades; these aggregates do not establish coordinated trading.`
+  };
 }
 var clamp2 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 var num4 = (s) => s == null || s === "" ? null : Number(s);
@@ -42565,9 +42680,9 @@ async function runTokenAudit(input, emit, opts) {
   const sells = pair.txns?.h24?.sells ?? 0;
   const pc24 = pair.priceChange?.h24 ?? 0;
   const ageDays = pair.pairCreatedAt ? (Date.now() - pair.pairCreatedAt) / 864e5 : void 0;
-  const wash = washSignatureFor({ vol24, liquidityUsd, pc24: pair.priceChange?.h24 ?? null, buys, sells });
+  const wash = washSignatureFor({ vol24, liquidityUsd: pair.liquidity?.usd ?? NaN, pc24: pair.priceChange?.h24 ?? null, buys, sells });
   const volLiq = wash.ratio;
-  const washSignature = wash.wash;
+  const volumeAnomaly = wash.anomaly;
   step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15e3 ? "warn" : "neutral" });
   const gpChain = GOPLUS_CHAIN[chain];
   let safety = emptySafety();
@@ -42618,7 +42733,7 @@ async function runTokenAudit(input, emit, opts) {
     } : { phase: "Contract", label: "Deployer unresolved", detail: "No source named a creator for this mint, so deployer forensics could not run.", tone: "warn" });
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders\u2026" : "GoPlus + honeypot.is buy/sell simulation\u2026", tone: "neutral" });
-    const [gp, sim, explorer, source2] = await Promise.all([
+    const [gp, sim, explorer, source2, system] = await Promise.all([
       goplus(gpChain, address, fetcher),
       opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address, fetcher),
       // Where GoPlus cannot order holders, the chain's own explorer is the
@@ -42626,12 +42741,13 @@ async function runTokenAudit(input, emit, opts) {
       blockscoutHolders(chain, address, fetcher),
       // What the deployer wrote about their own contract. Free, and the only
       // place an intent to defeat safety scanners is ever stated outright.
-      blockscoutContractSource(chain, address, fetcher)
+      blockscoutContractSource(chain, address, fetcher),
+      resolveTokenSystem(chain, address, fetcher)
     ]);
     gpEvm = gp;
     explorerHolders = explorer;
     contractSource = source2;
-    safety = evmSafety(gp, sim, address);
+    safety = { ...evmSafety(gp, sim, address), ...system ? { system } : {} };
     safety = recordObservedTradeability(safety, { buys24h: buys, sells24h: sells, liquidityUsd });
     const evmCreator = gp?.creator_address?.trim();
     const evmOwner = gp?.owner_address?.trim();
@@ -42775,7 +42891,7 @@ async function runTokenAudit(input, emit, opts) {
   }
   if (pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd) && liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
-  if (washSignature) findings.push({ claim: wash.claim, tone: "bad", source: "dexscreener" });
+  if (volumeAnomaly) findings.push({ claim: wash.claim, tone: "warn", source: "dexscreener" });
   if (pc24 <= -60) findings.push({ claim: `Down ${Math.abs(pc24).toFixed(0)}% in 24h. The token appears to have already dumped.`, tone: "bad", source: "dexscreener" });
   else if (pc24 >= 300 && liquidityUsd < 1e5) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity. This is a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
   if (!opts?.skipSim) {
@@ -42882,7 +42998,7 @@ async function runTokenAudit(input, emit, opts) {
     if (!s.ownerRenounced) aT2 -= 6;
     if (s.transferHook) aT2 -= 8;
   } else {
-    if (!s.openSource) aT2 -= 8;
+    if (!s.openSource && s.system !== "b20") aT2 -= 8;
     if (s.pausable) aT2 -= 8;
     if (s.selfdestruct) aT2 -= 10;
     if (!s.ownerRenounced) aT2 -= 4;
@@ -42891,7 +43007,7 @@ async function runTokenAudit(input, emit, opts) {
     if (!s.ownerRenounced && (s.blacklist || s.tradingCooldown)) aT2 -= 3;
   }
   aT2 = clamp2(aT2, 0, 26);
-  axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.openSource ? "verified" : "unverified"} source, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${s.pausable ? ", pausable" : ""}.` : "On-chain safety not verifiable keyless on this chain." });
+  axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.system === "b20" ? "B20 system asset; no per-token source" : s.openSource ? "verified source" : "unverified source"}, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${s.pausable ? ", pausable" : ""}.` : "On-chain safety not verifiable keyless on this chain." });
   const tax = s.buyTax + s.sellTax;
   let aT3 = !s.available ? 6 : tax === 0 ? 12 : tax <= 10 ? 10 : tax <= 20 ? 7 : tax <= 40 ? 3 : 0;
   if (s.cannotSellAll || s.nonTransferable) aT3 = 0;
@@ -42916,10 +43032,9 @@ async function runTokenAudit(input, emit, opts) {
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
-  if (washSignature) aT5 = 2;
-  else if (total > 20 && sells / total > 0.8) aT5 = clamp2(aT5 - 2, 0, 12);
+  if (total > 20 && sells / total > 0.8) aT5 = clamp2(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp2(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? wash.rationale : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: volumeAnomaly ? wash.rationale : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
     ...(pair.info?.socials ?? []).map((x) => ({ label: x.type, url: x.url }))

@@ -33,7 +33,7 @@ describe("plainScoreRationale", () => {
     expect(plainScoreRationale("24h vol/liquidity 0.95x, 10566 buys / 6091 sells."))
       .toBe("In the last day, trading volume was about 0.95 times the pool size, with 10,566 buys and 6,091 sells.");
     expect(plainScoreRationale("vol/liquidity 4.1x but price flat (0.2%): wash-trade signature."))
-      .toBe("Trading volume was 4.1 times the pool size while the price barely moved (0.2%). That pattern is a wash-trade signature, not proof of genuine demand.");
+      .toBe("Trading volume was 4.1 times the pool size while the price barely moved (0.2%). This is an activity anomaly; aggregate turnover and net price change do not establish participant-level conduct.");
     expect(explainCompositionScore("verified source, owner active.", 22, 26))
       .toBe("The source code is verified, and the owner still has control. That is why it scored 22 of 26 points (4 points not earned).");
   });

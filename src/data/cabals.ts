@@ -28,6 +28,7 @@ export type CabalKind =
 export type CabalIntent = "nefarious" | "benign" | "unestablished";
 
 export type WalletRole =
+  | "launch-contract" // receipt-linked factory, registry, hook or seeder; no custody assertion
   | "hub" // funds deployers and snipers, receives proceeds back
   | "deployer"
   | "sniper" // launch-block or block+1 buyer
@@ -98,6 +99,121 @@ const SOL = "solana";
 const BASE = "base";
 
 export const CABALS: Cabal[] = [
+{
+  "id": "base-catalyst-suite-2026-09-23",
+  "name": "Base Catalyst launch suite",
+  "kind": "infra",
+  "intent": "unestablished",
+  "summary": "Six market registrations on 2026-09-23 were recovered from the same Base registry. Their successful launch transactions share a sender and factory. Catalyst’s receipt identifies a USDC pair, hook and liquidity seeder. Shared infrastructure and a launch sender do not establish malicious intent, beneficial ownership, custody guarantees or project quality. Fee escrow, payout routing and subsequent conduct remain unverified.",
+  "firstSeen": "2026-09-23",
+  "lastSeen": "2026-09-24",
+  "wallets": [
+    {
+      "chain": "base",
+      "address": "0xe45ab753c9fe96913b1e221e472426770771a95a",
+      "role": "deployer",
+      "label": "Sender of the six observed registration transactions",
+      "evidence": "All six successful transactions listed in docs/launchpads/receipts/catalyst-2026-09-24.json have this sender; read Base Blockscout 2026-09-24. Transaction sender is not a verified real-world identity."
+    },
+    {
+      "chain": "base",
+      "address": "0x4d958575d15cb719f1caf65af04c0fd749e63f69",
+      "role": "launch-contract",
+      "label": "Factory / launch transaction target",
+      "evidence": "Catalyst mint recipient and launch transaction target in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+    },
+    {
+      "chain": "base",
+      "address": "0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+      "role": "launch-contract",
+      "label": "Market registry",
+      "evidence": "MarketRegistered event, log 61 in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+    },
+    {
+      "chain": "base",
+      "address": "0xfd2823fbf019e9d4a121544590e00705fdae80f0",
+      "role": "launch-contract",
+      "label": "Liquidity seeder",
+      "evidence": "ModifyLiquidity sender in logs 64–71 and MarketSeeded emitter at log 73 in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+    },
+    {
+      "chain": "base",
+      "address": "0x0d5d83c5a1d27654d12670bb07461971a5aba8cc",
+      "role": "launch-contract",
+      "label": "Pool hook",
+      "evidence": "Initialize hooks field in log 62 in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+    }
+  ],
+  "accounts": [],
+  "launches": [
+    {
+      "chain": "base",
+      "address": "0xca7a1e31b36779cf32acb18714ab26982cf36b05",
+      "symbol": "CATALYST",
+      "name": "CATALYST",
+      "launchedAt": "2026-09-23",
+      "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+      "outcome": "unestablished",
+      "note": "Observed market registration with pool ID 0xf0bac62dd4fd04dc26c9bc9ded68f16c515ab71c09bb87e8e546b7ce83c0ccb9; lifecycle, custody, creator fees and trading conduct remain unverified.",
+      "evidence": "https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0, block 51681332, registry log 61, 2026-09-23T08:26:51.000000Z; successful sender/target read 2026-09-24."
+    },
+    {
+      "chain": "base",
+      "address": "0xca7a365c7f33a04874ff621bd6b68043c034014e",
+      "symbol": "APPLEOG",
+      "name": "APPLEOG",
+      "launchedAt": "2026-09-23",
+      "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+      "outcome": "unestablished",
+      "note": "Observed market registration with pool ID 0xe69166e6da4b5cbbb9d7f2b6f9bb9b56a26d58f587c16cb465180a33ccc3135f; lifecycle, custody, creator fees and trading conduct remain unverified.",
+      "evidence": "https://base.blockscout.com/tx/0xbdf5bda7d907344c2d8f20105d6083177707775f58553266b3d4a26976e576b5, block 51696917, registry log 129, 2026-09-23T17:06:21.000000Z; successful sender/target read 2026-09-24."
+    },
+    {
+      "chain": "base",
+      "address": "0xca7a011bd9d2c2aa82a4367c71e713ea0e78f75d",
+      "symbol": "MUSEVERSE",
+      "name": "MUSEVERSE",
+      "launchedAt": "2026-09-23",
+      "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+      "outcome": "unestablished",
+      "note": "Observed market registration with pool ID 0xc50d25dccf38db0e3d2714b748f21937dac37b2ec1e37c9c53a6e0e52d7bf0e7; lifecycle, custody, creator fees and trading conduct remain unverified.",
+      "evidence": "https://base.blockscout.com/tx/0x33c0cb2cf6bade6593b3f1722e4f608f9900c76bb04fa0d89f698c3031847a2e, block 51697158, registry log 664, 2026-09-23T17:14:23.000000Z; successful sender/target read 2026-09-24."
+    },
+    {
+      "chain": "base",
+      "address": "0xca7ac088485c7c68f81eb60614f200797905aaa2",
+      "symbol": "BASEDPRIVACY",
+      "name": "BASEDPRIVACY",
+      "launchedAt": "2026-09-23",
+      "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+      "outcome": "unestablished",
+      "note": "Observed market registration with pool ID 0x5c3e216e0629d47f3e1d75bcc5e58923dab108494379f937bd4af607d70b5203; lifecycle, custody, creator fees and trading conduct remain unverified.",
+      "evidence": "https://base.blockscout.com/tx/0xe1705f079a97168a913c3ec3b975b996d15cc82e5c9d33482de3935c93d43b89, block 51697539, registry log 871, 2026-09-23T17:27:05.000000Z; successful sender/target read 2026-09-24."
+    },
+    {
+      "chain": "base",
+      "address": "0xca7ae68bbc9437cd5b93e543533b7a8e375d66bc",
+      "symbol": "GROKCOIN",
+      "name": "GROKCOIN",
+      "launchedAt": "2026-09-23",
+      "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+      "outcome": "unestablished",
+      "note": "Observed market registration with pool ID 0xda8fb1006b6838f3435aa7e6266860dcaf2606300391e3005e7326cbbfa334f7; lifecycle, custody, creator fees and trading conduct remain unverified.",
+      "evidence": "https://base.blockscout.com/tx/0x7a8cf60d88cefebdd585393d772b0c6e1c821acb3b0f658a1e8cdc5760303f37, block 51698300, registry log 577, 2026-09-23T17:52:27.000000Z; successful sender/target read 2026-09-24."
+    },
+    {
+      "chain": "base",
+      "address": "0xca7a548d5a73bb396fafe229447643ef1082fe0d",
+      "symbol": "BASEDGPUS",
+      "name": "BASEDGPUS",
+      "launchedAt": "2026-09-23",
+      "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+      "outcome": "unestablished",
+      "note": "Observed market registration with pool ID 0xe025a4f7554cab8213cabebfde59511316d7283a3e99596ad82f1968940a76cc; lifecycle, custody, creator fees and trading conduct remain unverified.",
+      "evidence": "https://base.blockscout.com/tx/0x9c8773cb1a7fba82e1f74cdd6c57e4ba4903826a3344406fc407c69a187c675b, block 51698390, registry log 368, 2026-09-23T17:55:27.000000Z; successful sender/target read 2026-09-24."
+    }
+  ]
+},
   {
     id: "rh-lemonfun-fee-farm",
     name: "$LEMON (Lemon.fun) creator fee farm",
@@ -271,11 +387,11 @@ export const CABALS: Cabal[] = [
   },
   {
     id: "rh-volume-ring-2026-09-22",
-    name: "Robinhood Chain wash-volume ring of 2026-09-22",
+    name: "Robinhood Chain turnover-anomaly cohort of 2026-09-22",
     kind: "launch-farm",
-    intent: "nefarious",
+    intent: "unestablished",
     summary:
-      "Thirty-one tokens deployed directly from thirty-two fresh wallets on 2026-09-21 to 23, no launchpad, that report 1.9M to 23M USD of daily volume on zero to 300,000 USD of liquidity: volume-to-liquidity ratios of 100 to 5,000 times, and four (a fake BTC, GREEN, FCAT, SHIB) showing millions of volume on no liquidity at all. Three bytecode templates cover 21 of them, several are name-clones of real tokens (musebook, Agrippa, HOOD6900, BTC, SHIB), the deployers have nonces of 5 to 18 and most are drained to zero after use, and template B is chain-funded from one pot: JEV's deployer sent RIG's 16.09 ETH and NODIUM's received 12.85 ETH. The tokens have no product, no socials and no organic holders; the volume exists to game the chain's top-by-volume rankings on GeckoTerminal and DexScreener. Any scan of one of these tokens should warn, and any volume ranking on this chain must exclude them.",
+      "Research reported 31 tokens and 32 wallets; this registry indexes only 13 token addresses and eight wallets. The recorded observations include unusually high daily volume relative to current liquidity, reused bytecode templates, duplicated names and specific funding links. These are investigation leads: neither aggregate turnover nor shared templates establish wash trading, common control of the whole cohort, or an intent to defraud. Missing addresses and transaction-level trading evidence remain outstanding. Do not treat this partial index as a complete ring or automatically exclude its tokens from rankings.",
     firstSeen: "2026-09-21",
     lastSeen: "2026-09-23",
     wallets: [

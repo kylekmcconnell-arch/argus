@@ -93,3 +93,22 @@ describe("lookups", () => {
     expect(s).not.toContain("\u2014");
   });
 });
+
+it("does not turn the partial turnover cohort into proven nefarious control", () => {
+  const cohort = CABALS.find(c => c.id === "rh-volume-ring-2026-09-22")!;
+  expect(cohort.intent).toBe("unestablished");
+  expect(cohort.launches).toHaveLength(13);
+  expect(cohort.wallets).toHaveLength(8);
+  expect(cohort.summary).toContain("only 13 token addresses and eight wallets");
+});
+
+it("joins recovered Catalyst launches and infrastructure without declaring malicious control", () => {
+  const cohort = CABALS.find(c => c.id === "base-catalyst-suite-2026-09-23")!;
+  expect(cohort.intent).toBe("unestablished");
+  expect(cohort.launches).toHaveLength(6);
+  for (const launch of cohort.launches) {
+    expect(findCabalLaunch("base", launch.address)?.cabal.id).toBe(cohort.id);
+    expect(launch.evidence).toMatch(/https:\/\/base.blockscout.com\/tx\/0x[0-9a-f]{64}/);
+  }
+  expect(findCabalWallet("base", "0xfd2823fbf019e9d4a121544590e00705fdae80f0")?.cabal.id).toBe(cohort.id);
+});

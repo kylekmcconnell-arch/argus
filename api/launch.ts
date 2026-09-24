@@ -226,7 +226,9 @@ const O1_BASE_ANNOUNCEMENT_REGISTRIES = [
 ];
 // B20 system-address prefix (Base-native asset standard). Gates the log probe:
 // a non-B20 Base token cannot be an o1 launch, so it never spends the calls.
-const B20_SYSTEM_ADDRESS = /^0xb20/i;
+const B20_SYSTEM_ADDRESS = /^0xb20[0-9a-f]{37}$/i;
+// keccak256("CreatorRegistered(address,address)")
+const O1_CREATOR_REGISTERED = "0xca4da5ec8448afb7e0c9e8b124653a2a4146cfd2f5a8f9778f93cf206e0a5bc0";
 
 export async function o1BaseAnnouncementVenue(token: string, etherscanKey: string): Promise<string | null> {
   if (!B20_SYSTEM_ADDRESS.test(token)) return null;
@@ -237,14 +239,22 @@ export async function o1BaseAnnouncementVenue(token: string, etherscanKey: strin
     try {
       const q = new URLSearchParams({
         chainid: "8453", module: "logs", action: "getLogs",
-        address: registry, topic1: paddedToken,
+        address: registry, topic0: O1_CREATOR_REGISTERED, topic1: paddedToken, topic0_1_opr: "and",
         fromBlock: "0", toBlock: "latest", page: "1", offset: "1",
         apikey: etherscanKey,
       });
       const r = await fetch(`https://api.etherscan.io/v2/api?${q}`, { signal: AbortSignal.timeout(9000) });
       if (!r.ok) continue;
       const d = (await r.json()) as { result?: unknown };
-      if (Array.isArray(d.result) && d.result.length > 0) return "o1";
+      if (Array.isArray(d.result) && d.result.some((row: unknown) => {
+        if (!row || typeof row !== "object") return false;
+        const log = row as { address?: unknown; topics?: unknown; removed?: unknown };
+        if (String(log.address).toLowerCase() !== registry || log.removed === true || log.removed === "true" || !Array.isArray(log.topics)) return false;
+        return log.topics.length === 3 && String(log.topics[0]).toLowerCase() === O1_CREATOR_REGISTERED
+          && String(log.topics[1]).toLowerCase() === paddedToken
+          && /^0x0{24}[0-9a-f]{40}$/i.test(String(log.topics[2]))
+          && !/^0x0{64}$/i.test(String(log.topics[2]));
+      })) return "o1";
     } catch {
       continue;
     }
@@ -294,9 +304,9 @@ export async function robinhoodCreatorVenue(token: string): Promise<string | nul
 // initializer (LONG, Bankr and any other integrator) and the Pons v1 lockers.
 const DOPPLER_INITIALIZER = "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544";
 const PONS_V1_LOCKERS = ["0x736d76699c26d0d966744cae304c000d471f7f35", "0x31ca5e101941a93a7dd6d0497928700625cf54b5"];
-// Where a sale lands on this chain: the v4 PoolManager, the routers, the
-// bridge, the app settler and the 0x settlers. A transfer into one of these
-// is a sell (or a bridge-out, which for a creator's fee leg reads the same).
+// Market infrastructure: the v4 PoolManager, routers, bridge and settlers.
+// Transfers to these destinations require transaction receipts to distinguish
+// swaps, liquidity movements, bridging and other routing.
 const RH_SELL_SINKS = new Set([
   "0x8366a39cc670b4001a1121b8f6a443a643e40951", // Uniswap v4 PoolManager
   "0x6f02324d20cc679d0e585290caa6b16bacbc0f77", // Doppler Rehype hook (LONG)
@@ -311,7 +321,7 @@ const RH_SELL_SINKS = new Set([
   "0xdeadc0de0000e54725ad1bf220324717043e02bf", // proxy router (MEME read)
 ]);
 const RH_BURN = new Set([ZERO, "0x000000000000000000000000000000000000dead"]);
-const RH_POOLS = new Set(["0x8366a39cc670b4001a1121b8f6a443a643e40951"]);
+
 
 // Blockscout's Etherscan-compatible token-transfer index. A full RPC log scan
 // of this chain is not viable inside a request: topic-filtered eth_getLogs
@@ -334,7 +344,10 @@ async function rhTokenTransfers(address: string, token: string, budget: { calls:
       const d = (await r.json()) as any;
       // An empty result is reported as status "0" with a "No transactions
       // found" message: that is an answer, not a failure.
-      if (d?.status === "0") return { rows, truncated: false };
+      if (d?.status === "0") {
+        const empty = /no transactions found/i.test(String(d.message ?? "") + " " + String(d.result ?? ""));
+        return empty ? { rows, truncated: false } : null;
+      }
       if (!Array.isArray(d?.result)) return null;
       rows.push(...(d.result as RhTransfer[]));
       if (d.result.length < RH_PAGE) return { rows, truncated: false };
@@ -352,12 +365,17 @@ const amountOf = (t: RhTransfer) => {
 
 export interface CreatorFeeUsage {
   claimer: string | null;
-  claimCount: number;
-  claimedTokens: number;
-  soldTokens: number;
+  claimCount: null;
+  claimedTokens: null;
+  evidence: "transfer-only";
+  sourceTransfers: number;
+  sourceTokens: number;
+  marketTransfers: number;
+  untracedTokens: number;
+  soldTokens: number | null;
   burnedTokens: number;
-  boughtBackTokens: number;
-  heldTokens: number;
+  boughtBackTokens: number | null;
+  heldTokens: number | null;
   usage: "lp-add" | "buyback-burn" | "buyback" | "hold" | "dump" | "unknown";
   note: string;
 }
@@ -380,28 +398,21 @@ export function classifyCreatorFeeUsage(t: ClaimTrace, symbol = "the token"): { 
   const sold = t.directSold + t.forwardedSold;
   const fmt = (n: number) => Math.round(n).toLocaleString();
   const claims = `${t.claimCount} claim${t.claimCount === 1 ? "" : "s"} of ${fmt(claimed)} ${symbol}`;
-  if (t.burned >= claimed * 0.5) return { usage: "buyback-burn", note: `${claims}; ${fmt(t.burned)} burned.` };
-  if (t.boughtBack >= claimed * 0.5 && sold < claimed * 0.5) return { usage: "buyback", note: `${claims}; the claimer bought ${fmt(t.boughtBack)} back from the pool.` };
-  if (sold >= claimed * 0.6 && t.claimCount >= 3) {
-    const via = t.forwardedSold > t.directSold ? ", mostly one hop through fresh wallets" : "";
+  if (t.burned >= claimed * 0.5 && t.boughtBack >= t.burned && t.boughtBack > sold) return { usage: "buyback-burn", note: `${claims}; ${fmt(t.burned)} burned.` };
+  if (t.boughtBack >= claimed * 0.5 && t.boughtBack >= sold) return { usage: "buyback", note: `${claims}; the claimer bought ${fmt(t.boughtBack)} back from the pool.` };
+  if (sold >= claimed * 0.6 && t.claimCount >= 3 && t.boughtBack + t.burned < sold * 0.4) {
+    const via = t.forwardedSold > t.directSold ? ", through an observed intermediary" : "";
     return { usage: "dump", note: `${claims}; ${fmt(sold)} (${Math.round((sold / claimed) * 100)}%) sold into the pool or a router${via}; ${fmt(t.boughtBack)} bought back.` };
   }
-  if (t.held + t.forwardedHeld >= claimed * 0.6) return { usage: "hold", note: `${claims}; ${fmt(t.held + t.forwardedHeld)} still held, none sold.` };
+  if (t.held + t.forwardedHeld >= claimed * 0.6) return { usage: "hold", note: `${claims}; ${fmt(t.held + t.forwardedHeld)} still held; ${fmt(sold)} observed sold.` };
   return { usage: "unknown", note: `${claims}; ${fmt(sold)} sold, ${fmt(t.held)} held, ${fmt(t.boughtBack)} bought back - no dominant pattern yet.` };
 }
 
 /**
- * Read the creator's fee claims for one token on Robinhood Chain and follow
- * the token leg one hop. The claimer is the launch transaction's sender: on
- * Doppler venues the pool's default fee beneficiary, on Pons v1 the locker's
- * payee. Its own transfer feed is small; the fee source's is not, because
- * Doppler's hook passes every swap through the initializer, so that feed runs
- * to hundreds of thousands of rows on a live token and must not be read.
- *
- * Only conduct after the first claim is attributed to the fee stream: a launch
- * buy sold later is a sale, but not a sale of fees. Returns null when the
- * index could not answer or the claimer's history was too long to read in
- * full - a partial read must never be reported as "no claims".
+ * Observe transfers between the launch sender, configured fee infrastructure
+ * and at most two subsequent recipients. Transfers do not establish claims,
+ * swaps or ownership of fungible inventory. No conduct verdict is emitted.
+ * Failed or capped feeds stay unknown rather than becoming clean balances.
  */
 const RH_FEED_PAGES = 5;
 export async function robinhoodCreatorFeeUsage(
@@ -419,63 +430,51 @@ export async function robinhoodCreatorFeeUsage(
   const feed = await rhTokenTransfers(claimer, token, budget, RH_FEED_PAGES);
   if (!feed || feed.truncated) return null;
 
-  // 1. Claims: inbound from the venue's fee source.
+  // Inbound transfers from configured sources, not verified claim events.
   const claims = feed.rows.filter((t) => String(t.to).toLowerCase() === claimer && src.has(String(t.from).toLowerCase()));
-  const none: CreatorFeeUsage = { claimer, claimCount: 0, claimedTokens: 0, soldTokens: 0, burnedTokens: 0, boughtBackTokens: 0, heldTokens: 0, usage: "unknown", note: "No creator fee claims observed in the launched token." };
-  if (!claims.length) return none;
-  const blk = (t: RhTransfer) => Number(t.blockNumber);
-  const firstClaim = Math.min(...claims.map(blk));
-  const trace: ClaimTrace = {
-    claimCount: claims.length, claimedTokens: claims.reduce((a, t) => a + amountOf(t), 0),
-    directSold: 0, forwardedSold: 0, forwardedHeld: 0, burned: 0, boughtBack: 0, held: 0,
-    firstClaimBlock: firstClaim, lastClaimBlock: Math.max(...claims.map(blk)),
-  };
-
-  // 2. What the claimer did with it, counted from the first claim onward.
-  const forwarded = new Map<string, number>();
-  let inboundAll = 0, outboundAll = 0;
+  const claimed = claims.reduce((sum, t) => sum + amountOf(t), 0);
+  const result: CreatorFeeUsage = { claimer, claimCount: null, claimedTokens: null,
+    evidence: "transfer-only", sourceTransfers: claims.length, sourceTokens: claimed,
+    marketTransfers: 0, untracedTokens: 0, soldTokens: null, burnedTokens: 0,
+    boughtBackTokens: null, heldTokens: null, usage: "unknown",
+    note: "No transfers from the configured fee sources were observed. Fee claims and trading conduct remain unverified." };
+  if (!claims.length) return result;
+  // Transfer feeds cannot distinguish fee claims from swaps through the same
+  // initializer, or a router transfer from a sale/LP addition/bridge action.
+  // Preserve observations without upgrading them into a fee-conduct verdict.
+  const firstBlock = Math.min(...claims.map(t => Number(t.blockNumber)));
+  if (!Number.isFinite(firstBlock)) return null;
+  const forwarded = new Map<string, { amount: number; firstBlock: number }>();
+  let outbound = 0;
   for (const t of feed.rows) {
-    const from = String(t.from).toLowerCase(); const to = String(t.to).toLowerCase(); const v = amountOf(t);
-    if (to === claimer) {
-      inboundAll += v;
-      // A buy after the first claim, delivered by a pool or router, is the
-      // creator putting fee proceeds (or other money) back into the token.
-      if (blk(t) > firstClaim && !src.has(from) && (RH_POOLS.has(from) || RH_SELL_SINKS.has(from))) trace.boughtBack += v;
-      continue;
+    if (String(t.from).toLowerCase() !== claimer || Number(t.blockNumber) < firstBlock) continue;
+    const to = String(t.to).toLowerCase(), value = amountOf(t);
+    outbound += value;
+    if (RH_SELL_SINKS.has(to)) result.marketTransfers += value;
+    else if (RH_BURN.has(to)) result.burnedTokens += value;
+    else if (!infra.has(to)) {
+      const old = forwarded.get(to);
+      forwarded.set(to, { amount: (old?.amount ?? 0) + value, firstBlock: Math.min(old?.firstBlock ?? Infinity, Number(t.blockNumber)) });
     }
-    if (from !== claimer) continue;
-    outboundAll += v;
-    if (blk(t) < firstClaim) continue;
-    if (RH_SELL_SINKS.has(to)) trace.directSold += v;
-    else if (RH_BURN.has(to)) trace.burned += v;
-    else if (!infra.has(to)) forwarded.set(to, (forwarded.get(to) ?? 0) + v);
   }
-  // Sales cannot exceed what was claimed when the question is what happened
-  // to the fees; the remainder of the wallet's selling is other inventory.
-  trace.directSold = Math.min(trace.directSold, trace.claimedTokens);
-  trace.held = Math.min(trace.claimedTokens, Math.max(0, inboundAll - outboundAll));
-
-  // 3. One hop: did the wallets the claimer forwarded to sell it on? A fee
-  //    leg routed through a fresh wallet into the pool is the pattern the
-  //    registry records for the wire bot, LEMON, MEME and TAIWAN.
-  const hops = [...forwarded.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2);
-  for (const [dest, v] of hops) {
+  const hops = [...forwarded.entries()].sort((a,b) => b[1].amount-a[1].amount);
+  result.untracedTokens = hops.slice(2).reduce((sum, [, row]) => sum + row.amount, 0);
+  for (const [dest, forwardedRow] of hops.slice(0, 2)) {
     const hop = await rhTokenTransfers(dest, token, budget, 2);
-    if (!hop) { trace.forwardedHeld += v; continue; }
-    const soldOn = hop.rows
-      .filter((t) => String(t.from).toLowerCase() === dest && RH_SELL_SINKS.has(String(t.to).toLowerCase()))
-      .reduce((a, t) => a + amountOf(t), 0);
-    trace.forwardedSold += Math.min(v, soldOn);
-    trace.forwardedHeld += Math.max(0, v - soldOn);
+    if (!hop || hop.truncated) { result.untracedTokens += forwardedRow.amount; continue; }
+    // Same-block ordering is not established by this feed, so exclude it.
+    const onward = hop.rows.filter(t => Number(t.blockNumber) > forwardedRow.firstBlock
+      && String(t.from).toLowerCase() === dest && RH_SELL_SINKS.has(String(t.to).toLowerCase()))
+      .reduce((sum, t) => sum + amountOf(t), 0);
+    result.marketTransfers += Math.min(forwardedRow.amount, onward);
   }
-  trace.forwardedSold = Math.min(trace.forwardedSold, Math.max(0, trace.claimedTokens - trace.directSold));
-
-  const { usage, note } = classifyCreatorFeeUsage(trace, symbol);
-  return {
-    claimer, claimCount: trace.claimCount, claimedTokens: trace.claimedTokens,
-    soldTokens: trace.directSold + trace.forwardedSold, burnedTokens: trace.burned,
-    boughtBackTokens: trace.boughtBack, heldTokens: trace.held + trace.forwardedHeld, usage, note,
-  };
+  if (outbound === 0) result.heldTokens = claimed;
+  result.note = `${claims.length} transfers totaling ${Math.round(claimed).toLocaleString()} ${symbol} arrived from configured fee-source contracts. `
+    + `${Math.round(result.marketTransfers).toLocaleString()} tokens were subsequently transferred toward market infrastructure; transfers alone do not establish sales, purchases, or fee-claim attribution. `
+    + (outbound === 0 ? "No subsequent outgoing transfer was observed in the complete claimer feed. " : "Ownership of forwarded balances remains unmeasured. ")
+    + (result.untracedTokens > 0 ? `${Math.round(result.untracedTokens).toLocaleString()} forwarded tokens have incomplete follow-up coverage. ` : "")
+    + "Creator trading conduct remains unverified.";
+  return result;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

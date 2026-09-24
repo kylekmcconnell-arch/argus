@@ -1136,3 +1136,31 @@ three or more claims with most of the token leg sold and nothing bought back
 or burned is the `dump` warning. Validated live against MEME (26 claims,
 5,010,685 claimed, all sold one hop out: dump), TAIWAN (one claim: unknown)
 and MOTION (85 claims, all held: hold).
+
+### 2026-09-24 audit correction: evidence boundaries
+
+This correction supersedes the 2026-09-23 scanner and wash-ring conclusions
+above. A suffix is a venue candidate, not confirmed attribution. Transfer
+feeds alone do not establish fee claims, swaps, bridging, beneficial ownership
+or sales of a particular fungible inventory. The Robinhood tracer now returns
+transfer observations and unknown conduct; failed/capped intermediary reads
+remain incomplete. Prior MEME/MOTION transfer-only classifications are not
+validated conduct evidence. Receipt-level decoding and inventory attribution
+remain outstanding.
+
+High reported turnover against current depth is an anomaly, not proof of wash
+trading. The registry contains 13 of the reported 31 tokens and eight wallet
+addresses. Its cohort intent is unestablished; the missing 18 token addresses,
+full wallet population and participant-level evidence have not been recovered.
+Shared bytecode, token names or funding infrastructure alone do not prove one
+controller. Do not automatically exclude this cohort from ranked coverage.
+
+CATALYST receipt recovery (same audit): free Base Blockscout reads recovered
+all six registration events and successful transaction senders/targets. They
+are now indexed as `base-catalyst-suite-2026-09-23` with intent unestablished.
+Full factory, registry, seeder and hook addresses are supported by Catalyst's
+launch receipt. Raw selected logs and registry records are retained in
+`docs/launchpads/receipts/catalyst-2026-09-24.json`. Fee escrow, payout address,
+custody rights and post-launch fee behavior remain unverified. Shared launch
+sender is not proof of beneficial ownership. A marketing name was not required
+to index this observed infrastructure.

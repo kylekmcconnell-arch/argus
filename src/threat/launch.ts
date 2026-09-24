@@ -346,13 +346,14 @@ interface LaunchApiResponse {
   // launched token (Doppler integrators, Pons v1): how many claims, how much,
   // and what the claimer did with it. See api/launch.ts creatorFeeUsage.
   creatorFees?: {
+    evidence?: "transfer-only" | "verified-events";
     claimer: string | null;
     claimCount: number;
     claimedTokens: number;
-    soldTokens: number;
+    soldTokens: number | null;
     burnedTokens: number;
-    boughtBackTokens: number;
-    heldTokens: number;
+    boughtBackTokens: number | null;
+    heldTokens: number | null;
     usage: NonNullable<LaunchProvenance["creatorFees"]>["usage"];
     note: string;
   } | null;
@@ -527,7 +528,9 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
       // venue's default. A venue that pays in the token is a note; a creator
       // who keeps claiming and selling it is the warning.
       const cf = api?.creatorFees;
-      if (cf && cf.claimCount > 0) {
+      if (cf?.evidence === "transfer-only") {
+        out.creatorFees.note = `${cf.note} ${venue.feeNote}`;
+      } else if (cf?.evidence === "verified-events" && cf.claimCount > 0) {
         out.creatorFees.claimCount = cf.claimCount;
         out.creatorFees.claimedTokens = cf.claimedTokens;
         out.creatorFees.claimedUsd = d.priceUsd != null && Number.isFinite(d.priceUsd) ? cf.claimedTokens * d.priceUsd : null;
