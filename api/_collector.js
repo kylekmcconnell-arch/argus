@@ -20819,6 +20819,16 @@ function preserveRelatedOrganization(ctx, member, profile) {
 }
 async function enrichOne(ctx, member) {
   const profile = await getProfile2(member.handle);
+  const url = `https://x.com/${member.handle.replace(/^@/, "")}`;
+  const status = !profile || profile.accountStatus === "temporarily_unavailable" ? "failed" : profile.accountStatus === "active" ? "read" : "partial";
+  member.sourceReceipts = [...(member.sourceReceipts ?? []).filter((row) => row.platform !== "x"), {
+    platform: "x",
+    url,
+    status,
+    capturedAt: profile?.statusCapturedAt ?? (/* @__PURE__ */ new Date()).toISOString(),
+    scope: status === "read" ? "Profile metadata only; posts and employment history were not collected by this check." : "Profile availability could not be fully established; no historical coverage.",
+    provider: "twitterapi"
+  }];
   if (!profile) return false;
   member.accountStatus = profile.accountStatus;
   member.followers = profile.followers;
@@ -20848,6 +20858,14 @@ async function enrichFirstPartyTeamAvatars(ctx) {
       if (result === "person") enriched++;
       if (result === "organization") reclassified++;
     } catch (error) {
+      member.sourceReceipts = [...(member.sourceReceipts ?? []).filter((row) => row.platform !== "x"), {
+        platform: "x",
+        url: `https://x.com/${member.handle.replace(/^@/, "")}`,
+        status: "failed",
+        capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        scope: "Profile lookup failed; no historical coverage.",
+        provider: "twitterapi"
+      }];
       ctx.emit({
         phase: "P1 \xB7 Team",
         label: "Team enrichment error",

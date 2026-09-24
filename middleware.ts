@@ -32,6 +32,7 @@ const VIEWER_GET_PATHS = new Set([
   "/api/serper-credits",
   "/api/alerts",
   "/api/holder-history",
+  "/api/person-research",
   "/api/holder-alerts",
   "/api/augment",
   // Keyless read-only lookup of a public OFAC SDN address list. Runs inline on
@@ -125,14 +126,14 @@ const SUPPLEMENTAL_PATHS = new Set([
   "project-docs", "recon-team", "github-forensics", "resolve-github", "x-find", "pfp-check", "kol-signals", "token-identity",
   "identity-sweep", "challenge-verdict", "vc-portfolio", "call-performance", "namesake", "cluster", "funder", "deployer",
   "evm-funder", "evm-cluster", "evm-deployer", "code-review", "wallet-taxonomy", "deployer-origin", "migration", "early-buyers",
-  "cohort", "wallet-holdings", "deployer-risk", "holder-enrichment", "reclassify", "resolve-deployer", "ocr-clue",
+  "person-research", "cohort", "wallet-holdings", "deployer-risk", "holder-enrichment", "reclassify", "resolve-deployer", "ocr-clue",
 ].map((route) => `/api/${route}`));
 // Routes that reserve their own supplemental unit from the handler, after
 // validation and immediately before paid work (reserveSupplementalBudget in
 // api/_auth.ts). Reserving here charged the daily allowance for 4xx
 // rejections, clarification-only turns and provider outages that delivered
 // nothing. Every path listed here MUST call the helper before its model call.
-export const HANDLER_METERED_SUPPLEMENTAL_PATHS = new Set(["/api/ask", "/api/reclassify"]);
+export const HANDLER_METERED_SUPPLEMENTAL_PATHS = new Set(["/api/ask", "/api/reclassify", "/api/person-research"]);
 const ROLE_RANK: Record<string, number> = { viewer: 0, analyst: 1, owner: 2 };
 
 export const config = {
