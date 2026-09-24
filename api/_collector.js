@@ -1209,6 +1209,121 @@ var SOL = "solana";
 var BASE = "base";
 var CABALS = [
   {
+    "id": "base-catalyst-suite-2026-09-23",
+    "name": "Base Catalyst launch suite",
+    "kind": "infra",
+    "intent": "unestablished",
+    "summary": "Six market registrations on 2026-09-23 were recovered from the same Base registry. Their successful launch transactions share a sender and factory. Catalyst\u2019s receipt identifies a USDC pair, hook and liquidity seeder. Shared infrastructure and a launch sender do not establish malicious intent, beneficial ownership, custody guarantees or project quality. Fee escrow, payout routing and subsequent conduct remain unverified.",
+    "firstSeen": "2026-09-23",
+    "lastSeen": "2026-09-24",
+    "wallets": [
+      {
+        "chain": "base",
+        "address": "0xe45ab753c9fe96913b1e221e472426770771a95a",
+        "role": "deployer",
+        "label": "Sender of the six observed registration transactions",
+        "evidence": "All six successful transactions listed in docs/launchpads/receipts/catalyst-2026-09-24.json have this sender; read Base Blockscout 2026-09-24. Transaction sender is not a verified real-world identity."
+      },
+      {
+        "chain": "base",
+        "address": "0x4d958575d15cb719f1caf65af04c0fd749e63f69",
+        "role": "launch-contract",
+        "label": "Factory / launch transaction target",
+        "evidence": "Catalyst mint recipient and launch transaction target in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+      },
+      {
+        "chain": "base",
+        "address": "0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "role": "launch-contract",
+        "label": "Market registry",
+        "evidence": "MarketRegistered event, log 61 in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+      },
+      {
+        "chain": "base",
+        "address": "0xfd2823fbf019e9d4a121544590e00705fdae80f0",
+        "role": "launch-contract",
+        "label": "Liquidity seeder",
+        "evidence": "ModifyLiquidity sender in logs 64\u201371 and MarketSeeded emitter at log 73 in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+      },
+      {
+        "chain": "base",
+        "address": "0x0d5d83c5a1d27654d12670bb07461971a5aba8cc",
+        "role": "launch-contract",
+        "label": "Pool hook",
+        "evidence": "Initialize hooks field in log 62 in https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0; read 2026-09-24. No custody or controller inference."
+      }
+    ],
+    "accounts": [],
+    "launches": [
+      {
+        "chain": "base",
+        "address": "0xca7a1e31b36779cf32acb18714ab26982cf36b05",
+        "symbol": "CATALYST",
+        "name": "CATALYST",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0xf0bac62dd4fd04dc26c9bc9ded68f16c515ab71c09bb87e8e546b7ce83c0ccb9; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0xf38e2e43e485ab243f6cd047aee077cee0595fad103169c905c1339428bd0ae0, block 51681332, registry log 61, 2026-09-23T08:26:51.000000Z; successful sender/target read 2026-09-24."
+      },
+      {
+        "chain": "base",
+        "address": "0xca7a365c7f33a04874ff621bd6b68043c034014e",
+        "symbol": "APPLEOG",
+        "name": "APPLEOG",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0xe69166e6da4b5cbbb9d7f2b6f9bb9b56a26d58f587c16cb465180a33ccc3135f; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0xbdf5bda7d907344c2d8f20105d6083177707775f58553266b3d4a26976e576b5, block 51696917, registry log 129, 2026-09-23T17:06:21.000000Z; successful sender/target read 2026-09-24."
+      },
+      {
+        "chain": "base",
+        "address": "0xca7a011bd9d2c2aa82a4367c71e713ea0e78f75d",
+        "symbol": "MUSEVERSE",
+        "name": "MUSEVERSE",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0xc50d25dccf38db0e3d2714b748f21937dac37b2ec1e37c9c53a6e0e52d7bf0e7; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0x33c0cb2cf6bade6593b3f1722e4f608f9900c76bb04fa0d89f698c3031847a2e, block 51697158, registry log 664, 2026-09-23T17:14:23.000000Z; successful sender/target read 2026-09-24."
+      },
+      {
+        "chain": "base",
+        "address": "0xca7ac088485c7c68f81eb60614f200797905aaa2",
+        "symbol": "BASEDPRIVACY",
+        "name": "BASEDPRIVACY",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0x5c3e216e0629d47f3e1d75bcc5e58923dab108494379f937bd4af607d70b5203; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0xe1705f079a97168a913c3ec3b975b996d15cc82e5c9d33482de3935c93d43b89, block 51697539, registry log 871, 2026-09-23T17:27:05.000000Z; successful sender/target read 2026-09-24."
+      },
+      {
+        "chain": "base",
+        "address": "0xca7ae68bbc9437cd5b93e543533b7a8e375d66bc",
+        "symbol": "GROKCOIN",
+        "name": "GROKCOIN",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0xda8fb1006b6838f3435aa7e6266860dcaf2606300391e3005e7326cbbfa334f7; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0x7a8cf60d88cefebdd585393d772b0c6e1c821acb3b0f658a1e8cdc5760303f37, block 51698300, registry log 577, 2026-09-23T17:52:27.000000Z; successful sender/target read 2026-09-24."
+      },
+      {
+        "chain": "base",
+        "address": "0xca7a548d5a73bb396fafe229447643ef1082fe0d",
+        "symbol": "BASEDGPUS",
+        "name": "BASEDGPUS",
+        "launchedAt": "2026-09-23",
+        "venue": "Unnamed Base suite, registry 0x98c9c7e416977ae5585595ef530bb05f1c7dd3f3",
+        "outcome": "unestablished",
+        "note": "Observed market registration with pool ID 0xe025a4f7554cab8213cabebfde59511316d7283a3e99596ad82f1968940a76cc; lifecycle, custody, creator fees and trading conduct remain unverified.",
+        "evidence": "https://base.blockscout.com/tx/0x9c8773cb1a7fba82e1f74cdd6c57e4ba4903826a3344406fc407c69a187c675b, block 51698390, registry log 368, 2026-09-23T17:55:27.000000Z; successful sender/target read 2026-09-24."
+      }
+    ]
+  },
+  {
     id: "rh-lemonfun-fee-farm",
     name: "$LEMON (Lemon.fun) creator fee farm",
     kind: "launch-farm",
@@ -1374,38 +1489,600 @@ var CABALS = [
     ]
   },
   {
-    id: "rh-volume-ring-2026-09-22",
-    name: "Robinhood Chain wash-volume ring of 2026-09-22",
-    kind: "launch-farm",
-    intent: "nefarious",
-    summary: "Thirty-one tokens deployed directly from thirty-two fresh wallets on 2026-09-21 to 23, no launchpad, that report 1.9M to 23M USD of daily volume on zero to 300,000 USD of liquidity: volume-to-liquidity ratios of 100 to 5,000 times, and four (a fake BTC, GREEN, FCAT, SHIB) showing millions of volume on no liquidity at all. Three bytecode templates cover 21 of them, several are name-clones of real tokens (musebook, Agrippa, HOOD6900, BTC, SHIB), the deployers have nonces of 5 to 18 and most are drained to zero after use, and template B is chain-funded from one pot: JEV's deployer sent RIG's 16.09 ETH and NODIUM's received 12.85 ETH. The tokens have no product, no socials and no organic holders; the volume exists to game the chain's top-by-volume rankings on GeckoTerminal and DexScreener. Any scan of one of these tokens should warn, and any volume ranking on this chain must exclude them.",
-    firstSeen: "2026-09-21",
-    lastSeen: "2026-09-23",
-    wallets: [
-      { chain: RH, address: "0x361bcf4b707695494db2b71f541af33776280876", role: "hub", label: "funder of two template-A deployers", evidence: "first-funder of CRAIL's deployer 0x5b93b427 (0.2 ETH, 2026-09-22 12:29) and PROUTE's deployer 0xb016fc9c (0.2 ETH, 2026-09-22 18:38), read on Blockscout 2026-09-23" },
-      { chain: RH, address: "0xc96aa6ad793bc744beb11a9afd1813470ca194dc", role: "hub", label: "JEV's deployer, which also funds the template-B set", evidence: "deployed JEV 0x1df7abb9 on 2026-09-22 and sent 16.0916 ETH to RIG's deployer 0xef7659ed at 2026-09-22 17:11; NODIUM's deployer 0x2f10b576 was funded 12.8454 ETH the same evening; read on Blockscout 2026-09-23" },
-      { chain: RH, address: "0x37aafcf68fbb35ad01c4bd2e92feced835f62525", role: "deployer", label: "PGREM deployer, template A", evidence: "direct CREATE of 0xb57ed3c7 on 2026-09-22; funded 0.4 ETH by 0xB3352958 at 08:52; nonce 17, 0 ETH left; PGREM shows 23.17M USD of 24h volume on 170,098 USD of liquidity, read 2026-09-23" },
-      { chain: RH, address: "0x5b93b4270f7144c49e38aaa41e0accfd1b242a10", role: "deployer", label: "CRAIL deployer, template A", evidence: "direct CREATE of 0xc8d8d13e on 2026-09-22; funded by 0x361bcf4b; nonce 18, 0 ETH left; 18.60M USD volume on 171,481 USD liquidity, read 2026-09-23" },
-      { chain: RH, address: "0xb016fc9c2df06e4554cec3b2c326786c8fb90419", role: "deployer", label: "PROUTE deployer, template A", evidence: "direct CREATE of 0x7af49cb4 on 2026-09-22; funded by 0x361bcf4b; nonce 16, 0 ETH left; 9.64M USD volume on 65,781 USD liquidity, read 2026-09-23" },
-      { chain: RH, address: "0xef7659ede76d13dd82ececfe2d07a40e63b015dd", role: "deployer", label: "RIG deployer, template B", evidence: "direct CREATE of 0x4c7c1f29 on 2026-09-22; funded 16.09 ETH by JEV's deployer 0xc96aa6ad; 2.40M USD volume on 832 USD liquidity, read 2026-09-23" },
-      { chain: RH, address: "0x2f10b57688f4a2b008ac91386cc6db0d1b0d635b", role: "deployer", label: "NODIUM deployer, template B", evidence: "direct CREATE of 0x753bd40e on 2026-09-22; funded 12.85 ETH by 0xb12B8dab at 19:36; 2.55M USD volume on 691 USD liquidity, read 2026-09-23" },
-      { chain: RH, address: "0xfa1aa1a5f7055043004e1ffb3f1c783a0951cc5d", role: "deployer", label: "deployer of the musebook name-clone", evidence: "direct CREATE of 0x17e900c2 named musebook on 2026-09-22, cloning Bankr's musebook 0x91a2dae9; 15.17M USD volume on 2,806 USD liquidity, read 2026-09-23" }
+    "id": "rh-volume-ring-2026-09-22",
+    "name": "Robinhood Chain study direct-deployment cohort, September 2026",
+    "kind": "launch-farm",
+    "intent": "unestablished",
+    "summary": "The handoff reported 31 tokens and 32 wallets. Its archived attribution snapshot actually contains 32 direct-deployment token records dated 2026-09-21 through 2026-09-23; all are indexed here alongside 33 reported deployer/funder wallets. This is a research cohort, not a proven single operator or wash-trading ring. High turnover, shared code sizes and names do not establish common control or malicious intent. Records retain the archived source and are not a fresh chain audit. The reported 31-token membership and underlying trading/identity evidence still need reconciliation. Do not automatically exclude this cohort from rankings.",
+    "firstSeen": "2026-09-21",
+    "lastSeen": "2026-09-23",
+    "wallets": [
+      {
+        "chain": "robinhood",
+        "address": "0x361bcf4b707695494db2b71f541af33776280876",
+        "role": "hub",
+        "label": "funder of two template-A deployers",
+        "evidence": "first-funder of CRAIL's deployer 0x5b93b427 (0.2 ETH, 2026-09-22 12:29) and PROUTE's deployer 0xb016fc9c (0.2 ETH, 2026-09-22 18:38), read on Blockscout 2026-09-23"
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xc96aa6ad793bc744beb11a9afd1813470ca194dc",
+        "role": "hub",
+        "label": "JEV's deployer, which also funds the template-B set",
+        "evidence": "deployed JEV 0x675279fe on 2026-09-22 and sent 16.0916 ETH to RIG's deployer 0xef7659ed at 2026-09-22 17:11; NODIUM's deployer 0x2f10b576 was funded 12.8454 ETH the same evening; read on Blockscout 2026-09-23"
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x37aafcf68fbb35ad01c4bd2e92feced835f62525",
+        "role": "deployer",
+        "label": "PGREM deployer, template A",
+        "evidence": "direct CREATE of 0xb57ed3c7 on 2026-09-22; funded 0.4 ETH by 0xB3352958 at 08:52; nonce 17, 0 ETH left; PGREM shows 23.17M USD of 24h volume on 170,098 USD of liquidity, read 2026-09-23"
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x5b93b4270f7144c49e38aaa41e0accfd1b242a10",
+        "role": "deployer",
+        "label": "CRAIL deployer, template A",
+        "evidence": "direct CREATE of 0xc8d8d13e on 2026-09-22; funded by 0x361bcf4b; nonce 18, 0 ETH left; 18.60M USD volume on 171,481 USD liquidity, read 2026-09-23"
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xb016fc9c2df06e4554cec3b2c326786c8fb90419",
+        "role": "deployer",
+        "label": "PROUTE deployer, template A",
+        "evidence": "direct CREATE of 0x7af49cb4 on 2026-09-22; funded by 0x361bcf4b; nonce 16, 0 ETH left; 9.64M USD volume on 65,781 USD liquidity, read 2026-09-23"
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xef7659ede76d13dd82ececfe2d07a40e63b015dd",
+        "role": "deployer",
+        "label": "RIG deployer, template B",
+        "evidence": "direct CREATE of 0x4c7c1f29 on 2026-09-22; funded 16.09 ETH by JEV's deployer 0xc96aa6ad; 2.40M USD volume on 832 USD liquidity, read 2026-09-23"
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x2f10b57688f4a2b008ac91386cc6db0d1b0d635b",
+        "role": "deployer",
+        "label": "NODIUM deployer, template B",
+        "evidence": "direct CREATE of 0x753bd40e on 2026-09-22; funded 12.85 ETH by 0xb12B8dab at 19:36; 2.55M USD volume on 691 USD liquidity, read 2026-09-23"
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xfa1aa1a5f7055043004e1ffb3f1c783a0951cc5d",
+        "role": "deployer",
+        "label": "deployer of the musebook name-clone",
+        "evidence": "direct CREATE of 0x17e900c2 named musebook on 2026-09-22, cloning Bankr's musebook 0x91a2dae9; 15.17M USD volume on 2,806 USD liquidity, read 2026-09-23"
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x9654dcefe2d62b8688a6580d613a0ff0c42ad264",
+        "role": "deployer",
+        "label": "Reported BTC deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x30ed6a37665c50f799125923185b0fc171d36f0c: reported deployer 0x9654dcefe2d62b8688a6580d613a0ff0c42ad264, mint block 69162900. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x479fe30e4c17b442381d6543defb815af200c0e2",
+        "role": "deployer",
+        "label": "Reported HITBUY deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x4d8a95531f6e05cc2a6300485f5048ea5379d14d: reported deployer 0x479fe30e4c17b442381d6543defb815af200c0e2, mint block 70243525. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x4c14744b7e25154f034f1173384552f95e81d5f4",
+        "role": "deployer",
+        "label": "Reported PKRT deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x6a603bcd27c2913dc76802bd0f4f136ca7253cf0: reported deployer 0x4c14744b7e25154f034f1173384552f95e81d5f4, mint block 69450584. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xed930abfc05c27ecda0458679b6b47ac0cc508e7",
+        "role": "deployer",
+        "label": "Reported Euler deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0xa2508b15ab16826c720631b9afa0a90c453ae8a4: reported deployer 0xed930abfc05c27ecda0458679b6b47ac0cc508e7, mint block 70153204. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x8baf803542ed4fd6f088cf3000cc0639df368626",
+        "role": "deployer",
+        "label": "Reported NOSH deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0xabe99cf268cdc8bd70a71a5283fdacbcb36714fd: reported deployer 0x8baf803542ed4fd6f088cf3000cc0639df368626, mint block 70093885. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xfbad78588ce0a3219bfa7c50568e5c6b95c08922",
+        "role": "deployer",
+        "label": "Reported Agrippa deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x10f5ba270b0b5da5a4d21369f2c74a300bb16a8b: reported deployer 0xfbad78588ce0a3219bfa7c50568e5c6b95c08922, mint block 69972255. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x62e92bfb0a77c36bf8eb66a93efdf8033ca820ef",
+        "role": "deployer",
+        "label": "Reported HOOD6900 deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x8d5c42c096344e3ad4d5fcac8fe7a4b4ffca0150: reported deployer 0x62e92bfb0a77c36bf8eb66a93efdf8033ca820ef, mint block 69877221. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x58897b5ab5e9765978da46d265ebc9557ce30c7b",
+        "role": "deployer",
+        "label": "Reported CAPYTL deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0xe5d808900343c08c8c464aee9196f07d6aff92ca: reported deployer 0x58897b5ab5e9765978da46d265ebc9557ce30c7b, mint block 70379712. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x7cdeaba11cf0bd75e9d2d1ab06d6c14729ce1a54",
+        "role": "deployer",
+        "label": "Reported GROK deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x55683371036401f8cae676c260efcde9be36a7f4: reported deployer 0x7cdeaba11cf0bd75e9d2d1ab06d6c14729ce1a54, mint block 69695369. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x0bdd9fdc80712f91371bcbd62cf9b11196550976",
+        "role": "deployer",
+        "label": "Reported PURRF deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x91737810403b892364edf677344e2719f9083f21: reported deployer 0x0bdd9fdc80712f91371bcbd62cf9b11196550976, mint block 70233496. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x1eecdbe695ed2a0e84c5837a2c6020caddfe25b6",
+        "role": "deployer",
+        "label": "Reported BTC deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x95e7b9b1bdb96748cdfdc2efe1234f849b6136ed: reported deployer 0x1eecdbe695ed2a0e84c5837a2c6020caddfe25b6, mint block 69649581. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xc331b714e923c6dda38cb3d319a6fc93f84c9906",
+        "role": "deployer",
+        "label": "Reported TTV deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0xd79e23da4d8e8df3eb740bc04a10601a9886a44e: reported deployer 0xc331b714e923c6dda38cb3d319a6fc93f84c9906, mint block 69728775. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x6ef732b723eb6b37a3b19a9c3dfc7f86d8cae6bc",
+        "role": "deployer",
+        "label": "Reported Grace deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x589be08a24f853baf0e54e0eb56192e0dacfc60f: reported deployer 0x6ef732b723eb6b37a3b19a9c3dfc7f86d8cae6bc, mint block 70083640. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xb0d5517f0347f8b7e9d7b09c9a8d220aa6c4012f",
+        "role": "deployer",
+        "label": "Reported KCAT deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x6bb7a811e5d542e8cfaeaca2e9d56c35d9078dc4: reported deployer 0xb0d5517f0347f8b7e9d7b09c9a8d220aa6c4012f, mint block 69631233. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xb941e8b20677e7b96c25f941a4c5a20575c88aa0",
+        "role": "deployer",
+        "label": "Reported GREEN deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x983eb0bc4274919671fce93164f5c3e1af2f9be5: reported deployer 0xb941e8b20677e7b96c25f941a4c5a20575c88aa0, mint block 69091403. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xd8e1e83e0344564dac0f4bf200582892c1f3c96b",
+        "role": "deployer",
+        "label": "Reported ShinyHunters deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x9d2a08c3fc38f51c3a9dff56fa552f884e78659e: reported deployer 0xd8e1e83e0344564dac0f4bf200582892c1f3c96b, mint block 70348891. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xa3f1caedea8cd046e403f030cb927b53fb4c1f5f",
+        "role": "deployer",
+        "label": "Reported SI deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x50c35c073e95d7e4143847502806f3bb1cf46059: reported deployer 0xa3f1caedea8cd046e403f030cb927b53fb4c1f5f, mint block 69841267. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xd701f910f7fdb70ed9ba30239a852f847788a3dd",
+        "role": "deployer",
+        "label": "Reported PURRF deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x6ef17777216eefdbc8906c80877b46a8a3cdd4ad: reported deployer 0xd701f910f7fdb70ed9ba30239a852f847788a3dd, mint block 69647658. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xffd8486bab7f66bf1f34ac9d6f3edd354052b998",
+        "role": "deployer",
+        "label": "Reported FCAT deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x1608502531e59c2aa5168921d3850285624c17f6: reported deployer 0xffd8486bab7f66bf1f34ac9d6f3edd354052b998, mint block 69742017. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x55b89ad05eaec513db581bf1fb91e732d3b7d378",
+        "role": "deployer",
+        "label": "Reported BOBCOIN deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x86259b991f25c94135d4b5150da16fb2908b0730: reported deployer 0x55b89ad05eaec513db581bf1fb91e732d3b7d378, mint block 69937855. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x9246c887d2525120e90496e4b64754fe252661c8",
+        "role": "deployer",
+        "label": "Reported SI deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0xb805bdcf7abc82c8c1d8d0ec4ed71ff67b58f048: reported deployer 0x9246c887d2525120e90496e4b64754fe252661c8, mint block 69762109. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xfd2f0ff6fe83865cd87b481b3c7d888390a9ab79",
+        "role": "deployer",
+        "label": "Reported SHIB deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0xd136b862ebbb1bd362a637ed67b7b0efe1052e7f: reported deployer 0xfd2f0ff6fe83865cd87b481b3c7d888390a9ab79, mint block 70051367. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x5ce16e2fd63b11ea391249b2bfb0419a98fa6142",
+        "role": "deployer",
+        "label": "Reported BET deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x1df7abb9d130e373f00bb1edec798cd4194a3845: reported deployer 0x5ce16e2fd63b11ea391249b2bfb0419a98fa6142, mint block 69897461. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x96068378dffec0f017f763f7131ab11e0688766b",
+        "role": "deployer",
+        "label": "Reported GTC deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x179bf4b6b504f1e067512c0a171ff9a07d22cdc9: reported deployer 0x96068378dffec0f017f763f7131ab11e0688766b, mint block 69797559. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xa6b5b90390d8f802842da2bf59cbf75a1d864bfb",
+        "role": "deployer",
+        "label": "Reported Tweenix deployer",
+        "evidence": "Archived 2026-09-23 study, docs/launchpads/data/attribution.json entry 0x135f8f75ec9605517cc0ff008a0f216445e23ecd: reported deployer 0xa6b5b90390d8f802842da2bf59cbf75a1d864bfb, mint block 69641432. Reindexed 2026-09-24; no new RPC verification or beneficial-owner inference."
+      }
     ],
-    accounts: [],
-    launches: [
-      { chain: RH, address: "0xb57ed3c7ffeaa75ceb6c772cb7a3be422782e250", symbol: "PGREM", name: "PGREM", launchedAt: "2026-09-22", venue: "direct deploy, template A (1,764 bytes)", outcome: "unestablished", note: "23.17M USD reported 24h volume on 170,098 USD liquidity, 136 times its depth.", evidence: "GeckoTerminal top-pools sweep and RPC bytecode hash, read 2026-09-23" },
-      { chain: RH, address: "0xc8d8d13eea8a47bc265f4f26c8b5b72425b611c2", symbol: "CRAIL", name: "CRAIL", launchedAt: "2026-09-22", venue: "direct deploy, template A", outcome: "unestablished", note: "18.60M USD on 171,481 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0x4d8a95531f6e05cc2a6300485f5048ea5379d14d", symbol: "HITBUY", name: "HITBUY", launchedAt: "2026-09-23", venue: "direct deploy, template A", outcome: "unestablished", note: "17.21M USD on 283,078 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0x6a603bcd27c2913dc76802bd0f4f136ca7253cf0", symbol: "PKRT", name: "PKRT", launchedAt: "2026-09-22", venue: "direct deploy, template A", outcome: "unestablished", note: "15.68M USD on 73,936 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0x7af49cb48abbf70d11d786d99242173698119892", symbol: "PROUTE", name: "PROUTE", launchedAt: "2026-09-22", venue: "direct deploy, template A", outcome: "unestablished", note: "9.64M USD on 65,781 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0x17e900c2a7a16695431469a40ea060d508edd6d2", symbol: "musebook", name: "musebook (clone)", launchedAt: "2026-09-22", venue: "direct deploy", outcome: "unestablished", note: "Name-clone of Bankr's musebook 0x91a2dae9; 15.17M USD on 2,806 USD liquidity, 5,407 times its depth.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0x10f5ba270b0b5da5a4d21369f2c74a300bb16a8b", symbol: "Agrippa", name: "Agrippa (clone)", launchedAt: "2026-09-22", venue: "direct deploy", outcome: "unestablished", note: "Name-clone of Bankr's Agrippa 0x83a49b80; 9.28M USD on 3,274 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0x8d5c42c096344e3ad4d5fcac8fe7a4b4ffca0150", symbol: "HOOD6900", name: "HOOD6900 (clone)", launchedAt: "2026-09-22", venue: "direct deploy, template C (3,554 bytes)", outcome: "unestablished", note: "8.46M USD on 3,523 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0xa2508b15ab16826c720631b9afa0a90c453ae8a4", symbol: "Euler", name: "Euler (clone)", launchedAt: "2026-09-23", venue: "direct deploy, template C", outcome: "unestablished", note: "12.49M USD on 172,950 USD liquidity; name-clones Bankr's Euler 0x434d49b8.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0xabe99cf268cdc8bd70a71a5283fdacbcb36714fd", symbol: "NOSH", name: "NOSH (clone)", launchedAt: "2026-09-23", venue: "direct deploy, template C", outcome: "unestablished", note: "9.96M USD on 24,026 USD liquidity; name-clones the Pons launch NOSH 0xe02c53d4.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0x4c7c1f29bc6be6c51d372f4edb3f68e77e34ab40", symbol: "RIG", name: "RIG", launchedAt: "2026-09-22", venue: "direct deploy, template B (4,655 bytes)", outcome: "unestablished", note: "2.40M USD on 832 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0x753bd40e11921abf2a1a01a05ddc836c61753bc1", symbol: "NODIUM", name: "NODIUM", launchedAt: "2026-09-22", venue: "direct deploy, template B", outcome: "unestablished", note: "2.55M USD on 691 USD liquidity.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" },
-      { chain: RH, address: "0x1df7abb9d130e373f00bb1edec798cd4194a3845", symbol: "JEV", name: "JEV", launchedAt: "2026-09-22", venue: "direct deploy, template B", outcome: "unestablished", note: "2.11M USD on 1,085 USD liquidity; its deployer funds the rest of template B.", evidence: "GeckoTerminal sweep and RPC, read 2026-09-23" }
+    "accounts": [],
+    "launches": [
+      {
+        "chain": "robinhood",
+        "address": "0xb57ed3c7ffeaa75ceb6c772cb7a3be422782e250",
+        "symbol": "PGREM",
+        "name": "PGREM",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69526662; reported bytecode length 1764 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0xb57ed3c7ffeaa75ceb6c772cb7a3be422782e250, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x30ed6a37665c50f799125923185b0fc171d36f0c",
+        "symbol": "BTC",
+        "name": "BTC",
+        "launchedAt": "2026-09-21",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69162900; reported bytecode length 2721 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x30ed6a37665c50f799125923185b0fc171d36f0c, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xc8d8d13eea8a47bc265f4f26c8b5b72425b611c2",
+        "symbol": "CRAIL",
+        "name": "CRAIL",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69655651; reported bytecode length 1764 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0xc8d8d13eea8a47bc265f4f26c8b5b72425b611c2, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x4d8a95531f6e05cc2a6300485f5048ea5379d14d",
+        "symbol": "HITBUY",
+        "name": "HITBUY",
+        "launchedAt": "2026-09-23",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 70243525; reported bytecode length 1764 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x4d8a95531f6e05cc2a6300485f5048ea5379d14d, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x6a603bcd27c2913dc76802bd0f4f136ca7253cf0",
+        "symbol": "PKRT",
+        "name": "PKRT",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69450584; reported bytecode length 1764 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x6a603bcd27c2913dc76802bd0f4f136ca7253cf0, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x17e900c2a7a16695431469a40ea060d508edd6d2",
+        "symbol": "musebook",
+        "name": "musebook",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69582652; reported bytecode length 1786 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x17e900c2a7a16695431469a40ea060d508edd6d2, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xa2508b15ab16826c720631b9afa0a90c453ae8a4",
+        "symbol": "Euler",
+        "name": "Euler",
+        "launchedAt": "2026-09-23",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 70153204; reported bytecode length 3554 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0xa2508b15ab16826c720631b9afa0a90c453ae8a4, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xabe99cf268cdc8bd70a71a5283fdacbcb36714fd",
+        "symbol": "NOSH",
+        "name": "NOSH",
+        "launchedAt": "2026-09-23",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 70093885; reported bytecode length 3554 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0xabe99cf268cdc8bd70a71a5283fdacbcb36714fd, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x7af49cb48abbf70d11d786d99242173698119892",
+        "symbol": "PROUTE",
+        "name": "PROUTE",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69875899; reported bytecode length 1764 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x7af49cb48abbf70d11d786d99242173698119892, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x10f5ba270b0b5da5a4d21369f2c74a300bb16a8b",
+        "symbol": "Agrippa",
+        "name": "Agrippa",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69972255; reported bytecode length 3580 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x10f5ba270b0b5da5a4d21369f2c74a300bb16a8b, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x8d5c42c096344e3ad4d5fcac8fe7a4b4ffca0150",
+        "symbol": "HOOD6900",
+        "name": "HOOD6900",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69877221; reported bytecode length 3554 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x8d5c42c096344e3ad4d5fcac8fe7a4b4ffca0150, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xe5d808900343c08c8c464aee9196f07d6aff92ca",
+        "symbol": "CAPYTL",
+        "name": "CAPYTL",
+        "launchedAt": "2026-09-23",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 70379712; reported bytecode length 1764 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0xe5d808900343c08c8c464aee9196f07d6aff92ca, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x55683371036401f8cae676c260efcde9be36a7f4",
+        "symbol": "GROK",
+        "name": "GROK",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69695369; reported bytecode length 3554 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x55683371036401f8cae676c260efcde9be36a7f4, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x91737810403b892364edf677344e2719f9083f21",
+        "symbol": "PURRF",
+        "name": "PURRF",
+        "launchedAt": "2026-09-23",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 70233496; reported bytecode length 1764 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x91737810403b892364edf677344e2719f9083f21, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x95e7b9b1bdb96748cdfdc2efe1234f849b6136ed",
+        "symbol": "BTC",
+        "name": "BTC",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69649581; reported bytecode length 1906 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x95e7b9b1bdb96748cdfdc2efe1234f849b6136ed, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xd79e23da4d8e8df3eb740bc04a10601a9886a44e",
+        "symbol": "TTV",
+        "name": "TTV",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69728775; reported bytecode length 3426 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0xd79e23da4d8e8df3eb740bc04a10601a9886a44e, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x589be08a24f853baf0e54e0eb56192e0dacfc60f",
+        "symbol": "Grace",
+        "name": "Grace",
+        "launchedAt": "2026-09-23",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 70083640; reported bytecode length 4509 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x589be08a24f853baf0e54e0eb56192e0dacfc60f, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x6bb7a811e5d542e8cfaeaca2e9d56c35d9078dc4",
+        "symbol": "KCAT",
+        "name": "KCAT",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69631233; reported bytecode length 12749 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x6bb7a811e5d542e8cfaeaca2e9d56c35d9078dc4, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x983eb0bc4274919671fce93164f5c3e1af2f9be5",
+        "symbol": "GREEN",
+        "name": "GREEN",
+        "launchedAt": "2026-09-21",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69091403; reported bytecode length 3017 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x983eb0bc4274919671fce93164f5c3e1af2f9be5, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x9d2a08c3fc38f51c3a9dff56fa552f884e78659e",
+        "symbol": "ShinyHunters",
+        "name": "ShinyHunters",
+        "launchedAt": "2026-09-23",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 70348891; reported bytecode length 1764 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x9d2a08c3fc38f51c3a9dff56fa552f884e78659e, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x50c35c073e95d7e4143847502806f3bb1cf46059",
+        "symbol": "SI",
+        "name": "SI",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69841267; reported bytecode length 3580 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x50c35c073e95d7e4143847502806f3bb1cf46059, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x753bd40e11921abf2a1a01a05ddc836c61753bc1",
+        "symbol": "NODIUM",
+        "name": "NODIUM",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69910624; reported bytecode length 4655 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x753bd40e11921abf2a1a01a05ddc836c61753bc1, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x6ef17777216eefdbc8906c80877b46a8a3cdd4ad",
+        "symbol": "PURRF",
+        "name": "PURRF",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69647658; reported bytecode length 1764 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x6ef17777216eefdbc8906c80877b46a8a3cdd4ad, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x4c7c1f29bc6be6c51d372f4edb3f68e77e34ab40",
+        "symbol": "RIG",
+        "name": "RIG",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69824087; reported bytecode length 4655 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x4c7c1f29bc6be6c51d372f4edb3f68e77e34ab40, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x1608502531e59c2aa5168921d3850285624c17f6",
+        "symbol": "FCAT",
+        "name": "FCAT",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69742017; reported bytecode length 3854 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x1608502531e59c2aa5168921d3850285624c17f6, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x86259b991f25c94135d4b5150da16fb2908b0730",
+        "symbol": "BOBCOIN",
+        "name": "BOBCOIN",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69937855; reported bytecode length 4655 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x86259b991f25c94135d4b5150da16fb2908b0730, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xb805bdcf7abc82c8c1d8d0ec4ed71ff67b58f048",
+        "symbol": "SI",
+        "name": "SI",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69762109; reported bytecode length 4655 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0xb805bdcf7abc82c8c1d8d0ec4ed71ff67b58f048, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0xd136b862ebbb1bd362a637ed67b7b0efe1052e7f",
+        "symbol": "SHIB",
+        "name": "SHIB",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 70051367; reported bytecode length 1998 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0xd136b862ebbb1bd362a637ed67b7b0efe1052e7f, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x1df7abb9d130e373f00bb1edec798cd4194a3845",
+        "symbol": "BET",
+        "name": "BET",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69897461; reported bytecode length 4655 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x1df7abb9d130e373f00bb1edec798cd4194a3845, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x675279fe3259dcd20b1520399d2977dad042bf3f",
+        "symbol": "JEV",
+        "name": "JEV",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69809612; reported bytecode length 4655 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x675279fe3259dcd20b1520399d2977dad042bf3f, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x179bf4b6b504f1e067512c0a171ff9a07d22cdc9",
+        "symbol": "GTC",
+        "name": "GTC",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69797559; reported bytecode length 4655 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x179bf4b6b504f1e067512c0a171ff9a07d22cdc9, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      },
+      {
+        "chain": "robinhood",
+        "address": "0x135f8f75ec9605517cc0ff008a0f216445e23ecd",
+        "symbol": "Tweenix",
+        "name": "Tweenix",
+        "launchedAt": "2026-09-22",
+        "venue": "Direct deploy reported in the 2026-09-23 study",
+        "outcome": "unestablished",
+        "note": "Archived mint block 69641432; reported bytecode length 1764 bytes. Similar bytecode length is not a code hash or evidence of common control. Price, liquidity, custody and conduct require current independent evidence.",
+        "evidence": "docs/launchpads/data/attribution.json entry 0x135f8f75ec9605517cc0ff008a0f216445e23ecd, captured for the 2026-09-23 study; reindexed 2026-09-24 without fresh chain verification."
+      }
     ]
   },
   {
@@ -42175,6 +42852,19 @@ function deployerWalletAddress(d) {
   if (d.deployerAttribution?.method === FACTORY_ATTRIBUTION_METHOD) return null;
   return d.deployer;
 }
+async function resolveTokenSystem(chain, address, fetchImpl2 = fetch) {
+  if (chain !== "base" || !/^0xb20[0-9a-f]{37}$/i.test(address)) return void 0;
+  try {
+    const r = await fetchImpl2(`/api/bytecode?address=${encodeURIComponent(address)}&chain=base`, { signal: AbortSignal.timeout(12e3) });
+    if (!r.ok) return void 0;
+    const data = await r.json();
+    if (!data || typeof data !== "object") return void 0;
+    const result = data;
+    return result.available === true && result.system === "b20" && result.chain === chain && String(result.address).toLowerCase() === address.toLowerCase() ? "b20" : void 0;
+  } catch {
+    return void 0;
+  }
+}
 async function resolveEvmCreatorKind(chain, creator, fetchImpl2 = fetch) {
   const origin = globalThis.location?.origin;
   if (!origin && !hasThreatApiContext()) return "unknown";
@@ -42259,37 +42949,24 @@ async function screenAddressSanctions(chain, addresses, fetchImpl2 = fetch) {
   }
 }
 function washSignatureFor(m) {
-  const vol = Number.isFinite(m.vol24) ? Math.max(0, m.vol24) : 0;
-  const liq = Number.isFinite(m.liquidityUsd) ? Math.max(0, m.liquidityUsd) : 0;
+  const volumeKnown = Number.isFinite(m.vol24) && m.vol24 >= 0;
+  const depthKnown = Number.isFinite(m.liquidityUsd) && m.liquidityUsd >= 0;
+  const vol = volumeKnown ? m.vol24 : 0;
+  const liq = depthKnown ? m.liquidityUsd : 0;
+  const ratio = liq > 0 ? vol / liq : 0;
   const txns = (m.buys ?? 0) + (m.sells ?? 0);
-  const ratio = liq > 0 ? vol / liq : vol > 0 ? Number.POSITIVE_INFINITY : 0;
-  const rx = Number.isFinite(ratio) ? `${ratio.toFixed(ratio >= 100 ? 0 : 1)}x` : "unbounded";
-  const money = (n) => `$${Math.round(n).toLocaleString()}`;
-  if (liq < 1e3 && vol >= 1e4) {
-    return {
-      wash: true,
-      ratio,
-      rationale: `${money(vol)} of 24h volume on ${money(liq)} of liquidity: volume without a pool to carry it, a fake-volume signature.`,
-      claim: `${money(vol)} of 24h volume is reported against ${money(liq)} of liquidity. No pool that shallow can host that trading; the volume is fabricated or the pool was drained after it. A fake-volume signature.`
-    };
-  }
-  if (ratio >= 100 && txns >= 20) {
-    return {
-      wash: true,
-      ratio,
-      rationale: `vol/liquidity ${rx} in 24h: the pool turned over ${rx} its depth and is still standing, a cycled-volume signature.`,
-      claim: `Volume is ${rx} liquidity in 24h (${money(vol)} on ${money(liq)}). A pool cycled a hundred times its depth in a day without being drained is being traded against itself; treat the volume as manufactured until the buyers are shown to be distinct wallets.`
-    };
-  }
-  if (m.pc24 != null && Number.isFinite(m.pc24) && ratio >= 15 && Math.abs(m.pc24) < 10 && txns >= 50) {
-    return {
-      wash: true,
-      ratio,
-      rationale: `vol/liquidity ${ratio.toFixed(1)}x but price flat (${m.pc24.toFixed(1)}%): wash-trade signature.`,
-      claim: `Volume is ${ratio.toFixed(0)}x liquidity in 24h while the price moved only ${m.pc24.toFixed(1)}%: a wash-trading or fake-volume signature.`
-    };
-  }
-  return { wash: false, ratio: Number.isFinite(ratio) ? ratio : 0, rationale: "", claim: "" };
+  const lowDepth = volumeKnown && vol >= 1e4 && (!depthKnown || liq < 1e3);
+  const turnover = ratio >= 100 && txns >= 20;
+  const churn = ratio >= 15 && m.pc24 != null && Number.isFinite(m.pc24) && Math.abs(m.pc24) < 10 && txns >= 50;
+  if (!lowDepth && !turnover && !churn) return { wash: false, anomaly: false, ratio, rationale: "", claim: "" };
+  const rationale = lowDepth ? `Liquidity anomaly: $${Math.round(vol).toLocaleString()} reported 24h volume; ${depthKnown ? `$${Math.round(liq).toLocaleString()} current pool liquidity` : "current pool liquidity unavailable"}. Volume/depth ratio is ${liq > 0 ? `${ratio.toFixed(1)}x` : "not measurable"}.` : `Turnover anomaly: 24h volume/current liquidity ${ratio.toFixed(1)}x${churn ? ` with ${m.pc24.toFixed(1)}% net price change` : ""}.`;
+  return {
+    wash: false,
+    anomaly: true,
+    ratio,
+    rationale,
+    claim: `${rationale} Daily volume and current depth cover different observation periods. Check historical liquidity and participant-level trades; these aggregates do not establish coordinated trading.`
+  };
 }
 var clamp2 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 var num4 = (s) => s == null || s === "" ? null : Number(s);
@@ -42565,9 +43242,9 @@ async function runTokenAudit(input, emit, opts) {
   const sells = pair.txns?.h24?.sells ?? 0;
   const pc24 = pair.priceChange?.h24 ?? 0;
   const ageDays = pair.pairCreatedAt ? (Date.now() - pair.pairCreatedAt) / 864e5 : void 0;
-  const wash = washSignatureFor({ vol24, liquidityUsd, pc24: pair.priceChange?.h24 ?? null, buys, sells });
+  const wash = washSignatureFor({ vol24, liquidityUsd: pair.liquidity?.usd ?? NaN, pc24: pair.priceChange?.h24 ?? null, buys, sells });
   const volLiq = wash.ratio;
-  const washSignature = wash.wash;
+  const volumeAnomaly = wash.anomaly;
   step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15e3 ? "warn" : "neutral" });
   const gpChain = GOPLUS_CHAIN[chain];
   let safety = emptySafety();
@@ -42618,7 +43295,7 @@ async function runTokenAudit(input, emit, opts) {
     } : { phase: "Contract", label: "Deployer unresolved", detail: "No source named a creator for this mint, so deployer forensics could not run.", tone: "warn" });
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders\u2026" : "GoPlus + honeypot.is buy/sell simulation\u2026", tone: "neutral" });
-    const [gp, sim, explorer, source2] = await Promise.all([
+    const [gp, sim, explorer, source2, system] = await Promise.all([
       goplus(gpChain, address, fetcher),
       opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address, fetcher),
       // Where GoPlus cannot order holders, the chain's own explorer is the
@@ -42626,12 +43303,13 @@ async function runTokenAudit(input, emit, opts) {
       blockscoutHolders(chain, address, fetcher),
       // What the deployer wrote about their own contract. Free, and the only
       // place an intent to defeat safety scanners is ever stated outright.
-      blockscoutContractSource(chain, address, fetcher)
+      blockscoutContractSource(chain, address, fetcher),
+      resolveTokenSystem(chain, address, fetcher)
     ]);
     gpEvm = gp;
     explorerHolders = explorer;
     contractSource = source2;
-    safety = evmSafety(gp, sim, address);
+    safety = { ...evmSafety(gp, sim, address), ...system ? { system } : {} };
     safety = recordObservedTradeability(safety, { buys24h: buys, sells24h: sells, liquidityUsd });
     const evmCreator = gp?.creator_address?.trim();
     const evmOwner = gp?.owner_address?.trim();
@@ -42775,7 +43453,7 @@ async function runTokenAudit(input, emit, opts) {
   }
   if (pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd) && liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
-  if (washSignature) findings.push({ claim: wash.claim, tone: "bad", source: "dexscreener" });
+  if (volumeAnomaly) findings.push({ claim: wash.claim, tone: "warn", source: "dexscreener" });
   if (pc24 <= -60) findings.push({ claim: `Down ${Math.abs(pc24).toFixed(0)}% in 24h. The token appears to have already dumped.`, tone: "bad", source: "dexscreener" });
   else if (pc24 >= 300 && liquidityUsd < 1e5) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity. This is a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
   if (!opts?.skipSim) {
@@ -42882,7 +43560,7 @@ async function runTokenAudit(input, emit, opts) {
     if (!s.ownerRenounced) aT2 -= 6;
     if (s.transferHook) aT2 -= 8;
   } else {
-    if (!s.openSource) aT2 -= 8;
+    if (!s.openSource && s.system !== "b20") aT2 -= 8;
     if (s.pausable) aT2 -= 8;
     if (s.selfdestruct) aT2 -= 10;
     if (!s.ownerRenounced) aT2 -= 4;
@@ -42891,7 +43569,7 @@ async function runTokenAudit(input, emit, opts) {
     if (!s.ownerRenounced && (s.blacklist || s.tradingCooldown)) aT2 -= 3;
   }
   aT2 = clamp2(aT2, 0, 26);
-  axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.openSource ? "verified" : "unverified"} source, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${s.pausable ? ", pausable" : ""}.` : "On-chain safety not verifiable keyless on this chain." });
+  axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.system === "b20" ? "B20 system asset; no per-token source" : s.openSource ? "verified source" : "unverified source"}, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${s.pausable ? ", pausable" : ""}.` : "On-chain safety not verifiable keyless on this chain." });
   const tax = s.buyTax + s.sellTax;
   let aT3 = !s.available ? 6 : tax === 0 ? 12 : tax <= 10 ? 10 : tax <= 20 ? 7 : tax <= 40 ? 3 : 0;
   if (s.cannotSellAll || s.nonTransferable) aT3 = 0;
@@ -42916,10 +43594,9 @@ async function runTokenAudit(input, emit, opts) {
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
-  if (washSignature) aT5 = 2;
-  else if (total > 20 && sells / total > 0.8) aT5 = clamp2(aT5 - 2, 0, 12);
+  if (total > 20 && sells / total > 0.8) aT5 = clamp2(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp2(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? wash.rationale : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: volumeAnomaly ? wash.rationale : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
     ...(pair.info?.socials ?? []).map((x) => ({ label: x.type, url: x.url }))

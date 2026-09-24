@@ -154,3 +154,35 @@ describe("finding 13: cannot_sell_all is honeypot-class in both lanes", () => {
     expect(d?.score).toBeLessThanOrEqual(10);
   });
 });
+
+describe("B20 system-asset scoring across the token lane", () => {
+  const b20 = "0xb20000000000000000000070f6c1a66d7c1e4d01";
+  async function audit(system: boolean, wrongSubject = false, pausable = false) {
+    vi.stubGlobal("fetch", vi.fn(async url => {
+      const u = String(url);
+      if (u.includes("/latest/dex/tokens/")) return Response.json({ pairs: [{ ...pair("base"), baseToken: { address: b20, name: "B20 test", symbol: "B20" } }] });
+      if (u.includes("gopluslabs")) return Response.json({ code: 1, result: { [b20]: { ...CLEAN_GOPLUS, is_open_source: "0", transfer_pausable: pausable ? "1" : "0" } } });
+      if (u.includes("/api/bytecode")) return Response.json({ available: true, address: wrongSubject ? ADDRESS : b20, chain: "base", ...(system ? { system: "b20" } : {}) });
+      return Response.json({});
+    }));
+    return auditToken({ ...input, ref: b20, chain: "base" }, undefined, { force: true, skipSim: true });
+  }
+  it("removes only the per-token source penalty when the exact system asset is confirmed", async () => {
+    const ordinary = await audit(false), system = await audit(true);
+    const before = ordinary!.axes.find(a => a.key === "T2")!, after = system!.axes.find(a => a.key === "T2")!;
+    expect(after.score - before.score).toBe(8);
+    expect(after.rationale).toContain("B20 system asset");
+    expect(after.rationale).not.toContain("unverified source");
+  });
+  it("a vanity prefix or a response about another token cannot waive source verification", async () => {
+    const result = await audit(true, true);
+    expect(result!.safety.system).toBeUndefined();
+    expect(result!.axes.find(a => a.key === "T2")!.rationale).toContain("unverified source");
+  });
+  it("retains independently observed pause powers on a system asset", async () => {
+    const normal = await audit(true), pausable = await audit(true, false, true);
+    expect(normal!.axes.find(a => a.key === "T2")!.score - pausable!.axes.find(a => a.key === "T2")!.score).toBe(8);
+    expect(pausable!.safety.pausable).toBe(true);
+  });
+
+});

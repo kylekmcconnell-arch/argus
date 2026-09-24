@@ -17,15 +17,15 @@ describe("classifyCreatorFeeUsage", () => {
     const r = classifyCreatorFeeUsage({ ...base, claimCount: 28, claimedTokens: 5_010_685, directSold: 0, forwardedSold: 5_000_000, held: 319_135 }, "MEME");
     expect(r.usage).toBe("dump");
     expect(r.note).toMatch(/28 claims of 5,010,685 MEME/);
-    expect(r.note).toMatch(/one hop through fresh wallets/);
+    expect(r.note).toMatch(/observed intermediary/);
   });
 
   it("does not call two claims a dump even if sold - conduct needs a pattern", () => {
     expect(classifyCreatorFeeUsage({ ...base, claimCount: 2, claimedTokens: 1_000, directSold: 1_000 }).usage).toBe("unknown");
   });
 
-  it("credits a claimer who burns the claims", () => {
-    expect(classifyCreatorFeeUsage({ ...base, claimCount: 5, claimedTokens: 1_000, burned: 900 }).usage).toBe("buyback-burn");
+  it("does not call a burn a buyback without a purchase", () => {
+    expect(classifyCreatorFeeUsage({ ...base, claimCount: 5, claimedTokens: 1_000, burned: 900 }).usage).toBe("unknown");
   });
 
   it("credits a claimer who buys back more than they sell", () => {
@@ -69,40 +69,42 @@ function indexStub(byAddress: Record<string, unknown[]>) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("robinhoodCreatorFeeUsage traces the claimer's feed one hop", () => {
-  it("reads claims forwarded through a fresh wallet and sold as a dump ($MEME shape)", async () => {
+  it("records onward market transfers without inventing a sale or fee attribution", async () => {
     vi.stubGlobal("fetch", indexStub({
       [DEP]: [LAUNCH_BUY, ...CLAIMS, xfer(DEP, A, 5_000_000, 54_100_000)],
       [A]: [xfer(DEP, A, 5_000_000, 54_100_000), xfer(A, POOL, 5_000_000, 54_100_050)],
     }));
     const r = await robinhoodCreatorFeeUsage(TOKEN, [INIT], DEP, "MEME");
     expect(r?.claimer).toBe(DEP);
-    expect(r?.claimCount).toBe(28);
-    expect(Math.round(r!.claimedTokens)).toBe(CLAIMED);
-    expect(Math.round(r!.soldTokens)).toBe(5_000_000);
-    expect(r?.boughtBackTokens).toBe(0); // the launch buy predates the claims
-    expect(r?.usage).toBe("dump");
-    expect(r?.note).toMatch(/one hop through fresh wallets/);
+    expect(r?.sourceTransfers).toBe(28);
+    expect(r?.claimCount).toBeNull();
+    expect(Math.round(r!.sourceTokens)).toBe(CLAIMED);
+    expect(r!.soldTokens).toBeNull();
+    expect(r!.marketTransfers).toBe(5_000_000);
+    expect(r?.boughtBackTokens).toBeNull(); // the launch buy predates the claims
+    expect(r?.usage).toBe("unknown");
+    expect(r?.note).toMatch(/transfers alone do not establish sales/);
   });
 
-  it("reads a claimer that keeps every claim as holding, not dumping ($MOTION shape)", async () => {
+  it("reports no outgoing transfers without asserting the incoming transfers were claims", async () => {
     vi.stubGlobal("fetch", indexStub({ [DEP]: CLAIMS }));
     const r = await robinhoodCreatorFeeUsage(TOKEN, [INIT], DEP, "MOTION");
-    expect(r?.usage).toBe("hold");
-    expect(Math.round(r!.heldTokens)).toBe(CLAIMED);
-    expect(r?.soldTokens).toBe(0);
+    expect(r?.usage).toBe("unknown");
+    expect(Math.round(r!.heldTokens!)).toBe(CLAIMED);
+    expect(r?.soldTokens).toBeNull();
   });
 
-  it("credits a buy from the pool made after the claims began", async () => {
+  it("does not mistake an incoming pool transfer for a verified purchase", async () => {
     vi.stubGlobal("fetch", indexStub({ [DEP]: [...CLAIMS, xfer(POOL, DEP, 3_000_000, 55_000_000)] }));
     const r = await robinhoodCreatorFeeUsage(TOKEN, [INIT], DEP, "MEME");
-    expect(Math.round(r!.boughtBackTokens)).toBe(3_000_000);
-    expect(r?.usage).toBe("buyback");
+    expect(r!.boughtBackTokens).toBeNull();
+    expect(r?.usage).toBe("unknown");
   });
 
-  it("says no claims when the venue paid the creator nothing in the token", async () => {
+  it("keeps claims unknown when no configured-source transfers were found", async () => {
     vi.stubGlobal("fetch", indexStub({ [DEP]: [LAUNCH_BUY] }));
     const r = await robinhoodCreatorFeeUsage(TOKEN, [INIT], DEP, "MEME");
-    expect(r?.claimCount).toBe(0);
+    expect(r?.claimCount).toBeNull();
     expect(r?.usage).toBe("unknown");
   });
 
@@ -145,4 +147,43 @@ describe("robinhoodCreatorVenue resolves the venues the study identified", () =>
     creation({ result: [{ contractFactory: "0x4B9Dcd6CCFAeF0f6D23065Dd78E79d5E20ec8cFD" }] });
     expect(await robinhoodCreatorVenue("0x57548740ae9d73ef4b1bfa35651d5e91ed0f6666")).toBe("stonkbrokers");
   });
+});
+
+describe("creator-conduct counterexamples from the handoff review", () => {
+  it("does not say none sold when 300 of 1,000 were sold", () => {
+    const r = classifyCreatorFeeUsage({ ...base, claimCount: 5, claimedTokens: 1000, directSold: 300, held: 700 });
+    expect(r.note).toContain("300 observed sold");
+    expect(r.note).not.toContain("none sold");
+  });
+  it("does not call net repurchases a dump", () => {
+    expect(classifyCreatorFeeUsage({ ...base, claimCount: 5, claimedTokens: 1000, directSold: 700, boughtBack: 1000, held: 1000 }).usage).toBe("buyback");
+  });
+  it("requires actual purchases before buyback-burn", () => {
+    expect(classifyCreatorFeeUsage({ ...base, claimCount: 5, claimedTokens: 1000, burned: 900, boughtBack: 950 }).usage).toBe("buyback-burn");
+  });
+  it("a provider NOTOK is unavailable, not no claims", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ status: "0", message: "NOTOK", result: "Max rate limit reached" })));
+    expect(await robinhoodCreatorFeeUsage(TOKEN, [INIT], DEP)).toBeNull();
+  });
+  it("an unreadable hop leaves forwarded holdings unknown", async () => {
+    const parent = indexStub({ [DEP]: [...CLAIMS, xfer(DEP, A, CLAIMED, 55000000)] });
+    vi.stubGlobal("fetch", vi.fn(async input => new URL(String(input)).searchParams.get("address") === A
+      ? new Response("throttled", { status: 429 }) : parent(input)));
+    const r = await robinhoodCreatorFeeUsage(TOKEN, [INIT], DEP);
+    expect(r).toMatchObject({ usage: "unknown", heldTokens: null, untracedTokens: CLAIMED, soldTokens: null });
+  });
+  it("ignores recipient sales before receipt of the forwarded tokens", async () => {
+    vi.stubGlobal("fetch", indexStub({ [DEP]: [...CLAIMS, xfer(DEP, A, CLAIMED, 55000000)],
+      [A]: [xfer(A, POOL, CLAIMED, 1), xfer(DEP, A, CLAIMED, 55000000)] }));
+    expect(await robinhoodCreatorFeeUsage(TOKEN, [INIT], DEP)).toMatchObject({ usage: "unknown", marketTransfers: 0, soldTokens: null });
+  });
+});
+
+it("does not count capped intermediary histories as held or completed coverage", async () => {
+  vi.stubGlobal("fetch", indexStub({
+    [DEP]: [...CLAIMS, xfer(DEP, A, 1_000, 55_000_000)],
+    [A]: Array.from({ length: 200 }, (_, i) => xfer(A, POOL, 1, 55_000_001 + i)),
+  }));
+  const result = await robinhoodCreatorFeeUsage(TOKEN, [INIT], DEP);
+  expect(result).toMatchObject({ usage: "unknown", heldTokens: null, soldTokens: null, untracedTokens: 1_000, marketTransfers: 0 });
 });

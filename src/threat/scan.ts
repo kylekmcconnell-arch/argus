@@ -96,7 +96,7 @@ export async function threatScan(
   // standard, not a fingerprint), so the source databases' silence is not
   // "unverified": there is nothing to verify. Folded into the review here so
   // every consumer - trace, judge, check row, report - reads one fact.
-  const code: CodeReview = fp?.system === "b20"
+  const code: CodeReview = (fp?.system === "b20" || dossier.safety.system === "b20")
     ? { ...codeRead, checked: false, verified: false, system: "b20" }
     : codeRead;
   // Linked-site safety: is the token's own website a drainer / blacklisted host,
@@ -989,10 +989,11 @@ export function buildChecks( // exported for unit tests only
         : d.capApplied === "documented_scanner_concealment" || d.findings.some((f) => f.tone === "bad" && f.source === "contract source") ? "The source documents defeating a safety scanner"
         : code.verified ? `${code.stats?.functions ?? 0} functions read, ${code.flags.length} flag${code.flags.length === 1 ? "" : "s"}` : "Source unverified - unreadable"),
     chk("market", "market", "Market conduct",
-      d.findings.some((f) => /wash-trad|fake-volume|cycled|manufactured/i.test(f.claim)) ? "fail" : (d.liquidityUsd ?? 0) < 15000 ? "warn" : "pass",
+      d.findings.some((f) => /wash-trad|fake-volume|cycled|manufactured/i.test(f.claim)) ? "fail" : d.findings.some(f => /turnover anomaly|liquidity anomaly/i.test(f.claim)) || (d.liquidityUsd ?? 0) < 15000 ? "warn" : "pass",
       // The ratio is printed beside every volume figure so the reader sees the
       // denominator: volume means nothing until it is set against the pool.
-      d.findings.some((f) => /fabricated|without a pool/i.test(f.claim)) ? `Fake-volume signature: ${money(d.vol24 ?? 0)} of volume on ${money(d.liquidityUsd ?? 0)} of liquidity`
+      d.findings.some(f => /turnover anomaly|liquidity anomaly/i.test(f.claim)) ? "Turnover or liquidity anomaly; participant-level conduct remains unverified"
+        : d.findings.some((f) => /fabricated|without a pool/i.test(f.claim)) ? `Fake-volume signature: ${money(d.vol24 ?? 0)} of volume on ${money(d.liquidityUsd ?? 0)} of liquidity`
         : d.findings.some((f) => /cycled|manufactured/i.test(f.claim)) ? `Cycled-volume signature: 24h volume is ${volumeToLiquidity(d)} the pool`
         : d.findings.some((f) => /wash-trad/i.test(f.claim)) ? `Wash-trading signature: 24h volume is ${volumeToLiquidity(d)} the pool with a flat price`
         : `${money(d.liquidityUsd ?? 0)} liquidity, ${money(d.vol24 ?? 0)} 24h volume (${volumeToLiquidity(d)} the pool)`),

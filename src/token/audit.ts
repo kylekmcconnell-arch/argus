@@ -34,6 +34,7 @@ export interface Holder { address: string; percent: number; tag?: string; isCont
 
 export interface NormalizedSafety {
   available: boolean;
+  system?: "b20";
   /** Whether a contract-property provider answered. A successful trade
    * simulation alone cannot establish mint, ownership, or source-code state. */
   contractPropertiesAssessed?: boolean;
@@ -328,6 +329,19 @@ export function deployerWalletAddress(d: Pick<TokenDossier, "deployer" | "deploy
 // bytecode route (one eth_getCode). Same shape as resolveDeployerViaRoute: a
 // relative URL requires a browser or an authenticated server transport. Raw
 // Node audits without either keep the provider attribution as unknown.
+export async function resolveTokenSystem(chain: string, address: string, fetchImpl: typeof fetch = fetch): Promise<"b20" | undefined> {
+  if (chain !== "base" || !/^0xb20[0-9a-f]{37}$/i.test(address)) return undefined;
+  try {
+    const r = await fetchImpl(`/api/bytecode?address=${encodeURIComponent(address)}&chain=base`, { signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return undefined;
+    const data: unknown = await r.json();
+    if (!data || typeof data !== "object") return undefined;
+    const result = data as Record<string, unknown>;
+    return result.available === true && result.system === "b20" && result.chain === chain
+      && String(result.address).toLowerCase() === address.toLowerCase() ? "b20" : undefined;
+  } catch { return undefined; }
+}
+
 export async function resolveEvmCreatorKind(
   chain: string,
   creator: string,
@@ -456,60 +470,25 @@ export async function screenAddressSanctions(
   }
 }
 
-/**
- * The volume-to-liquidity guard. Three shapes of manufactured volume, in the
- * order they were learned:
- *
- * 1. Volume on no liquidity. A pool that reports millions in 24h volume with
- *    nothing in it cannot have hosted that trading; the figure is fabricated
- *    or the pool was drained after the churn. The old ratio divided by zero
- *    to 0 and read these as clean (the fake-BTC, GREEN, FCAT and SHIB rows of
- *    the 2026-09-22 Robinhood Chain ring, RESEARCH.md).
- * 2. Volume more than a hundred times the pool. Real demand at that ratio
- *    would move the price violently and drain one side; a pool that turns
- *    over a hundred times its depth in a day and is still there is being
- *    cycled by its operator. The price may well have moved, so no flat-price
- *    condition applies here (PGREM 136x, CRAIL 108x, HITBUY 61x on
- *    280K, musebook clone 5,407x).
- * 3. Heavy churn with a flat price: fifteen times the pool with the price
- *    going nowhere. High turnover alone is normal for thin meme tokens; it is
- *    the absence of price impact that gives the signature away.
- *
- * Any of the three fails the market check and floors trading authenticity.
- * The ratio itself is exported to be printed beside every volume figure the
- * report shows, so a reader sees the denominator.
- */
+/** Aggregate turnover is an investigation lead, never proof of self-trading. */
 export function washSignatureFor(m: { vol24: number; liquidityUsd: number; pc24: number | null; buys: number; sells: number }): {
-  wash: boolean; ratio: number; rationale: string; claim: string;
+  wash: boolean; anomaly: boolean; ratio: number; rationale: string; claim: string;
 } {
-  const vol = Number.isFinite(m.vol24) ? Math.max(0, m.vol24) : 0;
-  const liq = Number.isFinite(m.liquidityUsd) ? Math.max(0, m.liquidityUsd) : 0;
+  const volumeKnown = Number.isFinite(m.vol24) && m.vol24 >= 0;
+  const depthKnown = Number.isFinite(m.liquidityUsd) && m.liquidityUsd >= 0;
+  const vol = volumeKnown ? m.vol24 : 0;
+  const liq = depthKnown ? m.liquidityUsd : 0;
+  const ratio = liq > 0 ? vol / liq : 0;
   const txns = (m.buys ?? 0) + (m.sells ?? 0);
-  const ratio = liq > 0 ? vol / liq : vol > 0 ? Number.POSITIVE_INFINITY : 0;
-  const rx = Number.isFinite(ratio) ? `${ratio.toFixed(ratio >= 100 ? 0 : 1)}x` : "unbounded";
-  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
-  if (liq < 1000 && vol >= 10_000) {
-    return {
-      wash: true, ratio,
-      rationale: `${money(vol)} of 24h volume on ${money(liq)} of liquidity: volume without a pool to carry it, a fake-volume signature.`,
-      claim: `${money(vol)} of 24h volume is reported against ${money(liq)} of liquidity. No pool that shallow can host that trading; the volume is fabricated or the pool was drained after it. A fake-volume signature.`,
-    };
-  }
-  if (ratio >= 100 && txns >= 20) {
-    return {
-      wash: true, ratio,
-      rationale: `vol/liquidity ${rx} in 24h: the pool turned over ${rx} its depth and is still standing, a cycled-volume signature.`,
-      claim: `Volume is ${rx} liquidity in 24h (${money(vol)} on ${money(liq)}). A pool cycled a hundred times its depth in a day without being drained is being traded against itself; treat the volume as manufactured until the buyers are shown to be distinct wallets.`,
-    };
-  }
-  if (m.pc24 != null && Number.isFinite(m.pc24) && ratio >= 15 && Math.abs(m.pc24) < 10 && txns >= 50) {
-    return {
-      wash: true, ratio,
-      rationale: `vol/liquidity ${ratio.toFixed(1)}x but price flat (${m.pc24.toFixed(1)}%): wash-trade signature.`,
-      claim: `Volume is ${ratio.toFixed(0)}x liquidity in 24h while the price moved only ${m.pc24.toFixed(1)}%: a wash-trading or fake-volume signature.`,
-    };
-  }
-  return { wash: false, ratio: Number.isFinite(ratio) ? ratio : 0, rationale: "", claim: "" };
+  const lowDepth = volumeKnown && vol >= 10_000 && (!depthKnown || liq < 1000);
+  const turnover = ratio >= 100 && txns >= 20;
+  const churn = ratio >= 15 && m.pc24 != null && Number.isFinite(m.pc24) && Math.abs(m.pc24) < 10 && txns >= 50;
+  if (!lowDepth && !turnover && !churn) return { wash: false, anomaly: false, ratio, rationale: "", claim: "" };
+  const rationale = lowDepth
+    ? `Liquidity anomaly: $${Math.round(vol).toLocaleString()} reported 24h volume; ${depthKnown ? `$${Math.round(liq).toLocaleString()} current pool liquidity` : "current pool liquidity unavailable"}. Volume/depth ratio is ${liq > 0 ? `${ratio.toFixed(1)}x` : "not measurable"}.`
+    : `Turnover anomaly: 24h volume/current liquidity ${ratio.toFixed(1)}x${churn ? ` with ${m.pc24!.toFixed(1)}% net price change` : ""}.`;
+  return { wash: false, anomaly: true, ratio, rationale,
+    claim: `${rationale} Daily volume and current depth cover different observation periods. Check historical liquidity and participant-level trades; these aggregates do not establish coordinated trading.` };
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -796,9 +775,9 @@ async function runTokenAudit(
   const sells = pair.txns?.h24?.sells ?? 0;
   const pc24 = pair.priceChange?.h24 ?? 0;
   const ageDays = pair.pairCreatedAt ? (Date.now() - pair.pairCreatedAt) / 86400000 : undefined;
-  const wash = washSignatureFor({ vol24, liquidityUsd, pc24: pair.priceChange?.h24 ?? null, buys, sells });
+  const wash = washSignatureFor({ vol24, liquidityUsd: pair.liquidity?.usd ?? NaN, pc24: pair.priceChange?.h24 ?? null, buys, sells });
   const volLiq = wash.ratio;
-  const washSignature = wash.wash;
+  const volumeAnomaly = wash.anomaly;
   step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
 
   // ---- safety (chain-specific) ----
@@ -878,7 +857,7 @@ async function runTokenAudit(
       : { phase: "Contract", label: "Deployer unresolved", detail: "No source named a creator for this mint, so deployer forensics could not run.", tone: "warn" });
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders…" : "GoPlus + honeypot.is buy/sell simulation…", tone: "neutral" });
-    const [gp, sim, explorer, source] = await Promise.all([
+    const [gp, sim, explorer, source, system] = await Promise.all([
       goplus(gpChain, address, fetcher),
       opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address, fetcher),
       // Where GoPlus cannot order holders, the chain's own explorer is the
@@ -887,11 +866,12 @@ async function runTokenAudit(
       // What the deployer wrote about their own contract. Free, and the only
       // place an intent to defeat safety scanners is ever stated outright.
       blockscoutContractSource(chain, address, fetcher),
+      resolveTokenSystem(chain, address, fetcher),
     ]);
     gpEvm = gp;
     explorerHolders = explorer;
     contractSource = source;
-    safety = evmSafety(gp, sim, address);
+    safety = { ...evmSafety(gp, sim, address), ...(system ? { system } : {}) };
     // Honeypot.is officially supports only Ethereum, BSC, and Base. On another
     // chain, two-sided activity in the selected liquid pool is a bounded but
     // definitive receipt that buying and selling occurred. It does not waive
@@ -1130,7 +1110,7 @@ async function runTokenAudit(
   if (pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd) && liquidityUsd < 15000) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
   // ---- manipulation & price-action signals ----
-  if (washSignature) findings.push({ claim: wash.claim, tone: "bad", source: "dexscreener" });
+  if (volumeAnomaly) findings.push({ claim: wash.claim, tone: "warn", source: "dexscreener" });
   if (pc24 <= -60) findings.push({ claim: `Down ${Math.abs(pc24).toFixed(0)}% in 24h. The token appears to have already dumped.`, tone: "bad", source: "dexscreener" });
   else if (pc24 >= 300 && liquidityUsd < 100000) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity. This is a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
 
@@ -1289,7 +1269,7 @@ async function runTokenAudit(
     if (!s.ownerRenounced) aT2 -= 6;
     if (s.transferHook) aT2 -= 8;
   } else {
-    if (!s.openSource) aT2 -= 8;
+    if (!s.openSource && s.system !== "b20") aT2 -= 8;
     if (s.pausable) aT2 -= 8;
     if (s.selfdestruct) aT2 -= 10;
     if (!s.ownerRenounced) aT2 -= 4;
@@ -1299,7 +1279,7 @@ async function runTokenAudit(
     if (!s.ownerRenounced && (s.blacklist || s.tradingCooldown)) aT2 -= 3;
   }
   aT2 = clamp(aT2, 0, 26);
-  axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? (chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.openSource ? "verified" : "unverified"} source, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${s.pausable ? ", pausable" : ""}.`) : "On-chain safety not verifiable keyless on this chain." });
+  axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? (chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.system === "b20" ? "B20 system asset; no per-token source" : s.openSource ? "verified source" : "unverified source"}, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${s.pausable ? ", pausable" : ""}.`) : "On-chain safety not verifiable keyless on this chain." });
 
   const tax = s.buyTax + s.sellTax;
   let aT3 = !s.available ? 6 : tax === 0 ? 12 : tax <= 10 ? 10 : tax <= 20 ? 7 : tax <= 40 ? 3 : 0;
@@ -1337,10 +1317,9 @@ async function runTokenAudit(
 
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
-  if (washSignature) aT5 = 2; // churn without price movement = manufactured volume
-  else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
+  if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? wash.rationale : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: volumeAnomaly ? wash.rationale : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells (DexScreener, the selected pair, rolling 24h).` });
 
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),

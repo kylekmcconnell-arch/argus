@@ -1136,3 +1136,35 @@ three or more claims with most of the token leg sold and nothing bought back
 or burned is the `dump` warning. Validated live against MEME (26 claims,
 5,010,685 claimed, all sold one hop out: dump), TAIWAN (one claim: unknown)
 and MOTION (85 claims, all held: hold).
+
+### 2026-09-24 audit correction: evidence boundaries
+
+This correction supersedes the 2026-09-23 scanner and wash-ring conclusions
+above. A suffix is a venue candidate, not confirmed attribution. Transfer
+feeds alone do not establish fee claims, swaps, bridging, beneficial ownership
+or sales of a particular fungible inventory. The Robinhood tracer now returns
+transfer observations and unknown conduct; failed/capped intermediary reads
+remain incomplete. Prior MEME/MOTION transfer-only classifications are not
+validated conduct evidence. Receipt-level decoding and inventory attribution
+remain outstanding.
+
+High reported turnover against current depth is an anomaly, not proof of wash
+trading. The runtime index initially contained 13 tokens and eight wallets.
+The archived attribution file contains 32 direct deployments in the reported
+date window, now indexed with 33 reported deployer/funder wallets. This does
+not reconcile the claimed 31-token membership or establish participant-level
+conduct. The archive corrects BET/JEV: BET is 0x1df7abb9d130e373f00bb1edec798cd4194a3845;
+JEV is 0x675279fe3259dcd20b1520399d2977dad042bf3f. Fresh metadata reads
+returned HTTP 403 and the public RPC returned HTTP 429; these records retain archived, not live-verified provenance.
+Shared bytecode, token names or funding infrastructure alone do not prove one
+controller. Do not automatically exclude this cohort from ranked coverage.
+
+CATALYST receipt recovery (same audit): free Base Blockscout reads recovered
+all six registration events and successful transaction senders/targets. They
+are now indexed as `base-catalyst-suite-2026-09-23` with intent unestablished.
+Full factory, registry, seeder and hook addresses are supported by Catalyst's
+launch receipt. Raw selected logs and registry records are retained in
+`docs/launchpads/receipts/catalyst-2026-09-24.json`. Fee escrow, payout address,
+custody rights and post-launch fee behavior remain unverified. Shared launch
+sender is not proof of beneficial ownership. A marketing name was not required
+to index this observed infrastructure.

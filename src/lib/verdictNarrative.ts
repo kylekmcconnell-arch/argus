@@ -107,11 +107,11 @@ export function plainScoreRationale(value: string): string {
 
   const wash = raw.match(/^vol\/liquidity ([\d.]+)x but price flat \(([-.\d]+)%\):\s*wash-trade signature\.?$/i);
   if (wash) {
-    return `Trading volume was ${wash[1]} times the pool size while the price barely moved (${wash[2]}%). That pattern is a wash-trade signature, not proof of genuine demand.`;
+    return `Trading volume was ${wash[1]} times the pool size while the price barely moved (${wash[2]}%). This is an activity anomaly; aggregate turnover and net price change do not establish participant-level conduct.`;
   }
   const cycled = raw.match(/^vol\/liquidity ([\d.]+x|unbounded) in 24h: the pool turned over .* a cycled-volume signature\.?$/i);
   if (cycled) {
-    return `Trading volume was ${cycled[1] === "unbounded" ? "unbounded relative to" : cycled[1].replace(/x$/, "") + " times"} the pool size in a day, and the pool is still standing. A pool that turns over a hundred times its depth without being drained is being traded against itself; the volume is manufactured, not demand.`;
+    return `Trading volume was ${cycled[1] === "unbounded" ? "unbounded relative to" : cycled[1].replace(/x$/, "") + " times"} the pool size in a day, and the pool is still standing. This turnover merits investigation; aggregate volume and current pool depth do not establish self-trading.`;
   }
   const noPool = raw.match(/^\$([\d,]+) of 24h volume on \$([\d,]+) of liquidity: volume without a pool to carry it, a fake-volume signature\.?$/i);
   if (noPool) {

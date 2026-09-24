@@ -93,3 +93,24 @@ describe("lookups", () => {
     expect(s).not.toContain("\u2014");
   });
 });
+
+it("recovers the archived direct-deployment cohort without declaring nefarious control", () => {
+  const cohort = CABALS.find(c => c.id === "rh-volume-ring-2026-09-22")!;
+  expect(cohort.intent).toBe("unestablished");
+  expect(cohort.launches).toHaveLength(32);
+  expect(cohort.wallets).toHaveLength(33);
+  expect(cohort.summary).toContain("not a fresh chain audit");
+  expect(findCabalLaunch("robinhood", "0x1df7abb9d130e373f00bb1edec798cd4194a3845")?.launch.symbol).toBe("BET");
+  expect(findCabalLaunch("robinhood", "0x675279fe3259dcd20b1520399d2977dad042bf3f")?.launch.symbol).toBe("JEV");
+});
+
+it("joins recovered Catalyst launches and infrastructure without declaring malicious control", () => {
+  const cohort = CABALS.find(c => c.id === "base-catalyst-suite-2026-09-23")!;
+  expect(cohort.intent).toBe("unestablished");
+  expect(cohort.launches).toHaveLength(6);
+  for (const launch of cohort.launches) {
+    expect(findCabalLaunch("base", launch.address)?.cabal.id).toBe(cohort.id);
+    expect(launch.evidence).toMatch(/https:\/\/base.blockscout.com\/tx\/0x[0-9a-f]{64}/);
+  }
+  expect(findCabalWallet("base", "0xfd2823fbf019e9d4a121544590e00705fdae80f0")?.cabal.id).toBe(cohort.id);
+});
