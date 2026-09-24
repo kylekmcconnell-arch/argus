@@ -121,7 +121,7 @@ import { ConnectionsChapter } from "../reports/argus/chapters/ConnectionsChapter
 import { EvidenceChapter } from "../reports/argus/chapters/EvidenceChapter";
 import { HolderReconciliation } from "../reports/argus/chapters/HolderReconciliation";
 import { LegacySection } from "../reports/argus/primitives";
-import { linkedinIdentityMismatch, utcStamp } from "../reports/argus/model";
+import { linkedinIdentityMismatch, linkedinSlug, safeHttpUrl, xHandleUrl, utcStamp } from "../reports/argus/model";
 import type { InvestigationDecisionCanvasProps } from "../reports/shared/reportLaneRendererTypes";
 import { printReportPdf, reportPdfFilename } from "../lib/printPdf";
 import { exportReportDoc } from "../lib/reportExport";
@@ -1375,7 +1375,7 @@ function sanitizedGroundedTeamMember(member: ReportTeamMember): ReportTeamMember
   return {
     ...member,
     ...(member.identity_link_evidence_origin === "model_lead"
-      ? { handle: undefined, linkedin: undefined }
+      ? { handle: member.handleProvenance === "subject_first_party" ? member.handle : undefined, linkedin: undefined }
       : {}),
     ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
   };
@@ -3124,11 +3124,12 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
               <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-[12.5px]">
                 <span className="font-medium text-ink-dim">{member.name}</span>
                 <span className="chip">{member.role}</span>
-                {member.handle && <span className="mono text-[11px] text-caution">candidate {member.handle}</span>}
-                {member.linkedin && <span className="text-[11px] text-ink-faint">LinkedIn candidate recorded</span>}
+                {member.handle && xHandleUrl(member.handle) && <a href={xHandleUrl(member.handle)!} target="_blank" rel="noopener noreferrer" className="link-ext text-[11px] text-caution">Candidate X profile: {member.handle}</a>}
+                {member.linkedin && linkedinSlug(member.linkedin) && <a href={safeHttpUrl(member.linkedin)!} target="_blank" rel="noopener noreferrer" className="link-ext text-[11px] text-caution">Candidate LinkedIn profile</a>}
+                {!!member.projects?.length && <span className="min-w-full text-[11px] text-ink-faint">Prior-project leads, not verified: {member.projects.map(project => `${project.name}${project.role ? ` (${project.role})` : ""}`).join(", ")}</span>}
                 <span className="text-[11px] text-ink-faint">{sourceProviderLabel(member.provider ?? member.source)}</span>
                 {member.evidence && <span className="min-w-full text-[11px] leading-relaxed text-ink-faint">{member.evidence}</span>}
-                {member.handle && onAudit && !shareView && <button type="button" onClick={() => onAudit(member.handle!)} className="btn-chip tint-caution ml-auto min-h-11">Verify →</button>}
+                {member.handle && onAudit && !shareView && <button type="button" onClick={() => (onResearchAudit ?? onAudit)(member.handle!)} className="btn-chip tint-caution ml-auto min-h-11">Verify →</button>}
               </div>
             ))}
           </Card>
@@ -3881,7 +3882,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           scores: () => <ScoresChapter view={reportView} legacy={scoresLegacy} />,
           product: () => <ProductChapter view={reportView} legacy={productLegacy} />,
           code: () => <CodeChapter subjectKind={reportView.subjectKind} code={codeView} legacy={codeLegacy} />,
-          people: () => <PeopleChapter view={reportView} legacy={peopleLegacy} onAudit={shareView ? undefined : onAudit} />,
+          people: () => <PeopleChapter view={reportView} legacy={peopleLegacy} onAudit={shareView ? undefined : onResearchAudit ?? onAudit} />,
           market: ({ active }) => <MarketChapter view={reportView} active={active} reconciliation={holderReconciliation} legacy={marketLegacy} />,
           social: () => <SocialChapter view={reportView} legacy={socialLegacy} />,
           connections: () => <ConnectionsChapter view={reportView} legacy={connectionsLegacy} />,

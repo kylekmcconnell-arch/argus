@@ -150,7 +150,16 @@ export function safeHttpUrl(value: string | null | undefined): string | null {
 }
 
 export function xHandleUrl(handle: string | null | undefined): string | null {
-  const clean = String(handle ?? "").trim().replace(/^@/, "");
+  const raw = String(handle ?? "").trim();
+  const profile = safeHttpUrl(raw);
+  let clean = raw.replace(/^@/, "");
+  if (profile) {
+    const url = new URL(profile);
+    if (!["x.com", "www.x.com", "twitter.com", "www.twitter.com"].includes(url.hostname.toLowerCase())) return null;
+    const path = url.pathname.match(/^\/@?([A-Za-z0-9_]{1,30})\/?$/);
+    if (!path || /^(?:home|search|intent|share|explore|settings|i)$/i.test(path[1])) return null;
+    clean = path[1];
+  }
   return /^[A-Za-z0-9_]{1,30}$/.test(clean) ? `https://x.com/${clean}` : null;
 }
 
@@ -316,8 +325,12 @@ function nameTokens(name: string): string[] {
 }
 
 export function linkedinSlug(url: string | null | undefined): string | null {
-  const match = String(url ?? "").match(/linkedin\.com\/in\/([^/?#\s]+)/i);
-  return match ? decodeURIComponent(match[1]).replace(/\/$/, "") : null;
+  const safe = safeHttpUrl(url);
+  if (!safe) return null;
+  const parsed = new URL(safe);
+  if (!/^(?:[a-z]{2,3}\.)?linkedin\.com$/i.test(parsed.hostname)) return null;
+  const match = parsed.pathname.match(/^\/in\/([^/]+)\/?$/i);
+  try { return match ? decodeURIComponent(match[1]) : null; } catch { return null; }
 }
 
 /**
@@ -385,7 +398,7 @@ export function personContacts(
   let mismatchedLinkedinSlug: string | undefined;
   const candidates = [member.linkedin, ...extraLinkedins]
     .map((value) => safeHttpUrl(value ?? ""))
-    .filter((value): value is string => Boolean(value))
+    .filter((value): value is string => Boolean(value && linkedinSlug(value)))
     .filter((value, index, all) => all.findIndex((other) => linkedinSlug(other)?.toLowerCase() === linkedinSlug(value)?.toLowerCase()) === index);
   for (const url of candidates) {
     if (linkedinIdentityMismatch(member.name, url)) {
@@ -397,7 +410,7 @@ export function personContacts(
   }
 
   return {
-    x: xUrl ? { label: `@${String(member.handle).replace(/^@/, "")}`, url: xUrl } : null,
+    x: xUrl ? { label: `@${new URL(xUrl).pathname.slice(1)}`, url: xUrl } : null,
     telegram: /^[A-Za-z0-9_]{4,64}$/.test(telegramSlug) ? { label: `@${telegramSlug}`, url: `https://t.me/${telegramSlug}` } : null,
     linkedin,
     email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? { label: email, url: `mailto:${email}` } : null,

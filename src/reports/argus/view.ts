@@ -95,6 +95,7 @@ export interface PersonCardView {
   sourceUrl?: string | null;
   sourceLabel: string;
   developerProfiles?: Array<{ label: string; url: string; proofUrl?: string | null }>;
+  candidateProfiles?: Array<{ label: string; url: string }>;
   /** X handle to run a full audit on this person, when the roster recorded one. */
   auditHandle?: string | null;
   /** What else the saved report records about this person. */

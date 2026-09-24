@@ -269,3 +269,12 @@ describe("dossier webTeam · reverse-bio first-party keep", () => {
     expect(dossier.graph.nodes).toContainEqual(expect.objectContaining({ key: "@someorg", type: "Company" }));
   });
 });
+
+it("preserves an explicitly first-party X handle when other identity links remain model leads", () => {
+  const evidence = emptyEvidence("@projecthandle");
+  evidence.roles = [SubjectClass.PROJECT];
+  evidence.webTeam = [{ name: "Ada Lovelace", role: "Founder", handle: "@ada_codes", handleProvenance: "subject_first_party", source: "official post", sourceUrl: "https://x.com/projecthandle/status/123", provider: "twitterapi", evidence_origin: "deterministic", artifact_verified: true, identity_link_evidence_origin: "model_lead", linkedin: "linkedin.com/in/guessed-profile" }];
+  const dossier = assembleDossier(evidence, true);
+  expect(dossier.webTeam[0]?.handle).toBe("@ada_codes");
+  expect(dossier.webTeam[0]?.linkedin).toBeUndefined();
+});

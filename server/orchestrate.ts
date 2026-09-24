@@ -5940,7 +5940,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     // so identity/founder scoring reflects the team we actually found.
     team: (evidence.webTeam ?? []).filter((p) => p.kind !== "org").map((p) => ({
       name: p.name,
-      handle: p.identity_link_evidence_origin === "model_lead" ? undefined : p.handle,
+      handle: p.identity_link_evidence_origin === "model_lead" && p.handleProvenance !== "subject_first_party" ? undefined : p.handle,
       role: p.role,
       linkedin: p.identity_link_evidence_origin === "model_lead" ? undefined : p.linkedin,
       source: p.source,

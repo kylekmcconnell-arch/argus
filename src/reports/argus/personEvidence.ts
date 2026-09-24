@@ -85,6 +85,9 @@ export interface PersonEvidenceInput {
   ventures?: AffiliationLike[] | null;
   associates?: AffiliationLike[] | null;
   intelligenceSources?: SourceLike[] | null;
+  /** Projects explicitly attached to this roster row, not a name join. */
+  priorProjects?: { name: string; role?: string }[];
+  priorProjectsSource?: string;
 }
 
 const MAX_PER_KIND = 6;
@@ -117,8 +120,14 @@ function trim(text: string, max = 260): string {
 export function personRecords(input: PersonEvidenceInput): PersonRecord[] {
   const pattern = namePattern(input.name);
   const handle = normalizeHandle(input.handle);
-  if (!pattern && !handle) return [];
+  if (!pattern && !handle && !input.priorProjects?.length) return [];
   const records: PersonRecord[] = [];
+
+  for (const project of input.priorProjects ?? []) {
+    records.push({ kind: "affiliation", label: "Reported prior project",
+      detail: `${project.name}${project.role ? `: ${project.role}` : ""}. This saved affiliation does not establish its outcome or common control.`,
+      url: input.priorProjectsSource ?? null, tone: "neutral" });
+  }
 
   for (const fact of input.basicFacts ?? []) {
     if (!mentions(fact.value, pattern, handle) && !mentions(fact.qualifier, pattern, handle)) continue;

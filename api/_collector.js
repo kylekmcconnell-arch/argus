@@ -8463,14 +8463,14 @@ function assembleDossier(ev, live) {
   const rosterIdentityIsPerson = (row) => isPlausiblePersonRosterIdentity({
     name: row.name,
     handle: row.handle,
-    handleBoundBySubject: row.handleProvenance === "subject_first_party" && row.identity_link_evidence_origin === "deterministic"
+    handleBoundBySubject: row.handleProvenance === "subject_first_party"
   });
   const identityGrounded = (row) => row.kind !== "org" && meaningfulTeamValue(row.name) && rosterIdentityIsPerson(row) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
   // often use @handle as the display name until enrichment fills it.
   (row.handleProvenance === "subject_first_party" && Boolean(row.handle) || !teamNameIsOwnHandle(row));
   const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
     ...member,
-    ...member.identity_link_evidence_origin === "model_lead" ? { handle: void 0, linkedin: void 0, telegram: void 0, email: void 0, github: void 0, developerProfiles: void 0 } : {},
+    ...member.identity_link_evidence_origin === "model_lead" ? { handle: member.handleProvenance === "subject_first_party" ? member.handle : void 0, linkedin: void 0, telegram: void 0, email: void 0, github: void 0, developerProfiles: void 0 } : {},
     ...member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}
   }));
   const organizationRelationships = (ev.webTeam ?? []).filter((member) => member.kind === "org" && meaningfulTeamValue(member.name) && meaningfulTeamValue(member.role) && member.evidence_origin !== "model_lead" && member.artifact_verified === true).map((member) => ({ ...member }));
@@ -8549,7 +8549,7 @@ function assembleDossier(ev, live) {
   const subjectKey = graph.nodes.find((n) => n.subject)?.key ?? ev.profile.handle;
   const hasNode = (key) => graph.nodes.some((n) => String(n.key).toLowerCase() === key.toLowerCase());
   for (const p of groundedWebTeam) {
-    const verifiedHandle = p.identity_link_evidence_origin === "model_lead" ? void 0 : p.handle;
+    const verifiedHandle = p.identity_link_evidence_origin === "model_lead" && p.handleProvenance !== "subject_first_party" ? void 0 : p.handle;
     const verifiedProjects = p.projects_evidence_origin === "model_lead" ? [] : p.projects ?? [];
     if (!verifiedHandle && !p.name) continue;
     const pkey = canonicalEntityKey({ handle: verifiedHandle, name: p.name });
@@ -42082,7 +42082,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
     // so identity/founder scoring reflects the team we actually found.
     team: (evidence.webTeam ?? []).filter((p) => p.kind !== "org").map((p) => ({
       name: p.name,
-      handle: p.identity_link_evidence_origin === "model_lead" ? void 0 : p.handle,
+      handle: p.identity_link_evidence_origin === "model_lead" && p.handleProvenance !== "subject_first_party" ? void 0 : p.handle,
       role: p.role,
       linkedin: p.identity_link_evidence_origin === "model_lead" ? void 0 : p.linkedin,
       source: p.source,

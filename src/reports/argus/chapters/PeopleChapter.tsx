@@ -49,8 +49,10 @@ function PersonPortrait({ person }: { person: PersonCardView }) {
   return <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setIndex((current) => current + 1)} />;
 }
 
-function PersonCard({ person, onAudit }: { person: PersonCardView; onAudit?: (handle: string) => void }) {
+function PersonCard({ person, subjectName, onAudit }: { person: PersonCardView; subjectName: string; onAudit?: (handle: string) => void }) {
   const panelId = `person:${person.key}`;
+  const identityQuery = `"${person.name.replace(/"/g, "")}" "${subjectName.replace(/"/g, "")}"`;
+  const backgroundQuery = `${identityQuery} (founder OR cofounder OR "previously" OR "former" OR company OR project)`;
   const challenge: ChallengeTarget = {
     id: findingId("people", person.key),
     title: `${person.name} · ${person.role}`,
@@ -72,6 +74,7 @@ function PersonCard({ person, onAudit }: { person: PersonCardView; onAudit?: (ha
         {person.recordSummary && <> <Badge tone={person.recordSummary.tone}>{person.recordSummary.label}</Badge></>}
         <p>{person.text}</p>
         <ContactList name={person.name} contacts={person.contacts} />
+        {!!person.developerProfiles?.length && <p>{person.developerProfiles.map(profile => <span key={profile.url}><ExtLink href={profile.url}>{profile.label}</ExtLink>{" "}</span>)}</p>}
         <div className="person-actions">
           <small>Contacts from the saved report</small>
           <DisclosureButton id={panelId} className="textbtn">Review evidence →</DisclosureButton>
@@ -91,6 +94,11 @@ function PersonCard({ person, onAudit }: { person: PersonCardView; onAudit?: (ha
             <h3>{person.role}</h3>
             <p className="dialog-body" style={{ marginTop: 16 }}>{person.text}</p>
             <ContactList name={person.name} contacts={person.contacts} />
+            {!!person.candidateProfiles?.length && <div className="dialog-section">
+              <h3>Profile leads to verify</h3>
+              <p>Search returned these accounts for the roster name and role. They may belong to a namesake; they are not established social links or team evidence.</p>
+              {person.candidateProfiles.map(profile => <p key={profile.url}><ExtLink href={profile.url}>{profile.label}</ExtLink></p>)}
+            </div>}
             {person.developerProfiles && person.developerProfiles.length > 0 && (
               <div className="dialog-section">
                 <h3>Developer profiles</h3>
@@ -105,8 +113,11 @@ function PersonCard({ person, onAudit }: { person: PersonCardView; onAudit?: (ha
               </div>
             )}
             <div className="dialog-section">
-              <h3>Verification needed</h3>
-              <p>Confirm exact platform identity, current role, start and end dates, and first-party or independently corroborated employment evidence. Do not infer prior misconduct or a departure from an absent provider match.</p>
+              <h3>Previous companies, projects and collaborators</h3>
+              <p>Follow dated founder and employment records, venture outcomes and people who appear across projects. Shared collaborators are a research lead, not proof of a cabal or common control.</p>
+              <p><ExtLink href={`https://www.google.com/search?q=${encodeURIComponent(backgroundQuery)}`}>Search public background</ExtLink>{" · "}<ExtLink href={`https://www.google.com/search?q=${encodeURIComponent(`site:linkedin.com/in/ ${identityQuery}`)}`}>Search LinkedIn records</ExtLink>{" · "}<ExtLink href={`https://x.com/search?q=${encodeURIComponent(person.auditHandle ? `from:${person.auditHandle.replace(/^@/, "")} (founded OR building OR cofounder OR previously)` : identityQuery)}`}>Search X history</ExtLink></p>
+              <p className="subtle-note">These searches open external sources and do not change this saved report. Check exact identity, role dates and independent sources before linking people or projects.</p>
+              {!person.auditHandle && <p className="status-box">A fresh automated person audit needs a resolved X account. Use the recorded profiles and searches above to establish the right account; a name alone is not an identity match.</p>}
             </div>
             {person.records && person.records.length > 0 && (
               <div className="dialog-section">
@@ -133,7 +144,7 @@ function PersonCard({ person, onAudit }: { person: PersonCardView; onAudit?: (ha
               <div className="dialog-section">
                 <h3>Go deeper on this person</h3>
                 <p>
-                  A full audit of {person.auditHandle} opens its own report: their own history, their other projects, adverse findings recorded against them and the sources behind each one. This report covers the company, and carries a person only as far as their role here.
+                  A fresh audit of {person.auditHandle} researches their identity, prior companies and projects, recurring collaborators and adverse sources. It runs separately and keeps this saved company report unchanged. Missing or blocked sources remain coverage gaps.
                 </p>
                 <button type="button" className="btn" onClick={() => onAudit(person.auditHandle!)}>Run a full audit on {person.auditHandle} →</button>
               </div>
@@ -170,7 +181,7 @@ export function PeopleChapter({ view, legacy, onAudit }: { view: ReportView; leg
       <div id="identity-evidence" className="scroll-mt-28">
       {people.cards.length > 0 ? (
         <div className="person-grid">
-          {people.cards.map((person) => <PersonCard key={person.key} person={person} onAudit={onAudit} />)}
+          {people.cards.map((person) => <PersonCard key={person.key} person={person} subjectName={view.subjectName} onAudit={onAudit} />)}
         </div>
       ) : people.identityNote ? (
         <Panel challenge={{ id: findingId("people", "identity-note"), title: "Identity note", claim: people.identityNote }}>
