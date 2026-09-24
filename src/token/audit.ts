@@ -530,7 +530,7 @@ const isBurnAddr = (a?: string) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a
 const isBurnTag = (t?: string) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
 
 // --- normalize EVM safety from GoPlus + honeypot.is ---
-function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null, tokenAddress?: string): NormalizedSafety {
+function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null, tokenAddress?: string, poolAddress?: string): NormalizedSafety {
   const s = sim;
   // GoPlus documents missing/empty trading fields as unknown. Only a DEX-listed
   // response with all three key outcomes recorded is a completed provider
@@ -541,20 +541,30 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null, tokenAddr
   // Classify where the liquidity sits: burned (permanent) vs locked vs sitting in
   // an unlocked wallet. Concentration in an unlocked CONTRACT (e.g. a pair/staking
   // contract, as PEPE shows) is not a rug signal — only an unlocked non-contract
-  // wallet holding the LP is rug-ready.
+  // wallet holding the LP is rug-ready. Those unclassified contract rows also
+  // must not count as a measured "not locked" pool: burned LP is often held by
+  // the pair or the token itself without a burn tag, and calling that unlocked
+  // is an assertion from absent custody data.
   let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
   let lpRowsSeen = 0, lpSelfPct = 0;
   const selfAddress = (tokenAddress ?? "").trim().toLowerCase();
+  const pool = (poolAddress ?? "").trim().toLowerCase();
   for (const h of gp?.lp_holders ?? []) {
     const pct = Number(h.percent) * 100;
     if (!Number.isFinite(pct) || pct < 0 || pct > 100) continue;
     lpRowsSeen += 1;
-    if (selfAddress && (h.address ?? "").trim().toLowerCase() === selfAddress) lpSelfPct += pct;
+    const holder = (h.address ?? "").trim().toLowerCase();
+    if (selfAddress && holder === selfAddress) {
+      lpSelfPct += pct;
+      continue;
+    }
+    if (pool && holder === pool) continue;
     if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct;
     else if (h.is_locked === 1) lpLockedPct += pct;
     else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
   }
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
+  const classifiedPct = lpBurnedPct + lpLockedPct + lpTopUnlockedEoaPct;
   // A list whose rows are mostly the token's own contract measures nothing about
   // custody: the provider returned the mint back to us, not the pool's holders.
   // Publishing "LP not locked" off that is an assertion from absent data, and it
@@ -567,6 +577,9 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null, tokenAddr
   const ownerAddress = (gp?.owner_address ?? "").trim();
   const hiddenOwner = t1(gp?.hidden_owner);
   const takeBack = t1(gp?.can_take_back_ownership);
+  // "Renounced" is only true when the owner was measured AND no owner power
+  // survives. A GoPlus pause flag after that is ABI residue, not a live halt.
+  const ownerRenounced = ownerAddressReported && (ownerAddress === "" || /^0x0+$/.test(ownerAddress)) && !hiddenOwner && !takeBack;
   return {
     available: !!gp && Object.values(gp).some((v) => v != null && v !== "") || simulationCompleted,
     contractPropertiesAssessed: !!gp && [gp.is_open_source, gp.is_mintable, gp.transfer_pausable, gp.selfdestruct].every((v) => v === "0" || v === "1") && typeof gp.owner_address === "string",
@@ -592,11 +605,11 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null, tokenAddr
     // was measured AND no owner power survives; every other case leaves the
     // owner-power vectors (balance rewrite, blacklist, tax change) live.
     ownerAssessed: ownerAddressReported,
-    ownerRenounced: ownerAddressReported && (ownerAddress === "" || /^0x0+$/.test(ownerAddress)) && !hiddenOwner && !takeBack,
+    ownerRenounced,
     takeBack,
     hiddenOwner,
     selfdestruct: t1(gp?.selfdestruct),
-    pausable: t1(gp?.transfer_pausable),
+    pausable: t1(gp?.transfer_pausable) && !ownerRenounced,
     openSource: t1(gp?.is_open_source),
     cannotSellAll: t1(gp?.cannot_sell_all),
     metadataMutable: false,
@@ -615,7 +628,7 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null, tokenAddr
     ownerChangeBalance: t1(gp?.owner_change_balance),
     creatorPercent: (creatorShare ?? 0) * 100,
     creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
-    lpAssessed: lpRowsSeen > 0 && !lpRowsAreSelfReferential,
+    lpAssessed: classifiedPct >= 50 && !lpRowsAreSelfReferential,
   };
 }
 
@@ -891,7 +904,7 @@ async function runTokenAudit(
     gpEvm = gp;
     explorerHolders = explorer;
     contractSource = source;
-    safety = evmSafety(gp, sim, address);
+    safety = evmSafety(gp, sim, address, pair.pairAddress);
     // Honeypot.is officially supports only Ethereum, BSC, and Base. On another
     // chain, two-sided activity in the selected liquid pool is a bounded but
     // definitive receipt that buying and selling occurred. It does not waive

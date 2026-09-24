@@ -74,4 +74,65 @@ describe("a self-referential GoPlus LP list is unmeasured, not unlocked", () => 
     expect(d?.safety.lpAssessed).toBe(true);
     expect(d?.safety.lpLocked).toBe(true);
   });
+
+  it("does not call an unclassified pair-contract LP row unlocked", async () => {
+    stubProviders({ ...CLEAN_GOPLUS, lp_holders: [
+      { address: POOL, percent: "0.997", is_contract: 1, is_locked: 0 },
+    ] });
+    const d = await auditToken(input, undefined, { force: true, skipSim: true });
+    expect(d?.safety.lpAssessed).toBe(false);
+    const t1 = d!.axes.find((a) => a.key === "T1");
+    expect(t1?.rationale ?? "").not.toMatch(/LP not locked/i);
+    expect(t1?.rationale ?? "").toMatch(/liquidity protection unverified/i);
+  });
+
+  it("does not treat an unlocked contract LP row as a measured unlocked pool", async () => {
+    stubProviders({ ...CLEAN_GOPLUS, lp_holders: [
+      { address: "0x6666666666666666666666666666666666666666", percent: "0.95", is_contract: 1, is_locked: 0 },
+    ] });
+    const d = await auditToken(input, undefined, { force: true, skipSim: true });
+    expect(d?.safety.lpAssessed).toBe(false);
+    expect(d!.axes.find((a) => a.key === "T1")?.rationale ?? "").not.toMatch(/LP not locked/i);
+  });
+
+  it("reports a dead-address LP as burned, not unlocked", async () => {
+    stubProviders({ ...CLEAN_GOPLUS, lp_holders: [
+      { address: "0x000000000000000000000000000000000000dead", percent: "0.99", is_contract: 0, tag: "dead" },
+    ] });
+    const d = await auditToken(input, undefined, { force: true, skipSim: true });
+    expect(d?.safety.lpAssessed).toBe(true);
+    expect(d?.safety.lpBurnedPct).toBeGreaterThanOrEqual(99);
+    const t1 = d!.axes.find((a) => a.key === "T1");
+    expect(t1?.rationale ?? "").toMatch(/LP burned/i);
+    expect(t1?.rationale ?? "").not.toMatch(/LP not locked/i);
+  });
+});
+
+describe("a GoPlus pause flag with no reachable owner is not a live halt", () => {
+  it("does not claim PEPE-shaped transfers can still be paused", async () => {
+    stubProviders({
+      ...CLEAN_GOPLUS,
+      transfer_pausable: "1",
+      owner_address: "0x0000000000000000000000000000000000000000",
+    });
+    const d = await auditToken(input, undefined, { force: true, skipSim: true });
+    expect(d?.safety.ownerRenounced).toBe(true);
+    expect(d?.safety.pausable).toBe(false);
+    const t2 = d!.axes.find((a) => a.key === "T2");
+    expect(t2?.rationale ?? "").not.toMatch(/pausable/i);
+    expect(JSON.stringify(d!.findings)).not.toMatch(/paused|pausable/i);
+  });
+
+  it("still treats pause as live while an owner can call it", async () => {
+    stubProviders({
+      ...CLEAN_GOPLUS,
+      transfer_pausable: "1",
+      owner_address: WALLET,
+    });
+    const d = await auditToken(input, undefined, { force: true, skipSim: true });
+    expect(d?.safety.ownerRenounced).toBe(false);
+    expect(d?.safety.pausable).toBe(true);
+    const t2 = d!.axes.find((a) => a.key === "T2");
+    expect(t2?.rationale ?? "").toMatch(/pausable/i);
+  });
 });
