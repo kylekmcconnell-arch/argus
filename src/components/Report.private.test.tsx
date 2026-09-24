@@ -1147,7 +1147,7 @@ describe("private person report evidence boundary", () => {
     expect(container.textContent).toContain("Model Team Lead");
     expect(container.textContent).toContain("not identity proof");
     expect(container.textContent).not.toContain("identity resolved through the named team");
-    expect(container.querySelector('a[href*="model-team-lead"]')).toBeNull();
+    expect(container.querySelector('a[href*="model-team-lead"]')?.textContent).toBe("Candidate LinkedIn profile");
     const context = String(harness.askReport.mock.calls.at(-1)?.[0]?.context ?? "");
     expect(context).not.toContain("Model Team Lead");
     expect(context).not.toContain("Model Venture");
@@ -3833,4 +3833,20 @@ it("renders supply correctly in the project summary without rewriting saved evid
   expect(container.textContent).not.toContain("supplie builders");
   expect(container.textContent).toContain("supply builders");
   expect(dossier.subjectOrientation.what).toBe(what);
+});
+
+it("starts fresh team research rather than opening a cached person report", () => {
+  const base = buildReport(SUBJECTS[1]);
+  const dossier = { ...base, webTeam: [{ name: "Ada Lovelace", role: "Founder", handle: "https://x.com/ada_codes", linkedin: "linkedin.com/in/ada-lovelace", source: "official team page", sourceUrl: "https://example.com/team", provider: "team-page", evidence_origin: "deterministic" as const, artifact_verified: true }] };
+  const openCached = vi.fn(), freshResearch = vi.fn();
+  act(() => root.render(<Report dossier={dossier} onReset={() => {}} onAudit={openCached} onResearchAudit={freshResearch} />));
+  const people = [...container.querySelectorAll('nav[aria-label="Report sections"] button')].find(button => button.textContent?.trim() === "People") as HTMLButtonElement;
+  act(() => people.click());
+  expect(container.querySelector('a[href="https://x.com/ada_codes"]')).not.toBeNull();
+  expect(container.querySelector('a[href="https://linkedin.com/in/ada-lovelace"]')).not.toBeNull();
+  const investigate = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("Run a full audit on Ada Lovelace"));
+  expect(investigate).toBeDefined();
+  act(() => investigate!.click());
+  expect(freshResearch).toHaveBeenCalledWith("@ada_codes");
+  expect(openCached).not.toHaveBeenCalled();
 });

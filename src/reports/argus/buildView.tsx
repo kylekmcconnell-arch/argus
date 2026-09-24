@@ -39,6 +39,7 @@ import {
   reconciliationIssues,
   recordedLinkedinsFor,
   safeHttpUrl,
+  xHandleUrl,
   shortAddress,
   signedPct,
   sourceTierLabel,
@@ -934,6 +935,14 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
   const management = f.companyEnrichment?.management ?? [];
   const departures = f.leaderDepartures ?? [];
   const cards: PersonCardView[] = input.webTeam.map((member, index) => {
+    // Same roster name/role only groups discovery leads for review; it does
+    // not establish that a candidate account belongs to this person.
+    const identityLeads = (f.webTeamLeads ?? []).filter(lead => lead.name.trim().toLowerCase() === member.name.trim().toLowerCase()
+      && lead.role.trim().toLowerCase() === member.role.trim().toLowerCase());
+    const candidateProfiles = uniqueBy(identityLeads.flatMap(lead => [
+      ...(xHandleUrl(lead.handle) ? [{ label: "Candidate X profile", url: xHandleUrl(lead.handle)! }] : []),
+      ...(linkedinSlug(lead.linkedin) ? [{ label: "Candidate LinkedIn profile", url: safeHttpUrl(lead.linkedin)! }] : []),
+    ]), link => link.url);
     const record = management.find((row) => row.name.trim().toLowerCase() === member.name.trim().toLowerCase());
     const departure = departures.find((row) => row.name.trim().toLowerCase() === member.name.trim().toLowerCase());
     const contacts = personContacts(member, [
@@ -974,6 +983,8 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
       ventures: f.evidence?.ventures,
       associates: f.evidence?.associates,
       intelligenceSources: f.intelligence?.sources,
+      priorProjects: member.projects_evidence_origin === "model_lead" ? [] : member.projects,
+      priorProjectsSource: safeHttpUrl(member.sourceUrl) ?? undefined,
     });
     return {
       key: `${member.name}-${index}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-"),
@@ -991,9 +1002,10 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
           proofUrl: safeHttpUrl(profile.sourceUrl),
         }))
         .filter((profile) => profile.url),
+      candidateProfiles: candidateProfiles.filter(link => link.url !== contacts.x?.url && link.url !== contacts.linkedin?.url),
       badge,
       text: parts.join(" "),
-      auditHandle: member.handle ?? null,
+      auditHandle: contacts.x?.label ?? null,
       records,
       recordSummary: personRecordSummary(records),
       contacts,

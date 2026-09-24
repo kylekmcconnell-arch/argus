@@ -346,8 +346,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   const rosterIdentityIsPerson = (row: WebTeamMember) => isPlausiblePersonRosterIdentity({
     name: row.name,
     handle: row.handle,
-    handleBoundBySubject: row.handleProvenance === "subject_first_party"
-      && row.identity_link_evidence_origin === "deterministic",
+    handleBoundBySubject: row.handleProvenance === "subject_first_party",
   });
   const identityGrounded = (row: WebTeamMember) =>
     row.kind !== "org"
@@ -367,7 +366,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     .map((member) => ({
       ...member,
       ...(member.identity_link_evidence_origin === "model_lead"
-        ? { handle: undefined, linkedin: undefined, telegram: undefined, email: undefined, github: undefined, developerProfiles: undefined }
+        ? { handle: member.handleProvenance === "subject_first_party" ? member.handle : undefined, linkedin: undefined, telegram: undefined, email: undefined, github: undefined, developerProfiles: undefined }
         : {}),
       ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
     }));
@@ -452,7 +451,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   const subjectKey = (graph.nodes.find((n) => (n as { subject?: boolean }).subject)?.key as string) ?? ev.profile.handle;
   const hasNode = (key: string) => graph.nodes.some((n) => String(n.key).toLowerCase() === key.toLowerCase());
   for (const p of groundedWebTeam) {
-    const verifiedHandle = p.identity_link_evidence_origin === "model_lead" ? undefined : p.handle;
+    const verifiedHandle = p.identity_link_evidence_origin === "model_lead" && p.handleProvenance !== "subject_first_party" ? undefined : p.handle;
     const verifiedProjects = p.projects_evidence_origin === "model_lead" ? [] : p.projects ?? [];
     if (!verifiedHandle && !p.name) continue;
     // Canonical key (@handle when known) so a team member bridges to their own

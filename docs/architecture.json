@@ -306,7 +306,8 @@
   "src/components/AppErrorBoundary.tsx": "wraps the whole app in main.tsx; every page is lazy-loaded, so a tab open across a deploy 404s on replaced chunks and React throws. A stale-chunk error self-recovers with ONE reload (sessionStorage argus:stale-chunk-reload, 30s cooldown); any other error renders the message + component stack so the next crash self-diagnoses instead of going white",
   "src/lib/useDeployFreshness.ts": "polls index.html last-modified against a frozen baseline; the sidebar shows an Update chip when the tab is behind the server",
   "src/lib/reportInsights.ts + src/components/InvestigatorBrief.tsx": "deterministic render-time investigator brief: deriveNoticedSignals (anomaly rules incl. unlock priced in days of volume, fees/TVL divergence, 90d/180d official-account silence) and deriveVerdictArgument (strongest evidence / sharpest concern / what would change it); a cap always wins the concern slot",
-  "src/lib/employmentCurrency.ts": "current / departed / absent from employment records; reports the end date and never a reason for leaving"
+  "src/lib/employmentCurrency.ts": "current / departed / absent from employment records; reports the end date and never a reason for leaving",
+  "teamPersonResearch": "PeopleChapter uses the fresh background research callback (onResearchAudit) for full person audits rather than cached navigation. Recorded X/LinkedIn/Telegram/developer links remain actionable; subject_first_party X bindings survive unrelated model enrichment. Candidate profiles are labeled and separate from identity evidence. Prior roster-attached projects retain provenance; name-only members receive external source-search links and an explicit resolved-X requirement, never a guessed audit identity. Presentation 2026-09-24.1."
  },
  "invariants": [
   "H2: no score floor from soft evidence - floors only from strict verified facts (floorEligible!==false); recall facts, press, and audit self-attestation are ceiling-only",
