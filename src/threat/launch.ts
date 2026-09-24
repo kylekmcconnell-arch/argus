@@ -340,6 +340,7 @@ const VENUES: Venue[] = [
 
 interface LaunchApiResponse {
   creatorVenue?: string;
+  description?: string | null;
   snipe?: LaunchProvenance["snipe"];
   pumpfun?: { complete?: boolean; curvePct?: number | null };
   // Server-side read of the creator's fee claims on venues that pay in the
@@ -496,6 +497,7 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
       lpDisposition: "unknown",
       lpNote: null,
       creatorFees: null,
+      description: api && typeof api.description === "string" && api.description.trim() ? api.description.trim().slice(0, 600) : null,
       snipe: api?.snipe ?? null,
       notes: [],
     };

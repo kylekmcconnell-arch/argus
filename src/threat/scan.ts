@@ -19,7 +19,7 @@ import { classifyToken, type TokenClassification } from "./classify";
 import { analyzeTokenomics, type TokenomicsView } from "./tokenomics";
 import { recordReceipt, sharedByDeployer } from "./receipts";
 import {
-  honeypotDeep, rugcheckReport, goplusMeta, codeFingerprint, knownRugClones, burnHistory,
+  honeypotDeep, rugcheckReport, goplusMeta, codeFingerprint, knownRugClones, burnHistory, productAuthenticity,
   type HoneypotDeep, type RugcheckReport, type GoPlusMeta,
 } from "./deepsources";
 import { crossChain } from "./crosschain";
@@ -30,7 +30,7 @@ import { registryVerification } from "./verification";
 import { sellStructure } from "./sellers";
 import { siteSafety } from "./sitesafety";
 import { technicalPosture } from "./technicalposture";
-import type { CrossChain, MigrationInfo, LaunchProvenance, RegistryVerification, SellStructure, SiteSafety, TechnicalPosture } from "./types";
+import type { CrossChain, MigrationInfo, LaunchProvenance, ProductAuthenticity, RegistryVerification, SellStructure, SiteSafety, TechnicalPosture } from "./types";
 
 const money = (n: number) =>
   n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
@@ -101,7 +101,20 @@ export async function threatScan(
     : codeRead;
   // Linked-site safety: is the token's own website a drainer / blacklisted host,
   // and does it even have an X account. The danger here is off-chain.
-  const site = await siteSafety(dossier.socials ?? [], dossier.address, dossier.chain);
+  // The linked product is read alongside the site: what its client code says
+  // it is (provider fingerprints, backend hosts) against what the copy claims.
+  const [site, product] = await Promise.all([
+    siteSafety(dossier.socials ?? [], dossier.address, dossier.chain),
+    productAuthenticity(dossier.socials ?? []),
+  ]);
+  if (product) {
+    emit?.({
+      phase: "ARGUS · Product",
+      label: product.read === "white-label" ? `White-label of ${product.providers.map((p) => p.name).join(", ")}` : product.read === "self-hosted" ? "Own contracts in the client" : "Product not verifiable",
+      detail: product.note,
+      tone: product.read === "white-label" ? (product.originalityClaims.length ? "bad" : "warn") : product.read === "unknown" && product.privacyProduct ? "warn" : "neutral",
+    });
+  }
   if (site?.worst === "malicious") emit?.({ phase: "ARGUS · Site", label: "Malicious linked site", detail: "The token's own website is flagged as a drainer / phishing site.", tone: "bad" });
   else if (site?.worst === "suspicious") emit?.({ phase: "ARGUS · Site", label: "Suspicious linked site", detail: "The token's website shows drainer-style cloaking or phishing signatures.", tone: "warn" });
   if (site?.xBio?.status === "mismatch") emit?.({ phase: "ARGUS · Authenticity", label: "Namesake / impersonation", detail: site.xBio.note, tone: "bad" });
@@ -198,7 +211,7 @@ export async function threatScan(
   // Re-run classification now that the code has been read - what the tax
   // actually DOES (e.g. buys RWAs/stocks for holders) outranks the blurb, and
   // can move the class. Only re-announce when the call changed.
-  const refined = classifyToken(dossier, code.tokenomics);
+  const refined = classifyToken(dossier, code.tokenomics, { privacyProduct: product?.privacyProduct ?? false, bio: launch?.description ?? null });
   if (refined.kind !== classification.kind) {
     emit?.({ phase: "ARGUS · Class", label: refined.label, detail: `Reclassified after the code read: ${refined.signals[0]}.`, tone: "neutral" });
   }
@@ -213,8 +226,8 @@ export async function threatScan(
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
     emit?.({ phase: "ARGUS · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders - a yield mechanism, not a rug tax.", tone: "good" });
   }
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification, sellers, site, classification);
-  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers, site, classification, posture);
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification, sellers, site, classification, product);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers, site, classification, posture, product);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -223,7 +236,7 @@ export async function threatScan(
     symbol: dossier.symbol,
     name: dossier.name,
     dossier, classification, call, code, deployer, tokenomics, checks,
-    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification, sellers, site, posture },
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification, sellers, site, posture, product },
     scannedAt: Date.now(),
   };
 
@@ -289,6 +302,12 @@ export function clusterSelling(sellers: SellStructure | null, chain: string): { 
   return { wallets, usd, kinds: [...kinds] };
 }
 
+// Copy that claims original engineering or a founding pedigree; a finding
+// only when the product's code names a third-party provider. Mirrors the
+// ORIGINALITY pattern in api/product-probe.ts.
+const ORIGINALITY_CLAIM_G = /\b(built (by|from the ground up|in[- ]house)|our (own|proprietary) (protocol|engine|router|tech|stack)|proprietary|in[- ]house|from (the )?ground up|true (privacy|cypherpunks?)|real (privacy|cypherpunks?)|cypherpunks?|\bOGs?\b|trench(es| warriors?)?|tor net|onions?\b)/gi;
+const ORIGINALITY_CLAIM = new RegExp(ORIGINALITY_CLAIM_G.source, "i");
+
 export function judge( // exported for unit tests only
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
@@ -297,6 +316,7 @@ export function judge( // exported for unit tests only
   launch: LaunchProvenance | null, verification: RegistryVerification | null,
   sellers: SellStructure | null, site: SiteSafety | null,
   cls: TokenClassification = UNCLASSIFIED,
+  product: ProductAuthenticity | null = null,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -552,6 +572,41 @@ export function judge( // exported for unit tests only
     // with no per-token code. No source to read means no hidden code either,
     // so the mint, owner and pause reads above are the complete power surface.
     positives.push("Base B20 system asset - no per-token contract exists to hide anything in; the token runs on the chain's asset precompile and the authority reads above are its whole power surface");
+  }
+
+  // --- product authenticity: what the product's own code says vs the copy ---
+  // Read for every token that links a product; decisive for a privacy token,
+  // where the sector is mostly mixers and wrappers and the pitch is almost
+  // always "built by us". A white-label front-end is not a finding by itself;
+  // a white-label front-end sold as original engineering is.
+  if (cls.kind === "privacy") {
+    warnings.push(`Privacy-transfer product: this sector is mostly mixers and wrappers around a few providers, with little original engineering - the product is judged on what its own client code says, not on the copy${product ? "" : ", and here the client could not be read"}`);
+    const mixerPath = (d.deployerRisk?.paths ?? []).find((p) => /mixer|tornado|tumbler|privacy|houdini|railgun/i.test(`${p.category ?? ""} ${p.seedName ?? ""} ${p.seedType ?? ""}`));
+    if (mixerPath) {
+      add(20);
+      flags.push(`The deployer's funding trace passes through ${mixerPath.seedName || mixerPath.category || "a mixer"} (${mixerPath.direction === "backward" ? "funded via" : "exposed to"}, ${mixerPath.hops} hop${mixerPath.hops === 1 ? "" : "s"}) - a privacy-product team obscuring its own money is the pattern to expect, and here it is on record`);
+    } else {
+      warnings.push("A team selling private transfers should be expected to use them on its own wallets - the deployer's funding trace shows no mixer hop on record, which is a bound on the trace, not a clean bill");
+    }
+  }
+  if (product?.read === "white-label") {
+    const names = product.providers.map((p) => p.name).join(", ");
+    const ev = product.providers.flatMap((p) => p.evidence).slice(0, 3).join(", ");
+    // Claims are read wherever the project makes them: the site, the token's
+    // own on-chain description, the aggregator blurb. Same pattern as the
+    // probe's, kept in step by scan.privacy.test.ts.
+    const claimText = [launch?.description ?? "", d.cg?.description ?? ""].join(" ");
+    const claims = [...new Set([...product.originalityClaims, ...(claimText.match(ORIGINALITY_CLAIM_G) ?? [])])].slice(0, 6);
+    if (claims.length) {
+      add(cls.kind === "privacy" ? 15 : 6);
+      flags.push(`The product at ${product.host ?? product.url} is a white-label front-end for ${names} (${ev} in the bundle) while the project claims original engineering (${claims.slice(0, 3).map((c) => `"${c}"`).join(", ")}) - the claim and the code disagree`);
+    } else {
+      soft(cls.kind === "privacy" ? 8 : 3);
+      warnings.push(`The product at ${product.host ?? product.url} is a front-end for ${names} (${ev} in the bundle), not its own engineering${product.paasHosts.length ? `; its backend is a hosted app on ${product.paasHosts.join(", ")}` : ""}`);
+    }
+  } else if (product && cls.kind === "privacy" && product.read !== "self-hosted") {
+    soft(4);
+    warnings.push(`The privacy product's client shows no contracts of its own and no known provider - what it actually does is not verifiable from ${product.host ?? "its site"}${product.paasHosts.length ? ` (backend on ${product.paasHosts.join(", ")})` : ""}`);
   }
 
   // --- taxes: the % AND what the tax DOES ---
@@ -826,6 +881,7 @@ export function buildChecks( // exported for unit tests only
   sellers: SellStructure | null, site: SiteSafety | null,
   cls: TokenClassification = UNCLASSIFIED,
   posture: TechnicalPosture | null = null,
+  product: ProductAuthenticity | null = null,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -941,6 +997,15 @@ export function buildChecks( // exported for unit tests only
         : meta == null ? "na" : meta.fakeToken || meta.airdropScam ? "fail" : meta.trustListed ? "pass" : "pass",
       d.cloneCheck?.checked && d.cloneCheck.audited === "later" && d.cloneCheck.clones.length ? `Ticker collision - ${d.cloneCheck.note}`
         : meta == null ? (sol ? "n/a on Solana" : "Unchecked") : meta.fakeToken ? "Counterfeit of an established token" : meta.airdropScam ? "Airdrop-scam pattern" : meta.trustListed ? "On GoPlus trust list" : "No counterfeit signal"),
+    chk("product", "authority", "Product authenticity",
+      !product ? "na"
+        : product.read === "white-label" ? ((product.originalityClaims.length || ORIGINALITY_CLAIM.test(`${launch?.description ?? ""} ${d.cg?.description ?? ""}`)) ? "fail" : "warn")
+        : product.read === "self-hosted" ? "pass"
+        : cls.kind === "privacy" ? "warn" : "na",
+      !product ? "No linked product read"
+        : product.read === "white-label" ? `White-label of ${product.providers.map((p) => p.name).join(", ")}${(product.originalityClaims.length || ORIGINALITY_CLAIM.test(`${launch?.description ?? ""} ${d.cg?.description ?? ""}`)) ? " sold as original engineering" : ""}`
+        : product.read === "self-hosted" ? `${product.contractsInApp} own contract${product.contractsInApp === 1 ? "" : "s"} in the client, no third-party provider`
+        : "Client shows neither own contracts nor a known provider"),
     chk("cluster-selling", "market", "Launch cluster still selling",
       (() => {
         if (!sellers?.recentTape) return "na";

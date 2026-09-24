@@ -11,7 +11,7 @@ import { AuditConsole } from "./AuditConsole";
 import type { ResolvedInput } from "../lib/resolveInput";
 import { printReportPdf } from "../lib/printPdf";
 import type { TraceStep } from "../data/evidence";
-import type { CodeFlag, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat/types";
+import type { CodeFlag, ProductAuthenticity, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat/types";
 import { launchMs } from "../threat/launchTime";
 import { threatScan } from "../threat/scan";
 import { projectLinks } from "../threat/links";
@@ -494,6 +494,35 @@ export function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]
   );
 }
 
+// Product authenticity: the linked product's client code named against its
+// copy. A white-label front-end is a disclosure; a white-label front-end sold
+// as original engineering is a finding. Rendered with the legacy panel
+// primitives on purpose - the report design pass restyles this with the rest.
+function ProductPanel({ product, privacy }: { product: ProductAuthenticity; privacy: boolean }) {
+  const row = (label: string, body: React.ReactNode) => (
+    <div className="flex items-start justify-between gap-3 border-b border-line/60 py-2 last:border-0">
+      <span className="shrink-0 text-[12.5px] text-ink-dim">{label}</span>
+      <span className="text-right text-[12px] text-ink-faint">{body}</span>
+    </div>
+  );
+  const tone = product.read === "white-label" ? (product.originalityClaims.length ? "var(--color-avoid)" : "var(--color-caution)") : product.read === "self-hosted" ? "var(--color-pass)" : privacy ? "var(--color-caution)" : undefined;
+  return (
+    <div className="mt-4 panel p-4">
+      <h2 className="display-sm text-[18px] leading-tight text-ink">Product</h2>
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">{privacy ? "A privacy product is judged on what its own client code says it is - this sector is mostly wrappers around a few providers, and the copy rarely says so." : "What the linked product's own client code says it is, set against the copy."}</p>
+      <div className="mt-2">
+        {row("Site", <span className="mono text-ink">{product.host ?? product.url}</span>)}
+        {row("Read", <span style={{ color: tone }}>{product.read === "white-label" ? `white-label of ${product.providers.map((p) => p.name).join(", ")}` : product.read === "self-hosted" ? "own contracts in the client" : "not verifiable from the client"}</span>)}
+        {product.providers.length > 0 && row("Evidence", product.providers.map((p) => `${p.name}: ${p.evidence.slice(0, 3).join(", ")}`).join(" · "))}
+        {product.paasHosts.length > 0 && row("Backend", <span className="mono">{product.paasHosts.join(", ")}</span>)}
+        {product.originalityClaims.length > 0 && row("Copy claims", product.originalityClaims.slice(0, 4).map((c) => `"${c}"`).join(", "))}
+        {product.contractsInApp > 0 && row("Contracts in client", String(product.contractsInApp))}
+        {row("Bundles read", String(product.bundlesRead))}
+      </div>
+    </div>
+  );
+}
+
 // Sell structure: who has actually been selling, and are they the bad actors -
 // the deployer (dev sold), wallets the deployer seeded directly, or launch-block
 // snipers who have exited. Answers what the honeypot sim (CAN they sell) and the
@@ -962,6 +991,8 @@ function Report({ scan, embedded = false, allowSupplemental = true }: { scan: Th
 
       {/* launch provenance */}
       {scan.deep.launch && scan.deep.launch.kind !== "unknown" && <LaunchPanel launch={scan.deep.launch} />}
+      {/* product authenticity: what the linked product's own code says it is */}
+      {scan.deep.product && <ProductPanel product={scan.deep.product} privacy={scan.classification?.kind === "privacy"} />}
 
       {/* linked-site safety */}
       {scan.deep.site && (scan.deep.site.worst !== "clean" || !scan.deep.site.hasX || scan.deep.site.xBio != null || scan.deep.site.xHistory != null) && (

@@ -39,6 +39,24 @@ const KNOWN_POOLS = new Set([
   "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad", // Universal Router (v1) - multi-chain
   "0x2626664c2603336e57b271c5c0b26f421741e481", // SwapRouter02 - Base
   "0x198ef79f1f515f02dfe9e3115ed9fc07183f02fc", // Universal Router - Base
+  // Robinhood Chain (4663): swap and launch infrastructure that holds or
+  // forwards tokens without owning a position. Without these the venue hook
+  // (which sells the snipe tax it collects) and the routers read as the
+  // biggest "sellers" on every Pons launch ($HADES, 2026-09-24).
+  "0x8366a39cc670b4001a1121b8f6a443a643e40951", // Uniswap V4 PoolManager
+  "0x8876789976decbfcbbbe364623c63652db8c0904", // Universal Router
+  "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f", // RelayRouterV3
+  "0x8f10b468b06c6fd214b65f87778827f7d113f996", // 0x settler
+  "0x6aa80dbbed9ae5ab45fbf61f9644fada3b29326e", // RobinHoodSettler
+  "0x0000000000001ff3684f28c67538d4d072c22734", // 0x AllowanceHolder
+  "0x9689992f5b5c09447f15906d8d11214944488341", // Park router proxy
+  "0xe5e702641ea86f4ae6cc3cdaed2b886f976be044", // PonsV2MemeHook (sells collected snipe tax)
+  "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e", // Pons v2 factory
+  "0x3711cea4feade896c913c68f01eda97cb06d1a42", // Pons v2 LaunchDeployer
+  "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544", // Doppler hook initializer (LONG, Bankr)
+  "0xeb7c034704ef8dcd2d32324c1545f62fb4ad0862", // Doppler Airlock
+  "0x22e99278308b393ea1260859b181ad7e78f5eeed", // LongLauncher v1
+  "0x1eef016f22a943abc7dd11422edee9d235942104", // LongLauncher v2
 ]);
 const PAGE = 1000, MAX_PAGES = 6; // bounded: ~6k transfers, oldest first
 
@@ -103,6 +121,19 @@ async function geckoTape(net: string, token: string, deployer: string) {
   } catch { return null; }
 }
 
+export function relayAddresses(txs: { hash?: unknown; from: unknown; to: unknown }[], pools: Set<string>): Set<string> {
+  const hops = new Map<string, number>();
+  const byHash = new Map<string, { ins: Set<string>; outs: Set<string> }>();
+  for (const t of txs) {
+    const h = String(t.hash ?? "");
+    if (!h) continue;
+    const g = byHash.get(h) ?? byHash.set(h, { ins: new Set(), outs: new Set() }).get(h)!;
+    g.ins.add(String(t.to).toLowerCase()); g.outs.add(String(t.from).toLowerCase());
+  }
+  for (const g of byHash.values()) for (const a of g.ins) if (g.outs.has(a) && !pools.has(a)) hops.set(a, (hops.get(a) ?? 0) + 1);
+  return new Set([...hops.entries()].filter(([, n]) => n >= 3).map(([a]) => a));
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const rawAddr = String(req.query.address ?? "").trim();
   const chain = String(req.query.chain ?? "").toLowerCase();
@@ -141,6 +172,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const pools = new Set<string>(KNOWN_POOLS);
   for (const [a, tos] of sends) if (tos.size >= 4 && (recvs.get(a)?.size ?? 0) >= 4) pools.add(a);
+  // Pass-through hops: an address that both receives and forwards the token
+  // inside one transaction is a router or a bot contract relaying for its
+  // owner, not a holder. Three such hops and it is treated as infrastructure,
+  // so the position lands on the wallet behind it (or nowhere) rather than on
+  // the relay. Catches private bot contracts no list can name.
+  for (const a of relayAddresses(txs, pools)) pools.add(a);
   const isPool = (a: string) => pools.has(a);
 
   // Per-wallet flow + first funder (for deployer-seeded detection).

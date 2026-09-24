@@ -5,6 +5,7 @@
 //     networks, LP locker identity. The Solana counterpart of GoPlus's depth.
 //   - Honeypot.is deep fields (EVM): the parts the base audit discards — per-
 //     holder sell analysis, supported summary flags, and honeypot reason.
+import type { ProductAuthenticity } from "./types";
 import { apiFetch } from "./net";
 import { retryFetch, retryFetchWithFreshTimeout } from "../lib/retry";
 import { arr, bool, num, rec, str } from "../lib/json";
@@ -276,6 +277,34 @@ export async function honeypotDeep(chain: string, address: string): Promise<Hone
           severity: str(flag.severity) || "medium",
         };
       }),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ---- product authenticity via api/product-probe ----
+// The linked website's own client code names the provider behind a "private
+// transfer" product; the copy rarely does. Only the first linked website is
+// read; a token with no website has no product to authenticate.
+export async function productAuthenticity(socials: { label: string; url: string }[]): Promise<ProductAuthenticity | null> {
+  const site = socials.find((s) => /^(website|site|web|home)/i.test(s.label) && /^https?:\/\//i.test(s.url))
+    ?? socials.find((s) => /^https?:\/\//i.test(s.url) && !/(x\.com|twitter\.com|t\.me|telegram|discord|github\.com|medium\.com|youtube\.com|instagram\.com|tiktok\.com)/i.test(s.url));
+  if (!site) return null;
+  try {
+    const res = await apiFetch(`/api/product-probe?url=${encodeURIComponent(site.url)}`, { signal: AbortSignal.timeout(22000) });
+    if (!res.ok) return null;
+    const d = rec(await res.json());
+    if (!d.available) return null;
+    const list = (v: unknown) => arr(v).map(str).filter(Boolean);
+    return {
+      url: str(d.url), host: d.host == null ? null : str(d.host),
+      privacyProduct: bool(d.privacyProduct),
+      providers: arr(d.providers).map(rec).map((p) => ({ name: str(p.name), kind: str(p.kind), evidence: list(p.evidence) })),
+      backendHosts: list(d.backendHosts), paasHosts: list(d.paasHosts), originalityClaims: list(d.originalityClaims),
+      contractsInApp: Number(d.contractsInApp ?? 0) || 0, bundlesRead: Number(d.bundlesRead ?? 0) || 0,
+      read: d.read === "white-label" || d.read === "self-hosted" ? d.read : "unknown",
+      note: str(d.note),
     };
   } catch {
     return null;

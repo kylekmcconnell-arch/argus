@@ -326,6 +326,10 @@ function threatBlock(d: Dossier): string {
   const tiers = tier("Flags", t.call.flags, "t-bad") + tier("Warnings", t.call.warnings, "t-warn") + tier("Positives", t.call.positives, "t-good");
 
   const code = t.code;
+  const product = t.deep?.product ?? null;
+  const productLine = product
+    ? `<p class="dim">Product: ${esc(product.host ?? product.url)} - ${esc(product.read === "white-label" ? `white-label of ${product.providers.map((p) => p.name).join(", ")}${product.originalityClaims.length ? ", sold as original engineering" : ""}` : product.read === "self-hosted" ? "own contracts in the client" : "not verifiable from the client")}.</p>`
+    : "";
   const codeHead = code.verified
     ? `${esc(code.contractName ?? "contract")} · ${code.stats?.functions ?? 0} functions · ${code.stats?.gatedFunctions ?? 0} privileged${code.origin ? ` · via ${esc(code.origin)}` : ""}`
     : code.checked
@@ -350,6 +354,7 @@ function threatBlock(d: Dossier): string {
       <h3>The code, read <span class="kicker">${codeHead}</span></h3>
       ${code.flags.length ? `<ul class="findings">${codeFlags}</ul>` : code.verified ? `<p class="note">No dangerous patterns found in the source.</p>` : ""}
       ${ai}
+      ${productLine}
     </div>`;
 
   const tk = t.tokenomics;

@@ -1168,3 +1168,17 @@ launch receipt. Raw selected logs and registry records are retained in
 custody rights and post-launch fee behavior remain unverified. Shared launch
 sender is not proof of beneficial ownership. A marketing name was not required
 to index this observed infrastructure.
+
+## Privacy tokens: judge the client, not the copy (2026-09-25)
+
+**Rule.** A token that sells private movement of capital is its own class (`privacy` in `src/threat/classify.ts`). The sector is mostly mixers and wrappers around a handful of providers, and the pitch is nearly always "built by us". So the assessment starts from the product's own client code, which cannot hide its provider: error-code namespaces, API hosts and option names ship to every visitor. `api/product-probe` reads the linked site and its same-origin bundles and names what it finds; `src/threat/scan.ts` turns that into a finding only when the code and the copy disagree.
+
+**Fingerprints that name a provider** (the probe's table): Houdini Swap (`HOUDINI_*` error codes, `useXmr`), Railgun (`@railgun-community`), Tornado, Privacy Pools, Umbra, Aztec, THORChain/xchainjs, and the instant-exchange APIs (ChangeNOW, Trocador, eXch, FixedFloat, SideShift, SimpleSwap, Exolix). A backend on a PaaS hostname (`*.up.railway.app`, `*.vercel.app`, …) with no contracts in the bundle is the second tell.
+
+**Scoring.** White-label plus originality claims: +15 for a privacy token (+6 otherwise) and a flag that quotes both. White-label without claims: soft 8 warning. Unverifiable client on a privacy token: soft 4. The sector note itself is a warning with no points. A mixer hop in the deployer's funding trace (from the deployer-risk provider) is +20 and a flag: a privacy team hiding its own money is the pattern to expect, and the absence of one on record is stated as a bound on the trace, never as a clean bill.
+
+**Case: $HADES** (`0x923d915d…164f`, Robinhood Chain, Pons v2, 2026-09-21). hades.exchange is a React client for Houdini Swap over a Railway backend; the token metadata says "built by the OGs growing up on tors and onions… true cypherpunks". Class privacy, product white-label, claims present → the flag. The creator's money trail is the opposite of private: Binance 14 → an everyday Ethereum wallet (4,306 txs) → 0.0443 ETH to the creator key → Across bridge → Robinhood Chain → launch, 32 minutes end to end. The dev buy (2.07%) is locked two years. The launch bundle was chain-wide sniper bots. Registry: `rh-hades-polyhedge-2026-09-21` (kind `privacy-farm`, intent unestablished) so the incubator @polyhedge's next launch is recognised.
+
+**What the sell-structure got wrong on this token, now fixed.** The venue hook (`PonsV2MemeHook`, which sells the snipe tax it collects), the Park router proxy and the Universal Router were read as the three largest sellers. `api/sell-structure` now carries the Robinhood infrastructure set and treats any address that receives and forwards the token inside one transaction, three times, as a relay rather than a holder.
+
+**Still manual.** Reading the incubator's bio and follow graph; cross-project matching by copy phrases and backend naming (the registry entry holds them for now); a deployer funding trace that follows a bridge to its origin chain automatically - this one was done by hand through Across's `FilledRelay` (`originChainId`, `depositor`).

@@ -429,11 +429,23 @@ export async function readBoundedResponseText(response: Response, maxBytes = MAX
   return bytes === null ? null : bytes.toString("utf8");
 }
 
+// Script bodies are read only by the product probe, which names a product's
+// provider from its own client code. Same target validation, hop guards and
+// size bound as a page read; only the content-type allowlist differs.
+const SCRIPT_CONTENT_TYPES = new Set([
+  "application/javascript",
+  "application/x-javascript",
+  "text/javascript",
+  "application/ecmascript",
+  "text/ecmascript",
+]);
+
 async function fetchValidatedPublicText(
   initialTarget: ValidatedPublicTarget,
   dependencies: PublicWebDependencies = {},
   accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8",
   asset = false,
+  contentTypes: Set<string> = SAFE_CONTENT_TYPES,
 ): Promise<PublicTextResult> {
   const request = dependencies.request ?? defaultRequestForMode();
   const lookup = dependencies.lookup ?? defaultLookupForMode();
@@ -474,7 +486,7 @@ async function fetchValidatedPublicText(
     if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
 
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (asset ? !/^image\/(?:x-icon|vnd.microsoft.icon|png|jpeg|gif|webp|svg\+xml)$/.test(contentType) : contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
+    if (asset ? !/^image\/(?:x-icon|vnd.microsoft.icon|png|jpeg|gif|webp|svg\+xml)$/.test(contentType) : contentType && !contentTypes.has(contentType)) {
       return { status: "failed", reason: "unsupported_content_type" };
     }
     let bytes: Buffer | null;
@@ -513,6 +525,17 @@ export async function fetchPublicText(
   const target = await validatedPublicTarget(raw, undefined, lookup);
   if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
   return fetchValidatedPublicText(target, dependencies);
+}
+
+/** Read a bounded public JavaScript bundle (the product probe's client read); same guards as a page. */
+export async function fetchPublicScript(
+  raw: string,
+  dependencies: PublicWebDependencies = {},
+): Promise<PublicTextResult> {
+  const lookup = dependencies.lookup ?? defaultLookupForMode();
+  const target = await validatedPublicTarget(raw, undefined, lookup);
+  if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
+  return fetchValidatedPublicText(target, dependencies, "application/javascript,text/javascript;q=0.9,*/*;q=0.1", false, SCRIPT_CONTENT_TYPES);
 }
 
 /** Hash a bounded public favicon using the same pinned transport and hop guards. */
