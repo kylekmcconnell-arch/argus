@@ -110,7 +110,7 @@ const OWNER_ACTIVE_NOTE = " This is a capability the owner still holds, not proo
 const OWNER_UNREPORTED_NOTE = " GoPlus reported no owner address for this contract, so whether that control is still held was not measured.";
 
 /** Never throws; a missing chain map, timeout, or empty register is a completed no-data outcome. */
-export async function collectHolderProfile(chain: string, address: string): Promise<HolderProfileOutcome> {
+export async function collectHolderProfile(chain: string, address: string, organizationId?: string): Promise<HolderProfileOutcome> {
   const chainKey = chain.trim().toLowerCase();
   const chainId = GOPLUS_CHAIN[chainKey];
   if (chainKey === "solana" && address) {
@@ -122,7 +122,7 @@ export async function collectHolderProfile(chain: string, address: string): Prom
     const holderIntelligence = await enrichHolderSnapshot(buildHolderIntelligence({ chain: chainKey, tokenAddress: address, capturedAt: sourceCapturedAt,
       source: "rugcheck", sourceUrl, rows: rug.topHolders ?? [], ranked: false, aggregateOwners: true,
       knownAccounts: rug.knownAccounts,
-    }), collectHolderIdentities);
+    }), (network, addresses) => collectHolderIdentities(network, addresses, organizationId));
     return { available: true, value: {
       binding: { canonicalAddress: address, chain: chainKey, method: "canonical_token_address_chain" },
       holderIntelligence, topHolderPct: null, top10Pct: null, assessedWalletCount: null, top10PctIsFloor: true,
@@ -305,7 +305,7 @@ export async function collectHolderProfile(chain: string, address: string): Prom
         sourceUrl: explorerHolders ? blockscoutHolderSourceUrl(chainKey, address) : `https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`,
         rows: explorerHolders ?? holders.map(row => ({ address: row.address, percent: Number(row.percent) * 100, isContract: row.is_contract === 1, ...(row.tag ? { tag: row.tag } : {}) })),
         ranked: Boolean(explorerHolders) || !unordered,
-      }), collectHolderIdentities),
+      }), (network, addresses) => collectHolderIdentities(network, addresses, organizationId)),
       binding: {
         canonicalAddress: address,
         chain: chainKey,

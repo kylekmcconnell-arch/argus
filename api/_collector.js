@@ -22777,18 +22777,18 @@ var fomoscanAdapter = {
     }
     const user = result.value;
     const binding = fomoRecordBindsToSubject(user, handle);
-    if (binding === "other-person") {
-      const detail2 = `FOMO account ${user.handle} links to X @${user.twitter}, not @${handle}; its wallets were not adopted.`;
+    if (binding !== "x-confirmed") {
+      const detail2 = user.twitter ? `FOMO account ${user.handle} links to X @${user.twitter}, not @${handle}; its wallets were not adopted.` : `FOMO account ${user.handle} has no X binding. A matching name is a discovery lead; its wallets were not adopted.`;
       ctx.emit({ phase: "On-chain", label: "FomoScan identity", detail: detail2, source: FOMOSCAN_PROVIDER, tone: "neutral" });
       return { state: "executed", attempts: 1, detail: detail2 };
     }
-    const known = new Set(ctx.evidence.wallets.map((w) => `${w.chain}:${w.address.toLowerCase()}`));
+    const known = new Set(ctx.evidence.wallets.map((w) => `${w.chain}:${providerAddressKey(w.address)}`));
     const added = [];
     const candidates = [];
     if (user.solanaAddress) candidates.push({ chain: "solana", address: user.solanaAddress });
     if (user.evmAddress) candidates.push({ chain: "ethereum", address: user.evmAddress });
     for (const c of candidates) {
-      const key = `${c.chain}:${c.address.toLowerCase()}`;
+      const key = `${c.chain}:${providerAddressKey(c.address)}`;
       if (known.has(key)) continue;
       ctx.evidence.wallets.push({
         address: c.address,
@@ -35451,8 +35451,107 @@ async function collectCryptoRankFunding(subject, options = {}) {
   };
 }
 
+// src/lib/growth.ts
+var REVENUE_SHARE_COMMISSION_BPS = 2e3;
+var CREDIT_SPLIT_PERCENT = 25;
+var CASH_SPLIT_PERCENT = 75;
+var DEFAULT_REVENUE_SHARE = {
+  commissionPercent: REVENUE_SHARE_COMMISSION_BPS / 100,
+  creditSplitPercent: CREDIT_SPLIT_PERCENT,
+  cashSplitPercent: CASH_SPLIT_PERCENT,
+  cashPayoutsActive: false
+};
+
+// api/_auth.ts
+function serviceCredentials() {
+  const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  return url && key ? { url, key } : null;
+}
+function serviceHeaders(key, extra) {
+  const result = {
+    apikey: key,
+    "content-type": "application/json",
+    ...extra
+  };
+  if (!key.startsWith("sb_secret_")) result.authorization = `Bearer ${key}`;
+  return result;
+}
+
+// src/lib/fomoHolderEvidence.ts
+var FOMO_REUSE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1e3;
+function validFomoObservation(row) {
+  const identity = tokenSubjectIdentity(row?.chain, row?.address);
+  if (!identity || identity.chain !== row.chain || identity.address !== row.address || row.chain === "evm" || !Number.isFinite(Date.parse(row.capturedAt)) || !/^[a-f0-9]{64}$/.test(row.receiptHash) || !["reported", "unlabelled"].includes(row.state) || row.state === "reported" && (typeof row.label !== "string" || !row.label.trim() || row.label.length > 200)) return false;
+  return row.sourceUrl === `https://api.fomoscan.sh/v2/user/wallet/${encodeURIComponent(row.address)}`;
+}
+function attachStoredFomo(snapshot, evidence, readAt) {
+  const unavailable = (state2) => ({ ...snapshot, enrichment: { ...snapshot.enrichment, fomo: state2 } });
+  if (!evidence || !Array.isArray(evidence.rows) || !Number.isFinite(Date.parse(readAt))) return unavailable("unavailable");
+  if (evidence.state !== "available") return unavailable(evidence.state === "not-configured" ? "not-configured" : "unavailable");
+  const requested = new Set(snapshot.rows.map((row) => row.address));
+  const map = /* @__PURE__ */ new Map();
+  for (const row of evidence.rows) {
+    if (!validFomoObservation(row) || row.chain !== snapshot.chain || !requested.has(row.address) || map.has(row.address)) return unavailable("unavailable");
+    const age = Date.parse(readAt) - Date.parse(row.capturedAt);
+    if (age < 0 || age > FOMO_REUSE_MAX_AGE_MS) continue;
+    map.set(row.address, row);
+  }
+  const rows = snapshot.rows.map((row) => {
+    const observation = map.get(row.address);
+    return !observation ? row : { ...row, identities: [...(row.identities ?? []).filter((item) => item.provider !== "fomo"), {
+      provider: "fomo",
+      state: observation.state,
+      label: observation.label,
+      twitter: observation.twitter,
+      capturedAt: observation.capturedAt,
+      sourceUrl: observation.sourceUrl,
+      receiptHash: observation.receiptHash,
+      scope: "provider-address-label"
+    }] };
+  });
+  const state = map.size === 0 ? "no-stored-evidence" : map.size === rows.length ? "complete" : "partial";
+  return { ...snapshot, rows, enrichment: { ...snapshot.enrichment, fomo: state } };
+}
+
+// server/fomoHolderStore.ts
+async function readStoredFomo(organizationId, chain, addresses, fetchImpl2 = fetch) {
+  const credentials2 = serviceCredentials();
+  if (!credentials2 || !organizationId) return { state: "not-configured", rows: [] };
+  if (!addresses.length) return { state: "available", rows: [] };
+  const ids = addresses.map((address) => tokenSubjectIdentity(chain, address));
+  if (addresses.length > 25 || ids.some((id) => !id || id.chain !== chain)) return { state: "unavailable", rows: [] };
+  const query = new URLSearchParams({
+    organization_id: `eq.${organizationId}`,
+    chain: `eq.${chain}`,
+    address: `in.(${ids.map((id) => id.address).join(",")})`,
+    captured_at: `gte.${new Date(Date.now() - FOMO_REUSE_MAX_AGE_MS).toISOString()}`,
+    order: "captured_at.desc,receipt_hash.asc",
+    limit: "1001",
+    select: "organization_id,chain,address,captured_at,source_url,receipt_hash,state,label,twitter"
+  });
+  try {
+    const response = await fetchImpl2(`${credentials2.url}/rest/v1/fomo_wallet_observations?${query}`, { headers: serviceHeaders(credentials2.key), signal: AbortSignal.timeout(5e3) });
+    if (!response.ok) return { state: "unavailable", rows: [] };
+    const data = await response.json();
+    if (!Array.isArray(data) || data.length > 1e3) return { state: "unavailable", rows: [] };
+    const wanted = new Set(ids.map((id) => id.address));
+    const latest = /* @__PURE__ */ new Map();
+    for (const row of data) {
+      const observation = { chain: row.chain, address: row.address, capturedAt: row.captured_at, sourceUrl: row.source_url, receiptHash: row.receipt_hash, state: row.state, label: row.label, twitter: row.twitter };
+      if (row.organization_id !== organizationId || row.chain !== chain || !wanted.has(row.address) || !validFomoObservation(observation)) return { state: "unavailable", rows: [] };
+      const previous = latest.get(row.address);
+      if (previous && previous.capturedAt === observation.capturedAt && (previous.state !== observation.state || previous.label !== observation.label || previous.twitter !== observation.twitter)) return { state: "unavailable", rows: [] };
+      if (!previous || Date.parse(previous.capturedAt) < Date.parse(observation.capturedAt)) latest.set(row.address, observation);
+    }
+    return { state: "available", rows: [...latest.values()] };
+  } catch {
+    return { state: "unavailable", rows: [] };
+  }
+}
+
 // api/_holder-enrichment.ts
-var collectHolderIdentities = async (chain, addresses) => {
+var collectHolderIdentities = async (chain, addresses, organizationId) => {
   const ids = addresses.map((address) => tokenSubjectIdentity(chain, address));
   if (addresses.length > 25 || ids.some((id) => !id || id.chain !== chain)) throw new Error("Invalid holder identities");
   const targets = [...new Set(ids.map((id) => id.address))];
@@ -35465,6 +35564,7 @@ var collectHolderIdentities = async (chain, addresses) => {
     scope: "provider-address-label",
     rows: []
   };
+  if (organizationId) base.storedFomo = await readStoredFomo(organizationId, chain, targets);
   const key = process.env.ARKHAM_API_KEY;
   if (!key || !targets.length) return base;
   const result = await fetchAddressLabelsBatch(targets, key, 8e3);
@@ -35514,8 +35614,10 @@ function attachHolderIdentities(snapshot, batch) {
 async function enrichHolderSnapshot(snapshot, collect) {
   if (!snapshot.rows.length) return snapshot;
   try {
-    const enriched = attachHolderIdentities(snapshot, await collect(snapshot.chain, snapshot.rows.map((row) => row.address)));
-    return enriched === snapshot ? { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } } : enriched;
+    const batch = await collect(snapshot.chain, snapshot.rows.map((row) => row.address));
+    const enriched = attachHolderIdentities(snapshot, batch);
+    const result = enriched === snapshot ? { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } } : enriched;
+    return batch.storedFomo ? attachStoredFomo(result, batch.storedFomo, batch.capturedAt) : result;
   } catch {
     return { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } };
   }
@@ -35526,7 +35628,7 @@ function holderIdentityRoute(fetchImpl2 = fetch) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ chain, addresses }),
-      signal: AbortSignal.timeout(1e4)
+      signal: AbortSignal.timeout(16e3)
     });
     if (!response.ok) throw new Error("Holder enrichment unavailable");
     return await response.json();
@@ -35541,7 +35643,7 @@ var t1 = (v) => v === "1";
 var AUTHORITY_NOTE = " On a token with real centralized-exchange listings this is typically a governed emissions/ops mechanism, not a rug setup. Confirm the controller.";
 var OWNER_ACTIVE_NOTE = " This is a capability the owner still holds, not proof of intent; on a broadly traded token it is usually a governance or upgrade artifact. Confirm the controller.";
 var OWNER_UNREPORTED_NOTE = " GoPlus reported no owner address for this contract, so whether that control is still held was not measured.";
-async function collectHolderProfile(chain, address) {
+async function collectHolderProfile(chain, address, organizationId) {
   const chainKey = chain.trim().toLowerCase();
   const chainId = GOPLUS_CHAIN[chainKey];
   if (chainKey === "solana" && address) {
@@ -35560,7 +35662,7 @@ async function collectHolderProfile(chain, address) {
       ranked: false,
       aggregateOwners: true,
       knownAccounts: rug.knownAccounts
-    }), collectHolderIdentities);
+    }), (network, addresses) => collectHolderIdentities(network, addresses, organizationId));
     return { available: true, value: {
       binding: { canonicalAddress: address, chain: chainKey, method: "canonical_token_address_chain" },
       holderIntelligence,
@@ -35682,7 +35784,7 @@ async function collectHolderProfile(chain, address) {
         sourceUrl: explorerHolders ? blockscoutHolderSourceUrl(chainKey, address) : `https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`,
         rows: explorerHolders ?? holders.map((row) => ({ address: row.address, percent: Number(row.percent) * 100, isContract: row.is_contract === 1, ...row.tag ? { tag: row.tag } : {} })),
         ranked: Boolean(explorerHolders) || !unordered
-      }), collectHolderIdentities),
+      }), (network, addresses) => collectHolderIdentities(network, addresses, organizationId)),
       binding: {
         canonicalAddress: address,
         chain: chainKey,
@@ -41310,7 +41412,7 @@ async function runAuditWithLedger(inputHandle, emit, options) {
           collectProtocolFees(protocolLookupName, { slug: protocolSlug }),
           // Float control (free, keyless): who holds the supply, is the LP
           // locked. Answers the reader's dump/rug question for project tokens.
-          evidence.projectToken.address ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address) : Promise.resolve({ available: false, note: "no canonical token address" })
+          evidence.projectToken.address ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address, options?.organizationId) : Promise.resolve({ available: false, note: "no canonical token address" })
         ]);
         if (holdersOutcome.available) {
           evidence.holderProfile = { ...holdersOutcome.value, capturedAt: holdersOutcome.value.sourceCapturedAt };

@@ -35,3 +35,10 @@ it("invalid or empty provider labels cannot imply completed enrichment", async (
   const empty = attachHolderIdentities(snapshot(), {...batch(), rows:[{address:addr(25),state:"reported",label:" "}]});
   expect(empty.enrichment.arkham).toBe("unavailable");
 });
+
+it("carries stored Fomo evidence through collection even when Arkham is unconfigured",async()=>{
+  const input=snapshot();
+  const result=await enrichHolderSnapshot(input,async()=>({...batch(),state:"not-configured",rows:[],storedFomo:{state:"available",rows:[{chain:"base",address:addr(25),capturedAt:"2026-09-23T00:00:00Z",sourceUrl:`https://api.fomoscan.sh/v2/user/wallet/${addr(25)}`,receiptHash:"a".repeat(64),state:"reported",label:"Stored trader"}]}}));
+  expect(result.enrichment).toEqual({arkham:"not-configured",fomo:"partial"});
+  expect(result.rows[24].identities?.find(row=>row.provider==="fomo")?.label).toBe("Stored trader");
+});

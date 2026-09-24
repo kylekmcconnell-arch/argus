@@ -1,3 +1,4 @@
+import { collectHolderIdentities } from "../_holder-enrichment.js";
 import { tokenMarketPresentation } from "../../src/lib/tokenMarketPresentation.js";
 import { recordProviderUsageBatch } from "../_cache.js";
 import { persistReportVersionBundle } from "../_provenance.js";
@@ -122,6 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // browser-only same-origin fetch.
     const d = await auditToken(input, undefined, {
       deadlineAt: startedAt + 40_000,
+      enrichHolders: (chain, addresses) => collectHolderIdentities(chain, addresses, auth.organizationId),
       screenSanctions: screenSanctionedAddresses,
       collectSocialActivity,
     });

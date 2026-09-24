@@ -1,10 +1,43 @@
 {
   "version": 1,
   "cases": [
-    { "name": "People identity, source failures and non-X research", "tests": ["src/lib/personSourceCoverage.test.ts", "src/reports/argus/personEvidence.test.ts", "server/personResearch.test.ts", "api/person-research.test.ts"] },
-    { "name": "Saved, private, shared and exported report boundaries", "tests": ["src/components/Report.private.test.tsx", "src/components/SharedReportView.test.tsx", "src/components/TokenReport.snapshot.test.tsx", "src/lib/reportExport.test.ts"] },
-    { "name": "Catalyst registry and SPIKE system-asset evidence", "tests": ["src/data/cabals.test.ts", "src/threat/scan.b20.test.ts", "api/launch.o1base.test.ts"] },
-    { "name": "Rank 25, partial coverage and conservative history", "tests": ["src/lib/holderIntelligence.test.ts", "src/lib/holderChanges.test.ts", "src/lib/holderAlerts.test.ts", "api/holder-history.test.ts"] }
+    {
+      "name": "People identity, source failures and non-X research",
+      "tests": [
+        "src/lib/personSourceCoverage.test.ts",
+        "src/reports/argus/personEvidence.test.ts",
+        "server/personResearch.test.ts",
+        "api/person-research.test.ts"
+      ]
+    },
+    {
+      "name": "Saved, private, shared and exported report boundaries",
+      "tests": [
+        "src/components/Report.private.test.tsx",
+        "src/components/SharedReportView.test.tsx",
+        "src/components/TokenReport.snapshot.test.tsx",
+        "src/lib/reportExport.test.ts"
+      ]
+    },
+    {
+      "name": "Catalyst registry and SPIKE system-asset evidence",
+      "tests": [
+        "src/data/cabals.test.ts",
+        "src/threat/scan.b20.test.ts",
+        "api/launch.o1base.test.ts"
+      ]
+    },
+    {
+      "name": "Rank 25, partial coverage and conservative history",
+      "tests": [
+        "src/lib/holderIntelligence.test.ts",
+        "src/lib/holderChanges.test.ts",
+        "src/lib/holderAlerts.test.ts",
+        "api/holder-history.test.ts",
+        "src/lib/fomoHolderEvidence.test.ts",
+        "server/fomoHolderStore.test.ts"
+      ]
+    }
   ],
   "limits": "Offline evidence/interaction checks. Does not establish live provider availability, complete data populations, mobile/PDF visual fidelity or predictive performance."
 }

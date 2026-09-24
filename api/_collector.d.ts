@@ -26,7 +26,7 @@ export function runAudit(
 export function auditToken(
   input: RunnableTokenInput,
   emit?: (step: TraceStep) => void,
-  options?: { chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
+  options?: { enrichHolders?: import("../src/lib/holderEnrichment.js").HolderIdentityCollector; chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
 ): Promise<TokenDossier | null>;
 
 export function collectSocialActivity(identity: {

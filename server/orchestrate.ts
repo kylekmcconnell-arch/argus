@@ -4839,7 +4839,7 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
           // Float control (free, keyless): who holds the supply, is the LP
           // locked. Answers the reader's dump/rug question for project tokens.
           evidence.projectToken.address
-            ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address)
+            ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address, options?.organizationId)
             : Promise.resolve({ available: false as const, note: "no canonical token address" }),
         ]);
         if (holdersOutcome.available) {

@@ -1,5 +1,17 @@
 {
- "holderIntelligence": {"version": 1, "target": 25, "implementation": "src/lib/holderIntelligence.ts", "coverage": "Frozen ranked-address or observed-owner sample, source/time, invalid rows, registry content version, exact multi-membership matches. Solana keys preserve case. Unknown contracts remain holders. GoPlus is limited to ten rows; explorer failures remain explicit partial coverage. Arkham/Fomo enrichment is not implied by an index match.", "history": "Immutable report_versions are projected through the service-only holder_observations view. GET /api/holder-history requires viewer authentication and scopes to organization plus chain/token. Token and investigation reports offer explicit saved-observation reads outside share/private views. Behavioral alerts and paid identity enrichment remain subsequent milestones."},
+ "holderIntelligence": {
+  "version": 1,
+  "target": 25,
+  "implementation": "src/lib/holderIntelligence.ts",
+  "coverage": "Frozen ranked-address or observed-owner sample, source/time, invalid rows, registry content version, exact multi-membership matches. Solana keys preserve case. Unknown contracts remain holders. GoPlus is limited to ten rows; explorer failures remain explicit partial coverage. Arkham/Fomo enrichment is not implied by an index match.",
+  "history": "Immutable report_versions are projected through the service-only holder_observations view. GET /api/holder-history requires viewer authentication and scopes to organization plus chain/token. Token and investigation reports offer explicit saved-observation reads outside share/private views. Behavioral alerts and paid identity enrichment remain subsequent milestones.",
+  "fomoStoredEvidence": {
+   "store": "fomo_wallet_observations (service-only, organization scoped, append only)",
+   "import": "scripts/import-fomo-wallets.ts validates exact-chain wallet-resolution receipts; explicit --apply; no provider requests",
+   "collection": "Fresh token/project holder enrichment reads dated observations at most 30 days old. Frozen reports remain immutable; missing receipts never imply a completed Fomo lookup.",
+   "limits": "Provider attribution only; no scores, ownership claims or automatic expensive wallet lookup."
+  }
+ },
  "$schema": "self-describing architecture map; read this BEFORE excavating the codebase",
  "app": "ARGUS - crypto due-diligence engine (@handle/token -> evidence -> scored verdict)",
  "generated": "2026-08-06",
@@ -259,8 +271,8 @@
    "ARGUS_EXTRACT_MODEL": "default claude-haiku-4-5; a provider/model slug + OPENROUTER_API_KEY routes via OpenRouter with data_collection=deny (ZDR)",
    "ARGUS_GENERAL_WEB_PROVIDER": "grok forces legacy grok-direct",
    "ARGUS_ENTITY_REUSE": "on = predicate-specific verified-fact cooldowns; live risk and additive event searches still refresh",
-   "ARGUS_GROK_AUDIT_CEILING_USD": "default 8.00 mid-run Grok stop"
-   ,"ARGUS_SOCIAL_ACTIVITY_MAX_POSTS": "default 5000, clamped 10-5000; twitterapi.io production ceiling, official X unused unless configured"
+   "ARGUS_GROK_AUDIT_CEILING_USD": "default 8.00 mid-run Grok stop",
+   "ARGUS_SOCIAL_ACTIVITY_MAX_POSTS": "default 5000, clamped 10-5000; twitterapi.io production ceiling, official X unused unless configured"
   },
   "providerCapabilities": {
    "VITE_ARKHAM_PROVIDER_ENABLED": "default off; true reactivates client Arkham calls and makes a missing scan-time funding trace decision-critical"
@@ -361,7 +373,7 @@
   "Challenge Verdict receives only an analyst question from the browser; its subject, verdict, score, evidence, and exact version come from the authenticated immutable report store",
   "A second-opinion recommendation is explicitly AI-attributed and can publish only when every sentence carries validated complete frozen-artifact refs for the challenged domain; bounded, omitted, credential-bearing, missing, or forged evidence withholds before or after the model as applicable",
   "An adverse all-clear is scoped only to named screens with a recorded checked-empty outcome; zero completed clean screens or any open decision-critical coverage cannot produce an absence claim",
-  "Offline replay owns every outbound transport: global fetch and pinned public-web HTTP/HTTPS reads pass through the same frozen ledger, and an uncovered replay request fails closed without DNS or a native socket"
-  ,"Social activity is immutable and score-neutral: only a bound official project handle may start the query; post counts and unique author breadth stay distinct; capped author pagination publishes minimums and withholds concentration plus the activity score; no social metric may alter the safety verdict, readiness or calibration"
+  "Offline replay owns every outbound transport: global fetch and pinned public-web HTTP/HTTPS reads pass through the same frozen ledger, and an uncovered replay request fails closed without DNS or a native socket",
+  "Social activity is immutable and score-neutral: only a bound official project handle may start the query; post counts and unique author breadth stay distinct; capped author pagination publishes minimums and withholds concentration plus the activity score; no social metric may alter the safety verdict, readiness or calibration"
  ]
 }

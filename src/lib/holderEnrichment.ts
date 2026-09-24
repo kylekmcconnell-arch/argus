@@ -1,3 +1,4 @@
+import { attachStoredFomo, type StoredFomoEvidence } from "./fomoHolderEvidence.js";
 import { tokenSubjectIdentity } from "./tokenIdentity.js";
 import type { HolderIntelligence } from "./holderIntelligence.js";
 
@@ -9,6 +10,7 @@ export interface HolderIdentityReading {
   twitter?: string;
 }
 export interface HolderIdentityBatch {
+  storedFomo?: StoredFomoEvidence;
   chain: string;
   provider: "arkham";
   capturedAt: string;
@@ -54,15 +56,17 @@ export function attachHolderIdentities(snapshot: HolderIntelligence, batch: Hold
 export async function enrichHolderSnapshot(snapshot: HolderIntelligence, collect: HolderIdentityCollector): Promise<HolderIntelligence> {
   if (!snapshot.rows.length) return snapshot;
   try {
-    const enriched = attachHolderIdentities(snapshot, await collect(snapshot.chain, snapshot.rows.map(row => row.address)));
-    return enriched === snapshot ? { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } } : enriched;
+    const batch = await collect(snapshot.chain, snapshot.rows.map(row => row.address));
+    const enriched = attachHolderIdentities(snapshot, batch);
+    const result = enriched === snapshot ? { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" as const } } : enriched;
+    return batch.storedFomo ? attachStoredFomo(result, batch.storedFomo, batch.capturedAt) : result;
   }
   catch { return { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } }; }
 }
 export function holderIdentityRoute(fetchImpl: typeof fetch = fetch): HolderIdentityCollector {
   return async (chain, addresses) => {
     const response = await fetchImpl("/api/holder-enrichment", { method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chain, addresses }), signal: AbortSignal.timeout(10000) });
+      body: JSON.stringify({ chain, addresses }), signal: AbortSignal.timeout(16000) });
     if (!response.ok) throw new Error("Holder enrichment unavailable");
     return await response.json() as HolderIdentityBatch;
   };
