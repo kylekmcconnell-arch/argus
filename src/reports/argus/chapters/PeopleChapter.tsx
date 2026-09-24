@@ -1,3 +1,4 @@
+import { PersonBackgroundResearch } from "../PersonBackgroundResearch";
 import { useState, type ReactNode } from "react";
 import { DisclosureButton, InlinePanel } from "../disclosure";
 import { useArgusReport } from "../context";
@@ -25,7 +26,7 @@ export function ContactList({ name, contacts }: { name: string; contacts: Person
                 ? key === "email"
                   ? <a href={value.url}>{value.label} <span aria-hidden="true">↗</span></a>
                   : <ExtLink href={value.url}>{value.label}</ExtLink>
-                : <span className="contact-missing">{needsCorrection ? "Link needs correction" : "Not available"}</span>}
+                : <span className="contact-missing">{needsCorrection ? "Link needs correction" : "Not recorded"}</span>}
               {key === "linkedin" && contacts.linkedinIssue && <small className="contact-warning">{contacts.linkedinIssue}</small>}
             </dd>
           </div>
@@ -49,7 +50,7 @@ function PersonPortrait({ person }: { person: PersonCardView }) {
   return <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setIndex((current) => current + 1)} />;
 }
 
-function PersonCard({ person, subjectName, onAudit }: { person: PersonCardView; subjectName: string; onAudit?: (handle: string) => void }) {
+function PersonCard({ person, subjectName, reportVersionId, onAudit }: { person: PersonCardView; subjectName: string; reportVersionId?: string; onAudit?: (handle: string) => void }) {
   const panelId = `person:${person.key}`;
   const identityQuery = `"${person.name.replace(/"/g, "")}" "${subjectName.replace(/"/g, "")}"`;
   const backgroundQuery = `${identityQuery} (founder OR cofounder OR "previously" OR "former" OR company OR project)`;
@@ -94,6 +95,17 @@ function PersonCard({ person, subjectName, onAudit }: { person: PersonCardView; 
             <h3>{person.role}</h3>
             <p className="dialog-body" style={{ marginTop: 16 }}>{person.text}</p>
             <ContactList name={person.name} contacts={person.contacts} />
+            {reportVersionId && <PersonBackgroundResearch reportVersionId={reportVersionId} name={person.name} role={person.role} />}
+            {!!person.sourceCoverage?.length && <div className="dialog-section">
+              <h3>What Argus could access</h3>
+              <p>Identity, access and historical coverage are separate. An inaccessible source is not an adverse finding.</p>
+              {person.sourceCoverage.map(source => <div className="dialog-section" key={source.platform}>
+                <h3>{source.label} · {source.access}</h3>
+                <p>{source.identity}</p><p>{source.coverage}</p>
+                <p className="subtle-note">{source.capturedAt ? `Checked ${source.capturedAt}.` : "No source-check time recorded."}</p>
+                <p><strong>Next action:</strong> {source.nextAction}</p>
+              </div>)}
+            </div>}
             {!!person.candidateProfiles?.length && <div className="dialog-section">
               <h3>Profile leads to verify</h3>
               <p>Search returned these accounts for the roster name and role. They may belong to a namesake; they are not established social links or team evidence.</p>
@@ -117,7 +129,7 @@ function PersonCard({ person, subjectName, onAudit }: { person: PersonCardView; 
               <p>Follow dated founder and employment records, venture outcomes and people who appear across projects. Shared collaborators are a research lead, not proof of a cabal or common control.</p>
               <p><ExtLink href={`https://www.google.com/search?q=${encodeURIComponent(backgroundQuery)}`}>Search public background</ExtLink>{" · "}<ExtLink href={`https://www.google.com/search?q=${encodeURIComponent(`site:linkedin.com/in/ ${identityQuery}`)}`}>Search LinkedIn records</ExtLink>{" · "}<ExtLink href={`https://x.com/search?q=${encodeURIComponent(person.auditHandle ? `from:${person.auditHandle.replace(/^@/, "")} (founded OR building OR cofounder OR previously)` : identityQuery)}`}>Search X history</ExtLink></p>
               <p className="subtle-note">These searches open external sources and do not change this saved report. Check exact identity, role dates and independent sources before linking people or projects.</p>
-              {!person.auditHandle && <p className="status-box">A fresh automated person audit needs a resolved X account. Use the recorded profiles and searches above to establish the right account; a name alone is not an identity match.</p>}
+              {!person.auditHandle && <p className="status-box">A full scored person audit needs a resolved X account. Background research can start from this saved person and company context. Use the recorded profiles and searches above to establish the right account; a name alone is not an identity match.</p>}
             </div>
             {person.records && person.records.length > 0 && (
               <div className="dialog-section">
@@ -157,7 +169,7 @@ function PersonCard({ person, subjectName, onAudit }: { person: PersonCardView; 
   );
 }
 
-export function PeopleChapter({ view, legacy, onAudit }: { view: ReportView; legacy?: ReactNode; onAudit?: (handle: string) => void }) {
+export function PeopleChapter({ view, legacy, reportVersionId, onAudit }: { view: ReportView; legacy?: ReactNode; reportVersionId?: string; onAudit?: (handle: string) => void }) {
   const report = useArgusReport();
   const people = view.people;
   const isPerson = view.subjectKind === "person";
@@ -168,7 +180,7 @@ export function PeopleChapter({ view, legacy, onAudit }: { view: ReportView; leg
         eyebrow="People & control"
         title={isPerson ? "Who this is, and who they work with." : "A named team is the start of diligence."}
         description={people.cards.length
-          ? `The roster below preserves all ${people.cards.length} reported ${people.cards.length === 1 ? "person" : "people"}. Contact links are recorded references, not independent identity verification. “Not available” means no contact was retained in the saved report.`
+          ? `The roster below preserves all ${people.cards.length} reported ${people.cards.length === 1 ? "person" : "people"}. Contact links are recorded references, not independent identity verification. “Not recorded” means no contact was retained in the saved report.`
           : "No source-grounded person is published in this saved report. Identity notes and unresolved leads are kept below."}
       />
       {people.verificationConflict && (
@@ -181,7 +193,7 @@ export function PeopleChapter({ view, legacy, onAudit }: { view: ReportView; leg
       <div id="identity-evidence" className="scroll-mt-28">
       {people.cards.length > 0 ? (
         <div className="person-grid">
-          {people.cards.map((person) => <PersonCard key={person.key} person={person} subjectName={view.subjectName} onAudit={onAudit} />)}
+          {people.cards.map((person) => <PersonCard key={person.key} person={person} subjectName={view.subjectName} reportVersionId={reportVersionId} onAudit={onAudit} />)}
         </div>
       ) : people.identityNote ? (
         <Panel challenge={{ id: findingId("people", "identity-note"), title: "Identity note", claim: people.identityNote }}>

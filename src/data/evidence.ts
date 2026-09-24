@@ -958,6 +958,8 @@ export interface BasicFactQuestionLedgerEntry {
 // own posts (role-word scan), or its X content. Named-only people are kept — a
 // real name with a role is signal even without an X handle to audit.
 export interface WebTeamMember {
+  /** Frozen per-person collection receipts; links alone are not successful reads. */
+  sourceReceipts?: import("../lib/personSourceCoverage").PersonSourceReceipt[];
   name: string;
   handle?: string;
   role: string;

@@ -1,3 +1,4 @@
+import { EvidenceAvailability } from "../EvidenceAvailability";
 import { useEffect, useState, type ReactNode } from "react";
 import { DisclosureButton, InlinePanel } from "../disclosure";
 import { useArgusReport } from "../context";
@@ -8,7 +9,7 @@ import type { LensView, ReportView, ScoreView, SourceCard } from "../view";
 import { ScoreTable } from "./ScoresChapter";
 import { QuestionRows } from "./EvidenceChapter";
 
-export type DecisionView = Pick<ReportView, "subjectName" | "avatarUrl" | "eyebrow" | "category" | "productLabel" | "summary" | "website" | "xHandle" | "token" | "primary" | "tokenScore" | "issues" | "lenses" | "researchStatus" | "checkRail" | "leadBanner" | "metrics"> & { evidence: Pick<ReportView["evidence"], "collection" | "questions">; methodologyHref?: string | undefined; additionalLinks?: Array<{ label: string; url: string }> | undefined };
+export type DecisionView = Partial<Pick<ReportView, "people" | "market">> & Pick<ReportView, "subjectName" | "avatarUrl" | "eyebrow" | "category" | "productLabel" | "summary" | "website" | "xHandle" | "token" | "primary" | "tokenScore" | "issues" | "lenses" | "researchStatus" | "checkRail" | "leadBanner" | "metrics"> & { evidence: Pick<ReportView["evidence"], "collection" | "questions">; methodologyHref?: string | undefined; additionalLinks?: Array<{ label: string; url: string }> | undefined };
 
 export function IdentityShortcuts({ view }: { view: Pick<DecisionView, "xHandle" | "website" | "token" | "additionalLinks"> }) {
   const xUrl = xHandleUrl(view.xHandle);
@@ -354,6 +355,7 @@ export function DecisionChapter({ view, before, after, onRescan, briefSupplement
       </section>
       <ScorePanels scores={scores} />
       {afterScores}
+      <EvidenceAvailability view={view} />
 
       {reviewable.length > 0 && (
         <>

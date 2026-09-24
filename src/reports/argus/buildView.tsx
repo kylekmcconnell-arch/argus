@@ -1,3 +1,4 @@
+import { personSourceCoverage } from "../../lib/personSourceCoverage";
 /* Build the redesign's presentation contract from ONE frozen report version.
 
    Inputs are the saved dossier plus the values the report surface already
@@ -1002,6 +1003,7 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
           proofUrl: safeHttpUrl(profile.sourceUrl),
         }))
         .filter((profile) => profile.url),
+      sourceCoverage: personSourceCoverage(member, { x: contacts.x?.url, linkedin: contacts.linkedin?.url }, candidateProfiles),
       candidateProfiles: candidateProfiles.filter(link => link.url !== contacts.x?.url && link.url !== contacts.linkedin?.url),
       badge,
       text: parts.join(" "),

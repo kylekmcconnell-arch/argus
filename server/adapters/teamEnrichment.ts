@@ -59,6 +59,14 @@ function preserveRelatedOrganization(ctx: CollectContext, member: WebTeamMember,
 
 async function enrichOne(ctx: CollectContext, member: WebTeamMember): Promise<"person" | "organization" | false> {
   const profile = await getProfile(member.handle!);
+  const url = `https://x.com/${member.handle!.replace(/^@/, "")}`;
+  const status = !profile || profile.accountStatus === "temporarily_unavailable" ? "failed"
+    : profile.accountStatus === "active" ? "read" : "partial";
+  member.sourceReceipts = [...(member.sourceReceipts ?? []).filter(row => row.platform !== "x"), {
+    platform: "x", url, status, capturedAt: profile?.statusCapturedAt ?? new Date().toISOString(),
+    scope: status === "read" ? "Profile metadata only; posts and employment history were not collected by this check." : "Profile availability could not be fully established; no historical coverage.",
+    provider: "twitterapi",
+  }];
   if (!profile) return false;
   member.accountStatus = profile.accountStatus;
   member.followers = profile.followers;
@@ -94,6 +102,10 @@ export async function enrichFirstPartyTeamAvatars(ctx: CollectContext): Promise<
       if (result === "person") enriched++;
       if (result === "organization") reclassified++;
     } catch (error) {
+      member.sourceReceipts = [...(member.sourceReceipts ?? []).filter(row => row.platform !== "x"), {
+        platform: "x", url: `https://x.com/${member.handle!.replace(/^@/, "")}`,
+        status: "failed", capturedAt: new Date().toISOString(), scope: "Profile lookup failed; no historical coverage.", provider: "twitterapi",
+      }];
       // Raw provider error text never reaches the browser: a stable code only.
       ctx.emit({
         phase: "P1 · Team",

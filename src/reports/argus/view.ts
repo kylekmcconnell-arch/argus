@@ -83,6 +83,7 @@ export interface QuestionView {
 }
 
 export interface PersonCardView {
+  sourceCoverage?: import("../../lib/personSourceCoverage").PersonSourceCoverage[];
   key: string;
   name: string;
   role: string;
