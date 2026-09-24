@@ -18,6 +18,7 @@ export type PersonRecordKind = "role" | "lead" | "post" | "contradiction" | "aff
 
 export interface PersonRecord {
   kind: PersonRecordKind;
+  identityMatch?: "account" | "name" | "roster";
   label: string;
   detail: string;
   url?: string | null;
@@ -124,7 +125,7 @@ export function personRecords(input: PersonEvidenceInput): PersonRecord[] {
   const records: PersonRecord[] = [];
 
   for (const project of input.priorProjects ?? []) {
-    records.push({ kind: "affiliation", label: "Reported prior project",
+    records.push({ kind: "affiliation", identityMatch: "roster", label: "Reported prior project",
       detail: `${project.name}${project.role ? `: ${project.role}` : ""}. This saved affiliation does not establish its outcome or common control.`,
       url: input.priorProjectsSource ?? null, tone: "neutral" });
   }
@@ -135,7 +136,7 @@ export function personRecords(input: PersonEvidenceInput): PersonRecord[] {
     records.push({
       kind: "role",
       label: fact.qualifier ? `${fact.qualifier}` : fact.predicate ? `Recorded as ${fact.predicate}` : "Recorded role",
-      detail: `${fact.status === "verified" ? "Verified against the recorded source" : `Recorded status: ${fact.status ?? "unstated"}`}.`,
+      detail: `Saved source status: ${fact.status ?? "unstated"}. Source status alone does not establish this person's identity.`,
       url: source?.url ?? null,
       tone: "neutral",
     });
@@ -143,11 +144,13 @@ export function personRecords(input: PersonEvidenceInput): PersonRecord[] {
 
   for (const lead of input.leads ?? []) {
     const target = normalizeHandle(lead.finding_scope?.target_entity_key);
+    if (target && target !== handle) continue;
     const hit = (handle && target && target === handle) || mentions(lead.claim, pattern, handle);
     if (!hit) continue;
     const adverse = (lead.polarity ?? 0) < 0;
     records.push({
       kind: "lead",
+      identityMatch: handle && target === handle ? "account" : undefined,
       label: adverse ? "Adverse lead recorded" : lead.finding_type ? `Lead: ${lead.finding_type}` : "Lead recorded",
       detail: trim(lead.claim ?? "A lead is recorded without a claim."),
       url: lead.source_url ?? null,
@@ -201,6 +204,14 @@ export function personRecords(input: PersonEvidenceInput): PersonRecord[] {
     });
   }
 
+  for (const record of records) {
+    record.identityMatch ??= mentions(`${record.label} ${record.detail}`, null, handle) ? "account" : "name";
+    if (record.identityMatch === "name") {
+      record.detail = `Name-only discovery; identity remains unresolved. ${record.detail}`;
+      record.tone = "neutral";
+    }
+  }
+
   // Cap each kind so one noisy pool cannot bury the rest, and drop duplicates.
   const seen = new Set<string>();
   const counts = new Map<PersonRecordKind, number>();
@@ -219,6 +230,6 @@ export function personRecords(input: PersonEvidenceInput): PersonRecord[] {
 export function personRecordSummary(records: PersonRecord[]): { label: string; tone: Tone } | null {
   if (records.length === 0) return null;
   const adverse = records.filter((record) => record.tone === "amber").length;
-  if (adverse > 0) return { label: `${adverse} adverse record${adverse === 1 ? "" : "s"} on file`, tone: "amber" };
+  if (adverse > 0) return { label: `${adverse} unverified concern${adverse === 1 ? "" : "s"} to review`, tone: "amber" };
   return { label: `${records.length} record${records.length === 1 ? "" : "s"} on file`, tone: "neutral" };
 }

@@ -15,3 +15,5 @@ Remaining programme: source-bound employment/outcome extraction and contradictio
 Rollout requires protected CI, production database migration and production deployment. Rollback removes the UI/API entry points; supplemental receipts can remain archived without changing historical reports.
 
 Validation: 5,364 passing offline tests plus one existing expected failure, seven offline canaries, 21 calibration subjects, all three type projects and production bundle. The saved Altcoinist preview was inspected through Decision-to-People navigation and the LinkedIn-only Endre evidence disclosure. Provider calls were mocked; no paid research was launched. Database permission and organization-binding tests run in protected CI.
+
+Review also found that existing name-based record matching could present an adverse badge or include a lead explicitly targeting a different account. The renderer now excludes mismatched explicit targets, marks name-only joins neutral unresolved discovery, and calls exact-account adverse leads unverified concerns rather than findings. Reference regressions cover all three cases.
