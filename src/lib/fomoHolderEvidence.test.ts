@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { attachStoredFomo, type FomoWalletObservation } from "./fomoHolderEvidence";
+import { attachStoredFomo, validFomoObservation, type FomoWalletObservation } from "./fomoHolderEvidence";
 import { buildHolderIntelligence } from "./holderIntelligence";
 const addr = (n: number) => `0x${n.toString(16).padStart(40, "0")}`;
 const now = "2026-09-24T12:00:00Z";
@@ -24,4 +24,9 @@ it("a stored miss remains a dated provider miss and preserves Arkham evidence",(
   const input=snapshot(); input.rows[24].identities=[{provider:"arkham",state:"reported",label:"Service",capturedAt:now,sourceUrl:"https://api.arkm.com",scope:"provider-address-label"}];
   const result=attachStoredFomo(input,{state:"available",rows:[{...observation(),state:"unlabelled",label:undefined}]},now);
   expect(result.rows[24].identities?.map(row=>row.provider)).toEqual(["arkham","fomo"]);
+});
+
+it("requires an EVM address on custom non-Solana chains",()=>{
+  const address="not-an-evm-wallet";
+  expect(validFomoObservation({...observation(),chain:"robinhood",address,sourceUrl:`https://api.fomoscan.sh/v2/user/wallet/${address}`})).toBe(false);
 });

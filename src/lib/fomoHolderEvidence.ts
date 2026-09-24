@@ -11,7 +11,7 @@ export interface StoredFomoEvidence {
 export const FOMO_REUSE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 export function validFomoObservation(row: FomoWalletObservation): boolean {
   const identity = tokenSubjectIdentity(row?.chain, row?.address);
-  if (!identity || identity.chain !== row.chain || identity.address !== row.address || row.chain === "evm"
+  if (!identity || (row.chain !== "solana" && !/^0x[0-9a-f]{40}$/.test(row.address)) || identity.chain !== row.chain || identity.address !== row.address || row.chain === "evm"
     || !Number.isFinite(Date.parse(row.capturedAt)) || !/^[a-f0-9]{64}$/.test(row.receiptHash)
     || !["reported", "unlabelled"].includes(row.state)
     || (row.state === "reported" && (typeof row.label !== "string" || !row.label.trim() || row.label.length > 200))) return false;

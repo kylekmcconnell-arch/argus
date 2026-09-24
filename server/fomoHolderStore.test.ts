@@ -33,3 +33,7 @@ it("missing organization makes no storage request; failure cannot masquerade as 
   expect((await readStoredFomo(undefined,"base",[address],request)).state).toBe("not-configured"); expect(request).not.toHaveBeenCalled();
   expect((await readStoredFomo("one","base",[address],request)).state).toBe("unavailable");
 });
+
+it("rejects custom-chain receipt values that are neither EVM nor Solana wallets",()=>{
+  expect(()=>importFomoWalletSweep(sweep([{...row,chain:"robinhood",address:"not-an-evm-wallet",fomo:{id:"one",handle:"trader",evmAddress:"not-an-evm-wallet"}}]),Date.parse(generatedAt))).toThrow("Invalid Fomo observation");
+});
