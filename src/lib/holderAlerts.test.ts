@@ -1,0 +1,8 @@
+import { expect, it } from "vitest";
+import { holderObservationAlerts, type SavedHolderSnapshot } from "./holderAlerts";
+import { buildHolderIntelligence } from "./holderIntelligence";
+const addr=(n:number)=>`0x${n.toString(16).padStart(40,"0")}`;
+const saved=(day:number):SavedHolderSnapshot=>({report_version_id:`version-${day}`,captured_at:`2026-09-${day}T00:00:00Z`,attestation_state:"server_attested",snapshot:buildHolderIntelligence({chain:"base",tokenAddress:addr(99),capturedAt:`2026-09-${day}T00:00:00Z`,source:"fixture",ranked:true,rows:Array.from({length:25},(_,i)=>({address:addr(i+1),percent:1}))})});
+it("emits stable, source-bound observation alerts and never infers trades",()=>{const a=saved(20),b=saved(21);b.snapshot.rows[0].percent=5;const alerts=holderObservationAlerts([b,a]);expect(alerts).toHaveLength(1);expect(alerts[0]).toMatchObject({fromVersion:"version-20",toVersion:"version-21",basis:"saved-report-observations"});expect(alerts[0].detail).toContain("does not establish a buy or sale");expect(holderObservationAlerts([b,a,a])).toEqual(alerts);});
+it("does not bridge over incomplete snapshots or incompatible sources",()=>{const a=saved(20),b=saved(21),c=saved(22);b.snapshot.status="partial";c.snapshot.rows[0].percent=5;expect(holderObservationAlerts([a,b,c])).toEqual([]);b.snapshot.status="complete";b.snapshot.source="different";expect(holderObservationAlerts([a,b,c])).toEqual([]);});
+it("keeps registry updates and exchanges out of accumulation narratives",()=>{const a=saved(20),b=saved(21);b.snapshot.rows[0].percent=5;b.snapshot.rows[0].role="exchange";expect(holderObservationAlerts([a,b])).toEqual([]);});

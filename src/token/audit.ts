@@ -1,3 +1,4 @@
+import { enrichHolderSnapshot, holderIdentityRoute, type HolderIdentityCollector } from "../lib/holderEnrichment.js";
 import { buildHolderIntelligence, HOLDER_TARGET, type HolderIntelligence } from "../lib/holderIntelligence";
 import { hasThreatApiContext } from "../threat/net";
 import { officialXProfileHandle } from "../lib/officialXProfile";
@@ -691,7 +692,7 @@ const CACHE_TTL = 60_000;
 export async function auditToken(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn; collectShipping?: CollectTokenShippingFn },
+  opts?: { enrichHolders?: HolderIdentityCollector; chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn; collectShipping?: CollectTokenShippingFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
@@ -719,7 +720,7 @@ export async function auditToken(
 async function runTokenAudit(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn; collectShipping?: CollectTokenShippingFn },
+  opts?: { enrichHolders?: HolderIdentityCollector; chain?: string; signal?: AbortSignal; deadlineAt?: number; fetchImpl?: typeof fetch; skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn; collectShipping?: CollectTokenShippingFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const fetcher = opts?.fetchImpl ?? fetch;
@@ -1431,7 +1432,7 @@ async function runTokenAudit(
     marketKind: classifyMarketAddress(h.address ?? h.account ?? "", { poolAddresses, knownAccounts })?.kind,
   })).filter((h) => h.address);
 
-  const holderIntelligence = buildHolderIntelligence({
+  let holderIntelligence = buildHolderIntelligence({
     chain, tokenAddress: address, capturedAt: new Date().toISOString(),
     source: explorerHolders ? "blockscout" : chain === "solana" && rugcheck?.topHolders?.length ? "rugcheck" : "goplus",
     sourceUrl: explorerHolders ? blockscoutHolderSourceUrl(chain, address) : chain === "solana" && rugcheck?.topHolders?.length
@@ -1442,6 +1443,10 @@ async function runTokenAudit(
     aggregateOwners: chain === "solana" && Boolean(rugcheck?.topHolders?.length),
     poolAddresses, ...(knownAccounts ? { knownAccounts } : {}),
   });
+
+  if (opts?.enrichHolders || arkhamProviderEnabled()) {
+    holderIntelligence = await enrichHolderSnapshot(holderIntelligence, opts?.enrichHolders ?? holderIdentityRoute(fetcher));
+  }
 
   if (chain === "solana" && rugcheck?.topHolders?.length) {
     topHolders = holderIntelligence.rows.map(row => ({ address: row.address, percent: row.percent }));

@@ -31,6 +31,8 @@ const VIEWER_GET_PATHS = new Set([
   "/api/provider-usage",
   "/api/serper-credits",
   "/api/alerts",
+  "/api/holder-history",
+  "/api/holder-alerts",
   "/api/augment",
   // Keyless read-only lookup of a public OFAC SDN address list. Runs inline on
   // every token scan, so it must be viewer-reachable and unmetered: gating it
@@ -123,7 +125,7 @@ const SUPPLEMENTAL_PATHS = new Set([
   "project-docs", "recon-team", "github-forensics", "resolve-github", "x-find", "pfp-check", "kol-signals", "token-identity",
   "identity-sweep", "challenge-verdict", "vc-portfolio", "call-performance", "namesake", "cluster", "funder", "deployer",
   "evm-funder", "evm-cluster", "evm-deployer", "code-review", "wallet-taxonomy", "deployer-origin", "migration", "early-buyers",
-  "cohort", "wallet-holdings", "deployer-risk", "reclassify", "resolve-deployer", "ocr-clue",
+  "cohort", "wallet-holdings", "deployer-risk", "holder-enrichment", "reclassify", "resolve-deployer", "ocr-clue",
 ].map((route) => `/api/${route}`));
 // Routes that reserve their own supplemental unit from the handler, after
 // validation and immediately before paid work (reserveSupplementalBudget in

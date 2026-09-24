@@ -22598,6 +22598,13 @@ var onchainAdapter = {
   }
 };
 
+// src/lib/providerAddress.ts
+var EVM_ADDRESS3 = /^0x[0-9a-f]{40}$/i;
+function providerAddressKey(address) {
+  const value = String(address).trim();
+  return EVM_ADDRESS3.test(value) ? value.toLowerCase() : value;
+}
+
 // server/adapters/fomoscan.ts
 var FOMOSCAN_HOST = "https://api.fomoscan.sh";
 var FOMOSCAN_PROVIDER = "fomoscan";
@@ -22909,7 +22916,7 @@ async function postBatch(url, addresses, key, timeoutMs) {
   const rows = /* @__PURE__ */ new Map();
   for (const [address, row] of Object.entries(container)) {
     if (row && typeof row === "object" && !Array.isArray(row)) {
-      rows.set(address.toLowerCase(), row);
+      rows.set(providerAddressKey(address), row);
     }
   }
   return { outcome: "answered", rows, status: response.status };
@@ -22950,7 +22957,7 @@ async function fetchAddressRiskBatch(addresses, key, timeoutMs = 15e3) {
 
 // server/adapters/evmControlReality.ts
 import { createHash as createHash5 } from "node:crypto";
-var EVM_ADDRESS3 = /^0x[a-fA-F0-9]{40}$/;
+var EVM_ADDRESS4 = /^0x[a-fA-F0-9]{40}$/;
 var HEX = /^0x[0-9a-fA-F]*$/;
 var ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 var ERC1967_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
@@ -23295,7 +23302,7 @@ var unavailableSnapshot = (chain, target, rpcCalls, note, chainIdentity) => ({
 async function collectEvmControlRealityFromTransport(chainInput, targetInput, transport) {
   const chain = chainInput.trim().toLowerCase();
   const target = normalizeAddress2(targetInput.trim());
-  if (!EVM_ADDRESS3.test(target)) throw new Error("valid EVM target address required");
+  if (!EVM_ADDRESS4.test(target)) throw new Error("valid EVM target address required");
   if (!EXPECTED_EVM_CHAIN_IDS[chain]) {
     return unavailableSnapshot(
       chain,
@@ -23480,7 +23487,7 @@ async function collectEvmControlRealityFromTransport(chainInput, targetInput, tr
 async function collectEvmControlReality(chainInput, targetInput, options = {}) {
   const chain = chainInput.trim().toLowerCase();
   const target = normalizeAddress2(targetInput.trim());
-  if (!EVM_ADDRESS3.test(target)) throw new Error("valid EVM target address required");
+  if (!EVM_ADDRESS4.test(target)) throw new Error("valid EVM target address required");
   const urls = options.rpcUrls ?? PUBLIC_EVM_RPC[chain];
   if (!urls?.length) return unavailableSnapshot(chain, target, 0, `No direct RPC is configured for chain '${chain}'.`);
   let totalCalls = 0;
@@ -31984,7 +31991,7 @@ var MAX_HISTORY_POINTS = 90;
 var PRICE_TOLERANCE = 0.25;
 var MIN_POOL_LIQUIDITY_USD = 25e3;
 var SITE_DECLARATION_MAX_BYTES = 4e5;
-var EVM_ADDRESS4 = /^0x[a-fA-F0-9]{40}$/;
+var EVM_ADDRESS5 = /^0x[a-fA-F0-9]{40}$/;
 var SOLANA_ADDRESS5 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 var PLATFORM_CHAIN = {
   solana: "solana",
@@ -32250,14 +32257,14 @@ function parseSeededContract(ctx) {
   if (!address || !chain) return null;
   const platform = CHAIN_PLATFORM[chain];
   if (!platform) return null;
-  const addressValid = chain === "solana" ? SOLANA_ADDRESS5.test(address) : EVM_ADDRESS4.test(address);
+  const addressValid = chain === "solana" ? SOLANA_ADDRESS5.test(address) : EVM_ADDRESS5.test(address);
   return addressValid ? { address, chain, platform } : null;
 }
 var validContract = (platform, value) => {
   const address = cleanText2(value);
   if (!address) return null;
   if (platform === "solana") return SOLANA_ADDRESS5.test(address) ? address : null;
-  return PLATFORM_CHAIN[platform] && EVM_ADDRESS4.test(address) ? address : null;
+  return PLATFORM_CHAIN[platform] && EVM_ADDRESS5.test(address) ? address : null;
 };
 function registryDeployments(details, sourceUrl2, capturedAt) {
   const platforms = isRecord4(details.platforms) ? details.platforms : {};
@@ -32646,7 +32653,7 @@ function dexProjectCandidates(ctx, query, rows) {
     const pairAddress = cleanText2(row.pairAddress);
     const sourceUrl2 = cleanText2(row.url);
     const relevance = tokenNameRelevance(query, name, symbol);
-    const addressValid = chain === "solana" ? SOLANA_ADDRESS5.test(address) : EVM_ADDRESS4.test(address);
+    const addressValid = chain === "solana" ? SOLANA_ADDRESS5.test(address) : EVM_ADDRESS5.test(address);
     if (!name || !symbol || !addressValid || !chain || !pairAddress || !sourceUrl2 || relevance < MIN_NAME_RELEVANCE) return [];
     const identity = dexIdentity(ctx, row);
     if (!identity) return [];
@@ -35426,6 +35433,88 @@ async function collectCryptoRankFunding(subject, options = {}) {
   };
 }
 
+// api/_holder-enrichment.ts
+var collectHolderIdentities = async (chain, addresses) => {
+  const ids = addresses.map((address) => tokenSubjectIdentity(chain, address));
+  if (addresses.length > 25 || ids.some((id) => !id || id.chain !== chain)) throw new Error("Invalid holder identities");
+  const targets = [...new Set(ids.map((id) => id.address))];
+  const base = {
+    chain,
+    provider: "arkham",
+    capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    state: "not-configured",
+    sourceUrl: ARKHAM_INTEL_BATCH,
+    scope: "provider-address-label",
+    rows: []
+  };
+  const key = process.env.ARKHAM_API_KEY;
+  if (!key || !targets.length) return base;
+  const result = await fetchAddressLabelsBatch(targets, key, 8e3);
+  recordCall("arkham", "holder-identities", 0, `${targets.length} addresses, subscription-backed`, result.outcome === "answered" ? "succeeded" : "failed");
+  if (result.outcome !== "answered") return { ...base, state: "unavailable" };
+  const rows = targets.map((address) => {
+    const label = result.rows.get(providerAddressKey(address));
+    return {
+      address,
+      state: !label ? "unavailable" : label.name ? "reported" : "unlabelled",
+      ...label?.name ? { label: label.name, entityType: label.type, twitter: label.twitter } : {}
+    };
+  });
+  return { ...base, state: rows.every((row) => row.state !== "unavailable") ? "complete" : "partial", rows };
+};
+
+// src/lib/holderEnrichment.ts
+function attachHolderIdentities(snapshot, batch) {
+  const validTime2 = Number.isFinite(Date.parse(batch?.capturedAt));
+  if (!validTime2 || batch?.chain !== snapshot.chain || batch.provider !== "arkham" || batch.scope !== "provider-address-label" || !["complete", "partial", "unavailable", "not-configured"].includes(batch.state) || !Array.isArray(batch.rows) || batch.rows.length > 25) return snapshot;
+  const requested = new Set(snapshot.rows.map((row) => tokenSubjectIdentity(snapshot.chain, row.address)?.ref));
+  const readings = /* @__PURE__ */ new Map();
+  for (const row of batch.rows) {
+    const id = tokenSubjectIdentity(batch.chain, row?.address);
+    if (!id || !requested.has(id.ref) || readings.has(id.ref) || !["reported", "unlabelled", "unavailable"].includes(row.state)) return snapshot;
+    readings.set(id.ref, row);
+  }
+  const rows = snapshot.rows.map((row) => {
+    const reading = readings.get(tokenSubjectIdentity(snapshot.chain, row.address).ref);
+    return { ...row, identities: [{
+      provider: "arkham",
+      capturedAt: batch.capturedAt,
+      sourceUrl: "https://api.arkm.com/intelligence/address_enriched/batch/all",
+      scope: batch.scope,
+      state: reading?.state === "reported" && (typeof reading.label !== "string" || !reading.label.trim()) ? "unavailable" : reading?.state ?? "unavailable",
+      ...reading?.state === "reported" && typeof reading.label === "string" && reading.label.trim() ? {
+        label: reading.label.slice(0, 200),
+        ...typeof reading.entityType === "string" ? { entityType: reading.entityType.slice(0, 80) } : {},
+        ...typeof reading.twitter === "string" ? { twitter: reading.twitter.slice(0, 100) } : {}
+      } : {}
+    }] };
+  });
+  const answered = rows.filter((row) => row.identities[0].state !== "unavailable").length;
+  const state = batch.state === "not-configured" ? "not-configured" : !answered ? "unavailable" : answered === rows.length ? "complete" : "partial";
+  return { ...snapshot, rows, enrichment: { ...snapshot.enrichment, arkham: state } };
+}
+async function enrichHolderSnapshot(snapshot, collect) {
+  if (!snapshot.rows.length) return snapshot;
+  try {
+    const enriched = attachHolderIdentities(snapshot, await collect(snapshot.chain, snapshot.rows.map((row) => row.address)));
+    return enriched === snapshot ? { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } } : enriched;
+  } catch {
+    return { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } };
+  }
+}
+function holderIdentityRoute(fetchImpl2 = fetch) {
+  return async (chain, addresses) => {
+    const response = await fetchImpl2("/api/holder-enrichment", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chain, addresses }),
+      signal: AbortSignal.timeout(1e4)
+    });
+    if (!response.ok) throw new Error("Holder enrichment unavailable");
+    return await response.json();
+  };
+}
+
 // server/adapters/tokenHolders.ts
 var FETCH_TIMEOUT_MS2 = 8e3;
 var isBurnAddr = (a) => !!a && (/^0x0{40}$/i.test(a) || /^0x0{36}dead$/i.test(a));
@@ -35443,7 +35532,7 @@ async function collectHolderProfile(chain, address) {
     recordCall("rugcheck", "holder-profile", 0, "Solana owner sample", rug ? "succeeded" : "partial");
     if (!rug) return { available: false, note: "RugCheck returned no owner register." };
     const sourceUrl2 = `https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(address)}/report`;
-    const holderIntelligence = buildHolderIntelligence({
+    const holderIntelligence = await enrichHolderSnapshot(buildHolderIntelligence({
       chain: chainKey,
       tokenAddress: address,
       capturedAt: sourceCapturedAt2,
@@ -35453,7 +35542,7 @@ async function collectHolderProfile(chain, address) {
       ranked: false,
       aggregateOwners: true,
       knownAccounts: rug.knownAccounts
-    });
+    }), collectHolderIdentities);
     return { available: true, value: {
       binding: { canonicalAddress: address, chain: chainKey, method: "canonical_token_address_chain" },
       holderIntelligence,
@@ -35567,7 +35656,7 @@ async function collectHolderProfile(chain, address) {
   return {
     available: true,
     value: {
-      holderIntelligence: buildHolderIntelligence({
+      holderIntelligence: await enrichHolderSnapshot(buildHolderIntelligence({
         chain: chainKey,
         tokenAddress: address,
         capturedAt: sourceCapturedAt,
@@ -35575,7 +35664,7 @@ async function collectHolderProfile(chain, address) {
         sourceUrl: explorerHolders ? blockscoutHolderSourceUrl(chainKey, address) : `https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`,
         rows: explorerHolders ?? holders.map((row) => ({ address: row.address, percent: Number(row.percent) * 100, isContract: row.is_contract === 1, ...row.tag ? { tag: row.tag } : {} })),
         ranked: Boolean(explorerHolders) || !unordered
-      }),
+      }), collectHolderIdentities),
       binding: {
         canonicalAddress: address,
         chain: chainKey,
@@ -42580,14 +42669,14 @@ var DEFAULT_LOOKUP_LIMIT = 8;
 var LOOKUP_CONCURRENCY = 4;
 var SEARCH_TIMEOUT_MS = 8e3;
 var LOOKUP_TIMEOUT_MS = 9e3;
-var EVM_ADDRESS5 = /^0x[0-9a-f]{40}$/i;
+var EVM_ADDRESS6 = /^0x[0-9a-f]{40}$/i;
 var INVISIBLE = new RegExp("[\\u200B-\\u200F\\u2060\\uFEFF]|\\p{Cc}", "gu");
 function normalizeTicker(symbol) {
   if (!symbol || typeof symbol !== "string") return "";
   return symbol.normalize("NFKC").replace(INVISIBLE, "").replace(/\s+/g, " ").trim().toUpperCase();
 }
 function mintKey(chain, address) {
-  return `${chain}:${EVM_ADDRESS5.test(address) ? address.toLowerCase() : address}`;
+  return `${chain}:${EVM_ADDRESS6.test(address) ? address.toLowerCase() : address}`;
 }
 async function rugcheckFirstSeen(mint, chain, fetchImpl2 = fetch) {
   if (chain !== "solana") return null;
@@ -42840,9 +42929,9 @@ function deployerRoleLabel(attribution, form = "title") {
   const base = proven ? "Deployer" : "Creator or authority";
   return form === "wallet" ? `${base} wallet` : base;
 }
-var EVM_ADDRESS6 = /^0x[0-9a-fA-F]{40}$/;
+var EVM_ADDRESS7 = /^0x[0-9a-fA-F]{40}$/;
 function sameWalletAddress(a, b) {
-  if (EVM_ADDRESS6.test(a) && EVM_ADDRESS6.test(b)) return a.toLowerCase() === b.toLowerCase();
+  if (EVM_ADDRESS7.test(a) && EVM_ADDRESS7.test(b)) return a.toLowerCase() === b.toLowerCase();
   return a === b;
 }
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
@@ -43686,7 +43775,7 @@ async function runTokenAudit(input, emit, opts) {
     isContract: h.is_contract === 1 || h.is_contract === "1",
     marketKind: classifyMarketAddress(h.address ?? h.account ?? "", { poolAddresses, knownAccounts })?.kind
   })).filter((h) => h.address);
-  const holderIntelligence = buildHolderIntelligence({
+  let holderIntelligence = buildHolderIntelligence({
     chain,
     tokenAddress: address,
     capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -43698,6 +43787,9 @@ async function runTokenAudit(input, emit, opts) {
     poolAddresses,
     ...knownAccounts ? { knownAccounts } : {}
   });
+  if (opts?.enrichHolders || arkhamProviderEnabled()) {
+    holderIntelligence = await enrichHolderSnapshot(holderIntelligence, opts?.enrichHolders ?? holderIdentityRoute(fetcher));
+  }
   if (chain === "solana" && rugcheck?.topHolders?.length) {
     topHolders = holderIntelligence.rows.map((row) => ({ address: row.address, percent: row.percent }));
   }
@@ -43917,7 +44009,7 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
 // server/tokenAudit.ts
 async function auditToken2(...args) {
   return withCostLedger(async () => {
-    const dossier = await auditToken(...args);
+    const dossier = await auditToken(args[0], args[1], { ...args[2], enrichHolders: args[2]?.enrichHolders ?? collectHolderIdentities });
     return dossier ? { ...dossier, cost: getCost() } : null;
   });
 }
@@ -45294,13 +45386,13 @@ var collectShippingSummary = async (githubOrg, options) => {
 };
 
 // src/polymarket/trader.ts
-var EVM_ADDRESS7 = /^0x[0-9a-f]{40}$/i;
+var EVM_ADDRESS8 = /^0x[0-9a-f]{40}$/i;
 var PROFILE_PATH = /^\/profile\/(0x[0-9a-f]{40})\/?$/i;
 var HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 function normalizeWalletInput(input) {
   const raw = (input ?? "").trim();
   if (!raw) return null;
-  if (EVM_ADDRESS7.test(raw)) return raw.toLowerCase();
+  if (EVM_ADDRESS8.test(raw)) return raw.toLowerCase();
   let url;
   try {
     url = new URL(HAS_SCHEME.test(raw) ? raw : `https://${raw}`);

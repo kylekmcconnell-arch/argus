@@ -1,3 +1,4 @@
+import { providerAddressKey } from "../src/lib/providerAddress.js";
 // Cross-compare everything ARGUS has attributed against FomoScan's trader
 // identity index: which of our wallets belong to a FOMO account, which of our
 // handles have a verified wallet, and what FOMO traders posted about our
@@ -14,8 +15,8 @@
 // compute units: a handle lookup is 2,500 CU on a hit and 250 on a miss; a
 // wallet resolution is 50,000 CU on a hit and 250 on a miss; a thesis page is
 // 250 CU. The wallet mode is therefore the expensive one and is gated behind an
-// explicit --budget-cu; the sweep assumes a miss for the running estimate and
-// re-checks the remaining units after every hit.
+// explicit --budget-cu for every mode; the sweep reserves the worst-case
+// next-call cost and stops on unavailable or rate-limited provider responses.
 //
 // Inputs are the cabal registry (src/data/cabals.ts wallets, accounts and
 // launches), optionally the notable-account directory (--notable), and any
@@ -88,14 +89,14 @@ function walletSubjects(extra: string[]): WalletSubject[] {
   const out: WalletSubject[] = [];
   for (const c of CABALS) {
     for (const w of c.wallets) {
-      const key = w.address.toLowerCase();
+      const key = `${w.chain}:${providerAddressKey(w.address)}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ chain: w.chain, address: w.address, cabal: c.id, role: w.role, label: w.label });
     }
   }
   for (const a of extra) {
-    const key = a.toLowerCase();
+    const key = `${a.startsWith("0x") ? "evm" : "solana"}:${providerAddressKey(a)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ chain: a.startsWith("0x") ? "evm" : "solana", address: a, cabal: "(file)", role: "traced" });
@@ -122,7 +123,7 @@ function launchSubjects(): LaunchSubject[] {
   const seen = new Set<string>();
   const out: LaunchSubject[] = [];
   for (const c of CABALS) for (const l of c.launches) {
-    const key = l.address.toLowerCase();
+    const key = `${l.chain}:${providerAddressKey(l.address)}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ chain: l.chain, address: l.address, symbol: l.symbol, cabal: c.id, outcome: l.outcome });
@@ -137,11 +138,13 @@ interface HandleRow extends HandleSubject { state: string; fomo?: FomoUser | nul
 interface ThesisRow extends LaunchSubject { state: string; theses: FomoThesis[]; cu: number; note: string }
 
 function stopState(r: FomoResult<unknown>): boolean {
-  return r.state === "no_key" || r.state === "no_plan" || r.state === "unauthorized";
+  return r.state === "no_key" || r.state === "no_plan" || r.state === "unauthorized" || r.state === "rate_limited" || r.state === "unavailable";
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  if (!Number.isFinite(args.budgetCu) || args.budgetCu < 0 || !Number.isSafeInteger(args.budgetCu)) throw new Error("Budget must be a finite non-negative integer CU amount");
+  if (!args.dryRun && args.budgetCu === 0) throw new Error("Every live sweep requires an explicit --budget-cu cap");
   const wallets = walletSubjects(readLines(args.walletsFile));
   const handles = handleSubjects(args.notable, readLines(args.handlesFile));
   const launches = launchSubjects();
@@ -172,7 +175,7 @@ async function main(): Promise<void> {
 
   mkdirSync(args.out, { recursive: true });
   const stamp = new Date().toISOString().slice(0, 10);
-  const outFile = join(args.out, `fomoscan-${args.mode}-${stamp}.json`);
+  const outFile = join(args.out, `fomoscan-${args.mode}-${stamp}-${Date.now()}.json`);
 
   if (args.mode === "handles") {
     const rows: HandleRow[] = [];
@@ -196,7 +199,7 @@ async function main(): Promise<void> {
       }
       if (stopState(r)) break;
     }
-    writeFileSync(outFile, JSON.stringify({ generatedAt: new Date().toISOString(), spentCu: spent, rows }, null, 2));
+    writeFileSync(outFile, JSON.stringify({ generatedAt: new Date().toISOString(), spentCu: spent, targetCount: args.mode === "wallets" ? wallets.length : args.mode === "handles" ? handles.length : launches.length, rows }, null, 2), { flag: "wx", mode: 0o600 });
     console.log(`\n| handle | cabal | role | FOMO | X on FOMO | solana | evm | 30d net USD |\n|---|---|---|---|---|---|---|---|`);
     for (const r of rows) {
       const w = r.pnl?.windows["30d"] ?? r.pnl?.windows.all;
@@ -218,7 +221,7 @@ async function main(): Promise<void> {
       rows.push({ ...w, state: r.state, fomo: r.value, cu: r.cu, note: r.note });
       if (stopState(r)) { console.error(`stopping: ${r.note}`); break; }
     }
-    writeFileSync(outFile, JSON.stringify({ generatedAt: new Date().toISOString(), spentCu: spent, rows }, null, 2));
+    writeFileSync(outFile, JSON.stringify({ generatedAt: new Date().toISOString(), spentCu: spent, targetCount: args.mode === "wallets" ? wallets.length : args.mode === "handles" ? handles.length : launches.length, rows }, null, 2), { flag: "wx", mode: 0o600 });
     console.log(`\n| wallet | chain | cabal | role | FOMO | X on FOMO | name |\n|---|---|---|---|---|---|---|`);
     for (const r of rows) {
       console.log(`| ${r.address} | ${r.chain} | ${r.cabal} | ${r.role}${r.label ? " (" + r.label + ")" : ""} | ${r.state === "hit" ? r.fomo?.handle : r.state} | ${r.fomo?.twitter ? "@" + r.fomo.twitter : ""} | ${r.fomo?.name ?? ""} |`);
@@ -234,7 +237,7 @@ async function main(): Promise<void> {
       rows.push({ ...l, state: r.state, theses: r.value ?? [], cu: r.cu, note: r.note });
       if (stopState(r)) { console.error(`stopping: ${r.note}`); break; }
     }
-    writeFileSync(outFile, JSON.stringify({ generatedAt: new Date().toISOString(), spentCu: spent, rows }, null, 2));
+    writeFileSync(outFile, JSON.stringify({ generatedAt: new Date().toISOString(), spentCu: spent, targetCount: args.mode === "wallets" ? wallets.length : args.mode === "handles" ? handles.length : launches.length, rows }, null, 2), { flag: "wx", mode: 0o600 });
     console.log(`\n| token | chain | cabal | outcome | theses | authors |\n|---|---|---|---|---|---|`);
     for (const r of rows) {
       const authors = Array.from(new Set(r.theses.map((t) => t.authorHandle ?? t.authorId ?? "?"))).slice(0, 6).join(", ");

@@ -1,3 +1,5 @@
+import { collectHolderIdentities } from "../../api/_holder-enrichment.js";
+import { enrichHolderSnapshot } from "../../src/lib/holderEnrichment.js";
 import { classifyMarketAddress } from "../../src/lib/marketAddresses";
 import { buildHolderIntelligence, type HolderIntelligence } from "../../src/lib/holderIntelligence";
 // Float control and contract control for a PROJECT's verified canonical token:
@@ -117,10 +119,10 @@ export async function collectHolderProfile(chain: string, address: string): Prom
     recordCall("rugcheck", "holder-profile", 0, "Solana owner sample", rug ? "succeeded" : "partial");
     if (!rug) return { available: false, note: "RugCheck returned no owner register." };
     const sourceUrl = `https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(address)}/report`;
-    const holderIntelligence = buildHolderIntelligence({ chain: chainKey, tokenAddress: address, capturedAt: sourceCapturedAt,
+    const holderIntelligence = await enrichHolderSnapshot(buildHolderIntelligence({ chain: chainKey, tokenAddress: address, capturedAt: sourceCapturedAt,
       source: "rugcheck", sourceUrl, rows: rug.topHolders ?? [], ranked: false, aggregateOwners: true,
       knownAccounts: rug.knownAccounts,
-    });
+    }), collectHolderIdentities);
     return { available: true, value: {
       binding: { canonicalAddress: address, chain: chainKey, method: "canonical_token_address_chain" },
       holderIntelligence, topHolderPct: null, top10Pct: null, assessedWalletCount: null, top10PctIsFloor: true,
@@ -297,13 +299,13 @@ export async function collectHolderProfile(chain: string, address: string): Prom
   return {
     available: true,
     value: {
-      holderIntelligence: buildHolderIntelligence({
+      holderIntelligence: await enrichHolderSnapshot(buildHolderIntelligence({
         chain: chainKey, tokenAddress: address, capturedAt: sourceCapturedAt,
         source: explorerHolders ? "blockscout" : "goplus",
         sourceUrl: explorerHolders ? blockscoutHolderSourceUrl(chainKey, address) : `https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`,
         rows: explorerHolders ?? holders.map(row => ({ address: row.address, percent: Number(row.percent) * 100, isContract: row.is_contract === 1, ...(row.tag ? { tag: row.tag } : {}) })),
         ranked: Boolean(explorerHolders) || !unordered,
-      }),
+      }), collectHolderIdentities),
       binding: {
         canonicalAddress: address,
         chain: chainKey,

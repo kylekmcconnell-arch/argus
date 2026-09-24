@@ -1,7 +1,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions, pg_catalog;
-select plan(6);
+select plan(11);
 select has_view('public', 'holder_observations', 'immutable holder observation index exists');
 select ok(not has_table_privilege('anon', 'public.holder_observations', 'select'), 'anonymous callers cannot read holder history');
 select ok(not has_table_privilege('authenticated', 'public.holder_observations', 'select'), 'direct authenticated reads cannot bypass API organization scoping');
@@ -14,5 +14,10 @@ values ('00000000-0000-4000-8000-000000009502','00000000-0000-4000-8000-00000000
 '{"token":{"holderIntelligence":{"version":1,"chain":"base","tokenAddress":"0x1111111111111111111111111111111111111111","rows":[{"address":"0x2222222222222222222222222222222222222222","percent":7}]}}}', 'test');
 select is((select count(*) from public.holder_observations where organization_id='00000000-0000-4000-8000-000000009501'),1::bigint,'nested investigation snapshot is projected once');
 select is((select observation->>'percent' from public.holder_observations where organization_id='00000000-0000-4000-8000-000000009501'),'7','original immutable observation is retained');
+select has_view('public', 'holder_snapshot_history', 'full frozen snapshots available for conservative comparisons');
+select ok(not has_table_privilege('anon', 'public.holder_snapshot_history', 'select'), 'anonymous callers cannot read snapshot comparisons');
+select ok(not has_table_privilege('authenticated', 'public.holder_snapshot_history', 'select'), 'authenticated direct reads cannot bypass organization scoping');
+select ok(has_table_privilege('service_role', 'public.holder_snapshot_history', 'select'), 'authorized server can query saved snapshots');
+select is((select snapshot#>>'{rows,0,percent}' from public.holder_snapshot_history where organization_id='00000000-0000-4000-8000-000000009501'),'7','comparison uses original frozen supply share');
 select * from finish();
 rollback;
