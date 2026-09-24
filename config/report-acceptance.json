@@ -37,6 +37,12 @@
         "src/lib/fomoHolderEvidence.test.ts",
         "server/fomoHolderStore.test.ts"
       ]
+    },
+    {
+      "name": "Behavioral evaluation without look-ahead or survivor-only coverage",
+      "tests": [
+        "server/behavior/shadow.test.ts"
+      ]
     }
   ],
   "limits": "Offline evidence/interaction checks. Does not establish live provider availability, complete data populations, mobile/PDF visual fidelity or predictive performance."

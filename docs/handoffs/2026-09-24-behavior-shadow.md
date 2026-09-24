@@ -1,0 +1,13 @@
+# Behavioral observation evaluation
+
+Issue #525. Added an offline registration and outcome-evaluation path before any predictive alert rollout.
+
+`npm run behavior:shadow -- register snapshots.json policy.json new-cohort.json` accepts the saved holder snapshot shape plus `saved_at`. Only server-attested snapshots with consistent collection and availability timestamps qualify. It freezes all qualifying token episodes for predeclared observation patterns and time windows; incomplete intervening snapshots cannot be skipped. Multiple wallet changes in a token episode are one candidate, not multiple independent successes. The candidate artifact has a policy, original input hash, exact before/after report references and snapshot hashes. Files are created exclusively and never overwritten.
+
+The policy declares `version: 1`, `name`, `patterns` (share-increased, share-decreased, indexed-appeared, indexed-disappeared), `windowStart`, `windowEnd`, `entryDelayMs`, `horizonMs`, `quoteToleranceMs`, `minimumLiquidityUsd`, and `assumedRoundTripCostBps`. Pattern names describe observations, not trades. Registration uses the actual current time. A registration after its planned entry is marked retrospective and is excluded from the prospective return summary.
+
+`npm run behavior:shadow -- evaluate cohort.json market-points.json new-evaluation.json` accepts source-receipted pool quotes with chain/token/pool, observed and available timestamps, price, liquidity, quality status, source URL and receipt hash. It uses the first quote within the declared tolerance, never skips a bad first quote to choose a better price, and requires the same pool and source for exit. Missing and unusable outcomes remain in coverage. Immature episodes remain pending; duplicate market observations require reconciliation. Raw and cost-assumption-adjusted quoted-price outcomes stay separate from realized trading returns.
+
+All outputs are research-only. Integrity hashes are not signatures or proof that a provider supplied a record. This is a workspace-selected sample, not the full launch universe. No control cohort, empirical predictive validation, executable fill model, calibrated alert threshold or proven strategy is claimed. No provider collection, paid backfill, notification or trading action is started by these commands.
+
+Validation covers look-ahead timing, prospective versus retrospective registration, incomplete-history gaps, same-pool outcomes, first-quote selection, missing outcomes, input mutation and empty samples. Required full quality/build and protected CI gate release. Rollback removes the offline command; report scores and saved reports are unaffected.

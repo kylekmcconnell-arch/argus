@@ -31,7 +31,8 @@
     "test:db": "supabase test db supabase/tests/fomo_wallet_observations.sql supabase/tests/person_research.sql supabase/tests/holder_observation_index.sql supabase/tests/scan_run_receipts.sql supabase/tests/report_activation_quality_guard.sql supabase/tests/database/persist_report_version_bundle.test.sql supabase/tests/gap_investigation_proposals.sql supabase/tests/approved_signin_security.sql supabase/tests/early_access_growth.sql supabase/tests/growth_waitlist_credits.sql supabase/tests/database_advisor_contract.sql supabase/tests/supplemental_budget.sql supabase/tests/scan_supplement_claims.sql supabase/tests/deep_launch_research.sql && node scripts/test-threat-address-case.mjs && node scripts/test-threat-chain-identity.mjs && node scripts/test-report-subject-identity.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "fomo:import": "tsx scripts/import-fomo-wallets.ts"
+    "fomo:import": "tsx scripts/import-fomo-wallets.ts",
+    "behavior:shadow": "tsx scripts/behavior-shadow.ts"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
