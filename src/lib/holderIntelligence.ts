@@ -37,9 +37,9 @@ export interface HolderIntelligence {
   supplyCoveredPct: number | null;
   invalidRows: number;
   notes: string[];
-  enrichment: { arkham: "not-run" | "not-configured" | "complete" | "partial" | "unavailable"; fomo: "not-run" };
+  enrichment: { arkham: "not-run" | "not-configured" | "complete" | "partial" | "unavailable"; fomo: "not-run" | "no-stored-evidence" | "not-configured" | "complete" | "partial" | "unavailable" };
   rows: Array<HolderObservation & {
-    identities?: Array<Omit<import("./holderEnrichment.js").HolderIdentityReading, "address"> & { provider: "arkham"; capturedAt: string; sourceUrl: string; scope: "provider-address-label" }>;
+    identities?: Array<Omit<import("./holderEnrichment.js").HolderIdentityReading, "address"> & { provider: "arkham" | "fomo"; receiptHash?: string; capturedAt: string; sourceUrl: string; scope: "provider-address-label" }>;
     rank: number;
     role: "pool" | "exchange" | "locker" | "burn" | "unclassified-contract" | "unattributed";
     roleEvidence: string | null;

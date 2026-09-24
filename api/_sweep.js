@@ -47,6 +47,42 @@ function tokenSubjectIdentity(chain, address) {
   return { chain: network, address: normalized, ref: `${network}:${normalized}` };
 }
 
+// src/lib/fomoHolderEvidence.ts
+var FOMO_REUSE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1e3;
+function validFomoObservation(row) {
+  const identity = tokenSubjectIdentity(row?.chain, row?.address);
+  if (!identity || identity.chain !== row.chain || identity.address !== row.address || row.chain === "evm" || !Number.isFinite(Date.parse(row.capturedAt)) || !/^[a-f0-9]{64}$/.test(row.receiptHash) || !["reported", "unlabelled"].includes(row.state) || row.state === "reported" && (typeof row.label !== "string" || !row.label.trim() || row.label.length > 200)) return false;
+  return row.sourceUrl === `https://api.fomoscan.sh/v2/user/wallet/${encodeURIComponent(row.address)}`;
+}
+function attachStoredFomo(snapshot, evidence, readAt) {
+  const unavailable = (state2) => ({ ...snapshot, enrichment: { ...snapshot.enrichment, fomo: state2 } });
+  if (!evidence || !Array.isArray(evidence.rows) || !Number.isFinite(Date.parse(readAt))) return unavailable("unavailable");
+  if (evidence.state !== "available") return unavailable(evidence.state === "not-configured" ? "not-configured" : "unavailable");
+  const requested = new Set(snapshot.rows.map((row) => row.address));
+  const map = /* @__PURE__ */ new Map();
+  for (const row of evidence.rows) {
+    if (!validFomoObservation(row) || row.chain !== snapshot.chain || !requested.has(row.address) || map.has(row.address)) return unavailable("unavailable");
+    const age = Date.parse(readAt) - Date.parse(row.capturedAt);
+    if (age < 0 || age > FOMO_REUSE_MAX_AGE_MS) continue;
+    map.set(row.address, row);
+  }
+  const rows = snapshot.rows.map((row) => {
+    const observation = map.get(row.address);
+    return !observation ? row : { ...row, identities: [...(row.identities ?? []).filter((item) => item.provider !== "fomo"), {
+      provider: "fomo",
+      state: observation.state,
+      label: observation.label,
+      twitter: observation.twitter,
+      capturedAt: observation.capturedAt,
+      sourceUrl: observation.sourceUrl,
+      receiptHash: observation.receiptHash,
+      scope: "provider-address-label"
+    }] };
+  });
+  const state = map.size === 0 ? "no-stored-evidence" : map.size === rows.length ? "complete" : "partial";
+  return { ...snapshot, rows, enrichment: { ...snapshot.enrichment, fomo: state } };
+}
+
 // src/lib/holderEnrichment.ts
 function attachHolderIdentities(snapshot, batch) {
   const validTime = Number.isFinite(Date.parse(batch?.capturedAt));
@@ -80,8 +116,10 @@ function attachHolderIdentities(snapshot, batch) {
 async function enrichHolderSnapshot(snapshot, collect) {
   if (!snapshot.rows.length) return snapshot;
   try {
-    const enriched = attachHolderIdentities(snapshot, await collect(snapshot.chain, snapshot.rows.map((row) => row.address)));
-    return enriched === snapshot ? { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } } : enriched;
+    const batch = await collect(snapshot.chain, snapshot.rows.map((row) => row.address));
+    const enriched = attachHolderIdentities(snapshot, batch);
+    const result = enriched === snapshot ? { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } } : enriched;
+    return batch.storedFomo ? attachStoredFomo(result, batch.storedFomo, batch.capturedAt) : result;
   } catch {
     return { ...snapshot, enrichment: { ...snapshot.enrichment, arkham: "unavailable" } };
   }
@@ -92,7 +130,7 @@ function holderIdentityRoute(fetchImpl2 = fetch) {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ chain, addresses }),
-      signal: AbortSignal.timeout(1e4)
+      signal: AbortSignal.timeout(16e3)
     });
     if (!response.ok) throw new Error("Holder enrichment unavailable");
     return await response.json();

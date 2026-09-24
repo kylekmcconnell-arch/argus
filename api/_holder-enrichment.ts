@@ -1,15 +1,17 @@
+import { readStoredFomo } from "../server/fomoHolderStore.js";
 import { recordCall } from "../server/cost.js";
 import { fetchAddressLabelsBatch, ARKHAM_INTEL_BATCH } from "./_arkham-core.js";
 import { tokenSubjectIdentity } from "../src/lib/tokenIdentity.js";
 import { providerAddressKey } from "../src/lib/providerAddress.js";
-import type { HolderIdentityBatch, HolderIdentityCollector } from "../src/lib/holderEnrichment.js";
+import type { HolderIdentityBatch } from "../src/lib/holderEnrichment.js";
 
-export const collectHolderIdentities: HolderIdentityCollector = async (chain, addresses) => {
+export const collectHolderIdentities = async (chain: string, addresses: string[], organizationId?: string): Promise<HolderIdentityBatch> => {
   const ids = addresses.map(address => tokenSubjectIdentity(chain, address));
   if (addresses.length > 25 || ids.some(id => !id || id.chain !== chain)) throw new Error("Invalid holder identities");
   const targets = [...new Set(ids.map(id => id!.address))];
   const base: HolderIdentityBatch = { chain, provider: "arkham", capturedAt: new Date().toISOString(),
     state: "not-configured", sourceUrl: ARKHAM_INTEL_BATCH, scope: "provider-address-label", rows: [] };
+  if (organizationId) base.storedFomo = await readStoredFomo(organizationId, chain, targets);
   const key = process.env.ARKHAM_API_KEY;
   if (!key || !targets.length) return base;
   const result = await fetchAddressLabelsBatch(targets, key, 8000);

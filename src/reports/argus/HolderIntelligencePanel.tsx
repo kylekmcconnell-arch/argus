@@ -29,14 +29,14 @@ export function HolderIntelligencePanel({ snapshot, allowHistory = false }: { sn
       <p className="subtle-note">{snapshot.source} · {snapshot.capturedAt} · {snapshot.block ? `block ${snapshot.block}` : "block not supplied"}. Registry {snapshot.registryVersion}.</p>
       <p className="subtle-note">An exact address match links to a recorded observation, not proof that the current project's team controls the wallet. Unmatched does not mean safe. Exchange custody does not identify its customers.</p>
       {snapshot.notes.map(note => <p className="subtle-note" key={note}>{note}</p>)}
-      <p className="subtle-note">{snapshot.enrichment.arkham === "not-run" ? "Arkham and Fomo identity enrichment was not run for this snapshot." : `Arkham identity coverage: ${snapshot.enrichment.arkham}. Fomo identity enrichment was not run for this snapshot.`}</p>
+      <p className="subtle-note">Arkham identity coverage: {snapshot.enrichment.arkham}. Fomo stored-evidence coverage: {snapshot.enrichment.fomo}. Stored labels retain their original observation date; no live Fomo lookup runs here.</p>
       <div className="holder-intelligence-rows">
         {snapshot.rows.map(row => {
           const explorer = explorerAddr(row.address, snapshot.chain);
           return <article key={row.address} className="holder-intelligence-row">
             <div><strong>{row.rank}. </strong>{explorer ? <a href={explorer} target="_blank" rel="noreferrer">{row.address}</a> : <span>{row.address}</span>}</div>
             <p>{snapshot.supplyCoveredPct == null ? "Share unmeasured" : `${row.percent.toFixed(2)}% of supply`} · {row.role.replace(/-/g, " ")}{row.roleEvidence ? ` (${row.roleEvidence})` : ""}</p>
-            {row.identities?.map(identity => <p className="subtle-note" key={identity.provider}>Arkham: {identity.state === "reported" && identity.label ? identity.label : identity.state === "unlabelled" ? "No label returned" : "Unavailable"} · {identity.capturedAt}. Provider attribution across its address index, not proof of ownership on this chain or current coordination.</p>)}
+            {row.identities?.map(identity => <p className="subtle-note" key={identity.provider}>{identity.provider === "fomo" ? "FomoScan (stored)" : "Arkham"}: {identity.state === "reported" && identity.label ? identity.label : identity.state === "unlabelled" ? "No label returned" : "Unavailable"} · {identity.capturedAt}. Provider attribution, not proof of current ownership or coordination.</p>)}
             {row.matches.map(match => <details key={`${match.registryId}:${match.role}`}>
               <summary>Curated record: {match.name} · {match.role}</summary>
               <p>{match.label}</p><p>{match.evidence}</p>

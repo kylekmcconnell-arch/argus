@@ -214,3 +214,13 @@ it("rejects a mismatched Fomo wallet and reserves the potential hit cost", async
   const result = await fetchFomoUserByWallet("0x1111111111111111111111111111111111111111", {allowExpensive:true,fetchImpl:vi.fn(async()=>json(user())) as typeof fetch});
   expect(result).toMatchObject({state:"unavailable",value:null,cu:FOMOSCAN_CU.walletHit});
 });
+
+it("never adopts a wallet from a matching FOMO name without an X binding", async () => {
+  vi.stubEnv("FOMOSCAN_API_KEY", "fixture");
+  vi.stubGlobal("fetch", vi.fn(async () => json(user({ twitter:null }))));
+  const {ctx,evidence}=context("@YusufGemz");
+  const result=await fomoscanAdapter.run(ctx);
+  expect(evidence.wallets).toHaveLength(0);
+  expect(result).toMatchObject({state:"executed",attempts:1});
+  expect(result?.detail).toContain("no X binding");
+});

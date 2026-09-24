@@ -10,7 +10,8 @@ it("hides workspace history by default for shared and private report surfaces", 
   const html = renderToStaticMarkup(<HolderIntelligencePanel snapshot={snapshot} />);
   expect(html).not.toContain("Read workspace history");
   expect(html).toContain("collection unavailable");
-  expect(html).toContain("identity enrichment was not run");
+  expect(html).toContain("Arkham identity coverage: not-run");
+  expect(html).toContain("Fomo stored-evidence coverage: not-run");
 });
 it("offers explicitly requested history separately from frozen evidence", () => {
   const html = renderToStaticMarkup(<HolderIntelligencePanel snapshot={snapshot} allowHistory />);

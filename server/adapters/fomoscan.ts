@@ -18,7 +18,7 @@ import { providerAddressKey } from "../../src/lib/providerAddress.js";
 // SelfDoxxed, and every field is reported as FomoScan's reading. FOMO handles
 // are not X handles; the record carries the X username FOMO holds, and the
 // adapter only adopts a wallet when that X username matches the audited
-// subject or FomoScan resolved the exact handle. Their PnL numbers are cash
+// subject. A matching FOMO handle without an X binding remains a lead. Their PnL numbers are cash
 // flow (sold minus bought), not realized profit, and are described that way.
 //
 // COST. Every call is billed in compute units against the partner plan:
@@ -471,18 +471,18 @@ export const fomoscanAdapter: Adapter = {
     }
     const user = result.value;
     const binding = fomoRecordBindsToSubject(user, handle);
-    if (binding === "other-person") {
-      const detail = `FOMO account ${user.handle} links to X @${user.twitter}, not @${handle}; its wallets were not adopted.`;
+    if (binding !== "x-confirmed") {
+      const detail = user.twitter ? `FOMO account ${user.handle} links to X @${user.twitter}, not @${handle}; its wallets were not adopted.` : `FOMO account ${user.handle} has no X binding. A matching name is a discovery lead; its wallets were not adopted.`;
       ctx.emit({ phase: "On-chain", label: "FomoScan identity", detail, source: FOMOSCAN_PROVIDER, tone: "neutral" });
       return { state: "executed", attempts: 1, detail };
     }
-    const known = new Set(ctx.evidence.wallets.map((w) => `${w.chain}:${w.address.toLowerCase()}`));
+    const known = new Set(ctx.evidence.wallets.map((w) => `${w.chain}:${providerAddressKey(w.address)}`));
     const added: string[] = [];
     const candidates: Array<{ chain: string; address: string }> = [];
     if (user.solanaAddress) candidates.push({ chain: "solana", address: user.solanaAddress });
     if (user.evmAddress) candidates.push({ chain: "ethereum", address: user.evmAddress });
     for (const c of candidates) {
-      const key = `${c.chain}:${c.address.toLowerCase()}`;
+      const key = `${c.chain}:${providerAddressKey(c.address)}`;
       if (known.has(key)) continue;
       ctx.evidence.wallets.push({
         address: c.address,
