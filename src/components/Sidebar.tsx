@@ -14,6 +14,7 @@ import {
   MegaphoneIcon,
   MoonIcon,
   PlugsConnectedIcon,
+  PulseIcon,
   SignOutIcon,
   StarIcon,
   SunIcon,
@@ -236,7 +237,7 @@ function AnalystBadge({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export type NavTarget = "idle" | "radar" | "trending" | "recon" | "find" | "threat" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "referrals" | "track" | "admin" | "about" | "api" | "providers" | "changelog";
+export type NavTarget = "idle" | "radar" | "trending" | "recon" | "find" | "threat" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "referrals" | "track" | "admin" | "about" | "api" | "providers" | "changelog" | "apis";
 
 export function Sidebar({
   onNav,
@@ -448,6 +449,7 @@ export function Sidebar({
             <>
               <NavGroup compact={compact} label="Admin" />
               <NavItem compact={compact} icon={PlugsConnectedIcon} label="Data sources" active={view === "providers"} onClick={() => nav("providers")} />
+              <NavItem compact={compact} icon={PulseIcon} label="API status" active={view === "apis"} onClick={() => nav("apis")} />
               <NavItem compact={compact} icon={KeyIcon} label="Access & activity" active={view === "admin"} onClick={() => nav("admin")} />
               <NavItem compact={compact} icon={ClockCounterClockwiseIcon} label="Changelog" active={view === "changelog"} onClick={() => nav("changelog")} />
             </>

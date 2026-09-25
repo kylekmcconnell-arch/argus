@@ -17,7 +17,7 @@ const VIEWER_MUTATION_PATHS = new Set(["/api/account-growth", "/api/feedback"]);
 // sends "Authorization: Bearer ${CRON_SECRET}" when that env var is set, so we
 // authenticate these by the shared cron secret and fail closed when it is unset
 // or does not match. The handler re-checks the same secret (defense in depth).
-const CRON_API_PATHS = new Set(["/api/threat-recheck"]);
+const CRON_API_PATHS = new Set(["/api/threat-recheck", "/api/provider-sentinel"]);
 const VIEWER_GET_PATHS = new Set([
   "/api/deep-launch",
   "/api/session",
@@ -41,7 +41,7 @@ const VIEWER_GET_PATHS = new Set([
   // screen (and per-report readiness) once a batch sweep exhausts the budget.
   "/api/sanctions",
 ]);
-const OWNER_PATHS = new Set(["/api/reclassify", "/api/members", "/api/waitlist", "/api/threat-recheck"]);
+const OWNER_PATHS = new Set(["/api/reclassify", "/api/members", "/api/waitlist", "/api/threat-recheck", "/api/provider-sentinel", "/api/provider-status"]);
 // Admission budget for bounded paid panels/chat; scan credits remain separate.
 // Paid panels: routes that spend provider money on an open report or a running
 // scan. Each one also attributes its cost through the same capability, so this
