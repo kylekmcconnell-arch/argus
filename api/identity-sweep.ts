@@ -49,19 +49,32 @@ async function getText(url: string, usage: ProviderUsage, provider: string, ms =
 }
 
 // memory.lol: every X handle this account has used, oldest date seen.
-async function handleHistory(handle: string, usage: ProviderUsage): Promise<{ prior: string[]; firstSeen: string | null }> {
+//
+// The archive is indexed by account id, and its by-name route only answers for
+// names it has already seen - so an account renamed after the archive's last
+// sighting reads as absent under its current handle while its history sits
+// under its id. When the name lookup misses and the caller knows the numeric id,
+// ask again by id; `currentUnseen` then says the archive has never seen the
+// account under the name it uses today, which dates the rename as recent.
+async function handleHistory(handle: string, usage: ProviderUsage, userId?: string): Promise<{ prior: string[]; firstSeen: string | null; currentUnseen: boolean }> {
   const d = await getJson(`https://api.memory.lol/v1/tw/${encodeURIComponent(handle)}`, usage, "memory.lol");
-  const acct = d?.accounts?.[0];
-  if (!acct?.screen_names) return { prior: [], firstSeen: null };
+  let acct = d?.accounts?.[0];
+  if (!acct?.screen_names && userId) {
+    // The by-id route answers with the account bare, not wrapped in `accounts`.
+    const byId = await getJson(`https://api.memory.lol/v1/tw/id/${encodeURIComponent(userId)}`, usage, "memory.lol");
+    if (byId?.screen_names) acct = byId;
+  }
+  if (!acct?.screen_names) return { prior: [], firstSeen: null, currentUnseen: false };
   const cur = handle.toLowerCase();
   const prior: string[] = [];
+  let currentUnseen = true;
   let firstSeen: string | null = null;
   for (const [name, dates] of Object.entries(acct.screen_names as Record<string, string[]>)) {
-    if (name.toLowerCase() !== cur) prior.push(name);
+    if (name.toLowerCase() !== cur) prior.push(name); else currentUnseen = false;
     const earliest = Array.isArray(dates) ? dates.filter(Boolean).sort()[0] : null;
     if (earliest && (!firstSeen || earliest < firstSeen)) firstSeen = earliest;
   }
-  return { prior, firstSeen };
+  return { prior, firstSeen, currentUnseen };
 }
 
 type Hit = { platform: string; username: string; url: string; detail: string };
@@ -129,11 +142,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const handle = (typeof req.query.handle === "string" ? req.query.handle : "").replace(/^@/, "").trim();
   if (!handle || !HANDLE.test(handle)) { res.status(400).json({ error: "an X handle is required" }); return; }
+  // Optional: the caller's already-resolved X account id, which reaches the
+  // archive's by-id route when the current handle is too new to be indexed.
+  const rawId = (typeof req.query.id === "string" ? req.query.id : "").trim();
+  const userId = /^[0-9]{1,25}$/.test(rawId) ? rawId : undefined;
   const key = process.env.GITHUB_TOKEN;
 
   const usage: ProviderUsage = {};
   try {
-    const { prior, firstSeen } = await handleHistory(handle, usage);
+    const { prior, firstSeen, currentUnseen } = await handleHistory(handle, usage, userId);
     // Usernames to correlate: current + prior handles (deduped, capped).
     const usernames = [...new Set([handle, ...prior].map((h) => h.toLowerCase()))].filter((u) => HANDLE.test(u)).slice(0, 5);
 
@@ -147,7 +164,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const platforms = [...new Set(footprint.map((h) => h.platform))];
 
     const bits: string[] = [];
-    if (prior.length) bits.push(`Previously went by ${prior.map((p) => "@" + p).join(", ")}, indicating a rebrand${firstSeen ? ` (account seen since ${firstSeen.slice(0, 4)})` : ""}.`);
+    if (prior.length) bits.push(`Previously went by ${prior.map((p) => "@" + p).join(", ")}, indicating a rebrand${firstSeen ? ` (account seen since ${firstSeen.slice(0, 4)})` : ""}.${currentUnseen ? ` The archive has no sighting of @${handle} itself, so the rename is more recent than its coverage.` : ""}`);
     if (platforms.length) bits.push(`Same username exists on ${platforms.join(", ")}. This is a cross-platform lead. Check the details: strong for an obscure pseudonym, but on well-known handles these can be squatters or impersonators.`);
     if (bios.length) bits.push(`Recovered ${bios.length} archived bio(s) from prior handle(s).`);
     const note = bits.length ? bits.join(" ") : "No prior X handles (no rebrand on memory.lol) and no same-username accounts found on GitHub / Farcaster / Reddit / Telegram.";
@@ -156,6 +173,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       handle,
       available: true,
       priorHandles: prior,
+      currentNameInArchive: !currentUnseen,
       firstSeen: firstSeen ? firstSeen.slice(0, 10) : null,
       footprint,
       platforms,

@@ -633,7 +633,7 @@ describe("X provider attempt accounting", () => {
       cost: getCost(),
     }));
 
-    expect(captured.result).toEqual({ priorHandles: [], idStr: "123" });
+    expect(captured.result).toEqual({ priorHandles: [], idStr: "123", currentNameInArchive: false });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "memory.lol",
@@ -645,5 +645,60 @@ describe("X provider attempt accounting", () => {
       status: "partial",
       meta: "screen_names_missing",
     }));
+  });
+
+  // memory.lol is indexed by account id and its by-name route only answers for
+  // names it has already seen, so an account renamed after the archive's last
+  // sighting is invisible by name and complete by id.
+  it("asks memory.lol by account id when the current handle is not in the archive", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ accounts: [] }))
+      .mockResolvedValueOnce(json({ id_str: "42", screen_names: { formername: ["2019-01-01", "2026-06-01"] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const captured = await withCostLedger(async () => ({
+      result: await handleHistory("@renamed", "42"),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toEqual({ priorHandles: ["formername"], idStr: "42", currentNameInArchive: false });
+    expect(String(fetchMock.mock.calls[1][0])).toBe("https://api.memory.lol/v1/tw/id/42");
+    // The fallback is billed as its own op, so a scan's ledger shows it happened.
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "memory.lol",
+      op: "tw-history-id",
+    }));
+  });
+
+  it("skips the id lookup when the name lookup already answered", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ accounts: [{ id_str: "42", screen_names: { argus: ["2020-01-01"] } }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(handleHistory("@argus", "42")).resolves.toEqual({
+      priorHandles: [], idStr: "42", currentNameInArchive: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // A screen name several accounts have worn: the id says which one is ours,
+  // so the priors reported are that account's own and not a stranger's.
+  it("picks the account matching our id when a handle has been worn by several", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ accounts: [
+      { id_str: "100", screen_names: { someoneelse: ["2014-01-01"], argus: ["2015-01-01"] } },
+      { id_str: "200", screen_names: { ourprior: ["2020-01-01"], argus: ["2026-01-01"] } },
+    ] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(handleHistory("@argus", "200")).resolves.toEqual({
+      priorHandles: ["ourprior"], idStr: "200", currentNameInArchive: true,
+    });
+  });
+
+  it("stays on the name lookup alone when no account id is known", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ accounts: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(handleHistory("@argus")).resolves.toEqual({ priorHandles: [], currentNameInArchive: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
