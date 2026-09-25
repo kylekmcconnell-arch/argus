@@ -1,3 +1,4 @@
+import { researchBudget } from "../server/researchBudget.js";
 import { providerAddressKey } from "../src/lib/providerAddress.js";
 // Cross-compare everything ARGUS has attributed against FomoScan's trader
 // identity index: which of our wallets belong to a FOMO account, which of our
@@ -15,7 +16,7 @@ import { providerAddressKey } from "../src/lib/providerAddress.js";
 // compute units: a handle lookup is 2,500 CU on a hit and 250 on a miss; a
 // wallet resolution is 50,000 CU on a hit and 250 on a miss; a thesis page is
 // 250 CU. The wallet mode is therefore the expensive one and is gated behind an
-// explicit --budget-cu for every mode; the sweep reserves the worst-case
+// explicit --budget-cu or --no-spend-cap for every mode; the sweep reserves the worst-case
 // next-call cost and stops on unavailable or rate-limited provider responses.
 //
 // Inputs are the cabal registry (src/data/cabals.ts wallets, accounts and
@@ -49,6 +50,7 @@ interface Args {
   dryRun: boolean;
   notable: boolean;
   budgetCu: number;
+  noSpendCap: boolean;
   walletsFile?: string;
   handlesFile?: string;
   out: string;
@@ -57,7 +59,7 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const mode = argv[0] as Mode;
   if (!["handles", "wallets", "theses"].includes(mode)) {
-    console.error("usage: fomoscan-sweep.ts handles|wallets|theses [--dry-run] [--notable] [--budget-cu N] [--wallets-file f] [--handles-file f] [--out dir]");
+    console.error("usage: fomoscan-sweep.ts handles|wallets|theses [--dry-run] [--notable] [--budget-cu N | --no-spend-cap] [--wallets-file f] [--handles-file f] [--out dir]");
     process.exit(2);
   }
   const flag = (name: string): string | undefined => {
@@ -69,6 +71,7 @@ function parseArgs(argv: string[]): Args {
     dryRun: argv.includes("--dry-run"),
     notable: argv.includes("--notable"),
     budgetCu: Number(flag("--budget-cu") ?? 0),
+    noSpendCap: argv.includes("--no-spend-cap"),
     walletsFile: flag("--wallets-file"),
     handlesFile: flag("--handles-file"),
     out: flag("--out") ?? "eval/fomoscan",
@@ -143,8 +146,7 @@ function stopState(r: FomoResult<unknown>): boolean {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  if (!Number.isFinite(args.budgetCu) || args.budgetCu < 0 || !Number.isSafeInteger(args.budgetCu)) throw new Error("Budget must be a finite non-negative integer CU amount");
-  if (!args.dryRun && args.budgetCu === 0) throw new Error("Every live sweep requires an explicit --budget-cu cap");
+  const authorizedBudget = researchBudget(args.budgetCu, args.noSpendCap, args.dryRun);
   const wallets = walletSubjects(readLines(args.walletsFile));
   const handles = handleSubjects(args.notable, readLines(args.handlesFile));
   const launches = launchSubjects();
@@ -169,7 +171,8 @@ async function main(): Promise<void> {
   let remaining = unmetered ? Number.POSITIVE_INFINITY : (me.value.unitsRemaining ?? 0) + (me.value.additionalUnits ?? 0);
   console.log(`plan: ${me.value.plan ?? "none"}; units remaining: ${unmetered ? "unmetered" : fmt(remaining)}${args.budgetCu ? `; budget for this run: ${fmt(args.budgetCu)}` : ""}`);
   let spent = 0;
-  const budget = args.budgetCu > 0 ? args.budgetCu : remaining;
+  const budget = authorizedBudget;
+  if (args.noSpendCap) console.log("No research spending cap. Provider quota remains enforced; CU are not a USD bill.");
   const canAfford = (cu: number): boolean => spent + cu <= budget && remaining >= cu;
   const charge = (cu: number) => { spent += cu; remaining -= cu; };
 
@@ -208,10 +211,6 @@ async function main(): Promise<void> {
   }
 
   if (args.mode === "wallets") {
-    if (!args.budgetCu) {
-      console.error("wallets mode spends 50,000 CU per hit; pass --budget-cu N to cap this run");
-      process.exit(2);
-    }
     const rows: WalletRow[] = [];
     for (const w of wallets) {
       // A hit must still fit: stop when one more hit would breach the cap.
