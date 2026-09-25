@@ -1331,6 +1331,8 @@ export interface SubjectOrientation {
 }
 
 export interface CollectedEvidence {
+  diligenceBrief?: import("../lib/diligenceBrief").DiligenceBrief;
+  teamCompanyChecks?: import("../lib/teamCompanyBinding").TeamCompanyCheck[];
   profile: SubjectProfile;
   roles: SubjectClass[];
   /** Bound-artifact orientation; never a display-name guess. */

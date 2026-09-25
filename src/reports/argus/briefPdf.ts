@@ -226,6 +226,14 @@ async function renderBrief(view: ReportView, layout: Layout, generatedAt: Date):
   text(ctx, clip([view.productLabel ? `${view.productLabel}.` : "", view.summary].filter(Boolean).join(" "), limit), { gap: 4 });
   if (investor?.body) text(ctx, clip(investor.body, limit));
 
+  const hypothesis = view.diligenceBrief?.hypotheses[0];
+  if (hypothesis) {
+    heading(ctx, view.diligenceBrief?.subjectKind === "person" ? "Role fit: analytical hypothesis" : "What is their edge? Analytical hypothesis");
+    text(ctx, clip(hypothesis.text, layout.compact ? 180 : 300));
+    text(ctx, clip(`Limits: ${hypothesis.limitations} What would change this: ${hypothesis.whatWouldChange}`, layout.compact ? 180 : 300), { size: 8 });
+    const source = view.diligenceBrief?.sources.find(item => hypothesis.sourceIds.includes(item.id));
+    if (source) text(ctx, clip(`Evidence: ${source.url} (captured ${source.capturedAt.slice(0, 10)}). Full sources and counter-evidence are in the saved report.`, 240), { size: 8 });
+  }
   const steps = investor?.tasks ?? [];
   if (steps.length) {
     heading(ctx, "Resolve these first");

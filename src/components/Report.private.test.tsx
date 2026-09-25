@@ -3840,7 +3840,7 @@ it("starts fresh team research rather than opening a cached person report", () =
   const dossier = { ...base, webTeam: [{ name: "Ada Lovelace", role: "Founder", handle: "https://x.com/ada_codes", linkedin: "linkedin.com/in/ada-lovelace", source: "official team page", sourceUrl: "https://example.com/team", provider: "team-page", evidence_origin: "deterministic" as const, artifact_verified: true }] };
   const openCached = vi.fn(), freshResearch = vi.fn();
   act(() => root.render(<Report dossier={dossier} onReset={() => {}} onAudit={openCached} onResearchAudit={freshResearch} />));
-  const people = [...container.querySelectorAll('nav[aria-label="Report sections"] button')].find(button => button.textContent?.trim() === "People") as HTMLButtonElement;
+  const people = [...container.querySelectorAll('nav[aria-label="Report sections"] button')].find(button => ["People", "Collaborators"].includes(button.textContent?.trim() ?? "")) as HTMLButtonElement;
   act(() => people.click());
   expect(container.querySelector('a[href="https://x.com/ada_codes"]')).not.toBeNull();
   expect(container.querySelector('a[href="https://linkedin.com/in/ada-lovelace"]')).not.toBeNull();

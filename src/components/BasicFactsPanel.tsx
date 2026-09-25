@@ -47,6 +47,7 @@ export interface BasicFactSourceView {
 }
 
 export interface BasicFactView {
+  questionId?: string;
   factId?: string;
   predicate: string;
   /** Frozen research question used for this report, when available. */

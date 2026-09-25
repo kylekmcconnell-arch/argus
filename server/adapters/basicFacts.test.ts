@@ -153,6 +153,11 @@ describe("basic-facts lead parsing", () => {
       "person.conflict_of_interest",
     ]));
     expect(founder.find((question) => question.id === "person.founder")?.critical).toBe(true);
+    for (const predicate of ["repository", "partnership", "treasury"]) {
+      expect(founder.find((question) => question.id === `person.${predicate}`)?.critical).toBe(false);
+    }
+    expect(founder.find((question) => question.id === "person.repository")?.question).toContain("authorship");
+    expect(founder.find((question) => question.id === "person.prior_role")?.question).toContain("military");
     expect(founder.find((question) => question.id === "person.track_record")?.critical).toBe(true);
     expect(founder.find((question) => question.id === "person.public_security")?.critical).toBe(true);
     expect(founder.find((question) => question.id === "person.official_token")?.critical).toBe(true);
@@ -972,7 +977,7 @@ describe("critical-gap search recovery", () => {
       }), { status: 200, headers: { "content-type": "application/json" } });
     });
     const questions = basicFactsResearchQuestions(ctx).filter((question) =>
-      question.predicate === "product" || question.predicate === "funding");
+      question.id === "project.product" || question.id === "project.funding");
 
     const result = await discoverBasicFactLeadsDetailed(ctx, {
       request,
@@ -1011,7 +1016,7 @@ describe("critical-gap search recovery", () => {
       }), { status: 200, headers: { "content-type": "application/json" } });
     });
     const questions = basicFactsResearchQuestions(ctx).filter((question) =>
-      question.predicate === "product" || question.predicate === "funding");
+      question.id === "project.product" || question.id === "project.funding");
 
     await discoverBasicFactLeadsDetailed(ctx, {
       request,
@@ -1029,7 +1034,7 @@ describe("critical-gap search recovery", () => {
   it("retries one malformed hosted-search response before giving up the gap", async () => {
     const { ctx } = context();
     const question = basicFactsResearchQuestions(ctx).filter((candidate) =>
-      candidate.predicate === "product");
+      candidate.id === "project.product");
     let calls = 0;
     const result = await discoverBasicFactLeadsDetailed(ctx, {
       request: async () => {
@@ -5878,5 +5883,27 @@ describe("knowledge-base reuse requires the live account to still be the stored 
     expect(discoveredIds).toContain("person.founder");
     expect((evidence.basicFacts ?? []).some((fact) => fact.predicate === "founder" && fact.status === "verified")).toBe(false);
     expect(ctx.emit).toHaveBeenCalledWith(expect.objectContaining({ label: "Stored facts belong to a different account" }));
+  });
+});
+
+describe("focused diligence coverage", () => {
+  it("keeps mechanism and edge questions open when only a generic product was established", async () => {
+    const { ctx, evidence } = context();
+    const excerpt = "Jupiter offers the Jupiter Swap exchange platform.";
+    await collectBasicFacts(ctx, {
+      discover: async () => [lead({ predicate: "product", value: "Jupiter Swap", questionId: "project.product", excerpt })],
+      repair: async () => [], fetchSource: async () => document({ text: excerpt }),
+    });
+    expect(evidence.basicFactQuestionLedger?.find(row => row.questionId === "project.product")?.status).toBe("answered");
+    for (const id of ["mechanism", "privacy_scope", "implementation", "claimed_edge", "edge_evidence", "alternatives"]) {
+      expect(evidence.basicFactQuestionLedger?.find(row => row.questionId === `project.diligence_${id}`)?.status).toBe("unanswered");
+    }
+  });
+  it("does not make optional military or wallet research a mandatory score gate", () => {
+    const { ctx, evidence } = context();
+    evidence.roles = [SubjectClass.FOUNDER];
+    const questions = basicFactsResearchQuestions(ctx);
+    expect(new Set(questions.map(q => q.id)).size).toBe(questions.length);
+    expect(questions.filter(q => q.id.includes(".diligence_")).every(q => !q.critical)).toBe(true);
   });
 });

@@ -1521,6 +1521,7 @@ export interface TeamMember {
   name: string;
   handle?: string;
   role: string;
+  companyHint?: import("../../src/lib/teamCompanyBinding").TeamCompanyHint;
   /** Descriptive first-party copy about the person; never parsed as another name. */
   biography?: string;
   evidence?: string;
@@ -1560,6 +1561,7 @@ export async function findTeam(
   name: string | undefined,
   posts: string[] = [],
   purchasedTeamSignalPosts?: string[],
+  officialDomain?: string,
 ): Promise<TeamMember[]> {
   const h = handle.replace(/^@/, "");
   const key = env("TWITTERAPI_KEY");
@@ -1583,13 +1585,14 @@ export async function findTeam(
   const system =
     "You are a forensic researcher with live web search, given a crypto/tech project's own X posts below. Identify the PEOPLE publicly tied to the project: founders, cofounders, core team, engineers, AND advisors/backers. " +
     "Search the exact X handle together with founder, co-founder, builder, creator, and built by. Inspect the official site's homepage and footer plus attributable podcasts, interviews, and ecosystem press; crypto builders are often disclosed there instead of on a formal team page. " +
+    "Use the supplied official website as the company identity anchor. For LinkedIn candidates return company_website from the employer page, company_linkedin and company_activity_matches after checking its description; exclude mismatched or unreadable employers. Return source_url for every person, on the official site or the exact project X account. Names alone cannot bind employers. " +
     "Read the provided posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') to see who is named, then web-search to confirm each person and their role here. " +
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if they are actually named as one; if they are a founder/cofounder, say so. Do NOT downgrade a founder to advisor. " +
     "For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that web search reveals. This exposes serial founders and cross-project ties. " +
     "Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"founder|cofounder|ceo|cto|engineer|advisor|backer\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If none, return {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await generalWebSearch(system, `Project X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, builders, team members, and advisors of this exact project? Search the exact handle and inspect official-site "built by" attribution, founder interviews, podcasts, and ecosystem press. Give each person's precise role here AND their other projects.${postContext}`, { cacheKey: `team-x-v2:${h}` });
-  return parseTeamJSON(text, h, "X content");
+  const text = await generalWebSearch(system, `Official company website: ${officialDomain || "unresolved"}. Project X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, builders, team members, and advisors of this exact project? Search the exact handle and inspect official-site "built by" attribution, founder interviews, podcasts, and ecosystem press. Give each person's precise role here AND their other projects.${postContext}`, { cacheKey: `team-x-v3:${h}:${officialDomain ?? ""}` });
+  return parseTeamJSON(text, h, "X content", officialDomain ?? "");
 }
 
 // The team page lives on the WEBSITE, not in the tweets. This runs the same
@@ -1606,6 +1609,8 @@ export async function findTeamOnSite(domain: string, projectName?: string, subje
   const system =
     "You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project: founders, cofounders, the WHOLE leadership team (CEO/CTO/COO/CFO/CMO), engineering and product leads, AND advisors/backers. " +
     "DIG hard and be COMPLETE: inspect the official homepage and footer for founder, builder, creator, and 'built by' attribution; Google the exact domain and X handle with 'team'/'leadership'/'about'/'founder'; open the project's LinkedIn company page and read its 'People' tab (list the employees it shows); and check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people. Do NOT stop at one or two; keep going until you have the full public roster you can verify. " +
+    "The supplied X account website is the company identity anchor. Before using LinkedIn People, open the employer company page and compare its website and business description with that official site. Same names are not a match: Hades Mining infrastructure is not Hades Privacy. If the employer website differs or activity conflicts, exclude the person. If the website or activity cannot be checked, omit the LinkedIn candidate. " +
+    "For each candidate return source_url, company_linkedin, company_website (the actual employer website, never copied from the task), and company_activity_matches (true only after comparing descriptions). Non-LinkedIn people need a source_url on the supplied official site. Matching candidates remain discovery leads. " +
     "Connect each name to their X handle and LinkedIn where possible. " +
     "Include ONLY real people genuinely tied to THIS specific project (match the domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. " +
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT. Do NOT downgrade a founder to advisor. " +
@@ -1618,10 +1623,10 @@ export async function findTeamOnSite(domain: string, projectName?: string, subje
     ...(project ? [`"${project}" founder LinkedIn`, `"${project}" cofounder`] : []),
   ];
   const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for "built by", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, {
-    cacheKey: `team-site-v3:${subjectKey}:${clean || projectName}`,
+    cacheKey: `team-site-v4:${subjectKey}:${clean || projectName}`,
     queries: officialSiteQueries.length ? officialSiteQueries : undefined,
   });
-  return parseTeamJSON(text, undefined, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
+  return parseTeamJSON(text, subjectHandle, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)", clean);
 }
 
 // Batched identity resolution for name-only team members: the project's own team
@@ -2074,17 +2079,18 @@ export async function findRoleClaimants(
   const serperQueries = plan.queries;
   const system =
     "You are a forensic OSINT researcher with live web and X search. The subject is a crypto/tech project's X account. Find the PEOPLE the public record credits with leading it: founders, cofounders, CEO/CTO/COO, core team. " +
+    "For LinkedIn candidates return company_website from the employer page and company_activity_matches after comparing the employer business to the supplied official site. Exclude mismatched or unreadable employers. Return source_url on the official site or exact project X account for every candidate. A name match never establishes employment. " +
     "Work the REVERSE direction: run the exact quoted searches given below on X AND on the general web (Google-style), and read what AI-answer search summaries say about who founded the project. " +
     "Pay special attention to X BIOS: accounts whose own bio contains phrases like 'Founder @project' are first-party role claims. Also check the project site's credits (footers often say 'Built by X'), press, and LinkedIn. " +
     "Include ONLY people with a real, quotable public claim tying them to THIS exact project (match the handle/name/domain; never a same-named project). For each person quote the claim VERBATIM in evidence and say where it lives (X bio, post URL, page). " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"founder|cofounder|ceo|cto|team\",\"kind\":\"team\",\"evidence\":\"\"}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
   const text = await generalWebSearch(
     system,
-    `Project X account: @${h}${nameVariant ? ` (${nameVariant})` : ""}${domainVariant ? `, website ${domainVariant}` : ""}. Who does the public record say founded or leads it? Run these exact searches on X and the web, then verify each hit: ${queries.join(", ")}.`,
-    { maxToolCalls: 6, cacheKey: `reverse-role:${h}`, queries: serperQueries, newsQuery: plan.newsQuery },
+    `Official company website: ${domainVariant || "unresolved"}. Project X account: @${h}${nameVariant ? ` (${nameVariant})` : ""}${domainVariant ? `, website ${domainVariant}` : ""}. Who does the public record say founded or leads it? Run these exact searches on X and the web, then verify each hit: ${queries.join(", ")}.`,
+    { maxToolCalls: 6, cacheKey: `reverse-role-v2:${h}:${domainVariant ?? ""}`, queries: serperQueries, newsQuery: plan.newsQuery },
   ).catch(() => null);
   const twitterBio = await discoverReverseBioFromTwitterapi(subjectHandle, subjectName);
-  const fromWeb = parseTeamJSON(text, h, "reverse role-phrase search");
+  const fromWeb = parseTeamJSON(text, h, "reverse role-phrase search", domainVariant ?? "");
   const seen = new Set(fromWeb.map((member) => (member.handle ?? "").replace(/^@/, "").toLowerCase()).filter(Boolean));
   for (const member of twitterBio.team) {
     const key = (member.handle ?? "").replace(/^@/, "").toLowerCase();
@@ -2871,7 +2877,7 @@ export function officialXNamedOrgs(posts: string[], projectName?: string): Linke
 
 
 // Shared parser for the team JSON both Grok team-finders return.
-export function parseTeamJSON(text: string | null, selfHandle: string | undefined, source: string): TeamMember[] {
+export function parseTeamJSON(text: string | null, selfHandle: string | undefined, source: string, _officialDomain?: string): TeamMember[] {
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -2892,10 +2898,16 @@ export function parseTeamJSON(text: string | null, selfHandle: string | undefine
               .slice(0, 6)
           : undefined;
         return {
+          companyHint: {
+            companyUrl: typeof t.company_linkedin === "string" ? (/^https?:/i.test(t.company_linkedin) ? t.company_linkedin : `https://${t.company_linkedin}`) : undefined,
+            website: typeof t.company_website === "string" ? t.company_website : undefined,
+            activityMatches: typeof t.company_activity_matches === "boolean" ? t.company_activity_matches : undefined,
+          },
           name: t.name.trim(),
           handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : undefined,
           role,
           biography: typeof t.biography === "string" && t.biography.trim() ? t.biography.trim() : undefined,
+          sourceUrl: typeof t.source_url === "string" && /^https?:\/\//i.test(t.source_url) ? t.source_url : undefined,
           kind, linkedin, evidence: typeof t.evidence === "string" ? t.evidence : undefined, source,
           projects: projects && projects.length ? projects : undefined,
         };

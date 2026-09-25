@@ -179,6 +179,7 @@ export interface EvidenceView {
 }
 
 export interface ReportView {
+  diligenceBrief?: import("../../lib/diligenceBrief").DiligenceBrief;
   subjectName: string;
   subjectKind: "project" | "person" | "token";
   handle?: string | null;

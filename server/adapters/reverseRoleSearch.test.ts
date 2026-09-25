@@ -173,7 +173,7 @@ describe("findRoleClaimants", () => {
     vi.stubGlobal("fetch", vi.fn(async (_url?: unknown, init?: RequestInit) => {
       seenBody = String(init?.body ?? "");
       return new Response(JSON.stringify({
-        output_text: JSON.stringify({ people: [{ name: "SimpleFarmer", handle: "@OxSimpleFarmer", role: "founder", kind: "team", evidence: "X bio: Founder @clutchmarkets" }] }),
+        output_text: JSON.stringify({ people: [{ name: "SimpleFarmer", handle: "@OxSimpleFarmer", role: "founder", kind: "team", evidence: "X bio: Founder @clutchmarkets", source_url: "https://clutch.markets/team" }] }),
       }), { status: 200, headers: { "content-type": "application/json" } });
     }));
 
@@ -230,7 +230,7 @@ describe("findRoleClaimants", () => {
                   handle: "@OxSimpleFarmer",
                   role: "founder",
                   kind: "team",
-                  evidence: "X bio: Founder @clutchmarkets",
+                  evidence: "X bio: Founder @clutchmarkets", source_url: "https://clutch.markets/team",
                 }],
               }),
             },

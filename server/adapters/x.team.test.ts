@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { officialXNamedOrgs, officialXNamedTeam, scanPostsForRoles } from "./x";
+import { officialXNamedOrgs, officialXNamedTeam, scanPostsForRoles, parseTeamJSON } from "./x";
 
 describe("deterministic project-team post scan", () => {
   it("binds a founder role to the adjacent person handle", () => {
@@ -170,5 +170,13 @@ describe("official corpus names handles as team or linked orgs", () => {
     expect(officialXNamedTeam([
       "Proud to introduce co-founders Alice and Bob.",
     ], "ExampleProject")).toEqual([]);
+  });
+});
+
+describe("company discovery provenance", () => {
+  it("preserves employer hints for independent checking rather than trusting a model match", () => {
+    const rows = parseTeamJSON(JSON.stringify({ people: [{ name: "Example Operator", role: "engineer", linkedin: "linkedin.com/in/example", company_linkedin: "linkedin.com/company/hades", company_website: "https://hades.com", company_activity_matches: true, source_url: "https://linkedin.com/in/example" }] }), "hadesprivacy", "web/LinkedIn search", "hadesprivacy.example");
+    expect(rows[0]).toMatchObject({ companyHint: { companyUrl: "https://linkedin.com/company/hades", website: "https://hades.com", activityMatches: true } });
+    expect(rows[0]).not.toHaveProperty("artifact_verified");
   });
 });

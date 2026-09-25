@@ -1,3 +1,5 @@
+import { TeamCompanyChecks } from "../reports/argus/TeamCompanyChecks";
+import { DiligenceHypotheses } from "../reports/argus/DiligenceHypotheses";
 import { evidenceRetryPlan, evidenceRetryReason } from "../lib/evidenceRetry";
 import { withheldScoreReason } from "../lib/withheldScore";
 import { useEffect, useState } from "react";
@@ -111,6 +113,8 @@ import { ArgusReportShell, type MoreAction } from "../reports/argus/ArgusReportS
 import { buildPersonReportView } from "../reports/argus/buildView";
 import { DecisionChapter } from "../reports/argus/chapters/DecisionChapter";
 import { ScoresChapter } from "../reports/argus/chapters/ScoresChapter";
+import { PersonDiligence } from "../reports/argus/PersonDiligence";
+import { CompanyEdge } from "../reports/argus/CompanyEdge";
 import { ProductChapter } from "../reports/argus/chapters/ProductChapter";
 import { CodeChapter } from "../reports/argus/chapters/CodeChapter";
 import { buildCodeView } from "../reports/argus/codeView";
@@ -3834,6 +3838,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   return (
     <div className="relative min-h-full">
       <ArgusReportShell
+        subjectKind={organizationAccount ? "project" : reportView.subjectKind}
         runtime={{
           subjectName: f.display_name || f.handle,
           subjectRef: report.handle,
@@ -3878,11 +3883,11 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         }}
         more={shareView ? [] : moreActions}
         chapters={{
-          decision: () => <DecisionChapter view={reportView} before={decisionBefore} after={decisionAfter} onRescan={shareView || scoringAccessError ? undefined : onRescan} />,
+          decision: () => <DecisionChapter view={reportView} afterScores={(reportView.subjectKind === "project" || organizationAccount) ? <CompanyEdge facts={basicFacts} brief={f.diligenceBrief} questions={f.basicFactQuestionLedger} /> : <section className="panel space-top"><h2>Assessment of the person</h2><DiligenceHypotheses brief={f.diligenceBrief} /></section>} before={decisionBefore} after={decisionAfter} onRescan={shareView || scoringAccessError ? undefined : onRescan} />,
           scores: () => <ScoresChapter view={reportView} legacy={scoresLegacy} />,
-          product: () => <ProductChapter view={reportView} legacy={productLegacy} />,
+          product: () => reportView.subjectKind === "person" && !organizationAccount ? <><PersonDiligence dossier={f} facts={basicFacts} websiteClaims={reportView.product.claims.filter(claim => /website/i.test(claim.title))} />{productLegacy}</> : <ProductChapter view={reportView} legacy={productLegacy} />,
           code: () => <CodeChapter subjectKind={reportView.subjectKind} code={codeView} legacy={codeLegacy} />,
-          people: () => <PeopleChapter view={reportView} legacy={peopleLegacy} reportVersionId={!shareView && !privateSession ? evidenceReportVersionId : undefined} onAudit={shareView ? undefined : onResearchAudit ?? onAudit} />,
+          people: () => <><TeamCompanyChecks checks={f.teamCompanyChecks} /><PeopleChapter view={reportView} legacy={peopleLegacy} reportVersionId={!shareView && !privateSession ? evidenceReportVersionId : undefined} onAudit={shareView ? undefined : onResearchAudit ?? onAudit} /></>,
           market: ({ active }) => <MarketChapter view={reportView} active={active} reconciliation={holderReconciliation} legacy={marketLegacy} />,
           social: () => <SocialChapter view={reportView} legacy={socialLegacy} />,
           connections: () => <ConnectionsChapter view={reportView} legacy={connectionsLegacy} />,
