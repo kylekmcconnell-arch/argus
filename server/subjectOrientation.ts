@@ -8,6 +8,7 @@ import { env } from "./config";
 import type { CollectedEvidence, LaunchedProductLead, SubjectOrientation } from "../src/data/evidence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
 import { grokSearch } from "./adapters/x";
+import { isOrganizationAccount } from "../src/lib/investorSubject";
 
 const RECENT_ACTIVITY_CAP = 24;
 const RECENT_ACTIVITY_ITEM_CHARS = 500;
@@ -95,6 +96,7 @@ const ORIENTATION_SYSTEM = [
   "Write what as polished report-opening copy, not a transcript of the X bio: one or two compact sentences in plain English from the packet, official site, and live X of THIS handle.",
   "Write with category fluency for a reader who already understands the field: identify the entity in the vocabulary its users would use, the core job it performs, and why someone uses it. Think of explaining the Yankees to a baseball fan as an MLB team with a competitive role and fan experience, not as an official website or social account.",
   "First decide whether the bound subject is an organization/product brand or an individual. Words describing users or features, such as community, chat, fans, members, or contributors, do not make a brand account a person.",
+  "Resolve the grammatical subject before assigning roles: 'built by @alice', 'founder: @alice' and 'dev @alice' describe a separate account, not the identity of this account. A privacy protocol naming its developer remains PROJECT. A person's 'I build @protocol' or 'founder of @protocol' remains a person. Keep company identity separate from its people even when no token has been verified.",
   "Lead with the product or protocol function. Then state its intended user, network, mechanism, or token role only when the bound artifacts support it.",
   "For a PROJECT, what must explain a concrete user action or product mechanism such as trading, lending, borrowing, staking, supplying liquidity, using a vault, or operating software. Merely saying that a project has an official site, exists on a chain, or is linked to a token is not a product explanation.",
   "When the official site contains a multi-product application, summarize the actual first-party product suite rather than describing site ownership or repeating the homepage slogan.",
@@ -484,6 +486,7 @@ export async function orientSubjectWithGrok(
   const packet = buildOrientationPacket(evidence, options?.siteExcerpt);
   const chat = options?.chat;
   const key = env("XAI_API_KEY");
+  const accept = (raw: unknown) => reconcileOrientationIdentity(parseOrientation(raw, packet), evidence);
 
   // Packet-only test double. Production always uses Responses API + x_search.
   if (chat) {
@@ -496,7 +499,7 @@ export async function orientSubjectWithGrok(
       jsonSchema: { name: "subject_orientation", schema: ORIENTATION_SCHEMA },
     });
     if (!result.ok) return null;
-    return parseOrientation(result.text, packet);
+    return accept(result.text);
   }
 
   if (!key) return null;
@@ -505,8 +508,21 @@ export async function orientSubjectWithGrok(
   const text = await search(ORIENTATION_SYSTEM, liveSearchUser(packet), {
     maxToolCalls: ORIENTATION_MAX_TOOL_CALLS,
     tools: ["web_search", "x_search"],
-    cacheKey: `subject-orientation:${normalizeHandle(packet.handle)}`,
+    cacheKey: `subject-orientation:v2:${normalizeHandle(packet.handle)}`,
   });
   if (!text) return null;
-  return parseOrientation(text, packet);
+  return accept(text);
+}
+
+/** Reject the model's person narrative as well as its role when the frozen
+ * profile explicitly describes a product and credits a separate builder. */
+export function reconcileOrientationIdentity(orientation: SubjectOrientation | null, evidence: CollectedEvidence): SubjectOrientation | null {
+  if (!orientation || orientation.kind !== "FOUNDER"
+    || !handlesMatch(orientation.boundHandle, evidence.profile.handle)
+    || !isOrganizationAccount({ roles: [], profile: evidence.profile })) return orientation;
+  return { kind: "PROJECT", what: "", audience: "", boundHandle: evidence.profile.handle,
+    boundDomain: canonicalOfficialWebsite(evidence.profile.website)?.domain ?? null,
+    sourceUrls: buildOrientationPacket(evidence).sourceUrls,
+    ...(orientation.mentionedHandles?.length ? { mentionedHandles: orientation.mentionedHandles } : {}),
+  };
 }

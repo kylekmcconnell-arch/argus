@@ -114,5 +114,16 @@ it("renders an access failure as a system problem while retaining the saved prod
   expect(container.textContent).toContain("administrator must restore provider access");
   expect(container.textContent).toContain("platform for AI models, agents and cloud computers");
   expect(container.textContent).not.toContain("Retry scoring investigation");
-  expect(container.textContent).toContain("Presentation 2026-09-25.2");
+  expect(container.textContent).toContain("Presentation 2026-09-25.3");
+});
+
+it("withholds a legacy person score when the frozen profile explicitly describes a company and credits its builder", () => {
+  const dossier = savedDossier(1, "TEST-BRAND-PERSON-MISMATCH");
+  Object.assign(dossier, { handle: "@privacybrand", display_name: "Privacy Brand", bio: "A privacy protocol. Built by @builder", website: "https://privacybrand.example", profile_collection_state: "resolved", profile_provider: "twitterapi", profile_captured_at: "2026-09-25T10:00:00Z", resolved_name: undefined, identity_binding: undefined });
+  dossier.report = { ...dossier.report, roles: ["FOUNDER"], governing_role: "FOUNDER", governing_score: 82 };
+  act(() => root.render(<Report dossier={dossier} onReset={() => {}} />));
+  expect(container.textContent).toContain("Company diligence");
+  expect(container.textContent).toContain("person score cannot serve as a company score");
+  expect(container.textContent).not.toContain("Assessment of the person");
+  expect(dossier.report.governing_score).toBe(82);
 });

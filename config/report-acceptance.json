@@ -47,6 +47,10 @@
     {
       "name": "Role relationships, specialist discovery and person-to-team evidence",
       "tests": [
+        "src/lib/subjectBio.test.ts",
+        "src/lib/projectAccountResult.test.ts",
+        "server/orchestrate.project-routing.test.ts",
+        "src/components/Report.case-label.test.tsx",
         "src/lib/relationshipDiligence.test.ts",
         "src/lib/personInvestigation.test.ts",
         "src/lib/linkedPersonEvidence.test.ts",

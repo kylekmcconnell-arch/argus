@@ -73,6 +73,7 @@ import { handlesMatch, orientSubjectWithGrok, orientationHandleBound, orientatio
 import { personChecks } from "../src/lib/scanChecklist";
 import { basicFactQuestionOutcome } from "../src/lib/basicFactQuestions";
 import { isOrganizationAccount } from "../src/lib/investorSubject";
+import { subjectBioScope } from "../src/lib/subjectBio";
 import { axisLabel } from "../src/lib/verdict";
 import {
   buildResearchPlan,
@@ -2119,7 +2120,15 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     : null;
   // Unique-id: a PROJECT-bound handle is the brand/protocol account. Display
   // name never binds a person. Founder facts describe some OTHER handle.
-  const projectBound = projectOrientationBound(evidence);
+  const bioScope = subjectBioScope(evidence.profile.bio, evidence.profile.handle);
+  const contextualBrand = bioScope.brandDescription
+    && evidence.profile.profile_collection_state === "resolved"
+    && evidence.profile.profile_provider === "twitterapi"
+    && Number.isFinite(Date.parse(evidence.profile.profile_captured_at ?? ""))
+    && canonicalOfficialWebsite(evidence.profile.website) !== null
+    && !evidence.profile.identity_binding
+    && !evidence.profile.resolved_name?.trim();
+  const projectBound = projectOrientationBound(evidence) || contextualBrand;
   // An individual human: the account is bridged to a person (identity binding
   // or a licensed resolved name, both of which only ever attach to people) or
   // the orientation model read it as a person. Deliberately NOT gated on
@@ -2137,7 +2146,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   const individualHuman =
     Boolean(evidence.profile.identity_binding)
     || Boolean(evidence.profile.resolved_name?.trim())
-    || (evidence.subjectOrientation?.kind === "FOUNDER" && orientationHandleBound(evidence));
+    || (!contextualBrand && evidence.subjectOrientation?.kind === "FOUNDER" && orientationHandleBound(evidence));
   // A canonical token can bind the audited handle to the project even when
   // the orientation model mistakes a project bio that names a developer for
   // that developer's personal account. The exact official-X match is a
@@ -2151,7 +2160,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // The bio is the first-party self-description, but an empty bio is not an
   // absent subject: the account's own posts are the same kind of evidence from
   // the same provider, so they classify when the bio says nothing.
-  const selfDescription = evidence.profile.bio.trim() || (evidence.profile.self_post_sample ?? "").trim();
+  const selfDescription = bioScope.selfDescription.trim() || (evidence.profile.bio.trim() ? "" : (evidence.profile.self_post_sample ?? "").trim());
   if (evidence.profile.profile_collection_state === "resolved" && selfDescription) {
     const classification = classifySubject(selfDescription);
     const profileRoles = classification.applicable_classes;
@@ -2327,6 +2336,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     const other = [...roles].filter((role) => role !== SubjectClass.PROJECT);
     if (other.length === 0) roles.add(SubjectClass.PROJECT);
   }
+  if (contextualBrand) roles.add(SubjectClass.PROJECT);
   return [...roles];
 }
 

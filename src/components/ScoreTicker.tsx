@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { verdictMeta } from "../lib/verdict";
-import { auditReadinessLabel, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
+import { auditEntityLabel, auditReadinessLabel, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
 import { recentScored } from "../lib/recentScored";
@@ -29,7 +29,7 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
         onOpen(ref, kind);
       }}
       title={presentedVerdict === "INCOMPLETE" ? "Open the report. Some required checks are still unfinished, so the early score is not ready to use." : "Open the full report"}
-      aria-label={`Open stored ${e.kind} case for ${e.query}${typeof e.score === "number" ? `, score ${e.score}` : ""}`}
+      aria-label={`Open stored ${auditEntityLabel(e)} case for ${e.query}${typeof e.score === "number" ? `, score ${e.score}` : ""}`}
       className="group panel flex w-[240px] shrink-0 items-center gap-2.5 p-2.5 text-left transition hover:border-line-2 hover:bg-panel/80"
     >
       {img ? (
@@ -40,7 +40,7 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
       <span className="min-w-0 flex-1">
         <span className="mono block truncate text-[12.5px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
         <span className="block truncate text-[11px] text-ink-faint">
-          {e.kind}{e.contributor && e.contributor !== me && e.contributor !== "anonymous" ? ` · ${e.contributor}` : ""}
+          {auditEntityLabel(e)}{e.contributor && e.contributor !== me && e.contributor !== "anonymous" ? ` · ${e.contributor}` : ""}
         </span>
       </span>
       <span className="flex shrink-0 flex-col items-end gap-1 leading-none">

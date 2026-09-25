@@ -2633,13 +2633,10 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   // Decision inputs retained from the saved-report derivations above.
   const organizationAccount = isOrganizationAccount({
     roles,
-    profile: {
-      handle: f.handle,
-      display_name: f.display_name,
-      resolved_name: f.resolved_name,
-      bio: f.bio,
-    },
+    profile: f,
   });
+  const entityMethodologyMismatch = organizationAccount
+    && !roles.some(role => [SubjectClass.PROJECT, SubjectClass.INVESTOR, SubjectClass.AGENCY].includes(role));
   const cleanScreens = diligenceChecks.filter((check) => check.status === "checked-empty");
   const unresolvedCheckNames = unresolvedChecks.slice(0, 3).map((check) => publicCheckLabel(check.label));
   const unresolvedCheckRemainder = Math.max(0, unresolvedChecks.length - unresolvedCheckNames.length);
@@ -2726,16 +2723,16 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const tokenAxisTreatment = f.tokenApplicability?.axisTreatment ?? tokenAxisApplicability?.axisTreatment ?? null;
   const reportView = buildPersonReportView({
     dossier: f,
-    isProject: roles.includes(SubjectClass.PROJECT),
-    presentedVerdict,
-    scoreFinal: presentation.final,
-    publishedScore: presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null,
+    isProject: organizationAccount,
+    presentedVerdict: entityMethodologyMismatch ? "INCOMPLETE" : presentedVerdict,
+    scoreFinal: !entityMethodologyMismatch && presentation.final,
+    publishedScore: !entityMethodologyMismatch && presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null,
     // A withheld score names the step that fell short (the frozen scoring
     // outcome, the routing state, the axis coverage) before falling back to
     // generic readiness guidance, which never told the reader what to do.
-    withheldNote: withheldScoreReason(f)
+    withheldNote: (entityMethodologyMismatch ? "This account describes a company, but the saved assessment used a person methodology. Its person score cannot serve as a company score. Run a fresh company assessment; the historical result is retained unchanged." : null) ?? withheldScoreReason(f)
       ?? (legacyCoverageNotCaptured ? readinessGuidance : plainLanguageSummary(presentation.note ?? readinessGuidance)),
-    compositionRows: presentation.primaryScore ? compositionRows : [],
+    compositionRows: !entityMethodologyMismatch && presentation.primaryScore ? compositionRows : [],
     decisionRows: decisionBasisSummary.rows,
     capNote: report.cap_applied ? `limited by ${capLabel(report.cap_applied)}` : null,
     statusLine: [
