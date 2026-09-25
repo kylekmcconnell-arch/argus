@@ -140,7 +140,8 @@ const PONS_V1_FACTORIES = new Set([
 // PonsV2LauncherToken and the position still goes to a locker
 // (PonsV2LaunchLocker, per the verified ILaunchpadV2 source).
 const PONS_V2_FACTORIES = new Set([
-  "0x3711cea4feade896c913c68f01eda97cb06d1a42",
+  "0x3711cea4feade896c913c68f01eda97cb06d1a42", // LaunchDeployer: the contract that CREATEs the token (Blockscout's contractFactory)
+  "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e", // PonsV2LaunchFactory: what the token's own launchFactory() returns
 ]);
 // Doppler protocol token factories (DopplerERC20V1Factory): the creating
 // contract of every LONG and Bankr launch and of any other Doppler integrator.
@@ -263,14 +264,48 @@ export async function o1BaseAnnouncementVenue(token: string, etherscanKey: strin
 }
 
 export interface RobinhoodCreation { venue: string | null; factory: string; creator: string | null; txHash: string | null }
+// Pons v2 tokens answer for themselves: PonsV2LauncherToken exposes
+// launchFactory() (0x536dac9b) and deployer() (0xd5f39488). When the
+// Blockscout creation lookup is throttled or challenged (it is Cloudflare-
+// fronted and 429s under load - $HADES 2026-09-25 came back "venue not
+// identified" for exactly that reason), two RPC calls settle the venue.
+const RH_RPC = "https://rpc.mainnet.chain.robinhood.com";
+async function rhCall(to: string, data: string): Promise<string | null> {
+  try {
+    const r = await fetch(RH_RPC, {
+      method: "POST", headers: { "content-type": "application/json", "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] }),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!r.ok) return null;
+    const d = (await r.json()) as { result?: string };
+    return typeof d.result === "string" && /^0x[0-9a-f]*$/i.test(d.result) ? d.result : null;
+  } catch { return null; }
+}
+const wordAddress = (hex: string | null): string | null =>
+  hex && /^0x[0-9a-f]{64}$/i.test(hex) ? `0x${hex.slice(26).toLowerCase()}` : null;
+
+export async function robinhoodCreationFromRpc(token: string): Promise<RobinhoodCreation | null> {
+  const [factory, creator] = await Promise.all([rhCall(token, "0x536dac9b"), rhCall(token, "0xd5f39488")]);
+  const f = wordAddress(factory);
+  if (!f || !PONS_V2_FACTORIES.has(f)) return null;
+  return { venue: "pons", factory: f, creator: wordAddress(creator), txHash: null };
+}
+
 export async function robinhoodCreation(token: string): Promise<RobinhoodCreation | null> {
+  const indexed = await robinhoodCreationFromIndex(token);
+  if (indexed) return indexed;
+  return robinhoodCreationFromRpc(token);
+}
+
+async function robinhoodCreationFromIndex(token: string): Promise<RobinhoodCreation | null> {
   try {
     // The v2 REST route (/api/v2/addresses/{addr}) 500s on a LOWERCASE address
     // on this Blockscout instance - and the handler lowercases every address -
     // so this check silently returned null for every token since it shipped.
     // The v1 Etherscan-style route is case-tolerant and answers the actual
     // question directly: which FACTORY (if any) deployed this contract.
-    const r = await fetch(`https://robinhoodchain.blockscout.com/api?module=contract&action=getcontractcreation&contractaddresses=${token}`, { signal: AbortSignal.timeout(10000) });
+    const r = await fetch(`https://robinhoodchain.blockscout.com/api?module=contract&action=getcontractcreation&contractaddresses=${token}`, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "application/json" }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const d = (await r.json()) as any;
     const row = Array.isArray(d?.result) ? d.result[0] : null;

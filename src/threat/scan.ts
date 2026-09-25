@@ -12,7 +12,7 @@ import { auditToken, deployerWalletAddress, SEVERE_RISK_CATEGORY, type TokenDoss
 import { isRunnableTokenInput, type ResolvedInput } from "../lib/resolveInput";
 import type { TraceStep } from "../data/evidence";
 import type {
-  CodeReview, DeployerRep, ThreatCall, ThreatCheck, ThreatScan, ThreatVerdict,
+  CodeFlag, CodeReview, DeployerRep, ThreatCall, ThreatCheck, ThreatScan, ThreatVerdict,
 } from "./types";
 import { reviewCode } from "./codereview";
 import { classifyToken, type TokenClassification } from "./classify";
@@ -308,6 +308,22 @@ export function clusterSelling(sellers: SellStructure | null, chain: string): { 
 const ORIGINALITY_CLAIM_G = /\b(built (by|from the ground up|in[- ]house)|our (own|proprietary) (protocol|engine|router|tech|stack)|proprietary|in[- ]house|from (the )?ground up|true (privacy|cypherpunks?)|real (privacy|cypherpunks?)|cypherpunks?|\bOGs?\b|trench(es| warriors?)?|tor net|onions?\b)/gi;
 const ORIGINALITY_CLAIM = new RegExp(ORIGINALITY_CLAIM_G.source, "i");
 
+// A launchpad token's verified source usually ships with the venue's whole
+// project - hook, factory, locker, vault. Flags in those files are the
+// venue's code and belong to every token it mints, not to this one. When the
+// venue is known and the token's own contract file is named, flags outside
+// that file are split off and reported once, without points.
+export function splitVenueCodeFlags(code: CodeReview, launch: LaunchProvenance | null): { own: CodeFlag[]; venue: CodeFlag[] } {
+  if (!code.contractName || !launch || launch.kind !== "launchpad" || !launch.venue) return { own: code.flags, venue: [] };
+  const ownFile = `${code.contractName.toLowerCase()}.sol`;
+  const isOwn = (f: CodeFlag) => (f.file.split("/").pop() ?? f.file).toLowerCase() === ownFile;
+  // A single-file source that does not carry the contract's name (flattened
+  // verification) is still the token's own code.
+  const files = new Set(code.flags.map((f) => (f.file.split("/").pop() ?? f.file).toLowerCase()));
+  if (files.size <= 1 && !files.has(ownFile)) return { own: code.flags, venue: [] };
+  return { own: code.flags.filter(isOwn), venue: code.flags.filter((f) => !isOwn(f)) };
+}
+
 export function judge( // exported for unit tests only
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
@@ -551,7 +567,12 @@ export function judge( // exported for unit tests only
     // nothing; an unmeasured owner is treated as live (ownerRenounced is
     // false in both cases, and hiddenOwner is re-checked for frozen dossiers).
     const disarmed = (s.ownerRenounced && !s.hiddenOwner && !s.takeBack) || established;
-    for (const f of code.flags) {
+    const { own: ownFlags, venue: venueFlags } = splitVenueCodeFlags(code, launch);
+    if (venueFlags.length) {
+      const files = [...new Set(venueFlags.map((f) => f.file.split("/").pop() ?? f.file))];
+      warnings.push(`${venueFlags.length} code flag${venueFlags.length === 1 ? "" : "s"} sit in ${launch?.venue}'s shared launch contracts (${files.slice(0, 4).join(", ")}${files.length > 4 ? ", …" : ""}) - the venue's code, common to every token it mints, judged on the venue rather than on this token`);
+    }
+    for (const f of ownFlags) {
       const cite = ` [${f.file.split("/").pop()}:${f.line}]`;
       const line = f.detail.replace(/\.$/, "") + cite;
       if (f.severity === "critical") {
@@ -562,8 +583,8 @@ export function judge( // exported for unit tests only
         else { add(20); warnings.push(line); }
       } else if (f.severity === "medium") { soft(8); warnings.push(line); }
     }
-    if (!code.flags.some((f) => f.severity === "critical" || f.severity === "high"))
-      positives.push("No dangerous patterns in the source - no hidden mint, balance rewrite, or trading kill-switch found");
+    if (!ownFlags.some((f) => f.severity === "critical" || f.severity === "high"))
+      positives.push(`No dangerous patterns in the ${venueFlags.length ? "token's own " : ""}source - no hidden mint, balance rewrite, or trading kill-switch found`);
   } else if (code.checked && EVM(d.chain)) {
     soft(15);
     warnings.push("UNVERIFIED contract - the source is hidden, so nobody can read what the code really does");
@@ -780,8 +801,17 @@ export function judge( // exported for unit tests only
   // A confirmed Migrate.fun migration means the spread IS the claim distribution.
   // Otherwise, on Solana require RugCheck's common-funder proof before calling it
   // a bundle.
-  const bundleProven = !sol || (!isMigrationClaim && rc != null && rc.insidersDetected > 0);
-  if (d.bundleRisk === "high" && !established && bundleProven) { add(25); flags.push(`${d.insiderPct}% of supply sits in ${d.bundleCount} fresh wallets (pools excluded) - a bundled launch or coordinated snipe`); }
+  // On EVM the proof is the launch block: same-block buyers taking a material
+  // share (the snipe trace), or launch-block snipers in the sell tape. A high
+  // top-25 share on its own is concentration, not coordination - on Robinhood
+  // Chain the top holders are routinely the app's own 7702 accounts.
+  const evmSnipeProof = !sol && (
+    ((launch?.snipe?.sameBlockBuyers ?? 0) >= 3 && (launch?.snipe?.pctOfSupply ?? 0) >= 10)
+    || (sellers?.topSellers.filter((t) => t.sameBlockSniper).length ?? 0) >= 2
+  );
+  const bundleProven = sol ? (!isMigrationClaim && rc != null && rc.insidersDetected > 0) : evmSnipeProof;
+  if (d.bundleRisk === "high" && !established && bundleProven) { add(25); flags.push(`${d.insiderPct}% of supply sits in ${d.bundleCount} ${sol ? "fresh" : "launch-block"} wallets (pools excluded) - a bundled launch or coordinated snipe`); }
+  else if (d.bundleRisk === "high" && !established && !sol) { soft(10); warnings.push(`${d.insiderPct}% of supply sits in ${d.bundleCount} non-market wallets, but no launch-block coordination is on record - read as concentration, not a proven bundle${d.chain === "robinhood" ? "; on Robinhood Chain the largest holders are routinely the app's own smart accounts" : ""}`); }
   else if (d.bundleRisk === "high" && !established && isMigrationClaim) { positives.push(`${d.insiderPct}% of supply across ${d.bundleCount} wallets is the Migrate.fun claim distribution to the original holders - expected after a migration, not a coordinated bundle.`); }
   else if (d.bundleRisk === "high" && !established && sol) { soft(10); warnings.push(`${d.insiderPct}% of supply is spread across ${d.bundleCount} wallets, but they don't share a common funder - likely a DISTRIBUTION (airdrop / migration claim), not a coordinated bundle. If the token migrated (e.g. via Migrate.fun) the contract is new and the chart restarted; judge age and holders on that basis.`); }
   else if (d.bundleRisk !== "low") { soft(12); warnings.push(`${d.insiderPct}% of supply is concentrated in ${d.bundleCount} non-contract wallets (pools excluded)`); }
@@ -1049,10 +1079,10 @@ export function buildChecks( // exported for unit tests only
     chk("code", "code", "Source code read",
       !code.checked ? "na"
         : d.capApplied === "documented_scanner_concealment" || d.findings.some((f) => f.tone === "bad" && f.source === "contract source") ? "fail"
-        : code.verified ? (code.flags.some((f) => f.severity === "critical") ? "fail" : code.flags.some((f) => f.severity === "high") ? "warn" : "pass") : "warn",
+        : code.verified ? (splitVenueCodeFlags(code, launch).own.some((f) => f.severity === "critical") ? "fail" : splitVenueCodeFlags(code, launch).own.some((f) => f.severity === "high") ? "warn" : "pass") : "warn",
       !code.checked ? (sol ? "SPL - standard program, no per-token code" : code.system === "b20" ? "B20 system asset - no per-token code, nothing to verify" : "Not checked")
         : d.capApplied === "documented_scanner_concealment" || d.findings.some((f) => f.tone === "bad" && f.source === "contract source") ? "The source documents defeating a safety scanner"
-        : code.verified ? `${code.stats?.functions ?? 0} functions read, ${code.flags.length} flag${code.flags.length === 1 ? "" : "s"}` : "Source unverified - unreadable"),
+        : code.verified ? (() => { const sp = splitVenueCodeFlags(code, launch); return `${code.stats?.functions ?? 0} functions read, ${sp.own.length} flag${sp.own.length === 1 ? "" : "s"}${sp.venue.length ? ` on the token (${sp.venue.length} in ${launch?.venue}'s shared contracts)` : ""}`; })() : "Source unverified - unreadable"),
     chk("market", "market", "Market conduct",
       d.findings.some((f) => /wash-trad|fake-volume|cycled|manufactured/i.test(f.claim)) ? "fail" : d.findings.some(f => /turnover anomaly|liquidity anomaly/i.test(f.claim)) || (d.liquidityUsd ?? 0) < 15000 ? "warn" : "pass",
       // The ratio is printed beside every volume figure so the reader sees the
