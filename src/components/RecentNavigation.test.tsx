@@ -40,7 +40,8 @@ vi.mock("../graph/network", () => ({
   },
 }));
 vi.mock("../lib/recentScored", () => ({ recentScored: () => harness.entries }));
-vi.mock("../lib/auditlog", () => ({
+vi.mock("../lib/auditlog", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../lib/auditlog")>(),
   mergedLog: () => harness.entries,
   subscribeLog: () => () => undefined,
   presentedAuditVerdict: (entry: { verdict?: string; coverage?: string }) => (
