@@ -33,7 +33,7 @@ export function DataInventory() {
       <p className="mt-1 text-xs text-ink-dim">{data.dailySpend.basis}</p>
       <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-xs">
         <thead><tr><th>Dataset</th><th>Workspace records</th><th>Date field</th><th>Earliest</th><th>Latest</th></tr></thead>
-        <tbody>{data.datasets.map(d => <tr key={d.table}><td className="py-1">{d.table}</td><td>{d.rows ?? "Shared: schema only"}</td><td>{d.dateColumn ?? "Not recorded"}</td><td>{d.firstAt ?? "—"}</td><td>{d.lastAt ?? "—"}</td></tr>)}</tbody>
+        <tbody>{data.datasets.map(d => <tr key={d.table}><td className="py-1">{d.table}</td><td>{d.rows ?? "Shared: schema only"}</td><td>{d.dateColumn ?? "Not recorded"}</td><td>{d.firstAt ?? "Not recorded"}</td><td>{d.lastAt ?? "Not recorded"}</td></tr>)}</tbody>
       </table></div>
       <p className="mt-3 text-xs text-ink-dim">Read {data.capturedAt}. {data.limitations.join(" ")}</p>
     </>}
