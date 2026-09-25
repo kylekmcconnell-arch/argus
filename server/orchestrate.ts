@@ -1,3 +1,6 @@
+import { collectDiligenceBrief } from "./diligenceBrief";
+import { verifyTeamCompanyCandidates } from "./teamCompanyBinding";
+import { sameTeamIdentity } from "../src/lib/teamCompanyBinding";
 import { withProviderAccessScope, grokAccessFailure } from "./providerAccess";
 import { scoreComparisonNote } from "../src/lib/scoreComparison";
 import { withProviderDeadline } from "./providerDeadline.js";
@@ -1156,7 +1159,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // only the newest originals for cadence and tone. Passing the latter here
     // silently discarded the historical founder/team posts we had already paid
     // twitterapi.io to retrieve.
-    findTeam(ctx.handle, ctx.evidence.profile.display_name, posts, corpus.teamSignalPosts),
+    findTeam(ctx.handle, ctx.evidence.profile.display_name, posts, corpus.teamSignalPosts, domain),
     // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
     // domain or a project name — a big public project's roster lives off-X, and
     // many project accounts put no plain domain in the bio.
@@ -1261,7 +1264,16 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // is where the team page actually lives — mine it like Site recon would.
   // discoverAffiliations now covers the reverse-mention angle too (was a second
   // Grok search call — merged to halve intake search spend).
-  const [bySubject, people, siteTeam, pageTeam, operatorTeam, amplifiedTeam, reverseTeam, reverseBioTwitter] = await discoveryPromise;
+  const [bySubject, rawPeople, rawSiteTeam, pageTeam, operatorTeam, amplifiedTeam, rawReverseTeam, reverseBioTwitter] = await discoveryPromise;
+  const companyChecks = await verifyTeamCompanyCandidates([
+    ...rawPeople.map(member => ({ ...member, discoveryLane: "people" })),
+    ...rawSiteTeam.map(member => ({ ...member, discoveryLane: "site" })),
+    ...rawReverseTeam.map(member => ({ ...member, discoveryLane: "reverse" })),
+  ], siteUrl, ctx.handle);
+  ctx.evidence.teamCompanyChecks = companyChecks.checks;
+  const people: TeamMember[] = companyChecks.accepted.filter(member => member.discoveryLane === "people");
+  const siteTeam: TeamMember[] = companyChecks.accepted.filter(member => member.discoveryLane === "site");
+  const reverseTeam: TeamMember[] = companyChecks.accepted.filter(member => member.discoveryLane === "reverse");
 
   // Reverse-search leads are model output until the claimed person's LIVE bio
   // is fetched and really carries the claim. A confirmed bio is a first-party
@@ -1462,7 +1474,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     if (!teamCandidateSourceMatchesIdentity(t)) continue;
     // Never list the audited subject handle as founder (or any role) of itself.
     if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
-    const existing = (h && byHandle.get(h)) || (n && byName.get(n)) || null;
+    const existing = (h && byHandle.get(h)) || webTeam.find(member => sameTeamIdentity(member, t)) || null;
     if (existing) {
       if (!existing.handle && t.handle) {
         existing.handle = t.handle;
@@ -4396,8 +4408,8 @@ export function coldIntakeAuthorized(scope: RunAuditOptions["authorizedResearchS
  */
 export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Emit): void {
   const enrichment = evidence.companyEnrichment;
-  const officialWebsite = evidence.projectToken?.homepage
-    ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+  const officialWebsite = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl
+    ?? evidence.projectToken?.homepage;
   if (!enrichment || !companyEnrichmentMatchesOfficialDomain(enrichment, officialWebsite)) {
     if (evidence.companyEnrichment?.management?.length) {
       emit({
@@ -4413,16 +4425,15 @@ export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Em
   const management = enrichment.management ?? [];
   if (!management.length) return;
   const webTeam = evidence.webTeam ?? (evidence.webTeam = []);
-  const norm = (value?: string | null) => (value ?? "").trim().toLowerCase().replace(/^@/, "");
   let added = 0;
   let corroborated = 0;
   for (const person of management) {
     const name = person.name?.trim();
     if (!name) continue;
-    const existing = webTeam.find((member) => norm(member.name) === norm(name));
+    const existing = webTeam.find((member) => sameTeamIdentity(member, { name, linkedin: person.linkedin ?? undefined }));
     if (existing) {
-      // The display name is the only thing Monid and the existing row share.
-      // A name match corroborates the person's role, title and LinkedIn; it
+      // The exact LinkedIn identity matches this domain-bound provider row.
+      // That corroborates the recorded role and LinkedIn; it
       // never verifies an X handle, GitHub, or developer profile the model
       // guessed for that name. Those survive only when the identity link was
       // already deterministic before this merge (first-party bound), so a
@@ -6241,6 +6252,11 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     };
   }
   finishRuntimeStage("analyst", analystStartedAt);
+  // This score-neutral synthesis only reads frozen evidence after scoring.
+  // Scoped supplements must not buy an unrelated analytical call.
+  if (!options?.authorizedResearchScope) {
+    evidence.diligenceBrief = await collectDiligenceBrief(evidence);
+  }
 
   // A report with no complete axis set is still a useful, honest artifact. The
   // engine emits INCOMPLETE with null totals instead of turning missing data into

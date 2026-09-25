@@ -1,3 +1,5 @@
+import { personFactBindsAccount } from "../../src/lib/personFactBinding";
+import { COMPANY_DILIGENCE_TOPICS, PERSON_DILIGENCE_TOPICS } from "../../src/lib/diligenceTopics";
 import { deadlineFetch } from "../providerDeadline.js";
 import { createHash } from "node:crypto";
 import { captureTimestamp } from "../captureTime";
@@ -171,6 +173,7 @@ export interface BasicFactsDiscoveryResult {
 }
 
 interface QuestionTemplate {
+  idSuffix?: string;
   batch: Exclude<BasicFactsResearchBatch, "repair">;
   predicate: BasicFactPredicate;
   question: string;
@@ -182,7 +185,7 @@ const PROJECT_QUESTIONS: readonly QuestionTemplate[] = [
   { batch: "identity", predicate: "founder", question: "Who founded or co-founded the project? Return one person per answer.", critical: true },
   { batch: "identity", predicate: "executive", question: "Who currently leads or operates the project? Return one person and role per answer.", critical: true },
   { batch: "identity", predicate: "founded", question: "When was the project founded?" },
-  { batch: "track_record", predicate: "product", question: "What live products or services does the project provide?", critical: true },
+  { batch: "track_record", predicate: "product", question: "What live products or services does the project provide, how do they work, and what is their claimed edge? For privacy protocols identify mixer, FHE, zero-knowledge proofs, TEE, MPC or hybrid architecture from technical documentation; explain what is hidden, from whom, trust assumptions and limitations. Separate deployed implementation from roadmap. Return each named mechanism or differentiator separately with its exact supporting passage. A cryptographic primitive alone is not proof of a moat.", critical: true },
   { batch: "track_record", predicate: "launched", question: "When did its product, protocol, or mainnet launch?", critical: true },
   { batch: "track_record", predicate: "official_token", question: "What is the project's official crypto token, if any?", critical: true },
   { batch: "track_record", predicate: "public_security", question: "Does the organization have a publicly traded equity or debt security distinct from any crypto token?" },
@@ -205,16 +208,19 @@ const PROJECT_QUESTIONS: readonly QuestionTemplate[] = [
 ];
 
 const PERSON_QUESTIONS: readonly QuestionTemplate[] = [
-  { batch: "identity", predicate: "official_identity", question: "What is this person's source-backed public identity?", critical: true },
-  { batch: "identity", predicate: "current_role", question: "What roles does this person currently hold? Return one role and organization per answer.", critical: true },
-  { batch: "identity", predicate: "prior_role", question: "What material prior roles did this person hold? Return one role and organization per answer." },
-  { batch: "identity", predicate: "education", question: "What education or credentials are explicitly documented? Return one institution or credential per answer." },
+  { batch: "identity", predicate: "official_identity", question: "What identity has this person publicly disclosed, and which public aliases and professional profiles are explicitly linked to that exact account? Preserve pseudonyms when no public identity link exists. Do not uncover private identities using leaks, private contact data or speculative cross-account joins.", critical: true },
+  { batch: "identity", predicate: "current_role", question: "What roles does this person currently hold: founder, executive, employee, engineer, investor, partner or principal? State the exact organization, capacity and dates. Verify employer website and activity against the official company before linking a same-named employer. Return one role and organization per answer.", critical: true },
+  { batch: "identity", predicate: "prior_role", question: "What material prior roles did this person hold? Include publicly documented military service only when relevant, with branch, role and service dates; never infer distinction or competence from service alone. Return one role and organization per answer." },
+  { batch: "identity", predicate: "education", question: "What education, credentials or accolades are explicitly documented? Distinguish attendance from graduation and self-report from institutional confirmation. Return one institution or credential per answer." },
   { batch: "identity", predicate: "founder", question: "Which companies or projects did this person found or co-found? Return one venture per answer." },
   { batch: "identity", predicate: "executive", question: "Which executive roles are source-backed? Return one role and organization per answer." },
   { batch: "track_record", predicate: "founded", question: "When were the person's principal ventures founded? Return one dated venture per answer." },
   { batch: "track_record", predicate: "product", question: "What products or protocols did this person materially build or lead? Return one per answer." },
   { batch: "track_record", predicate: "exit", question: "What acquisitions, IPOs, sales, shutdowns, or other venture exits are source-backed? Return one event per answer." },
-  { batch: "track_record", predicate: "track_record", question: "What concrete operating or investment outcomes establish this person's track record? Return one measurable outcome per answer." },
+  { batch: "track_record", predicate: "track_record", question: "What concrete operating or investment outcomes establish this person's track record? Identify their actual contribution, venture dates, outcomes, recurring co-founders and collaborators with publicly linked aliases. Distinguish failure, allegations and proven misconduct. Explain role-relevant strengths and limitations without predicting success from prestige or network size. Return one measurable outcome per answer." },
+  { batch: "track_record", predicate: "repository", question: "For an engineer or coding founder, which GitHub account and repositories are publicly bound to this person? Identify original contributions, shipped work, maintenance, tests and security limitations; stars or organization membership do not prove authorship." },
+  { batch: "track_record", predicate: "partnership", question: "Which co-founders and collaborators have documented work with this person, on which ventures and dates? Preserve public aliases and exact relationship sources; co-mentions or follows are not collaboration." },
+  { batch: "structure_risk", predicate: "treasury", question: "Which wallets has this person publicly disclosed or proved control of? Record chain, address, attribution source and date. A transfer, exchange deposit or aggregator label alone does not prove ownership or common control; never infer a private wallet. Distinguish attributed transactions from allegations about rugs or successful ventures." },
   { batch: "structure_risk", predicate: "official_token", question: "Which crypto token is officially tied to a venture this person controls, if any? Do not report public-company stock here.", critical: true },
   { batch: "structure_risk", predicate: "public_security", question: "Which publicly traded equity or debt security is tied to a company this person controls, if any? Do not report a crypto token here.", critical: true },
   { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events explicitly name this person, and what is each event's stated status? Never transfer a company-only event to the person." },
@@ -279,7 +285,7 @@ const BUSINESS_ORGANIZATION_QUESTIONS: readonly QuestionTemplate[] = [
 ];
 
 const FOUNDER_REPAIR_PREDICATES = new Set<BasicFactPredicate>(
-  PERSON_QUESTIONS.map((question) => question.predicate),
+  PERSON_QUESTIONS.filter((question) => !["repository", "partnership", "treasury"].includes(question.predicate)).map((question) => question.predicate),
 );
 
 const REPAIR_PRIORITY: Record<BasicFactsResearchAudience, readonly BasicFactPredicate[]> = {
@@ -371,15 +377,21 @@ export function basicFactsResearchQuestions(ctx: CollectContext): BasicFactsRese
       : businessOrganization ? BUSINESS_ORGANIZATION_QUESTIONS : PERSON_QUESTIONS;
   const questionPrefix = institutionalInvestor ? "investor_org" : businessOrganization ? "organization" : audience;
   const founderSubject = ctx.evidence.roles.some((role) => String(role) === "FOUNDER");
-  return templates.map((template) => ({
-    id: `${questionPrefix}.${template.predicate}`,
+  const topics = audience === "project" || institutionalInvestor || businessOrganization
+    ? COMPANY_DILIGENCE_TOPICS : PERSON_DILIGENCE_TOPICS;
+  const expanded: readonly QuestionTemplate[] = [...templates, ...topics.map(topic => ({
+    idSuffix: `diligence_${topic.id}`, predicate: topic.predicate, question: topic.question,
+    batch: "track_record" as const, critical: false,
+  }))];
+  return expanded.map((template) => ({
+    id: `${questionPrefix}.${template.idSuffix ?? template.predicate}`,
     audience,
     batch: template.batch,
     predicate: template.predicate,
     question: template.question,
     critical: Boolean(
       template.critical
-      || (audience !== "project" && founderSubject && FOUNDER_REPAIR_PREDICATES.has(template.predicate)),
+      || (!template.idSuffix && audience !== "project" && founderSubject && FOUNDER_REPAIR_PREDICATES.has(template.predicate)),
     ),
   }));
 }
@@ -1218,6 +1230,8 @@ function discoveryPrompt(
     targetedIdentityInstruction,
     projectLeadershipInstruction,
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
+    !organizationSubject && audience !== "project" ? "Person diligence: assess founders through venture outcomes and leadership, engineers through attributable shipped code, employees through actual role scope, and investors through personal investment responsibility and outcomes rather than a whole firm portfolio. Search public court and regulatory records with exact identity, jurisdiction, dates and procedural status; Reddit and social accusations are discovery leads only. No match or inaccessible database is not a clean record. Public military and education history may inform a limited, evidence-based role-fit thesis, never an automatic positive or negative score." : "",
+    audience === "project" ? "What is their edge? Separate claimed technical or business differentiation from demonstrated defensibility. Compare alternatives only with sources and dates. Look for reproducible performance, proprietary assets, distribution, integrations, switching costs or network effects. State when a moat is unestablished. For privacy systems, zero-knowledge proofs do not automatically mean all transaction data is private; specify actual privacy guarantees and trust assumptions." : "",
     "Read the official homepage, About/story page, docs and footer for all named operators, including pseudonyms. Preserve the stated role and source; do not require LinkedIn or invent a legal name. Separate project founding, original token launch, migrations, historical products and future product launches. A replacement contract creation date is not the project founding date.",
     "Record explicit fair-launch/launchpad origin, product stage, and any later funding independently. A venture affiliation or backer statement is not a funding round or a raised amount. Optional treasury, governance, allocation and vesting disclosures are not mandatory for a fair launch. Published supply and FDV ratios do not prove absence of locks or minting rights.",
     "Security audit scope must distinguish a standard launchpad program from bespoke token code, bridges and products. Prelaunch products have no production audit expectation yet; alpha/beta products with live funds still require security assessment. Legal events require a named, attributed event and procedural status; no event found is not an allegation. Related-party conflicts mean documented overlapping financial interests or counterparties controlled by insiders, not merely founders working together.",
@@ -4382,15 +4396,16 @@ function deterministicQuestionAnswerRefs(
   const refs = facts
     .filter((fact) =>
       (fact.status === "verified" || fact.status === "corroborated")
-      && (fact.questionId === question.id || fact.predicate === question.predicate)
+      && (fact.questionId === question.id || (!question.id.includes(".diligence_") && fact.predicate === question.predicate))
       && (!personSubject || fact.predicate !== "official_identity" || identityFactBindsExactAuditedHandle(ctx, fact))
-      && (!personSubject || fact.predicate === "official_identity" || Boolean(ctx.evidence.profile.identity_binding))
+      && (!personSubject || fact.predicate === "official_identity" || personFactBindsAccount(fact, ctx.evidence.profile))
       && !(
         (question.audience === "person" || question.audience === "investor")
         && fact.predicate === "legal_regulatory_event"
         && fact.attributionScope !== "direct_subject"
       ))
     .map((fact) => fact.factId);
+  if (question.id.includes(".diligence_")) return refs;
   const add = (ref: string) => { if (!refs.includes(ref)) refs.push(ref); };
 
   if (

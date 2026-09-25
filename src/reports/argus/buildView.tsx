@@ -1267,6 +1267,7 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
 
   return {
     subjectName: name,
+    diligenceBrief: input.dossier.diligenceBrief,
     subjectKind: input.isProject ? "project" : "person",
     handle: f.handle,
     avatarUrl: f.avatar_url ?? null,

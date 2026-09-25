@@ -38,11 +38,12 @@ describe("mergeManagementIntoWebTeam", () => {
     expect(emit).toHaveBeenCalledWith(expect.objectContaining({ source: "monid", tone: "good" }));
   });
 
-  it("corroborates an existing unverified member instead of duplicating them", () => {
+  it("corroborates an existing member only when the LinkedIn identity matches", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.profile.website = "https://uniswap.org";
     evidence.webTeam = [{
       name: "Hayden Adams",
+      linkedin: "linkedin.com/in/haydenadams",
       role: "team",
       source: "web/LinkedIn search",
       evidence_origin: "model_lead",
@@ -92,10 +93,11 @@ describe("mergeManagementIntoWebTeam", () => {
     ]);
     mergeManagementIntoWebTeam(evidence, vi.fn());
 
-    expect(evidence.webTeam).toHaveLength(1);
-    const row = evidence.webTeam[0];
+    expect(evidence.webTeam).toHaveLength(2);
+    expect(evidence.webTeam[0]).toMatchObject({ artifact_verified: false, evidence_origin: "model_lead", handle: "@johnsmith_wrongguy" });
+    const row = evidence.webTeam[1];
     expect(row).toMatchObject({
-      name: "John Smith",
+      name: "john smith",
       role: "CFO",
       linkedin: "linkedin.com/in/john-smith-cfo",
       artifact_verified: true,
@@ -113,6 +115,7 @@ describe("mergeManagementIntoWebTeam", () => {
     evidence.profile.website = "https://uniswap.org";
     evidence.webTeam = [{
       name: "Hayden Adams",
+      linkedin: "linkedin.com/in/haydenadams",
       handle: "@haydenzadams",
       role: "team",
       source: "subject posts",

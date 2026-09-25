@@ -119,6 +119,8 @@ declare module "./evidence" {
 }
 
 export interface Dossier {
+  diligenceBrief?: import("../lib/diligenceBrief").DiligenceBrief;
+  teamCompanyChecks?: import("../lib/teamCompanyBinding").TeamCompanyCheck[];
   handle: string;
   display_name: string;
   resolved_name?: string;
@@ -620,7 +622,9 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     } : {}),
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
+    ...(ev.diligenceBrief ? { diligenceBrief: structuredClone(ev.diligenceBrief) } : {}),
     webTeam: groundedWebTeam,
+    ...(ev.teamCompanyChecks ? { teamCompanyChecks: structuredClone(ev.teamCompanyChecks) } : {}),
     ...(organizationRelationships.length ? { organizationRelationships } : {}),
     ...(webTeamLeads.length ? { webTeamLeads } : {}),
     ...(ev.leaderDepartures?.length

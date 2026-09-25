@@ -9,13 +9,19 @@ export function researchExcerpt(text: string, name: string): string {
   return plain.slice(Math.max(0, at - 240), Math.max(0, at - 240) + 1800);
 }
 const quoted = (s: string) => `"${s.replace(/["\\\r\n]/g, " ").slice(0, 120)}"`;
-export function personResearchQuestions(member: Pick<WebTeamMember, "name" | "linkedin" | "handle">, company: string) {
+export function personResearchQuestions(member: Pick<WebTeamMember, "name" | "linkedin" | "handle"> & { role?: string }, company: string) {
   const identity = `${quoted(member.name)} ${quoted(company)}`;
+  const role = member.role ?? "";
+  const roleResearch = /engineer|developer|cto|coder/i.test(role)
+    ? { question: "Attributable engineering work", query: `${identity} (site:github.com OR release OR maintainer OR contributor)` }
+    : /investor|partner|principal|venture capital/i.test(role)
+      ? { question: "Personal investment responsibility and outcomes", query: `${identity} (investment OR board OR portfolio OR realized OR exit)` }
+      : { question: "Venture outcomes and collaborators", query: `${identity} (acquired OR shutdown OR cofounder OR collaborator)` };
   return [
     { question: "Identity and LinkedIn employment", query: member.linkedin ? `${quoted(member.linkedin)} ${identity}` : `site:linkedin.com/in/ ${identity}` },
     { question: "Earlier companies and projects", query: `${quoted(member.name)} (founder OR cofounder OR previously OR former)` },
-    { question: "Venture outcomes and collaborators", query: `${quoted(member.name)} (acquired OR shutdown OR cofounder OR lawsuit) ${quoted(company)}` },
-    { question: "Public X project history", query: `site:x.com ${identity} (founded OR building OR launched)` },
+    roleResearch,
+    { question: "Attributable public records and disputed claims", query: `${identity} (court OR regulator OR judgment OR dismissed OR site:reddit.com)` },
   ];
 }
 export async function collectPersonResearch(member: WebTeamMember, company: string, key: string,

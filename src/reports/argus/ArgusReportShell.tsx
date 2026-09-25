@@ -29,6 +29,7 @@ export interface MoreAction {
 }
 
 export interface ArgusReportShellProps {
+  subjectKind?: "person" | "project" | "token";
   runtime: Omit<ArgusReportRuntime, "readOnly" | "goTo" | "toast">;
   shareView: boolean;
   breadcrumbName: string;
@@ -279,7 +280,7 @@ function ShellBody(props: ArgusReportShellProps & {
             aria-current={item.id === chapter ? "page" : undefined}
             onClick={() => setChapter(item.id)}
           >
-            {item.label}
+            {props.subjectKind === "person" ? ({ product: "Background & track record", people: "Collaborators", market: "Venture markets" } as Partial<Record<ChapterId, string>>)[item.id] ?? item.label : item.label}
           </button>
         ))}
       </nav>
@@ -333,7 +334,7 @@ function ShellBody(props: ArgusReportShellProps & {
         ))}
         <footer className="rd-footer">
           <span>ARGUS · Evidence before conviction.</span>
-          <span data-report-identity="true">{props.footerNote} · Presentation 2026-09-24.4</span>
+          <span data-report-identity="true">{props.footerNote} · Presentation 2026-09-25.1</span>
           <DisclosureButton id="scope" className="textbtn">Scope &amp; limitations</DisclosureButton>
         </footer>
         <InlinePanel id="scope" label="Scope and limitations">{() => props.scope}</InlinePanel>
