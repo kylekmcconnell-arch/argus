@@ -15,6 +15,7 @@ import {
 } from "../lib/investigation";
 import { Avatar } from "./Avatar";
 import { personAvatar, trustedOfficialTeamPortraitUrl, trustedOfficialXAvatarUrl, xAvatar } from "../lib/avatars";
+import { projectAccountResultError } from "../lib/projectAccountResult";
 import { OnChainForensics } from "./OnChainForensics";
 import { deployerRoleLabel } from "../token/audit";
 import { ProjectResearch } from "./ProjectResearch";
@@ -776,7 +777,14 @@ export function InvestigationReport({
     versionContext?.reportVersionId
     || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
   );
-  const { token, projectX, siteUrl, recon, projectAccount, founders, deployerTrail } = inv;
+  const { token, projectX, siteUrl, recon, founders, deployerTrail } = inv;
+  const projectRoutingError = inv.projectAccount
+    ? projectAccountResultError(inv.projectAccount, projectX ?? inv.projectAccount.handle) : null;
+  // Retain the historical source ledger, but never use a mismatched assessment
+  // as the company's score. Identity/domain gates on individual facts still apply.
+  const projectAccount = inv.projectAccount;
+  const projectAccountAudit = projectRoutingError
+    ? { state: "failed" as const, note: projectRoutingError } : inv.projectAccountAudit;
   // Social conversation is project-level evidence. Older investigation saves
   // often persisted it on the embedded project-account dossier while the
   // report looked only at token.socialActivity, which is why Prologue had no
@@ -792,7 +800,7 @@ export function InvestigationReport({
     })
     : { subjectLeads: [], relatedEntityLeads: [], subjectAdverseLeads: [] };
   const accountGoverning = accountReport?.role_reports?.find((rr) => rr.role === accountReport.governing_role);
-  const accountAxes = accountGoverning ? Object.entries(accountGoverning.axes ?? {}) : [];
+  const accountAxes = accountGoverning && !projectRoutingError ? Object.entries(accountGoverning.axes ?? {}) : [];
   const projectCompositionRows = accountAxes.map(([axis, value]) => ({
     axis,
     label: axisLabel(axis),
@@ -858,11 +866,11 @@ export function InvestigationReport({
   const diligenceChecks = applyReportCheckContract("investigation", reconcileInvestigationChecks(
     inv.versionContext ? inv.versionContext.checks : tokenChecks(token),
     token.address,
-    projectAccount,
-    inv.projectAccountAudit,
+    projectRoutingError ? null : projectAccount,
+    projectAccountAudit,
     inv.projectAccountBinding,
   ));
-  const facets = investigationFacets(inv, diligenceChecks);
+  const facets = investigationFacets({ ...inv, projectAccount: projectRoutingError ? null : projectAccount, projectAccountAudit }, diligenceChecks);
   const readiness = deriveDecisionReadiness(diligenceChecks);
   const clearance = clearanceCoverage(diligenceChecks);
   const observedTokenMeta = verdictMeta(token.verdict);
@@ -911,7 +919,7 @@ export function InvestigationReport({
     projectAccount?.report.composite_verdict === "PASS" && projectReadiness?.status !== "ready",
   );
   const projectReviewOpen = Boolean(
-    projectPositiveNeedsQualification || projectAccount?.report.composite_verdict === "INCOMPLETE",
+    projectRoutingError || projectPositiveNeedsQualification || projectAccount?.report.composite_verdict === "INCOMPLETE",
   );
   const presentedProjectVerdict = projectAccount?.report.composite_verdict;
   const projectAccountHeadline = projectAccount
@@ -1528,7 +1536,7 @@ export function InvestigationReport({
             composition={tokenCompositionRows.length > 0 ? tokenCompositionRows : undefined}
             secondaryScore={projectAccount && accountReport ? {
               label: "Project diligence score",
-              score: typeof accountReport.governing_score === "number" ? accountReport.governing_score : null,
+              score: !projectRoutingError && typeof accountReport.governing_score === "number" ? accountReport.governing_score : null,
               verdictLabel: verdictMeta(accountReport.composite_verdict).label,
               context: "Who runs the project, what it has built, and what evidence supports its claims about backing and use.",
               composition: projectCompositionRows,
@@ -1536,7 +1544,7 @@ export function InvestigationReport({
               // A withheld score states its own cause. "N/A, not measured" with
               // no reason reads as a broken product rather than as the honest
               // coverage limit it is.
-              unavailableCopy: withheldScoreReason(projectAccount)
+              unavailableCopy: projectRoutingError ?? withheldScoreReason(projectAccount)
                 ?? "The linked project report did not publish a diligence score.",
             } : {
               label: "Project diligence score",
@@ -1544,7 +1552,7 @@ export function InvestigationReport({
               verdictLabel: "Not assessed",
               context: "Project diligence is separate from token trading and safety measurements.",
               composition: [],
-              unavailableCopy: inv.projectAccountAudit?.note
+              unavailableCopy: projectAccountAudit?.note
                 ?? "No linked project assessment was saved. The token score does not assess what the project does or who operates it.",
             }} legacy={<div className="investigation-story rd-legacy">
       {rescanError && (

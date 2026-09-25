@@ -497,6 +497,25 @@ function personFactBindsAccount(fact, profile) {
   });
 }
 
+// src/lib/subjectBio.ts
+function subjectBioScope(bio, handle) {
+  const subject = handle.replace(/^@/, "").toLowerCase();
+  const creditedHandles = [];
+  let selfDescription = bio.replace(/\b(?:(?:built|founded|created|developed|engineered)\s+by|(?:our\s+)?(?:co-?founder|founder|ceo|cto|developer|dev|engineer)\s*:)\s*@([a-z0-9_]{1,30})\b/gi, (text2, other) => {
+    if (other.toLowerCase() === subject) return text2;
+    creditedHandles.push(other.toLowerCase());
+    return " ";
+  });
+  selfDescription = selfDescription.replace(/([|\n.;])\s*(?:dev|developer|founder|co-?founder|ceo|cto)\s+@([a-z0-9_]{1,30})\b/gi, (text2, separator, other, offset) => {
+    if (other.toLowerCase() === subject || !/\b(?:protocol|platform|exchange|privacy|marketplace|app)\b/i.test(bio.slice(0, offset))) return text2;
+    creditedHandles.push(other.toLowerCase());
+    return separator;
+  });
+  const personal = /\b(?:I(?:'m| am| build| founded| work)|my\s|founder\s+(?:of|at)|co-?founder\s+(?:of|at)|(?:engineer|developer|dev|ceo|cto)\s+(?:at|of)|building\s+@)\b/i.test(selfDescription);
+  const product = /\b(?:protocol|platform|exchange|privacy|marketplace|(?:trading|payments?|web|mobile) app|official account)\b/i.test(selfDescription);
+  return { selfDescription, creditedHandles: [...new Set(creditedHandles)], brandDescription: creditedHandles.length > 0 && product && !personal };
+}
+
 // src/lib/investorSubject.ts
 var INSTITUTION_LANGUAGE = /\b(?:venture(?:s)?|venture capital|capital partners?|investment (?:firm|fund|manager)|fund management|portfolio|accelerator|family office)\b/i;
 var FIRST_PERSON_ORGANIZATION = /\b(?:we|our|us)\s+(?:back|fund|invest|partner|support|manage|help)\b/i;
@@ -511,6 +530,8 @@ function isInstitutionalInvestorAccount(evidence) {
 }
 function isOrganizationAccount(evidence) {
   if (evidence.roles.some((role) => String(role) === "PROJECT")) return true;
+  const profile = evidence.profile;
+  if (!profile.identity_binding && !profile.resolved_name?.trim() && profile.profile_provider === "twitterapi" && profile.profile_collection_state === "resolved" && Number.isFinite(Date.parse(profile.profile_captured_at ?? "")) && canonicalOfficialWebsite(profile.website) !== null && subjectBioScope(profile.bio, profile.handle).brandDescription) return true;
   if (isInstitutionalInvestorAccount(evidence)) return true;
   if (!evidence.roles.some((role) => String(role) === "AGENCY")) return false;
   if (evidence.profile.resolved_name?.trim()) return false;
@@ -21908,6 +21929,7 @@ var ORIENTATION_SYSTEM = [
   "Write what as polished report-opening copy, not a transcript of the X bio: one or two compact sentences in plain English from the packet, official site, and live X of THIS handle.",
   "Write with category fluency for a reader who already understands the field: identify the entity in the vocabulary its users would use, the core job it performs, and why someone uses it. Think of explaining the Yankees to a baseball fan as an MLB team with a competitive role and fan experience, not as an official website or social account.",
   "First decide whether the bound subject is an organization/product brand or an individual. Words describing users or features, such as community, chat, fans, members, or contributors, do not make a brand account a person.",
+  "Resolve the grammatical subject before assigning roles: 'built by @alice', 'founder: @alice' and 'dev @alice' describe a separate account, not the identity of this account. A privacy protocol naming its developer remains PROJECT. A person's 'I build @protocol' or 'founder of @protocol' remains a person. Keep company identity separate from its people even when no token has been verified.",
   "Lead with the product or protocol function. Then state its intended user, network, mechanism, or token role only when the bound artifacts support it.",
   "For a PROJECT, what must explain a concrete user action or product mechanism such as trading, lending, borrowing, staking, supplying liquidity, using a vault, or operating software. Merely saying that a project has an official site, exists on a chain, or is linked to a token is not a product explanation.",
   "When the official site contains a multi-product application, summarize the actual first-party product suite rather than describing site ownership or repeating the homepage slogan.",
@@ -40345,10 +40367,12 @@ function providerBackedRoles(evidence) {
   let verifiedOfficialProjectProfile = false;
   let investorBeyondBio = false;
   const profileDeclaredToken = evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(evidence.profile.profile_captured_at ?? "")) ? declaredTokenFromBio(evidence.profile.bio) : null;
-  const projectBound = projectOrientationBound(evidence);
-  const individualHuman = Boolean(evidence.profile.identity_binding) || Boolean(evidence.profile.resolved_name?.trim()) || evidence.subjectOrientation?.kind === "FOUNDER" && orientationHandleBound(evidence);
+  const bioScope = subjectBioScope(evidence.profile.bio, evidence.profile.handle);
+  const contextualBrand = bioScope.brandDescription && evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(evidence.profile.profile_captured_at ?? "")) && canonicalOfficialWebsite(evidence.profile.website) !== null && !evidence.profile.identity_binding && !evidence.profile.resolved_name?.trim();
+  const projectBound = projectOrientationBound(evidence) || contextualBrand;
+  const individualHuman = Boolean(evidence.profile.identity_binding) || Boolean(evidence.profile.resolved_name?.trim()) || !contextualBrand && evidence.subjectOrientation?.kind === "FOUNDER" && orientationHandleBound(evidence);
   const canonicalTokenProjectBound = evidence.projectToken?.verified === true && Boolean(evidence.projectToken.officialX) && handlesMatch(evidence.projectToken.officialX ?? "", evidence.profile.handle) && !evidence.profile.resolved_name?.trim() && subjectAdoptsCanonicalToken(evidence);
-  const selfDescription = evidence.profile.bio.trim() || (evidence.profile.self_post_sample ?? "").trim();
+  const selfDescription = bioScope.selfDescription.trim() || (evidence.profile.bio.trim() ? "" : (evidence.profile.self_post_sample ?? "").trim());
   if (evidence.profile.profile_collection_state === "resolved" && selfDescription) {
     const classification = classifySubject(selfDescription);
     const profileRoles = classification.applicable_classes;
@@ -40432,6 +40456,7 @@ function providerBackedRoles(evidence) {
     const other = [...roles].filter((role) => role !== "PROJECT" /* PROJECT */);
     if (other.length === 0) roles.add("PROJECT" /* PROJECT */);
   }
+  if (contextualBrand) roles.add("PROJECT" /* PROJECT */);
   return [...roles];
 }
 function subjectAdoptsCanonicalToken(evidence) {

@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Investigation } from "../lib/investigation";
 import type { TokenDossier } from "../token/audit";
+import type { Dossier } from "../data/dossier";
+import { buildReport, SUBJECTS } from "../data/subjects";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -112,6 +114,15 @@ function investigation(overrides: Partial<Investigation> = {}): Investigation {
 
 let container: HTMLDivElement;
 let root: Root;
+
+it("never relabels an embedded founder score as company diligence", () => {
+  const base = buildReport(SUBJECTS[1]);
+  const account = { ...base, handle: "@argusbrand", display_name: "Argus", bio: "Building software", report: { ...base.report, roles: ["FOUNDER"], governing_score: 97, composite_verdict: "PASS" } } as Dossier;
+  render(investigation({ projectX: "@argusbrand", projectAccount: account }));
+  expect(container.textContent).toContain("No person score was used as a company score");
+  expect(container.textContent).not.toContain("97/100");
+  expect(account.report.governing_score).toBe(97);
+});
 
 function render(inv: Investigation, onReAudit?: () => void, onOpenBrief?: () => void, shareView?: boolean) {
   act(() => {

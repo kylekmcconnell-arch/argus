@@ -22,6 +22,7 @@ import { collectTokenShipping } from "./shippingClient";
 import type { RunnableTokenInput } from "./resolveInput";
 import { runRecon, type Recon } from "../collect/recon";
 import { streamAudit, probeBackend } from "./live";
+import { projectAccountResultError } from "./projectAccountResult";
 import type { RetrievalStage } from "../collect/retrieve";
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
@@ -583,7 +584,7 @@ export function streamInvestigation(
           if (projectAccountBinding?.status === "mismatch") projectX = null;
         } else if (analystLive) {
           h.onHop("backgrounding the project's X account");
-          h.onStep(milestone("Step 3 · Background the project account", `Live people-audit of ${projectX}. This is the project's own account, not a named founder.`, "neutral"));
+          h.onStep(milestone("Step 3 · Background the project account", `Company investigation of ${projectX}. People named by the project remain separate subjects.`, "neutral"));
           const projectAuditResult = await new Promise<
             { dossier: Dossier; error: null } | { dossier: null; error: string }
           >((resolve) => {
@@ -592,8 +593,13 @@ export function streamInvestigation(
             // report (that's what made @Uniswap appear as a loose "PERSON" card).
             abortLive = streamAudit(boundProjectX, true, {
               onStep: (s) => { if (!aborted) h.onStep(s); },
-              onDone: (d) => resolve({ dossier: d, error: null }),
-              onError: (error) => resolve({ dossier: null, error }),
+              onDone: (d) => {
+                const mismatch = projectAccountResultError(d, boundProjectX);
+                resolve(mismatch ? { dossier: null, error: mismatch } : { dossier: d, error: null });
+              },
+              onError: (error, failure) => resolve({ dossier: null, error: failure?.kind === "stream_dropped"
+                ? "The company-audit connection was interrupted before a result arrived. This does not establish a person classification or a company score. No automatic paid retry was launched."
+                : error }),
             }, opts?.intent, {
               tokenAddress: token.address,
               tokenChain: token.chain,

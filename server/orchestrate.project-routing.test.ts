@@ -54,6 +54,27 @@ function resolvedProjectProfile(bio: string, website: string | null | undefined 
 }
 
 describe("provider-backed project routing", () => {
+  it("keeps a tokenless privacy brand separate from the developer it credits even after a wrong model orientation", () => {
+    const evidence = resolvedProjectProfile("A privacy protocol. Built by @shlok_dm. Founder: @alice", "https://hades.exchange/");
+    evidence.profile.handle = "@hades_privacy";
+    evidence.subjectOrientation = { kind: "FOUNDER", what: "A developer", audience: "", boundHandle: "@hades_privacy", boundDomain: null, sourceUrls: ["https://x.com/hades_privacy"] };
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.PROJECT]);
+  });
+
+  it("does not transfer a company's protocol words onto its personally identified founder", () => {
+    const evidence = resolvedProjectProfile("Founder of @hades_privacy, a privacy protocol. CTO: @alice", "https://hades.exchange/");
+    evidence.profile.handle = "@shlok_dm";
+    evidence.profile.identity_binding = "independent_exact_handle";
+    expect(providerBackedRoles(evidence)).toContain(SubjectClass.FOUNDER);
+    expect(providerBackedRoles(evidence)).not.toContain(SubjectClass.PROJECT);
+  });
+
+  it("does not promote an unfetched brand description into a company route", () => {
+    const evidence = emptyEvidence("@unfetched");
+    evidence.profile.bio = "A privacy protocol. Built by @alice";
+    evidence.profile.website = "https://unfetched.example/";
+    expect(providerBackedRoles(evidence)).toEqual([]);
+  });
   it("classifies an empty-bio account from its own posts instead of refusing to route", () => {
     // The @stonkbrokers case: empty bio, no website, 11 followers. Routing read
     // only the bio, found nothing, and published INCOMPLETE with zero
