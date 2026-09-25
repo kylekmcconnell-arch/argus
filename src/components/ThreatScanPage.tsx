@@ -588,6 +588,11 @@ export function HandleProvenance({ h, launchedAt }: { // exported for unit tests
           })}
         </div>
       ))}
+      {h.status === "renamed" && h.currentNameInArchive === false && (
+        <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-caution)" }}>
+          The archive has no sighting of @{h.handle} at all - it holds this account only under the names above, so the rename is more recent than the archive's own coverage.
+        </p>
+      )}
       {h.handleReused && (
         <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-avoid)" }}>
           This screen name has been worn by {accounts.length} different account ids - the followers and history on it may not belong to the account using it now.

@@ -31,6 +31,30 @@ function stubUpstream(payload: unknown, status = 200) {
   return fetchMock;
 }
 
+const json = (payload: unknown) => Promise.resolve(new Response(JSON.stringify(payload), {
+  status: 200, headers: { "content-type": "application/json" },
+}));
+
+// The by-name route answers `{accounts:[...]}`; the by-id route answers with the
+// one account bare. `byId` is keyed on the numeric id in the path.
+function stubRoutes(opts: { byName?: unknown; byId?: Record<string, unknown>; resolveId?: unknown }) {
+  const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+    const url = String(input);
+    const id = url.match(/^https:\/\/api\.memory\.lol\/v1\/tw\/id\/(\d+)$/)?.[1];
+    if (id) {
+      const hit = opts.byId?.[id];
+      return hit ? json(hit) : Promise.resolve(new Response("no", { status: 404 }));
+    }
+    if (url.startsWith("https://api.memory.lol/v1/tw/")) return json(opts.byName ?? { accounts: [] });
+    if (url.startsWith("https://api.twitterapi.io/")) {
+      return opts.resolveId ? json(opts.resolveId) : Promise.resolve(new Response("no", { status: 404 }));
+    }
+    throw new Error(`unexpected upstream call: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 async function run(query: Record<string, string>) {
   const { res, captured } = response();
   await handler({ query } as unknown as VercelRequest, res as unknown as VercelResponse);
@@ -106,6 +130,84 @@ describe("x-handle-history - handle reuse across accounts", () => {
     expect(c.body?.handleReused).toBe(true);
     expect(c.body?.accountCount).toBe(2);
     expect(c.body?.note).toContain("changed hands");
+  });
+});
+
+// The archive is keyed by account id, and its by-name route only answers for
+// names it has already seen. A rename newer than the archive's last sighting is
+// therefore invisible by name and complete by id - the case this fallback is for.
+describe("x-handle-history - falls back to the account id", () => {
+  const record = {
+    id_str: "1234567890",
+    screen_names: { oldgamblingbot: ["2019-03-01", "2026-06-20"], secondname: ["2026-06-21", "2026-07-02"] },
+  };
+
+  it("finds the history by id when the current name is too new to be indexed", async () => {
+    const fetchMock = stubRoutes({ byName: { accounts: [] }, byId: { "1234567890": record } });
+    const c = await run({ handle: "shlok_dm", id: "1234567890" });
+    expect(c.status).toBe(200);
+    expect(c.body?.status).toBe("renamed");
+    expect(c.body?.resolvedBy).toBe("id");
+    expect(c.body?.priorHandles).toEqual(["oldgamblingbot", "secondname"]);
+    expect(c.body?.currentNameInArchive).toBe(false);
+    expect(c.body?.lastRenameSeen).toBe("2026-07-02");
+    // The sharper claim: not merely "was renamed" but "renamed after the
+    // archive last looked", which is what makes it fresh.
+    expect(c.body?.note).toContain("no sighting of it as @shlok_dm");
+    expect(c.body?.note).toContain("more recent than that");
+    expect(String(fetchMock.mock.calls[1][0])).toBe("https://api.memory.lol/v1/tw/id/1234567890");
+  });
+
+  it("does not spend the id lookup when the name lookup already answered", async () => {
+    const fetchMock = stubRoutes({
+      byName: { accounts: [{ id_str: "1234567890", screen_names: { prior: ["2020-01-01"], known: ["2026-01-01"] } }] },
+      byId: { "1234567890": record },
+    });
+    const c = await run({ handle: "known", id: "1234567890" });
+    expect(c.body?.resolvedBy).toBe("handle");
+    expect(c.body?.currentNameInArchive).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves the id from a keyed provider when the caller has none", async () => {
+    process.env.TWITTERAPI_KEY = "test-key";
+    try {
+      stubRoutes({
+        byName: { accounts: [] },
+        byId: { "555": record },
+        resolveId: { data: { id: "555" } },
+      });
+      const c = await run({ handle: "renamedlast_month" });
+      expect(c.body?.resolvedBy).toBe("id");
+      expect(c.body?.priorHandles).toEqual(["oldgamblingbot", "secondname"]);
+    } finally { delete process.env.TWITTERAPI_KEY; }
+  });
+
+  it("stays keyless and unchanged when no id is available", async () => {
+    const fetchMock = stubRoutes({ byName: { accounts: [] } });
+    const c = await run({ handle: "nevertracked" });
+    expect(c.body?.status).toBe("unknown");
+    expect(c.body?.resolvedBy).toBeNull();
+    expect(c.body?.note).toMatch(/not a clean bill/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores an id that is not a numeric account id", async () => {
+    const fetchMock = stubRoutes({ byName: { accounts: [] } });
+    const c = await run({ handle: "someone", id: "../../etc/passwd" });
+    expect(c.body?.status).toBe("unknown");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports 'single' when the id route knows only the current name", async () => {
+    stubRoutes({
+      byName: { accounts: [] },
+      byId: { "77": { id_str: "77", screen_names: { onlyname: ["2018-06-01"] } } },
+    });
+    const c = await run({ handle: "onlyname", id: "77" });
+    expect(c.body?.status).toBe("single");
+    expect(c.body?.currentNameInArchive).toBe(true);
+    expect(c.body?.note).toMatch(/partial|weak evidence/i);
   });
 });
 

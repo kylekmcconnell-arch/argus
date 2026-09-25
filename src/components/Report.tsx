@@ -3257,7 +3257,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       )}
       {showCurrentIntelligence && panelCostToken && (
         <Section title="Identity continuity" kicker="current supplemental search · not part of the stored score">
-          <IdentitySweep handle={report.handle} auto panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
+          <IdentitySweep handle={report.handle} userId={f.x_user_id} auto panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
         </Section>
       )}
       {showProfilePhotoSupplemental && panelCostToken && (

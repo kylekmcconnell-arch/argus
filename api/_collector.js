@@ -13283,6 +13283,7 @@ function assembleDossier(ev, live) {
     days_since_post: ev.profile.days_since_post,
     identity_note: ev.profile.identity_note,
     prior_handles: ev.profile.prior_handles,
+    x_user_id: ev.profile.x_user_id,
     ...ev.socialActivity ? { socialActivity: structuredClone(ev.socialActivity) } : {},
     headline: ev.headline,
     live,
@@ -16249,44 +16250,75 @@ async function getProfile2(handle) {
   }
   return null;
 }
-async function handleHistory(handle) {
-  const u = handle.replace(/^@/, "");
+async function memoryLolAccounts(path, op) {
   let response;
   try {
-    response = await deadlineFetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8e3) });
+    response = await deadlineFetch(`https://api.memory.lol/v1/tw/${path}`, { signal: AbortSignal.timeout(8e3) });
   } catch {
-    recordCall("memory.lol", "tw-history", 0, "transport_error", "failed");
+    recordCall("memory.lol", op, 0, "transport_error", "failed");
     return null;
   }
+  if (response.status === 404) return [];
   if (!response.ok) {
-    recordCall("memory.lol", "tw-history", 0, `http_${response.status}`, "failed");
+    recordCall("memory.lol", op, 0, `http_${response.status}`, "failed");
     return null;
   }
   let parsed;
   try {
     parsed = await response.json();
   } catch {
-    recordCall("memory.lol", "tw-history", 0, "response_json_error", "failed");
+    recordCall("memory.lol", op, 0, "response_json_error", "failed");
     return null;
   }
   const envelope = asRecord2(parsed);
-  if (!Array.isArray(envelope.accounts)) {
-    recordCall("memory.lol", "tw-history", 0, "invalid_result_shape", "partial");
-    return null;
+  if (Array.isArray(envelope.accounts)) return envelope.accounts.map(asRecord2);
+  if (envelope.screen_names && typeof envelope.screen_names === "object" && !Array.isArray(envelope.screen_names)) {
+    return [envelope];
   }
-  if (!envelope.accounts.length) {
+  recordCall("memory.lol", op, 0, "invalid_result_shape", "partial");
+  return null;
+}
+function screenNamesOf(acct) {
+  const names = acct.screen_names;
+  if (!names || typeof names !== "object" || Array.isArray(names)) return null;
+  return Object.keys(names);
+}
+async function handleHistory(handle, userId) {
+  const u = handle.replace(/^@/, "");
+  const id = (userId ?? "").trim();
+  const usableId = /^[0-9]{1,25}$/.test(id) ? id : "";
+  const nothingKnown = () => ({ priorHandles: [], currentNameInArchive: false });
+  const byName = await memoryLolAccounts(encodeURIComponent(u), "tw-history");
+  if (!byName) return null;
+  let op = "tw-history";
+  let acct = byName.length ? (usableId ? byName.find((a) => String(a.id_str ?? a.id ?? "") === usableId) : void 0) ?? byName[0] : void 0;
+  if (!acct) {
     recordCall("memory.lol", "tw-history", 0, "no_match", "succeeded");
-    return { priorHandles: [] };
+    if (!usableId) return nothingKnown();
+    op = "tw-history-id";
+    const byId = await memoryLolAccounts(`id/${encodeURIComponent(usableId)}`, op);
+    if (!byId) return nothingKnown();
+    acct = byId[0];
+    if (!acct) {
+      recordCall("memory.lol", op, 0, "no_match", "succeeded");
+      return nothingKnown();
+    }
   }
-  const acct = asRecord2(envelope.accounts[0]);
-  if (!acct.screen_names || typeof acct.screen_names !== "object" || Array.isArray(acct.screen_names)) {
-    recordCall("memory.lol", "tw-history", 0, "screen_names_missing", "partial");
-    return { priorHandles: [], ...typeof acct.id_str === "string" ? { idStr: acct.id_str } : {} };
+  const idStr = typeof acct.id_str === "string" ? acct.id_str : typeof acct.id === "number" || typeof acct.id === "string" ? String(acct.id) : void 0;
+  const names = screenNamesOf(acct);
+  if (!names) {
+    recordCall("memory.lol", op, 0, "screen_names_missing", "partial");
+    return { ...nothingKnown(), ...idStr ? { idStr } : {} };
   }
-  const names = Object.keys(acct.screen_names);
   const prior = names.filter((n) => n.toLowerCase() !== u.toLowerCase());
-  recordCall("memory.lol", "tw-history", 0, prior.length ? "history_found" : "no_prior_handles", "succeeded");
-  return { priorHandles: prior, ...typeof acct.id_str === "string" ? { idStr: acct.id_str } : {} };
+  recordCall("memory.lol", op, 0, prior.length ? "history_found" : "no_prior_handles", "succeeded");
+  return {
+    priorHandles: prior,
+    // False with names present means the archive has never seen this account
+    // under the handle it uses today: the rename postdates every sighting.
+    currentNameInArchive: names.length > prior.length,
+    ...idStr ? { idStr } : {}
+  };
 }
 var LAST_TWEETS_MEMO_TTL_MS = 10 * 6e4;
 var LAST_TWEETS_MEMO_MAX = 64;
@@ -39543,7 +39575,10 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   const bioDomain = bioWebsiteDomain(ctx.evidence.profile.bio);
   const domain2 = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   const [hist, { corpus, foundWallets }, registration, siteSubstance] = await Promise.all([
-    handleHistory(ctx.handle),
+    // The account id (resolved with the profile above) is what makes the
+    // archive's by-id route reachable when the current handle is too new to be
+    // indexed - the recent-rename case this check exists to catch.
+    handleHistory(ctx.handle, ctx.evidence.profile.x_user_id),
     (async () => {
       const corpus2 = await collectCorpus(ctx.handle);
       const foundWallets2 = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...corpus2.posts].join(" \n "));
@@ -39569,14 +39604,15 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   }
   if (hist && hist.priorHandles.length) {
     ctx.evidence.profile.prior_handles = hist.priorHandles;
+    const unseenCurrent = !hist.currentNameInArchive;
     ctx.recordCheck?.({
       id: "identity-continuity",
       status: "finding",
-      note: `prior handles found: ${hist.priorHandles.map((handle) => `@${handle}`).join(", ")}`,
+      note: unseenCurrent ? `prior handles found: ${hist.priorHandles.map((handle) => `@${handle}`).join(", ")}; the archive has no sighting of @${ctx.handle.replace(/^@/, "")} itself, so the rename is more recent than its coverage` : `prior handles found: ${hist.priorHandles.map((handle) => `@${handle}`).join(", ")}`,
       provider: "memory.lol",
       sourceCount: hist.priorHandles.length
     });
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")}, indicating a rebrand. Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")}, indicating a rebrand.${unseenCurrent ? " The archive has never seen it under its current name, so the rename is recent." : ""} Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
   } else if (hist) {
     ctx.recordCheck?.({
       id: "identity-continuity",

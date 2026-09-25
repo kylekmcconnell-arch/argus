@@ -16,11 +16,17 @@ type IdentityData = {
   note?: string;
 };
 
-export function IdentitySweep({ handle, auto, panelCostToken, record = true }: { handle: string; auto?: boolean; panelCostToken?: string; record?: boolean }) {
+// `userId` is the frozen X account id from the report. It is optional, and only
+// matters when the archive has nothing under the current handle: the id survives
+// renames, so it reaches the history of an account renamed too recently to be
+// indexed under the name it uses today.
+export function IdentitySweep({ handle, userId, auto, panelCostToken, record = true }: { handle: string; userId?: string; auto?: boolean; panelCostToken?: string; record?: boolean }) {
   const [data, setData] = useState<IdentityData | null>(null);
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<{ key: string; failure: PanelRequestFailure } | null>(null);
-  const requestKey = [handle, panelCostToken ?? ""].join("\u0000");
+  // The id is part of the request, so a report that supplies one late re-runs
+  // rather than keeping the answer from the lookup that had only a handle.
+  const requestKey = [handle, userId ?? "", panelCostToken ?? ""].join("\u0000");
   const currentFailure = failure?.key === requestKey ? failure.failure : null;
   const ran = useRef("");
   const run = async () => {
@@ -28,7 +34,7 @@ export function IdentitySweep({ handle, auto, panelCostToken, record = true }: {
     setLoading(true);
     try {
       const d = await fetchPanelJson<IdentityData>(
-        `/api/identity-sweep?handle=${encodeURIComponent(handle.replace(/^@/, ""))}`,
+        `/api/identity-sweep?handle=${encodeURIComponent(handle.replace(/^@/, ""))}${userId ? `&id=${encodeURIComponent(userId)}` : ""}`,
         { headers: requiredPanelHeaders(panelCostToken) },
       );
       setData(d);

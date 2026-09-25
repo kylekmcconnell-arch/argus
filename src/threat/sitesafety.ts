@@ -60,6 +60,7 @@ async function handleHistory(handle: string): Promise<SiteSafety["xHistory"]> {
       priorHandles: Array.isArray(d.priorHandles) ? d.priorHandles.filter((h): h is string => typeof h === "string") : [],
       handleReused: d.handleReused === true,
       currentSince: typeof d.currentSince === "string" ? d.currentSince : null,
+      ...(typeof d.currentNameInArchive === "boolean" ? { currentNameInArchive: d.currentNameInArchive } : {}),
       lastRenameSeen: typeof d.lastRenameSeen === "string" ? d.lastRenameSeen : null,
       accounts: parseTimeline(d.accounts),
       note: d.note,

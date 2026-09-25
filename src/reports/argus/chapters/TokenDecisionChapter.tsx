@@ -19,12 +19,20 @@ interface Props extends InvestigationDecisionCanvasProps {
   privateReport: boolean;
   saving: boolean;
   persistenceFailed: boolean;
+  /** Sanitized server-side cause of a failed save, shown under the not-saved notice. */
+  persistenceFailedReason?: string | undefined;
+  /** A live overlay on the saved verdict (the community-graph RingAlert).
+   * Rendered at chapter level beside the score cards, never inside a
+   * disclosure: a verdict-changing warning must be visible without a click. */
+  verdictOverlay?: ReactNode;
+  /** Case detail the chapters do not carry. Omit it when there is nothing to
+   * show; any node here, even an empty fragment, renders the "full case"
+   * disclosure. */
   legacy?: ReactNode;
   notices?: import("../../../lib/reportInsights").NoticedSignal[];
   error?: string | null | undefined;
   liveNotice?: boolean;
   identityNote?: string;
-
 }
 
 function rows(items: DecisionCanvasCompositionRow[] = []): ScoreView["rows"] {
@@ -116,12 +124,12 @@ export function TokenDecisionChapter(p: Props) {
     {p.context?.length ? <section className="panel space-top"><div className="section-top"><h2>Other useful context</h2></div>{p.context.map((item, i) => <p key={i}><strong>{plainDecisionText(item.label)}</strong> {plainDecisionText(item.detail ?? "")}</p>)}</section> : null}
     {p.notices?.map(signal => <ReviewBanner key={signal.id} title={signal.headline} body={signal.detail} />)}
   </>} afterScores={<>
+    {p.verdictOverlay}
     {p.scoreIsProvisional && <ReviewBanner title="Before you use this report" body={`The score is provisional. ${p.openChecks.map(check => plainDecisionText([check.label, check.note].filter(Boolean).join(": "))).join(" ") || "Required evidence remains open."}`} />}
     {p.error && <p className="status-box" role="alert">{p.error}</p>}
-
     {p.privateReport && <ReviewBanner title="Private report" body="Extra live checks are off, and nothing is added to shared cases, watchlists, or activity." />}
     {p.saving && <p className="status-box" role="status">Saving this report before running extra checks…</p>}
-    {p.persistenceFailed && <ReviewBanner title="This report is visible now, but it was not saved." body="Run the scan again to create a saved version before opening extra research." />}
+    {p.persistenceFailed && <ReviewBanner title="This report is visible now, but it was not saved." body={["It will disappear when you leave this page. Run the scan again to create a saved version before opening extra research.", p.persistenceFailedReason].filter(Boolean).join(" ")} />}
     {p.snapshot && <ReviewBanner title={`Saved report v${p.snapshot.version}`} body={`This report uses data saved on ${new Date(p.snapshot.createdAt).toUTCString()}. ${p.currentDataEnabled ? "Current data is shown separately and does not change the saved score." : "New checks do not change the saved score or the shared report."}`} action={!p.currentDataEnabled && !p.privateReport ? <button type="button" className="textbtn" onClick={p.onCheckCurrentData}>Check current data</button> : undefined} />}
     {p.liveNotice && !p.snapshot && !p.privateReport && !p.saving && !p.persistenceFailed && <p className="subtle-note">Extra checks below run live. They do not change the saved score or the shared report.</p>}
   </>} after={<>

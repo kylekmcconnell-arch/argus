@@ -104,6 +104,33 @@ describe("HandleProvenance - the rename against the token's launch", () => {
   });
 });
 
+describe("HandleProvenance - a rename newer than the archive", () => {
+  // Reached through the by-id lookup: the archive knows the account, but has
+  // never seen it under the name it wears today.
+  const unseen = renamed({
+    handle: "shlok_dm",
+    currentNameInArchive: false,
+    currentSince: null,
+    lastRenameSeen: "2026-07-02",
+    accounts: [{ id: "4242", names: [{ handle: "oldgamblingbot", firstSeen: "2019-03-01", lastSeen: "2026-07-02" }] }],
+  });
+
+  it("states that the archive has no sighting of the current name at all", () => {
+    const text = render(unseen, null);
+    expect(text).toContain("no sighting of @shlok_dm");
+    expect(text).toContain("more recent than the archive's own coverage");
+  });
+
+  it("stays quiet when the archive has seen the current name", () => {
+    expect(render(renamed({ currentNameInArchive: true }), null)).not.toContain("no sighting of");
+  });
+
+  it("stays quiet on a scan frozen before the lane looked up the id", () => {
+    // currentNameInArchive is absent, not false, on those cached scans.
+    expect(render(renamed(), null)).not.toContain("no sighting of");
+  });
+});
+
 describe("HandleProvenance - a handle that changed hands", () => {
   it("names the account ids and warns the following may not be the account's own", () => {
     const text = render(renamed({
