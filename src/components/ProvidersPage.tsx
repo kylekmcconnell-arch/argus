@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { DataInventory } from "./DataInventory";
+import { FomoReceiptImport } from "./FomoReceiptImport";
 import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 import type { EvidenceCategory, ProviderKind, ProviderLifecycle } from "../lib/providerCatalog";
 
@@ -416,7 +417,7 @@ export function ProvidersPage({ previewData, previewUsage }: { previewData?: Pro
   return (
     <div className="workspace-frame">
       <h1 className="display-sm text-[24px] text-ink">Evidence sources</h1>
-      {!previewData && <DataInventory />}
+      {!previewData && <><DataInventory /><FomoReceiptImport /></>}
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         See where ARGUS gets outside facts, what each source can establish, and where its evidence stops. Models and product infrastructure are listed separately because they are not evidence.
       </p>
