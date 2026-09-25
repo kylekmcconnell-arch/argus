@@ -241,3 +241,10 @@ it("preserves rank-25 registry attribution and explicit partial coverage in expo
   const partial = reportToHtml({ ...dossier, holderProfile: { ...dossier.holderProfile!, holderIntelligence: { ...snapshot, examined: 10, status: "partial", rows: snapshot.rows.slice(0,10) } } });
   expect(partial).toContain("10/25 addresses examined; partial coverage");
 });
+
+it("preserves role scope, career contradictions and specialist attribution limits in portable exports", () => {
+  const d = { ...first, diligenceProviders: [{ provider: "courtlistener", status: "unavailable", capturedAt: "2026-09-25", calls: 1, estimatedUsd: null, candidates: [], note: "No absence finding can be drawn." }],
+    personInvestigation: { version: 1, timeline: [], questions: [{ id: "q", question: "What did this person deliver?", reason: "Attribution unresolved", priority: "high", factIds: [] }], referenceQuestions: [], note: "Capture dates are not event dates." } } as Dossier;
+  const html = reportToHtml(d);
+  expect(html).toContain("Specialist discovery: identity unresolved"); expect(html).toContain("No absence finding"); expect(html).toContain("Capture dates are not event dates");
+});

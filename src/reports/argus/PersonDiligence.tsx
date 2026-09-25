@@ -1,3 +1,4 @@
+import { InvestigationEvidence } from "./InvestigationEvidence";
 import { PERSON_DILIGENCE_TOPICS } from "../../lib/diligenceTopics";
 import { personLenses, PERSON_LENSES, personRelationshipGraph, personIdentityStatus } from "../../lib/personDiligence";
 import { DiligenceHypotheses } from "./DiligenceHypotheses";
@@ -46,6 +47,7 @@ export function PersonDiligence({ dossier, facts, websiteClaims = [] }: { dossie
       {websiteClaims.map(claim => <div className="product-claim" key={claim.key}><strong>{claim.title}</strong><p>{claim.text}</p><Badge tone={claim.badge.tone}>{claim.badge.label}</Badge>{claim.sourceUrl && <ExtLink href={claim.sourceUrl}>Source</ExtLink>}</div>)}
     </Panel>}
     <Panel className="space-top"><h2>Evidence-based role fit</h2><DiligenceHypotheses brief={dossier.diligenceBrief} /></Panel>
+    <InvestigationEvidence investigation={dossier.personInvestigation} receipts={dossier.diligenceProviders} />
     {relationships.length > 0 && <Panel className="space-top"><h2>Relationship history</h2><p>Each connection retains its role, period and source. Unresolved counterparty names are not merged across reports.</p>
       <div className="diligence-table-wrap"><table className="diligence-table"><thead><tr><th>Venture or collaborator</th><th>Relationship</th><th>Period and outcome</th><th>Evidence</th></tr></thead><tbody>
         {relationships.map(edge => <tr key={edge.id}><td>{edge.target}</td><td>{edge.relation}</td><td>{edge.period || "Dates not established"}<small>{edge.status}</small></td><td>{edge.sources.map((source, index) => <p key={index}><ExtLink href={source.url}>Source {index + 1}</ExtLink>{source.capturedAt && <small>{source.capturedAt.slice(0, 10)}</small>}</p>)}</td></tr>)}

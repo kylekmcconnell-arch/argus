@@ -97,6 +97,8 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     configuredService("fomoscan", "FomoScan (FOMO trader identity + theses)", process.env.FOMOSCAN_API_KEY, "configure FOMOSCAN_API_KEY (partner.fomoscan.sh; the key also needs an active plan or every call returns 402)"),
     optionalService("resend", "Resend (challenge verification + edit notices)", process.env.RESEND_API_KEY, "configure RESEND_API_KEY (and RESEND_FROM on a verified sending domain)"),
     optionalService("companies-house", "Companies House (UK legal-entity registry)", process.env.COMPANIES_HOUSE_API_KEY, "configure COMPANIES_HOUSE_API_KEY (free key at developer.company-information.service.gov.uk)"),
+    optionalService("openalex", "OpenAlex (research history leads)", process.env.OPENALEX_API_KEY, "configure OPENALEX_API_KEY"),
+    optionalService("courtlistener", "CourtListener (public case leads)", process.env.COURTLISTENER_API_TOKEN, "configure COURTLISTENER_API_TOKEN with commercial access"),
     optionalService("opencorporates", "OpenCorporates (global legal-entity registry)", process.env.OPENCORPORATES_API_TOKEN, "configure OPENCORPORATES_API_TOKEN"),
     optionalService("safebrowsing", "Google Safe Browsing (site-safety recall)", process.env.GOOGLE_SAFE_BROWSING_KEY, "configure GOOGLE_SAFE_BROWSING_KEY"),
     optionalService("chart-signals", "Chart signals (technical posture)", process.env.CHART_SIGNALS_URL, "configure CHART_SIGNALS_URL + CHART_SIGNALS_TOKEN"),

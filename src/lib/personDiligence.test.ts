@@ -16,3 +16,7 @@ describe("role-aware person evidence model", () => {
     expect(personRelationshipGraph({ ...dossier, identity_binding: "independent_exact_handle" })[0]).toMatchObject({ targetKey: "unresolved:collaboration:1", relation: "collaboration" });
   });
 });
+it("adds the person's specific professional lens only for bound role evidence", () => {
+  const role = { factId: "role", predicate: "current_role", value: "Marketing director", status: "verified", evidence_origin: "deterministic", artifact_verified: true, sources: [{ artifactVerified: true, excerpt: "@example is Marketing director", url: "https://example.com/team" }] } as never;
+  expect(personLenses({ ...base, basicFacts: [role] })).toContain("commercial");
+});

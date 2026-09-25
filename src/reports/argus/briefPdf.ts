@@ -228,7 +228,7 @@ async function renderBrief(view: ReportView, layout: Layout, generatedAt: Date):
 
   const hypothesis = view.diligenceBrief?.hypotheses[0];
   if (hypothesis) {
-    heading(ctx, view.diligenceBrief?.subjectKind === "person" ? "Role fit: analytical hypothesis" : "What is their edge? Analytical hypothesis");
+    heading(ctx, hypothesis.topic === "team_fit" ? "Team ability: analytical hypothesis" : view.diligenceBrief?.subjectKind === "person" ? "Role fit: analytical hypothesis" : "What is their edge? Analytical hypothesis");
     text(ctx, clip(hypothesis.text, layout.compact ? 180 : 300));
     text(ctx, clip(`Limits: ${hypothesis.limitations} What would change this: ${hypothesis.whatWouldChange}`, layout.compact ? 180 : 300), { size: 8 });
     const source = view.diligenceBrief?.sources.find(item => hypothesis.sourceIds.includes(item.id));
@@ -279,6 +279,12 @@ async function renderBrief(view: ReportView, layout: Layout, generatedAt: Date):
       if (score.rows.length) text(ctx, `${score.eyebrow}: ${score.arithmetic}`, { size: 9.5, gap: 2 });
       if (score.scaleNote && !layout.compact) text(ctx, score.scaleNote, { size: 8.5, rgb: MUTED, gap: 2 });
     }
+  }
+  const teamQuestion = view.teamDiligence?.questions[0] ?? view.personInvestigation?.questions[0]?.question;
+  if (teamQuestion) {
+    heading(ctx, "People diligence: next evidence", 14);
+    text(ctx, clip(teamQuestion, 240), { size: 9.5 });
+    text(ctx, "Relationship scope, career sources and unresolved identity leads are retained in the full saved report. They do not alter the saved score.", { size: 8.5, rgb: MUTED });
   }
   heading(ctx, "Source and scope", 14);
   text(ctx, `Based on the frozen ${view.subjectName} report${view.version ? ` version ${view.version}` : ""}${view.savedAt ? `, saved ${utcStamp(view.savedAt)}` : ""}. Sources are read as saved report evidence, not independently re-audited. Newer market observations shown in the interactive report are excluded from this historical brief. This PDF contains no watchlist, checklist or challenge-form entries.`, { size: 9.5 });

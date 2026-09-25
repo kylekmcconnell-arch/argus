@@ -1,6 +1,8 @@
 export interface DiligenceSource {
   id: string;
   factId: string;
+  subjectHandle?: string;
+  sourceReportVersionId?: string;
   topic?: string;
   predicate: string;
   value: string;
@@ -14,7 +16,7 @@ export interface DiligenceSource {
   sourceClass: string;
 }
 export interface DiligenceHypothesis {
-  topic: "role_fit" | "advantage" | "defensibility" | "risk_to_thesis";
+  topic: "role_fit" | "team_fit" | "advantage" | "defensibility" | "risk_to_thesis";
   text: string;
   sourceIds: string[];
   limitations: string;

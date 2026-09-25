@@ -1268,6 +1268,8 @@ export function buildPersonReportView(input: PersonViewInput): ReportView {
   return {
     subjectName: name,
     diligenceBrief: input.dossier.diligenceBrief,
+    teamDiligence: input.dossier.teamDiligence,
+    personInvestigation: input.dossier.personInvestigation,
     subjectKind: input.isProject ? "project" : "person",
     handle: f.handle,
     avatarUrl: f.avatar_url ?? null,

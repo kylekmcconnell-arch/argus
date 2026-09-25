@@ -1,3 +1,4 @@
+import { RELATIONSHIPS } from "./relationshipDiligence";
 import { personContacts, safeHttpUrl } from "../reports/argus/model";
 import { personSourceCoverage } from "./personSourceCoverage";
 import { presentPublicReport } from "./reportPresentation";
@@ -123,6 +124,29 @@ function identityBlock(d: Dossier): string {
     "Identity",
     `<p class="note"><span class="pill">${esc(conf)}</span> ${esc(d.identity_note ?? "")}</p>`,
   );
+}
+
+function investigationBlock(d: Dossier): string {
+  const sources = (rows: Array<{ url: string; excerpt?: string; capturedAt?: string; relation?: string }>) => rows.map(row => {
+    const href = safeHref(row.url);
+    return `<p>${esc(row.relation === "contradicts" ? "Counter-evidence: " : "")}${esc(row.excerpt)} ${href ? `<a href="${href}">Source</a>` : "Source URL unavailable"}${row.capturedAt ? ` · Captured ${esc(row.capturedAt)}` : ""}</p>`;
+  }).join("");
+  const blocks: string[] = [];
+  if (d.teamDiligence) {
+    const team = d.teamDiligence;
+    if (team.linkedPeople?.length) blocks.push(section("Prior person evidence", team.linkedPeople.map(person => `<h3>${esc(person.handle)}</h3><p>${esc(person.note)} Source version ${esc(person.reportVersionId)}, saved ${esc(person.capturedAt)}.</p>${person.investigation.timeline.map(entry => `<p>${esc(entry.claim)} · ${esc(entry.period)}</p>${sources(entry.sources)}`).join("")}`).join("")));
+    blocks.push(section("Team responsibility and relationships", `<p>${esc(team.note)}</p>${team.capabilities.map(c => `<p><strong>${esc(c.function)}:</strong> ${esc(c.assessment)}</p>`).join("")}
+      ${team.relationships.map(row => `<h3>${esc(row.party)}</h3><p>${esc(row.claim)} · ${esc(row.support)}</p><p>${esc(row.classification.relationships.map(kind => RELATIONSHIPS[kind]).join("; "))}. Capacity: ${esc(row.classification.capacity)}. Timing: ${esc(row.classification.temporal)}.</p>${row.concern ? `<p>${esc(row.concern.detail)}</p>` : ""}${sources(row.sources)}`).join("")}
+      <h3>Open questions</h3><ul>${team.questions.map(q => `<li>${esc(q)}</li>`).join("")}</ul>`));
+  }
+  if (d.personInvestigation) {
+    const investigation = d.personInvestigation;
+    blocks.push(section("Career evidence and investigation", `<p>${esc(investigation.note)}</p>${investigation.timeline.map(entry => `<h3>${esc(entry.claim)}</h3><p>${esc(entry.status)} · Period: ${esc(entry.period)}. Captured: ${esc(entry.recordedAt)} (not the event date).</p>${sources(entry.sources)}`).join("")}
+      <h3>Open questions</h3><ul>${investigation.questions.map(q => `<li>${esc(q.question)} ${esc(q.reason)}</li>`).join("")}</ul>`));
+  }
+  if (d.diligenceProviders?.length) blocks.push(section("Specialist discovery: identity unresolved", d.diligenceProviders.map(receipt => `<h3>${esc(receipt.provider)}: ${esc(receipt.status)}</h3><p>${esc(receipt.note)} Captured ${esc(receipt.capturedAt)}.</p>${receipt.candidates.map(candidate => `<p>${safeHref(candidate.url) ? `<a href="${safeHref(candidate.url)}">${esc(candidate.title)}</a>` : esc(candidate.title)}: ${esc(candidate.excerpt)} Identity attribution unresolved.</p>`).join("")}`).join("")));
+  if (d.diligenceBrief?.hypotheses.length) blocks.push(section("Analytical hypotheses", d.diligenceBrief.hypotheses.map(h => `<h3>${esc(h.topic)}</h3><p>${esc(h.text)}</p><p>Limits: ${esc(h.limitations)}</p><p>What would change this: ${esc(h.whatWouldChange)}</p>${sources(d.diligenceBrief!.sources.filter(source => h.sourceIds.includes(source.id)))}`).join("")));
+  return blocks.join("\n");
 }
 
 function holderIntelligenceBlock(d: Dossier): string {
@@ -537,6 +561,7 @@ ${printScript}
   ${subjectBlock(d)}
   ${verdictBanner(d)}
   ${identityBlock(d)}
+  ${investigationBlock(d)}
   ${holderIntelligenceBlock(d)}
   ${contradictionsBlock(d)}
   ${roleBreakdown(d)}

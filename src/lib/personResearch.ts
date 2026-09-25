@@ -15,6 +15,10 @@ export interface PersonResearchResult {
   searches: { question: string; status: "searched" | "failed"; count: number }[];
   sources: PersonResearchSource[];
   note: string;
+  linkedReport?: import("./linkedPersonEvidence.js").LinkedPersonEvidence;
+  providerReceipts?: import("./diligenceProviders.js").DiligenceProviderReceipt[];
+  plannedQuestions?: Array<{ question: string; reason: string }>;
+  stopReason?: "completed_budget" | "provider_failure";
 }
 
 /** Only a first-party account binding may join research across reports. */

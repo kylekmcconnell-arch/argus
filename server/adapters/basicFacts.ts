@@ -41,7 +41,7 @@ const MAX_REPAIR_PROVIDER_CALLS = 8;
 // tight enough that slow calls timed out and fell back to Grok (erasing the cost
 // win). Discovery batches run in parallel, well inside the ~390s budget.
 const DISCOVERY_TIMEOUT_MS = 90_000;
-const RESEARCH_CACHE_VERSION = "v12";
+const RESEARCH_CACHE_VERSION = "v13";
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
 const PREDICATES = new Set<BasicFactPredicate>([

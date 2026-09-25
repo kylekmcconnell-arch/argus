@@ -1389,6 +1389,19 @@ var EVM_CEX_WALLETS = {
   "0x236f9f97e0e62388479bf9e5ba4889e46b0273c3": "OKX",
   "0x1522900b6dafac587d499a862861c0869be6e428": "Bitfinex"
 };
+var EVM_MARKET_CONTRACTS = {
+  "0x000000000004444c5dc75cb358380d2e3de08a90": { label: "Uniswap V4 PoolManager", kind: "pool" },
+  "0x498581ff718922c3f8e6a244956af099b2652b2b": { label: "Uniswap V4 PoolManager", kind: "pool" },
+  "0x360e68faccca8ca495c1b759fd9eee466db9fb32": { label: "Uniswap V4 PoolManager", kind: "pool" },
+  "0x9a13f98cb987694c9f086b1f5eb990eea8264ec3": { label: "Uniswap V4 PoolManager", kind: "pool" },
+  "0x67366782805870060151383f4bbff9dab53e5cd6": { label: "Uniswap V4 PoolManager", kind: "pool" },
+  "0x28e2ea090877bf75740558f6bfb36a5ffee9e9df": { label: "Uniswap V4 PoolManager", kind: "pool" },
+  "0x8366a39cc670b4001a1121b8f6a443a643e40951": { label: "Uniswap V4 PoolManager (Robinhood Chain)", kind: "pool" },
+  "0x4e3468951d49f2eea976ed0d6e75ffcb44a9a544": { label: "Doppler LP custody (Robinhood Chain)", kind: "locker" },
+  "0xbdf938149ac6a781f94faa0ed45e6a0e984c6544": { label: "Doppler LP custody (Base)", kind: "locker" },
+  "0x267444d099b10fb5ed7c3cc7b7c767adca574952": { label: "Pons v2 launch locker", kind: "locker" },
+  "0xd0f7d8c6e9f6d80c297bebe4f7fd1b9c8125c32f": { label: "RobinhoodLocker", kind: "locker" }
+};
 var normalize = (address) => {
   const value = String(address ?? "").trim();
   return /^0x[0-9a-fA-F]{40}$/.test(value) ? value.toLowerCase() : value;
@@ -1409,6 +1422,8 @@ function classifyMarketAddress(address, context2 = {}) {
   if (pool) return { label: "liquidity pool", kind: "pool" };
   const exchange = lookup(SOLANA_CEX_WALLETS, value) ?? lookup(EVM_CEX_WALLETS, value);
   if (exchange) return { label: exchange, kind: "exchange" };
+  const market = EVM_MARKET_CONTRACTS[normalize(value)];
+  if (market) return market;
   const known = context2.knownAccounts?.[value];
   const type = String(known?.type ?? "").toUpperCase();
   if (type === "AMM" || type === "MARKET" || type === "POOL") {

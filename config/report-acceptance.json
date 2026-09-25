@@ -43,6 +43,18 @@
       "tests": [
         "server/behavior/shadow.test.ts"
       ]
+    },
+    {
+      "name": "Role relationships, specialist discovery and person-to-team evidence",
+      "tests": [
+        "src/lib/relationshipDiligence.test.ts",
+        "src/lib/personInvestigation.test.ts",
+        "src/lib/linkedPersonEvidence.test.ts",
+        "server/diligenceProviders.test.ts",
+        "server/linkedTeamEvidence.test.ts",
+        "src/reports/argus/TeamDiligencePanel.test.tsx",
+        "api/person-research.test.ts"
+      ]
     }
   ],
   "limits": "Offline evidence/interaction checks. Does not establish live provider availability, complete data populations, mobile/PDF visual fidelity or predictive performance."

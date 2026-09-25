@@ -1,3 +1,5 @@
+import { linkedPersonEvidence } from "../src/lib/linkedPersonEvidence.js";
+import type { Dossier } from "../src/data/dossier.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { requireArgusAuth, serviceCredentials, serviceHeaders, reserveSupplementalBudget, rejectSupplementalReservation } from "./_auth.js";
 import { recordProviderUsageBatch } from "./_cache.js";
@@ -48,20 +50,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       res.status(200).json({ runs, related, historyAvailable, identityKey }); return;
     }
+    const attach = input?.action === "attach_report";
+    if (input?.action && !attach) { res.status(400).json({ error: "unknown_research_action" }); return; }
     const key = process.env.SERPER_API_KEY;
-    if (!key) { res.status(503).json({ error: "background_search_unavailable" }); return; }
+    if (!attach && !key) { res.status(503).json({ error: "background_search_unavailable" }); return; }
     const runId = String(input?.runId ?? "");
     if (!UUID.test(runId)) { res.status(400).json({ error: "run_id_required" }); return; }
+    let linked: ReturnType<typeof linkedPersonEvidence> = null;
+    if (attach) {
+      const sourceVersionId = String(input?.sourceVersionId ?? "");
+      if (!UUID.test(sourceVersionId) || sourceVersionId === versionId) { res.status(400).json({ error: "exact_person_version_required" }); return; }
+      const person = await loadExactVersionReport(credentials, auth.organizationId, sourceVersionId);
+      linked = person && typeof person.report.ts === "string" ? linkedPersonEvidence(member, person.report.payload as unknown as Dossier, sourceVersionId, person.report.ts) : null;
+      if (!linked) { res.status(409).json({ error: "person_identity_mismatch", message: "The saved person report must match this member's first-party-bound account in this workspace. Names alone cannot attach evidence." }); return; }
+    }
     const claim = await fetch(`${credentials.url}/rest/v1/person_research_runs`, { method: "POST", headers, body: JSON.stringify({ id: runId, organization_id: auth.organizationId, report_version_id: versionId, member_key: memberKey, identity_key: identityKey, status: "running" }), signal: AbortSignal.timeout(8000) });
     if (!claim.ok) { res.status(claim.status === 409 ? 409 : 503).json({ error: "research_not_started", message: "This request may already exist. Read saved research before retrying." }); return; }
     const finish = async (status: string, result?: unknown) => {
       const saved = await fetch(`${credentials.url}/rest/v1/person_research_runs?id=eq.${runId}&organization_id=eq.${auth.organizationId}&status=eq.running`, { method: "PATCH", headers, body: JSON.stringify({ status, ...(result ? { payload: result } : {}) }), signal: AbortSignal.timeout(8000) });
       if (!saved.ok) throw new Error("save");
     };
+    if (linked) {
+      const result = { version: 1, name: member.name, company: context.company, capturedAt: new Date().toISOString(), searches: [], sources: [], linkedReport: linked,
+        note: "Existing person evidence attached without new provider calls. The parent report's score and historical evidence are unchanged." };
+      await finish("complete", result); res.status(200).json({ runId, result }); return;
+    }
     const reservation = await reserveSupplementalBudget(auth, "/api/person-research");
     if (!reservation.allowed) { await finish("failed"); rejectSupplementalReservation(res, reservation); return; }
-    const result = await collectPersonResearch(member, context.company, key);
+    const result = await collectPersonResearch(member, context.company, key!, undefined, { publicNameEstablished: member.artifact_verified === true && member.evidence_origin === "deterministic" && Boolean(member.sourceUrl) });
     await recordProviderUsageBatch(auth.organizationId, versionId, auth.userId, [{ provider: "serper", op: "person-background", calls: result.searches.length, usd: result.searches.length * 0.001, status: result.searches.some(row => row.status === "failed") ? "partial" : "succeeded", idempotencyKey: runId, meta: "At most four searches; list-price estimate, not a settled invoice." }]);
+    const specialistCalls = (result.providerReceipts ?? []).filter(receipt => receipt.calls > 0);
+    if (specialistCalls.length) await recordProviderUsageBatch(auth.organizationId, versionId, auth.userId, specialistCalls.map(receipt => ({
+      provider: receipt.provider, op: "person-discovery", calls: receipt.calls, usd: receipt.estimatedUsd ?? 0,
+      status: receipt.status === "unavailable" ? "failed" as const : "succeeded" as const,
+      idempotencyKey: `${runId}:${receipt.provider}`, meta: receipt.estimatedUsd === null ? "Cost unknown: commercial contract, not measured as free. No PACER purchases." : "API list-price estimate before allowances; discovery only.",
+    })));
     await finish("complete", result);
     res.status(200).json({ runId, result });
   } catch { res.status(503).json({ error: "person_research_unavailable", message: "Research could not be completed or saved. Read saved research before retrying; this is not an empty history." }); }

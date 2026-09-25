@@ -14,7 +14,7 @@ export function CompanyEdge({ facts, brief, questions }: { facts: BasicFactView[
     <h2>What's their edge?</h2>
     <p>Understand how it works, what is distinctive and how much of the advantage is demonstrated.</p>
     <div className="diligence-grid">
-      {COMPANY_DILIGENCE_TOPICS.map(topic => {
+      {COMPANY_DILIGENCE_TOPICS.filter(topic => !["relationship_scope", "team_delivery"].includes(topic.id)).map(topic => {
         const rows = relevant.filter(fact => fact.questionId?.endsWith(`.diligence_${topic.id}`));
         const research = questions?.find(row => row.questionId.endsWith(`.diligence_${topic.id}`));
         const attempted = research?.providerRuns.some(run => ["succeeded", "partial", "completed_empty"].includes(run.state));
@@ -30,6 +30,6 @@ export function CompanyEdge({ facts, brief, questions }: { facts: BasicFactView[
     {!hasFocused && relevant.some(fact => fact.predicate === "product") && <details className="disclosure"><summary>Previously recorded product evidence</summary><DiligenceFacts facts={relevant.filter(fact => fact.predicate === "product")} /></details>}
     <p className="subtle-note">A feature or company claim does not establish a durable moat. Mixer or pool design can combine with ZK, FHE, MPC or other techniques; the source must establish what each does and what remains visible.</p>
     <h3>Our assessment of the advantage</h3>
-    <DiligenceHypotheses brief={brief} />
+    <DiligenceHypotheses brief={brief ? { ...brief, hypotheses: brief.hypotheses.filter(h => h.topic !== "team_fit") } : undefined} />
   </Panel>;
 }
