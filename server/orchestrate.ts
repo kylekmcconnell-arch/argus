@@ -1062,7 +1062,10 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // not the sum. Results are applied in the original order below so every
   // evidence merge stays identical to the serial pipeline.
   const [hist, { corpus, foundWallets }, registration, siteSubstance] = await Promise.all([
-    handleHistory(ctx.handle),
+    // The account id (resolved with the profile above) is what makes the
+    // archive's by-id route reachable when the current handle is too new to be
+    // indexed - the recent-rename case this check exists to catch.
+    handleHistory(ctx.handle, ctx.evidence.profile.x_user_id),
     (async () => {
       const corpus = await collectCorpus(ctx.handle);
       const foundWallets = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...corpus.posts].join(" \n "));
@@ -1091,14 +1094,20 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // flag, and the old handles let us search the subject's history under them.
   if (hist && hist.priorHandles.length) {
     ctx.evidence.profile.prior_handles = hist.priorHandles;
+    // The archive holding the account only under older names means the rename
+    // is newer than every sighting on record - a sharper finding than a rebrand
+    // the archive has already caught up with, so it is recorded as its own note.
+    const unseenCurrent = !hist.currentNameInArchive;
     ctx.recordCheck?.({
       id: "identity-continuity",
       status: "finding",
-      note: `prior handles found: ${hist.priorHandles.map((handle) => `@${handle}`).join(", ")}`,
+      note: unseenCurrent
+        ? `prior handles found: ${hist.priorHandles.map((handle) => `@${handle}`).join(", ")}; the archive has no sighting of @${ctx.handle.replace(/^@/, "")} itself, so the rename is more recent than its coverage`
+        : `prior handles found: ${hist.priorHandles.map((handle) => `@${handle}`).join(", ")}`,
       provider: "memory.lol",
       sourceCount: hist.priorHandles.length,
     });
-    ctx.emit({ phase: "P0 · Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")}, indicating a rebrand. Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
+    ctx.emit({ phase: "P0 · Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")}, indicating a rebrand.${unseenCurrent ? " The archive has never seen it under its current name, so the rename is recent." : ""} Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
   } else if (hist) {
     ctx.recordCheck?.({
       id: "identity-continuity",

@@ -189,6 +189,11 @@ export interface SiteSafety {
     priorHandles: string[];
     handleReused: boolean;
     currentSince: string | null;
+    // False alongside a record means the archive has never seen the account
+    // under the name it uses today: the rename postdates the archive's own
+    // coverage, which is the freshest form of this finding. Absent on scans
+    // frozen before the lane looked the account up by id.
+    currentNameInArchive?: boolean;
     lastRenameSeen: string | null;
     // The dated timeline the archive actually holds, per account id: every
     // screen name this account has worn and the window it was seen under each.

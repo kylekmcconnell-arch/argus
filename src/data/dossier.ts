@@ -146,6 +146,12 @@ export interface Dossier {
   days_since_post?: number;
   identity_note: string;
   prior_handles?: string[];
+  /**
+   * Provider-frozen X account id. Carried into the report because it is the
+   * only identifier that survives a rename: the supplemental identity lane
+   * uses it to reach an archive that has never seen the current handle.
+   */
+  x_user_id?: string;
   headline: string;
   live: boolean;
   /** Strict evidence-to-axis lineage for newly scored live reports. */
@@ -602,6 +608,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     days_since_post: ev.profile.days_since_post,
     identity_note: ev.profile.identity_note,
     prior_handles: ev.profile.prior_handles,
+    x_user_id: ev.profile.x_user_id,
     ...(ev.socialActivity ? { socialActivity: structuredClone(ev.socialActivity) } : {}),
     headline: ev.headline,
     live,

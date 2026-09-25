@@ -499,49 +499,114 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
   return null;
 }
 
-// Handle-change history via memory.lol (keyless OSINT index that maps an X
-// account id to every screen name it has used, with date ranges). A rebrand is a
-// classic move to escape a burned reputation, and X keeps the same id across
-// handle changes, so the old names are recoverable. Coverage is partial: an empty
-// result means "not in the index", never a guarantee of no change.
-export async function handleHistory(handle: string): Promise<{ priorHandles: string[]; idStr?: string } | null> {
-  const u = handle.replace(/^@/, "");
+// One memory.lol route. `op` separates the by-name and by-id lookups in the
+// provider ledger so a fallback is visible as its own call, not folded into the
+// first. Returns the matching accounts, or null when the route itself failed -
+// a distinction the caller needs, since "archive says nothing" and "we could
+// not ask" are not the same answer.
+async function memoryLolAccounts(path: string, op: string): Promise<Record<string, unknown>[] | null> {
   let response: Response;
   try {
-    response = await deadlineFetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8000) });
+    response = await deadlineFetch(`https://api.memory.lol/v1/tw/${path}`, { signal: AbortSignal.timeout(8000) });
   } catch {
-    recordCall("memory.lol", "tw-history", 0, "transport_error", "failed");
+    recordCall("memory.lol", op, 0, "transport_error", "failed");
     return null;
   }
+  // 404 is how the by-id route says "no record" - a real answer, not a fault.
+  if (response.status === 404) return [];
   if (!response.ok) {
-    recordCall("memory.lol", "tw-history", 0, `http_${response.status}`, "failed");
+    recordCall("memory.lol", op, 0, `http_${response.status}`, "failed");
     return null;
   }
   let parsed: unknown;
   try {
     parsed = await response.json();
   } catch {
-    recordCall("memory.lol", "tw-history", 0, "response_json_error", "failed");
+    recordCall("memory.lol", op, 0, "response_json_error", "failed");
     return null;
   }
   const envelope = asRecord(parsed);
-  if (!Array.isArray(envelope.accounts)) {
-    recordCall("memory.lol", "tw-history", 0, "invalid_result_shape", "partial");
-    return null;
+  // The by-name route wraps matches in `accounts`; the by-id route returns the
+  // one account bare.
+  if (Array.isArray(envelope.accounts)) return envelope.accounts.map(asRecord);
+  if (envelope.screen_names && typeof envelope.screen_names === "object" && !Array.isArray(envelope.screen_names)) {
+    return [envelope];
   }
-  if (!envelope.accounts.length) {
+  recordCall("memory.lol", op, 0, "invalid_result_shape", "partial");
+  return null;
+}
+
+function screenNamesOf(acct: Record<string, unknown>): string[] | null {
+  const names = acct.screen_names;
+  if (!names || typeof names !== "object" || Array.isArray(names)) return null;
+  return Object.keys(names as Record<string, unknown>);
+}
+
+// Handle-change history via memory.lol (keyless OSINT index that maps an X
+// account id to every screen name it has used, with date ranges). A rebrand is a
+// classic move to escape a burned reputation, and X keeps the same id across
+// handle changes, so the old names are recoverable. Coverage is partial: an empty
+// result means "not in the index", never a guarantee of no change.
+//
+// The index is keyed by account id, and the by-name route only answers for names
+// it has already seen - so an account renamed more recently than the archive's
+// last sighting looks absent under its current handle while its whole history
+// sits under its id. Pass `userId` (the scan has it from the X profile) and the
+// by-id route is tried whenever the name lookup comes back empty. It also
+// disambiguates a name that several accounts have worn: with an id we can pick
+// OUR account instead of whichever one the archive listed first.
+export async function handleHistory(
+  handle: string,
+  userId?: string,
+): Promise<{ priorHandles: string[]; idStr?: string; currentNameInArchive: boolean } | null> {
+  const u = handle.replace(/^@/, "");
+  const id = (userId ?? "").trim();
+  const usableId = /^[0-9]{1,25}$/.test(id) ? id : "";
+
+  // A fresh object each time: callers own what they get back.
+  const nothingKnown = () => ({ priorHandles: [] as string[], currentNameInArchive: false });
+
+  const byName = await memoryLolAccounts(encodeURIComponent(u), "tw-history");
+  if (!byName) return null;
+
+  // Each lookup that completes is recorded under its own op, so a scan's ledger
+  // shows whether the answer came from the name or from the id behind it.
+  let op = "tw-history";
+  let acct = byName.length
+    // A screen name worn by several accounts: ours is the one with our id.
+    ? (usableId ? byName.find((a) => String(a.id_str ?? a.id ?? "") === usableId) : undefined) ?? byName[0]
+    : undefined;
+
+  if (!acct) {
     recordCall("memory.lol", "tw-history", 0, "no_match", "succeeded");
-    return { priorHandles: [] };
+    if (!usableId) return nothingKnown();
+    op = "tw-history-id";
+    const byId = await memoryLolAccounts(`id/${encodeURIComponent(usableId)}`, op);
+    if (!byId) return nothingKnown();
+    acct = byId[0];
+    if (!acct) {
+      recordCall("memory.lol", op, 0, "no_match", "succeeded");
+      return nothingKnown();
+    }
   }
-  const acct = asRecord(envelope.accounts[0]);
-  if (!acct.screen_names || typeof acct.screen_names !== "object" || Array.isArray(acct.screen_names)) {
-    recordCall("memory.lol", "tw-history", 0, "screen_names_missing", "partial");
-    return { priorHandles: [], ...(typeof acct.id_str === "string" ? { idStr: acct.id_str } : {}) };
+
+  const idStr = typeof acct.id_str === "string" ? acct.id_str
+    : typeof acct.id === "number" || typeof acct.id === "string" ? String(acct.id)
+      : undefined;
+  const names = screenNamesOf(acct);
+  if (!names) {
+    recordCall("memory.lol", op, 0, "screen_names_missing", "partial");
+    return { ...nothingKnown(), ...(idStr ? { idStr } : {}) };
   }
-  const names = Object.keys(acct.screen_names);
   const prior = names.filter((n) => n.toLowerCase() !== u.toLowerCase());
-  recordCall("memory.lol", "tw-history", 0, prior.length ? "history_found" : "no_prior_handles", "succeeded");
-  return { priorHandles: prior, ...(typeof acct.id_str === "string" ? { idStr: acct.id_str } : {}) };
+  recordCall("memory.lol", op, 0, prior.length ? "history_found" : "no_prior_handles", "succeeded");
+  return {
+    priorHandles: prior,
+    // False with names present means the archive has never seen this account
+    // under the handle it uses today: the rename postdates every sighting.
+    currentNameInArchive: names.length > prior.length,
+    ...(idStr ? { idStr } : {}),
+  };
 }
 
 // One live audit reads the SAME cursorless last_tweets page from three passes
