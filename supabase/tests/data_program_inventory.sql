@@ -1,0 +1,14 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions, pg_catalog;
+select plan(8);
+select ok(not has_function_privilege('anon','public.get_data_program_inventory(uuid)','execute'),'anonymous cannot inventory');
+select ok(not has_function_privilege('authenticated','public.get_data_program_inventory(uuid)','execute'),'clients cannot supply another workspace');
+select ok(has_function_privilege('service_role','public.get_data_program_inventory(uuid)','execute'),'server can inventory');
+select throws_ok($$select public.get_data_program_inventory(null)$$,'P0001','workspace required','null workspace rejected');
+select is((public.get_data_program_inventory('ffffffff-ffff-4fff-8fff-ffffffffffff')->'dailySpend'->>'events')::bigint,0::bigint,'absent workspace does not receive other workspace spend');
+select ok(not exists(select 1 from jsonb_array_elements(public.get_data_program_inventory('ffffffff-ffff-4fff-8fff-ffffffffffff')->'datasets') d where d->>'scope'='workspace' and (d->>'rows')::bigint<>0),'all workspace counts scoped');
+select ok(not exists(select 1 from jsonb_array_elements(public.get_data_program_inventory('ffffffff-ffff-4fff-8fff-ffffffffffff')->'datasets') d where d->>'scope'='schema_only' and d->>'rows' is not null),'shared data not counted or returned');
+select is(public.get_data_program_inventory('ffffffff-ffff-4fff-8fff-ffffffffffff')->'dailySpend'->>'timezone','Europe/Lisbon','daily spend has explicit business timezone');
+select * from finish();
+rollback;
