@@ -56,6 +56,7 @@ import { normalizedReportLane, REPORT_VIEW_QUERY_KEY } from "./reports/shared/re
 const AboutPage = lazy(() => import("./components/AboutPage").then((module) => ({ default: module.AboutPage })));
 const AdminPage = lazy(() => import("./components/AdminPage").then((module) => ({ default: module.AdminPage })));
 const ApiPage = lazy(() => import("./components/ApiPage").then((module) => ({ default: module.ApiPage })));
+const ApiStatusPage = lazy(() => import("./components/ApiStatusPage").then((module) => ({ default: module.ApiStatusPage })));
 const ChangelogPage = lazy(() => import("./components/ChangelogPage").then((module) => ({ default: module.ChangelogPage })));
 const CaseBriefPanel = lazy(() => import("./components/CaseBriefPanel").then((module) => ({ default: module.CaseBriefPanel })));
 const DossiersPage = lazy(() => import("./components/DossiersPage").then((module) => ({ default: module.DossiersPage })));
@@ -131,7 +132,7 @@ function CaseBriefLoadingDialog() {
 }
 
 type Phase =
-  | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "referrals" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
+  | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "referrals" | "track" | "admin" | "about" | "api" | "providers" | "changelog" | "apis"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "threat"
@@ -395,6 +396,7 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
   const inv = params.get("inv");
   if (inv) return { phase: "idle", dossier: null, query: "", openRef: inv, openKind: "investigation" };
   if (params.has("find")) return { phase: "find", dossier: null, query: "" };
+  if (params.has("apis")) return { phase: "apis", dossier: null, query: "" };
   return { phase: "idle", dossier: null, query: "" };
 }
 
@@ -1839,7 +1841,7 @@ export default function App() {
   }, [closeCaseBriefForNavigation, setDossier, setInvestigation, setPhase, setQuery]);
 
   const onNav = useCallback((t: NavTarget) => {
-    if ((t === "admin" || t === "providers" || t === "changelog") && role !== "owner") return;
+    if ((t === "admin" || t === "providers" || t === "changelog" || t === "apis") && role !== "owner") return;
     if (!closeCaseBriefForNavigation()) return;
     safeAuditRequestRef.current += 1;
     setResearchReturn(null);
@@ -1874,7 +1876,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "threat" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "referrals" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
+    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "threat" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "referrals" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog" || phase === "apis"
       ? phase
       : "idle";
   const personReportPrivate = (dossier?.viewPersistence ?? dossier?.persistence)?.state === "private";
@@ -1936,6 +1938,8 @@ export default function App() {
       {phase === "providers" && role === "owner" && <ProvidersPage />}
 
       {phase === "changelog" && role === "owner" && <ChangelogPage />}
+
+      {phase === "apis" && role === "owner" && <ApiStatusPage />}
 
       {phase === "dossiers" && <DossiersPage onOpen={onOpen} onOpenBrief={setCaseBriefTarget} />}
 
