@@ -520,8 +520,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // the fee read is null and the venue answer still goes out.
     if (sources) feePromise = robinhoodCreatorFeeUsage(addr, sources, creation.creator, String(req.query.symbol ?? "the token").slice(0, 16) || "the token", { calls: 8, deadline: Date.now() + 12_000 }).catch(() => null);
   }
-  if (!chainid || !key) { res.status(200).json({ available: !!creatorVenue, note: "snipe trace needs an Etherscan-covered chain and key", creatorVenue, pumpfun: null, snipe: null, creatorFees: await feePromise }); return; }
+  // The launcher's own metadata: Pons v2 tokens (and other Robinhood launchers)
+  // carry a description() string set at creation - the project's pitch in the
+  // contract, which the scan reads for claims the way it reads a bio.
+  const descriptionPromise = chain === "robinhood" ? onchainDescription(addr).catch(() => null) : Promise.resolve(null);
+  if (!chainid || !key) { res.status(200).json({ available: !!creatorVenue, note: "snipe trace needs an Etherscan-covered chain and key", creatorVenue, pumpfun: null, snipe: null, creatorFees: await feePromise, description: await descriptionPromise }); return; }
   const pairParam = String(req.query.pair ?? "").trim().toLowerCase();
-  const [snipe, creatorFees] = await Promise.all([evmSnipe(chainid, addr, key, EVM.test(pairParam) ? pairParam : null), feePromise]);
-  res.status(200).json({ available: true, chain, pumpfun: null, snipe, creatorVenue, creatorFees });
+  const [snipe, creatorFees, description] = await Promise.all([evmSnipe(chainid, addr, key, EVM.test(pairParam) ? pairParam : null), feePromise, descriptionPromise]);
+  res.status(200).json({ available: true, chain, pumpfun: null, snipe, creatorVenue, creatorFees, description });
+}
+
+// description() on the token itself (selector 0x7284e416). Pons v2's
+// PonsV2LauncherToken exposes it; on a token without it the call reverts and
+// the answer is null. One RPC call, decoded as an ABI string.
+export async function onchainDescription(token: string): Promise<string | null> {
+  const r = await fetch("https://rpc.mainnet.chain.robinhood.com", {
+    method: "POST", headers: { "content-type": "application/json", "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: token, data: "0x7284e416" }, "latest"] }),
+    signal: AbortSignal.timeout(6000),
+  });
+  if (!r.ok) return null;
+  const d = (await r.json()) as { result?: string };
+  const hex = d.result ?? "";
+  if (!/^0x[0-9a-f]{128,}$/i.test(hex)) return null;
+  const body = hex.slice(2);
+  const offset = parseInt(body.slice(0, 64), 16) * 2;
+  const len = parseInt(body.slice(offset, offset + 64), 16) * 2;
+  if (!Number.isFinite(len) || len <= 0 || len > 8000) return null;
+  const text = Buffer.from(body.slice(offset + 64, offset + 64 + len), "hex").toString("utf8").replace(/\s+/g, " ").trim();
+  return text || null;
 }

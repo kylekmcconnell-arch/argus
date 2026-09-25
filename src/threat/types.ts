@@ -130,6 +130,7 @@ export interface ThreatScan {
     xchain: CrossChain | null;
     migration: MigrationInfo | null;
     launch: LaunchProvenance | null;
+    product?: ProductAuthenticity | null;
     verification: RegistryVerification | null;
     sellers: SellStructure | null;
     site: SiteSafety | null;
@@ -151,6 +152,25 @@ export interface TechnicalPosture {
 }
 
 // ---- linked-site safety (drainer / blacklist check on the token's website) ----
+// Product authenticity: what the linked product's own client code says it is,
+// set against what the copy claims. Read server-side by api/product-probe
+// from the page and its bundles; "white-label" means a known third-party
+// provider's fingerprint (error-code namespace, API host, SDK id) is in the
+// bundle. null when the token links no website or the probe could not read it.
+export interface ProductAuthenticity {
+  url: string;
+  host: string | null;
+  privacyProduct: boolean;
+  providers: { name: string; kind: string; evidence: string[] }[];
+  backendHosts: string[];
+  paasHosts: string[];
+  originalityClaims: string[];
+  contractsInApp: number;
+  bundlesRead: number;
+  read: "white-label" | "self-hosted" | "unknown";
+  note: string;
+}
+
 export interface SiteSafety {
   hasX: boolean;
   hasWebsite: boolean;
@@ -269,6 +289,9 @@ export interface LaunchProvenance {
     note: string;
   } | null;
   notes: string[];
+  // The launcher's own metadata description, when the token contract carries
+  // one (Pons v2 description()). The project's pitch, read for claims.
+  description?: string | null;
 }
 
 // ---- Migrate.fun migration (#5) ----

@@ -10,6 +10,9 @@
 //   rwa           - claims real-world-asset backing or buys/distributes RWAs
 //   equity        - tokenized stock/share; tracks or represents equity
 //   security-like - profit-sharing / dividend / revenue-share mechanics
+//   privacy       - sells private transfer / mixing / anonymity for capital;
+//                   a sector with little true innovation, so the token is
+//                   judged on whether the product is its own or a wrapper
 //   unknown       - not enough context to call it
 //
 // The call is heuristic and CONTEXTUAL: CoinGecko's own taxonomy first (the
@@ -21,7 +24,7 @@
 import type { TokenDossier } from "../token/audit";
 import type { CodeTokenomics } from "./solidity";
 
-export type TokenKind = "meme" | "utility" | "rwa" | "equity" | "security-like" | "unknown";
+export type TokenKind = "meme" | "utility" | "rwa" | "equity" | "security-like" | "privacy" | "unknown";
 
 export interface TokenClassification {
   kind: TokenKind;
@@ -37,6 +40,7 @@ const LABEL: Record<TokenKind, string> = {
   rwa: "RWA",
   equity: "EQUITY",
   "security-like": "SECURITY-LIKE",
+  privacy: "PRIVACY",
   unknown: "UNCLASSIFIED",
 };
 
@@ -48,6 +52,7 @@ const LENS: Record<TokenKind, string> = {
   rwa: "Assessed as an RWA token: the real-world backing claim IS the risk - issuer credibility and custody of the underlying matter more than the chart.",
   equity: "Assessed as tokenized equity: mint/redeem authority held by the issuer is part of the design, not a rug switch - the issuer's credibility and the tracking mechanism are the risk.",
   "security-like": "Assessed as security-like: dividend / profit-sharing mechanics add securities-law exposure on top of ordinary market risk.",
+  privacy: "Assessed as a privacy token: it sells private movement of capital, a sector that is mostly mixers and wrappers with little original engineering. It is judged on what the product's own code says it is versus what the copy claims, on whether the team's wallets show the same obfuscation the product sells, and on mixer-class regulatory exposure.",
   unknown: "Class unclear from available context - assessed with full generic scrutiny.",
 };
 
@@ -63,6 +68,7 @@ const TXT_EQUITY = /tokenized (stock|share|equit)|\bxstocks?\b|equity token|repr
 const TXT_RWA = /\brwa\b|real[- ]world asset|(backed|collateralized) by (gold|silver|us ?treasur|t-?bills?|real estate|bonds?|commodit)|tokenized (gold|silver|treasur|real estate|commodit|bond)/i;
 const TXT_SECURITY = /dividends?|revenue.?shar(e|ing)|profit.?shar(e|ing)|share of (the )?(revenue|profits?|fees)|passive income|(pays?|earn) .{0,20}yield/i;
 const TXT_MEME = /\bmeme\b|memecoin|community[- ](coin|token|driven)|for fun|no (intrinsic )?(value|utility)|just a (dog|cat|frog|coin|token)|\binu\b|\bpepe\b|\bshiba?\b|\bdoge\b|\bwojak\b|mascot/i;
+const TXT_PRIVACY = /\bprivacy\b|private (transfer|swap|send|bridge|route|routing|transaction)|\bmixer\b|\bmixing\b|anonym(ous|ity|ise|ize)|untraceable|unlinkable|stealth (address|transfer)|shielded|xmr routing|\bmonero\b|\bcypherpunk/i;
 const TXT_UTILITY = /protocol|governance|staking|infrastructure|oracle|layer.?[12]\b|\bdex\b|lending|borrow|payment|gas token|native token|access to|platform|network fee|ecosystem|\bdapp\b|compute|bridge|validator/i;
 // Ticker culture - weak signal on its own, only ever a tiebreaker.
 const TICKER_MEME = /^(.*(INU|DOGE|PEPE|SHIB|ELON|MOON|CHAD|WOJAK|BABY|CAT|WIF|BONK|TRUMP|FROG).*)$/i;
@@ -72,9 +78,18 @@ const TICKER_MEME = /^(.*(INU|DOGE|PEPE|SHIB|ELON|MOON|CHAD|WOJAK|BABY|CAT|WIF|B
 const MEME_LAUNCHPAD_DEX = /pump|moonshot|boop|bags|believe|launchlab|four\.?meme|sunpump|daos/i;
 const MEME_MINT_SUFFIX = /(pump|bonk)$/i;
 
-export function classifyToken(d: TokenDossier, code: CodeTokenomics | null = null): TokenClassification {
-  const score: Record<Exclude<TokenKind, "unknown">, number> = { meme: 0, utility: 0, rwa: 0, equity: 0, "security-like": 0 };
-  const why: Record<Exclude<TokenKind, "unknown">, string[]> = { meme: [], utility: [], rwa: [], equity: [], "security-like": [] };
+// Context the classifier cannot see in the dossier: the linked product read
+// by api/product-probe (privacy language on the site itself) and the linked
+// account's bio. Both arrive after the outset call, so the class is re-run
+// with them the same way it is re-run with the code's tokenomics.
+export interface ClassifyContext {
+  privacyProduct?: boolean;
+  bio?: string | null;
+}
+
+export function classifyToken(d: TokenDossier, code: CodeTokenomics | null = null, ctx: ClassifyContext = {}): TokenClassification {
+  const score: Record<Exclude<TokenKind, "unknown">, number> = { meme: 0, utility: 0, rwa: 0, equity: 0, "security-like": 0, privacy: 0 };
+  const why: Record<Exclude<TokenKind, "unknown">, string[]> = { meme: [], utility: [], rwa: [], equity: [], "security-like": [], privacy: [] };
   const add = (k: Exclude<TokenKind, "unknown">, pts: number, reason: string) => { score[k] += pts; why[k].push(reason); };
 
   // 1. CoinGecko's own taxonomy - the project told an aggregator what it is.
@@ -104,6 +119,9 @@ export function classifyToken(d: TokenDossier, code: CodeTokenomics | null = nul
   if (TXT_SECURITY.test(txt)) add("security-like", 2, "advertises dividends / revenue share / passive income");
   if (TXT_MEME.test(txt)) add("meme", 2, "describes itself in meme/community terms");
   if (TXT_UTILITY.test(txt)) add("utility", 1, "describes protocol/platform utility");
+  if (TXT_PRIVACY.test(txt)) add("privacy", 3, "describes itself as a privacy / private-transfer product");
+  if (ctx.bio && TXT_PRIVACY.test(ctx.bio)) add("privacy", 2, "the linked account's bio sells privacy");
+  if (ctx.privacyProduct) add("privacy", 3, "the linked product's own site sells private transfers");
 
   // 4. Launch venue: born on a meme launchpad = a meme coin until proven otherwise.
   if (MEME_LAUNCHPAD_DEX.test(d.dexId) || MEME_MINT_SUFFIX.test(d.address)) {
@@ -116,7 +134,7 @@ export function classifyToken(d: TokenDossier, code: CodeTokenomics | null = nul
   // Tie-break order is deliberate: the more specific/consequential claim wins.
   // (SHIB carries both "Meme" and DeFi categories - meme outranks utility; a
   // tokenized stock with utility language is still equity.)
-  const order: Exclude<TokenKind, "unknown">[] = ["equity", "rwa", "security-like", "meme", "utility"];
+  const order: Exclude<TokenKind, "unknown">[] = ["equity", "rwa", "privacy", "security-like", "meme", "utility"];
   let kind: TokenKind = "unknown";
   let best = 0;
   for (const k of order) if (score[k] > best) { best = score[k]; kind = k; }

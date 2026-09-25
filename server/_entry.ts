@@ -10,4 +10,4 @@ export { getRecentPostsMeta } from "./adapters/x";
 export { collectShippingSummary } from "./shippingSummary";
 export { resolveInput } from "../src/lib/resolveInput";
 
-export { fetchPublicText, fetchPublicAssetHash } from "./publicWeb";
+export { fetchPublicText, fetchPublicScript, fetchPublicAssetHash } from "./publicWeb";

@@ -48,4 +48,4 @@ export function providerStatus(): Array<{
   configured: boolean;
 }>;
 
-export { fetchPublicText, fetchPublicAssetHash } from "../server/publicWeb";
+export { fetchPublicText, fetchPublicScript, fetchPublicAssetHash } from "../server/publicWeb";

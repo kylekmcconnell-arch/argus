@@ -1209,6 +1209,27 @@ var SOL = "solana";
 var BASE = "base";
 var CABALS = [
   {
+    id: "rh-hades-polyhedge-2026-09-21",
+    name: "Hades / Polyhedge privacy launch",
+    kind: "privacy-farm",
+    intent: "unestablished",
+    summary: "$HADES (Robinhood Chain, Pons v2, 2026-09-21) sells 'private transfers' through hades.exchange. The site is a white-label client for Houdini Swap - the bundle carries HOUDINI_AMOUNT_BELOW_MINIMUM, HOUDINI_TRANSFER_NOT_FOUND and the useXmr routing toggle, and its backend is a hosted app at hades-api-production.up.railway.app - while the token metadata and X bio claim original engineering ('built by the OGs growing up on tors and onions', 'true cypherpunks'). No contract of the product exists on chain and the token has no role in it. Incubator @polyhedge (joined 2026-02, 'Consumer Trading Lab', first product Hades, second teased as Elysium) is anonymous. The creator wallet was funded from a Binance-sourced Ethereum wallet and bridged over Across 32 minutes before launch - no mixer anywhere in its own trail - dev-bought 2.07% and locked it for two years (RobinhoodLocker id 525, unlock 2028-09-22); no fee claims, no sells. The launch bundle (four wallets, 11.3% in one second at 16:54:34 UTC, all exited) traced to chain-wide sniper bots funded through Robinhood's distribution wallet, not to the team. Indexed so the next privacy launch sharing this copy, this backend pattern or this incubator is recognised as the same hands. Intent unestablished: a wrapper sold as original is a disclosure finding, not proof of a rug.",
+    firstSeen: "2026-09-21",
+    lastSeen: "2026-09-25",
+    wallets: [
+      { chain: RH, address: "0x5ded38b5b4cbb97a44323609156c3e182e5202ad", role: "deployer", label: "HADES creator (Pons v2 launch sender; dev buy locked)", evidence: "Pons v2 creation tx 0x0bddaf35cc003d9ac953000da673b1e0fae5e473d8702c7ed959f3effd82ab60 (2026-09-21 16:37 UTC); received 20,694,817 HADES in the launch tx; locked all of it in RobinhoodLocker 0xd0f7d8c6e9f6d80c297bebe4f7fd1b9c8125c32f on 2026-09-22 18:45 (Locked id 525, unlockTime 1853260200). Three transactions total, no claims, no sells; read Robinhood Blockscout 2026-09-24." },
+      { chain: "ethereum", address: "0x5ded38b5b4cbb97a44323609156c3e182e5202ad", role: "deployer", label: "Same creator key on Ethereum: received 0.0443 ETH and bridged 0.044 ETH to Robinhood Chain via Across, 32 minutes before launch", evidence: "Ethereum: 0.0443 ETH in from 0xdea91d11 at 2026-09-21 16:05 UTC; depositV3 to Across SpokePool 0x5c7bcd6e at 16:09 (depositId 4631938, originChainId 1); filled on Robinhood Chain in 0x09ff0313162f16ffbc80578801b1e0b9ae83f32c451eb7fed47142bdacbfe672 at 16:09:38. Two Ethereum transactions total. Read Etherscan + Robinhood Blockscout 2026-09-25." },
+      { chain: "ethereum", address: "0xdea91d119e625fd556b57a85ebf7cda9688ddcbb", role: "hub", label: "Funded the creator on Ethereum; 4,306-transaction wallet first funded 0.5 ETH by Binance 14 on 2026-05-17", evidence: "Sent 0.0443 ETH to 0x5ded38b5 at 2026-09-21 16:05 UTC. First inbound 0.5 ETH from 0x28c6c06298d514db089934071355e5743bf21d60 (Binance 14) on 2026-05-17 17:23; USDT/USDC transfers and 4,306 transactions since; 2.33 ETH balance on 2026-09-25. No mixer, bridge-hop or privacy tool anywhere in the trail: the team that sells private transfers funded its launch from a KYC exchange through an everyday wallet. Read Etherscan 2026-09-25." }
+    ],
+    accounts: [
+      { handle: "hades_privacy", role: "project", label: "Project account; joined September 2026; bio 'Real Privacy. Built by Real Trenchers. Incubated by @polyhedge'", evidence: "x.com/hades_privacy read 2026-09-24: 618 followers, 7 following, CA in bio." },
+      { handle: "polyhedge", role: "cofounder", label: "Incubator; joined February 2026; 'Consumer Trading Lab', 'First Product Out: @hades_privacy', 'Elysium' teased", evidence: "x.com/polyhedge read 2026-09-24: 245 followers, 7 following, no names." }
+    ],
+    launches: [
+      { chain: RH, address: "0x923d915ddf0fe60c04addac68e13f0d5af03164f", symbol: "HADES", name: "Hades", launchedAt: "2026-09-21", venue: "pons-v2", outcome: "unestablished", note: "Privacy-transfer token whose product is a Houdini Swap white-label; copy claims original engineering. Dev allocation locked two years; launch bundle was third-party sniper bots.", evidence: "api/product-probe on https://hades.exchange/ (bundle /assets/index-YHk1MDq3.js: HOUDINI_ error namespace, useXmr, backend hades-api-production.up.railway.app); token metadata description in the creation calldata; sniper funding traced to 0xf70da97812cb96acdf810712aa562db8dfa3dbef (Robinhood distribution wallet, 2.13M txs) on 2026-09-18." }
+    ]
+  },
+  {
     "id": "base-catalyst-suite-2026-09-23",
     "name": "Base Catalyst launch suite",
     "kind": "infra",
@@ -14652,7 +14673,14 @@ async function readBoundedResponseText(response, maxBytes = MAX_TEXT_BYTES) {
   const bytes = await readBoundedText(response, maxBytes);
   return bytes === null ? null : bytes.toString("utf8");
 }
-async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8", asset = false) {
+var SCRIPT_CONTENT_TYPES = /* @__PURE__ */ new Set([
+  "application/javascript",
+  "application/x-javascript",
+  "text/javascript",
+  "application/ecmascript",
+  "text/ecmascript"
+]);
+async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8", asset = false, contentTypes = SAFE_CONTENT_TYPES) {
   const request = dependencies.request ?? defaultRequestForMode();
   const lookup2 = dependencies.lookup ?? defaultLookupForMode();
   let target = initialTarget;
@@ -14686,7 +14714,7 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
     }
     if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (asset ? !/^image\/(?:x-icon|vnd.microsoft.icon|png|jpeg|gif|webp|svg\+xml)$/.test(contentType) : contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
+    if (asset ? !/^image\/(?:x-icon|vnd.microsoft.icon|png|jpeg|gif|webp|svg\+xml)$/.test(contentType) : contentType && !contentTypes.has(contentType)) {
       return { status: "failed", reason: "unsupported_content_type" };
     }
     let bytes;
@@ -14719,6 +14747,12 @@ async function fetchPublicText(raw, dependencies = {}) {
   const target = await validatedPublicTarget(raw, void 0, lookup2);
   if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
   return fetchValidatedPublicText(target, dependencies);
+}
+async function fetchPublicScript(raw, dependencies = {}) {
+  const lookup2 = dependencies.lookup ?? defaultLookupForMode();
+  const target = await validatedPublicTarget(raw, void 0, lookup2);
+  if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
+  return fetchValidatedPublicText(target, dependencies, "application/javascript,text/javascript;q=0.9,*/*;q=0.1", false, SCRIPT_CONTENT_TYPES);
 }
 async function fetchPublicAssetHash(raw, dependencies = {}) {
   const target = await validatedPublicTarget(raw, void 0, dependencies.lookup ?? defaultLookupForMode());
@@ -45579,6 +45613,7 @@ export {
   collectShippingSummary,
   collectSocialActivity,
   fetchPublicAssetHash,
+  fetchPublicScript,
   fetchPublicText,
   getRecentPostsMeta,
   providerStatus,
