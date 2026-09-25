@@ -9,6 +9,8 @@ import { TokenReport } from "../components/TokenReport";
 import type { TokenDossier } from "../token/audit";
 import { storedPersonDossier, type StoredReport } from "../lib/reports";
 import type { ShippingSummary } from "../threat/shipping";
+import { recordContribution, setGraphStoreOrganization } from "../graph/store";
+import type { GraphContribution } from "../graph/network";
 import fixture from "../reports/argus/__fixtures__/altcoinist-v4.json";
 
 /* Development-only harness for the ARGUS report design.
@@ -16,6 +18,12 @@ import fixture from "../reports/argus/__fixtures__/altcoinist-v4.json";
    ?design-preview=argus-report&mode=share recipient (read-only) view
    ?design-preview=argus-report&code=demo  the Code chapter with a made-up development read
    ?design-preview=argus-report&kind=token the token scan of the same saved case
+   ?design-preview=argus-report&kind=token&persistence=failed|pending|private|persisted
+                                           the same token as a LIVE report in
+                                           that persistence state (no snapshot)
+   ?design-preview=argus-report&kind=token&ring=demo
+                                           seed a synthetic community-graph tie
+                                           so the RingAlert overlay renders
    The scroll container mirrors the workspace's main pane so sticky chrome
    behaves exactly as it does inside the app shell. */
 
@@ -114,6 +122,23 @@ const DEMO_SHIPPING: ShippingSummary = {
   botSharePct: 4,
 };
 
+/* A fabricated community-graph tie, for laying out the RingAlert overlay
+   only: the previewed token and a made-up failed subject share one deployer
+   wallet. Written to a preview-only graph slot in this browser; the shared
+   graph backend is not running in the dev preview. Never imported by the app. */
+function seedRingDemo(symbol: string): void {
+  const me = `$${symbol}`;
+  const shared = "wallet:0x00000000000000000000000000000000deadbeef";
+  const authoritative = (c: GraphContribution, n: number): GraphContribution => ({
+    ...c, provenanceState: "server_collected", reportVersionId: `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+  });
+  setGraphStoreOrganization("design-preview");
+  recordContribution(authoritative({ handle: me, verdict: "PASS", aliases: [me],
+    nodes: [{ type: "Company", key: me, subject: true }, { type: "Identity", key: shared }], edges: [{ src: me, dst: shared, type: "DEPLOYED_BY" }] }, 1));
+  recordContribution(authoritative({ handle: "$PREVIEW-RUG", verdict: "AVOID", aliases: ["$PREVIEW-RUG"],
+    nodes: [{ type: "Company", key: "$PREVIEW-RUG", subject: true }, { type: "Identity", key: shared }], edges: [{ src: "$PREVIEW-RUG", dst: shared, type: "DEPLOYED_BY" }] }, 2));
+}
+
 export function ArgusReportPreview() {
   const params = new URLSearchParams(window.location.search);
   const share = params.get("mode") === "share";
@@ -144,6 +169,18 @@ export function ArgusReportPreview() {
     const partial = params.get("coverage") === "partial";
     if (partial) { token.projectX = null; token.socials = []; token.cg = null; }
     if (params.get("code") === "demo") token.shipping = DEMO_SHIPPING;
+    // A live, unsaved report in the requested persistence state: drop the
+    // saved-version context so the report renders its live notices.
+    const persistence = params.get("persistence");
+    if (persistence === "failed" || persistence === "pending" || persistence === "private" || persistence === "persisted") {
+      token.versionContext = undefined;
+      token.persistence = persistence === "failed"
+        ? { state: "failed", reason: "Preview: the immutable save was refused by the fixture backend." }
+        : persistence === "persisted"
+          ? { state: "persisted", reportVersionId: (fixture as unknown as StoredReport).versionContext?.reportVersionId ?? null, panelCostToken: "design-preview" }
+          : { state: persistence };
+    }
+    if (params.get("ring") === "demo") seedRingDemo(token.symbol);
     return (
       <div className="flex h-screen overflow-hidden bg-void">
         <main className="thin-scroll flex-1 overflow-x-hidden overflow-y-auto">

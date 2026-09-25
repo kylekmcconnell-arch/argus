@@ -38,7 +38,6 @@ import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
 import { TokenStory } from "./TokenStory";
 import { SecondOpinion } from "./SecondOpinion";
 import { RingAlert } from "./RingAlert";
-import { LiveSupplementalNotice } from "./SnapshotEvidenceControl";
 import { TokenDecisionChapter } from "../reports/argus/chapters/TokenDecisionChapter";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
 import { ArgusReportShell, type MoreAction } from "../reports/argus/ArgusReportShell";
@@ -398,73 +397,59 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       }}
       more={moreActions}
       chapters={{
-        decision: () => (<TokenDecisionChapter
-                liveNotice={showCurrentIntelligence}
-                token={d}
-                website={projectSite}
-                openChecks={requiredGapChecks}
-                snapshot={versionContext}
-                currentDataEnabled={currentIntelligenceEnabled}
-                onCheckCurrentData={loadCurrentIntelligence}
-                privateReport={privateSession}
-                saving={persistencePending}
-                persistenceFailed={persistenceFailed || persistenceMissingCapability}
-                presentationStyle={reportStyle}
-                subjectName={d.name || `$${d.symbol}`}
-                subjectSummary={neutralProjectDescription}
-                reportSummary={d.headline}
-                verdictLabel={presentationMeta.label}
-                score={d.score}
-                scoreLabel="Token safety score"
-                scoreContext="Can it be bought and sold? Who can change its rules, and how concentrated are its funds and ownership?"
-                scoreIsProvisional={d.assessment?.provisional === true || readiness.status !== "ready"}
-                favorable={favorableVerdict}
-                verdictTone={decisionCanvasTone}
-                argument={verdictArgument}
-                discovery={materialChangeDiscovery ?? controlPathDiscovery ?? decisionDiscovery}
-                decisionBoundary={d.decisionBoundary}
-                decisionBoundaryEvidenceHref={d.decisionBoundary ? decisionBoundaryHref(d.decisionBoundary, "token") : undefined}
-                supports={supportItems}
-                concerns={concernItems}
-                nextSteps={nextStepItems}
-                verified={verifiedItems}
-                challengeAnchorId={shareView ? null : "token-challenge"}
-                coveragePercent={readiness.coveragePercent}
-                successful={readiness.successful}
-                applicable={readiness.applicable}
-                checkScopeLabel="Token safety checks"
-                openItemsLabel={requiredGapChecks.length > 0
-                  ? "Required checks still open"
-                  : supplementalGapChecks.length > 0
-                    ? "Optional follow-up research"
-                    : "What is still open"}
-                capturedAt={capturedAt}
-                composition={compositionRows.length > 0 ? compositionRows : undefined} legacy={<>
-
-            {!versionContext && (showCurrentIntelligence || privateSession) && (
-              <LiveSupplementalNotice private={privateSession} persisted={livePersistence?.state === "persisted"} />
-            )}
-            {persistencePending && (
-              <div className="panel mt-4 px-4 py-3 text-[12.5px] text-ink-dim" role="status">
-                Saving this report before running extra checks…
-              </div>
-            )}
-            {(persistenceFailed || persistenceMissingCapability) && (
-              <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
-                <strong className="block text-ink">This report is visible now, but it was not saved.</strong>
-                <span className="mt-1 block">It will disappear when you leave this page. Run the scan again to create a saved version before opening extra research.</span>
-                {livePersistence?.state === "failed" && livePersistence.reason && (
-                  <span className="mt-1 block text-ink-dim">{livePersistence.reason}</span>
-                )}
-              </div>
-            )}
-            {showCurrentIntelligence && <RingAlert handle={"$" + d.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
-
-            <div className="rd-legacy">
-
-
-            </div>
-          </>} />),
+        // The chapter carries every live notice (saving, not saved, private,
+        // snapshot) from the props below; nothing is repeated in a `legacy`
+        // node. Token reports have no case detail outside their chapters, so
+        // no "full case" disclosure is rendered.
+        decision: () => (
+          <TokenDecisionChapter
+            liveNotice={showCurrentIntelligence}
+            token={d}
+            website={projectSite}
+            openChecks={requiredGapChecks}
+            snapshot={versionContext}
+            currentDataEnabled={currentIntelligenceEnabled}
+            onCheckCurrentData={loadCurrentIntelligence}
+            privateReport={privateSession}
+            saving={persistencePending}
+            persistenceFailed={persistenceFailed || persistenceMissingCapability}
+            persistenceFailedReason={livePersistence?.state === "failed" ? livePersistence.reason : undefined}
+            verdictOverlay={showCurrentIntelligence
+              ? <RingAlert handle={"$" + d.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />
+              : undefined}
+            presentationStyle={reportStyle}
+            subjectName={d.name || `$${d.symbol}`}
+            subjectSummary={neutralProjectDescription}
+            reportSummary={d.headline}
+            verdictLabel={presentationMeta.label}
+            score={d.score}
+            scoreLabel="Token safety score"
+            scoreContext="Can it be bought and sold? Who can change its rules, and how concentrated are its funds and ownership?"
+            scoreIsProvisional={d.assessment?.provisional === true || readiness.status !== "ready"}
+            favorable={favorableVerdict}
+            verdictTone={decisionCanvasTone}
+            argument={verdictArgument}
+            discovery={materialChangeDiscovery ?? controlPathDiscovery ?? decisionDiscovery}
+            decisionBoundary={d.decisionBoundary}
+            decisionBoundaryEvidenceHref={d.decisionBoundary ? decisionBoundaryHref(d.decisionBoundary, "token") : undefined}
+            supports={supportItems}
+            concerns={concernItems}
+            nextSteps={nextStepItems}
+            verified={verifiedItems}
+            challengeAnchorId={shareView ? null : "token-challenge"}
+            coveragePercent={readiness.coveragePercent}
+            successful={readiness.successful}
+            applicable={readiness.applicable}
+            checkScopeLabel="Token safety checks"
+            openItemsLabel={requiredGapChecks.length > 0
+              ? "Required checks still open"
+              : supplementalGapChecks.length > 0
+                ? "Optional follow-up research"
+                : "What is still open"}
+            capturedAt={capturedAt}
+            composition={compositionRows.length > 0 ? compositionRows : undefined}
+          />
+        ),
         scores: () => (
           <LegacySection title="How this score was composed" note="Every weighted dimension of the saved token result, with its evidence and what it could not measure.">
             <section id="composition" className="af-doc scroll-mt-28">
