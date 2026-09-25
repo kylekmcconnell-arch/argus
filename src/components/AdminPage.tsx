@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { auditReadinessLabel, getLog, clearLog, hasCoverageGap, logStats, mergedLog, presentedAuditVerdict, applyRoles, type LogEntry } from "../lib/auditlog";
+import { auditEntityLabel, auditReadinessLabel, getLog, clearLog, hasCoverageGap, logStats, mergedLog, presentedAuditVerdict, applyRoles, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { PendingEdits } from "./PendingEdits";
 import { TeamAccess } from "./TeamAccess";
@@ -145,7 +145,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Total audits" value={stats.total} />
         <Stat label="Tokens" value={stats.byKind.token} />
-        <Stat label="People / sites" value={stats.byKind.person + stats.byKind.site} />
+        <Stat label="Accounts / sites" value={stats.byKind.person + stats.byKind.site} />
         <Stat label="Coverage gaps" value={stats.gaps} tone="var(--color-unverifiable)" />
       </div>
 
@@ -219,7 +219,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
               className="flex w-full cursor-pointer items-start gap-3 border-b border-line px-4 py-3 text-left transition last:border-0 hover:bg-panel/40"
             >
               <span className="chip tint-var mt-0.5 shrink-0" style={{ "--tint": KIND_META[e.kind].color } as React.CSSProperties}>
-                {KIND_META[e.kind].label}
+                {auditEntityLabel(e)}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="mono block truncate text-[12.5px] text-ink">{e.query}</span>

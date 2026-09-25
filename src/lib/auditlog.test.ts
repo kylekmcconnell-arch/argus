@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyAuditCaseFamily, auditReadinessLabel, getLog, hasCoverageGap, presentedAuditVerdict, reconcileAuditOutcome } from "./auditlog";
+import { auditEntityLabel, applyAuditCaseFamily, auditReadinessLabel, getLog, hasCoverageGap, presentedAuditVerdict, reconcileAuditOutcome } from "./auditlog";
 
 describe("failed local scan cleanup", () => {
   afterEach(() => {
@@ -207,4 +207,11 @@ describe("linked project and token case family", () => {
     ]);
     expect(stored.find((row) => row.id === "other")?.flags).toBeUndefined();
   });
+});
+
+it("does not expose the person storage kind as a company classification", () => {
+  expect(auditEntityLabel({ kind: "person", flags: ["role:PROJECT"] })).toBe("company");
+  expect(auditEntityLabel({ kind: "person", flags: ["role:FOUNDER"] })).toBe("person");
+  expect(auditEntityLabel({ kind: "person", flags: ["role:INVESTOR"] })).toBe("account");
+  expect(auditEntityLabel({ kind: "person" })).toBe("account");
 });

@@ -23,6 +23,14 @@ export interface LogEntry {
 
 const COMPLETE_COVERAGE = new Set(["ready", "complete", "rendered", "recovered"]);
 
+/** Storage kind "person" also holds company-account audits; it is not an entity label. */
+export function auditEntityLabel(entry: Pick<LogEntry, "kind" | "flags">): string {
+  if (entry.kind !== "person") return entry.kind;
+  if (entry.flags?.some(flag => /^role:project$/i.test(flag))) return "company";
+  if (entry.flags?.some(flag => /^role:(?:founder|member|advisor|kol)$/i.test(flag))) return "person";
+  return "account";
+}
+
 /**
  * Positive scores stay available for auditability, but never present as final
  * clearance when their evidence coverage is partial, unknown, or missing.
