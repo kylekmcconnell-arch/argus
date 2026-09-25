@@ -1,4 +1,8 @@
 import { collectDiligenceBrief } from "./diligenceBrief";
+import { buildTeamDiligence } from "../src/lib/relationshipDiligence";
+import { buildPersonInvestigation } from "../src/lib/personInvestigation";
+import { collectLinkedTeamEvidence } from "./linkedTeamEvidence";
+import { collectDiligenceProviders } from "./diligenceProviders";
 import { verifyTeamCompanyCandidates } from "./teamCompanyBinding";
 import { sameTeamIdentity } from "../src/lib/teamCompanyBinding";
 import { withProviderAccessScope, grokAccessFailure } from "./providerAccess";
@@ -5217,6 +5221,22 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
   await collectSiteBackersEvidence(ctx);
   // Venue-as-subject recognition rides on the finalized official domain.
   detectLaunchVenueSubject(ctx);
+  // New specialist providers return discovery receipts only, never scoring facts.
+  // Full person audits only; scoped supplements and expired collection budgets do not spend here.
+  if (!options?.authorizedResearchScope && !isOrganizationAccount(evidence) && !evidence.roles.includes(SubjectClass.PROJECT) && !collectionOverBudget()) {
+    const boundRoles = (evidence.basicFacts ?? []).filter(f => f.predicate === "current_role" && f.artifact_verified && f.status === "verified").map(f => f.value).join(" ");
+    try {
+      evidence.diligenceProviders = await collectDiligenceProviders({
+        deadlineAt: collectionDeadlineAt,
+        name: evidence.profile.resolved_name ?? evidence.profile.display_name,
+        company: boundRoles, role: boundRoles || evidence.profile.bio,
+        publicNameEstablished: Boolean(evidence.profile.resolved_name && evidence.profile.identity_binding),
+      });
+      for (const receipt of evidence.diligenceProviders) if (receipt.calls) recordCall(receipt.provider, "person-discovery", receipt.estimatedUsd ?? 0,
+        receipt.estimatedUsd === null ? "Cost unknown: commercial contract; not measured as free. Read-only discovery; no PACER purchase." : "List-price estimate before allowance; no identity promotion.",
+        receipt.status === "unavailable" ? "failed" : "succeeded");
+    } catch { /* A deadline cannot change identity, scores or freeze provider errors as an absence. */ }
+  }
   let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
   if (rolesAfterBasicFacts.includes(SubjectClass.PROJECT)) {
@@ -6261,6 +6281,17 @@ async function runAuditWithLedger(inputHandle: string, emit: Emit, options?: Run
     };
   }
   finishRuntimeStage("analyst", analystStartedAt);
+  // Freeze presentation-only investigation records after scoring. These are not evidence for floors or graph control.
+  if (isOrganizationAccount(evidence) || evidence.roles.includes(SubjectClass.PROJECT)) {
+    evidence.teamDiligence = buildTeamDiligence(evidence.webTeam ?? [], evidence.basicFacts ?? []);
+    if (!options?.authorizedResearchScope && Date.now() < analystDeadlineAt - 8000) {
+      const linked = await collectLinkedTeamEvidence(ctx.organizationId, evidence.webTeam ?? []);
+      evidence.teamDiligence.linkedPeople = linked.people;
+      evidence.teamDiligence.linkedPeopleStatus = linked.status;
+    } else evidence.teamDiligence.linkedPeopleStatus = "not_requested";
+  } else {
+    evidence.personInvestigation = buildPersonInvestigation(evidence.profile, evidence.basicFacts ?? []);
+  }
   // This score-neutral synthesis only reads frozen evidence after scoring.
   // Scoped supplements must not buy an unrelated analytical call.
   if (!options?.authorizedResearchScope) {

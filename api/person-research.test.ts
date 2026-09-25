@@ -53,3 +53,21 @@ it("resolves people inside frozen project facets without using the token name as
   expect(savedPersonContext({ token: { projectAccount } }, "Ada", "Founder")?.company).toBe("Actual Company");
   expect(savedPersonContext({ ...projectAccount, projectAccount }, "Ada", "Founder")).toBeNull();
 });
+
+it("attaches exact person evidence without new provider calls or a spending reservation", async () => {
+  const linkedMember = { name: "Ada", role: "Founder", handle: "ada", handleProvenance: "subject_first_party" };
+  mocks.load.mockResolvedValueOnce({ report: { payload: { display_name: "Example", webTeam: [linkedMember] } } }).mockResolvedValueOnce({ report: { ts: "2026-09-25", payload: { handle: "ada", display_name: "Ada", bio: "Builder", identity_binding: "independent_exact_handle", basicFacts: [], report: { roles: ["FOUNDER"] } } } });
+  vi.stubEnv("SERPER_API_KEY", "");
+  const fetcher = vi.fn().mockImplementation(async () => new Response('', { status: 201 })); vi.stubGlobal("fetch", fetcher);
+  const res = response(); const sourceVersion = "00000000-0000-4000-8000-000000000456";
+  await handler({ method: "POST", body: { reportVersionId: version, name: "Ada", role: "Founder", runId: version, action: "attach_report", sourceVersionId: sourceVersion } } as never, res as never);
+  expect(res.status).toHaveBeenCalledWith(200); expect(mocks.collect).not.toHaveBeenCalled(); expect(mocks.budget).not.toHaveBeenCalled();
+  expect(mocks.load.mock.calls[1].slice(1)).toEqual(["org-a", sourceVersion]);
+  expect(JSON.parse(fetcher.mock.calls[1][1].body).payload.linkedReport.reportVersionId).toBe(sourceVersion);
+});
+it("rejects a different account even when the display name matches", async () => {
+  mocks.load.mockResolvedValueOnce({ report: { payload: { webTeam: [{ name: "Ada", role: "Founder", handle: "ada", handleProvenance: "subject_first_party" }] } } }).mockResolvedValueOnce({ report: { payload: { handle: "other", display_name: "Ada", report: { roles: ["FOUNDER"] } } } });
+  const res = response();
+  await handler({ method: "POST", body: { reportVersionId: version, name: "Ada", role: "Founder", runId: version, action: "attach_report", sourceVersionId: "00000000-0000-4000-8000-000000000456" } } as never, res as never);
+  expect(res.status).toHaveBeenCalledWith(409); expect(mocks.collect).not.toHaveBeenCalled();
+});

@@ -34,3 +34,7 @@ describe("bounded diligence synthesis", () => {
     expect(diligenceSources(ev)).toEqual([]);
   });
 });
+it("requires relationship or contribution evidence for team hypotheses, not generic product evidence", () => {
+  expect(validateDiligenceHypotheses({ hypotheses: [{ ...hypothesis, topic: "team_fit" }] }, [source], "company")).toEqual([]);
+  expect(validateDiligenceHypotheses({ hypotheses: [{ ...hypothesis, topic: "team_fit" }] }, [{ ...source, predicate: "track_record" }], "company")).toHaveLength(1);
+});

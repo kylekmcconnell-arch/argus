@@ -1,5 +1,5 @@
 import type { BasicFact } from "../data/evidence";
-import { canonicalOfficialWebsite } from "./fundScaleEvidence";
+import { canonicalOfficialWebsite } from "./fundScaleEvidence.js";
 
 /** A pseudonym can have an attributable track record without a public legal name. */
 export function personFactBindsAccount(fact: BasicFact, profile: { handle: string; website?: string; identity_binding?: string }): boolean {

@@ -1331,6 +1331,9 @@ export interface SubjectOrientation {
 }
 
 export interface CollectedEvidence {
+  teamDiligence?: import("../lib/relationshipDiligence").TeamDiligence;
+  personInvestigation?: import("../lib/personInvestigation").PersonInvestigation;
+  diligenceProviders?: import("../lib/diligenceProviders").DiligenceProviderReceipt[];
   diligenceBrief?: import("../lib/diligenceBrief").DiligenceBrief;
   teamCompanyChecks?: import("../lib/teamCompanyBinding").TeamCompanyCheck[];
   profile: SubjectProfile;

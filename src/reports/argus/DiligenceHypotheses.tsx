@@ -7,7 +7,7 @@ export function DiligenceHypotheses({ brief }: { brief?: DiligenceBrief }) {
     const sources = brief.sources.filter(source => hypothesis.sourceIds.includes(source.id));
     return <article className="diligence-card" key={index}>
       <Badge>Analytical hypothesis</Badge>
-      <h3>{({ role_fit: "Fit for the role", advantage: "Potential advantage", defensibility: "Defensibility", risk_to_thesis: "What could weaken the thesis" })[hypothesis.topic]}</h3>
+      <h3>{({ role_fit: "Fit for the role", team_fit: "Team ability and dependencies", advantage: "Potential advantage", defensibility: "Defensibility", risk_to_thesis: "What could weaken the thesis" })[hypothesis.topic]}</h3>
       <p>{hypothesis.text}</p>
       <p><strong>Limits:</strong> {hypothesis.limitations}</p>
       <p><strong>What would change this:</strong> {hypothesis.whatWouldChange}</p>

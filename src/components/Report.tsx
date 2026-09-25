@@ -1,3 +1,4 @@
+import { TeamDiligencePanel } from "../reports/argus/TeamDiligencePanel";
 import { TeamCompanyChecks } from "../reports/argus/TeamCompanyChecks";
 import { DiligenceHypotheses } from "../reports/argus/DiligenceHypotheses";
 import { evidenceRetryPlan, evidenceRetryReason } from "../lib/evidenceRetry";
@@ -3883,11 +3884,11 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         }}
         more={shareView ? [] : moreActions}
         chapters={{
-          decision: () => <DecisionChapter view={reportView} afterScores={(reportView.subjectKind === "project" || organizationAccount) ? <CompanyEdge facts={basicFacts} brief={f.diligenceBrief} questions={f.basicFactQuestionLedger} /> : <section className="panel space-top"><h2>Assessment of the person</h2><DiligenceHypotheses brief={f.diligenceBrief} /></section>} before={decisionBefore} after={decisionAfter} onRescan={shareView || scoringAccessError ? undefined : onRescan} />,
+          decision: () => <DecisionChapter view={reportView} afterScores={(reportView.subjectKind === "project" || organizationAccount) ? <><CompanyEdge facts={basicFacts} brief={f.diligenceBrief} questions={f.basicFactQuestionLedger} /><TeamDiligencePanel team={f.teamDiligence} brief={f.diligenceBrief} compact /></> : <section className="panel space-top"><h2>Assessment of the person</h2><DiligenceHypotheses brief={f.diligenceBrief} /></section>} before={decisionBefore} after={decisionAfter} onRescan={shareView || scoringAccessError ? undefined : onRescan} />,
           scores: () => <ScoresChapter view={reportView} legacy={scoresLegacy} />,
           product: () => reportView.subjectKind === "person" && !organizationAccount ? <><PersonDiligence dossier={f} facts={basicFacts} websiteClaims={reportView.product.claims.filter(claim => /website/i.test(claim.title))} />{productLegacy}</> : <ProductChapter view={reportView} legacy={productLegacy} />,
           code: () => <CodeChapter subjectKind={reportView.subjectKind} code={codeView} legacy={codeLegacy} />,
-          people: () => <><TeamCompanyChecks checks={f.teamCompanyChecks} /><PeopleChapter view={reportView} legacy={peopleLegacy} reportVersionId={!shareView && !privateSession ? evidenceReportVersionId : undefined} onAudit={shareView ? undefined : onResearchAudit ?? onAudit} /></>,
+          people: () => <>{(reportView.subjectKind === "project" || organizationAccount) && <TeamDiligencePanel team={f.teamDiligence} brief={f.diligenceBrief} />}<TeamCompanyChecks checks={f.teamCompanyChecks} /><PeopleChapter view={reportView} legacy={peopleLegacy} reportVersionId={!shareView && !privateSession ? evidenceReportVersionId : undefined} onAudit={shareView ? undefined : onResearchAudit ?? onAudit} /></>,
           market: ({ active }) => <MarketChapter view={reportView} active={active} reconciliation={holderReconciliation} legacy={marketLegacy} />,
           social: () => <SocialChapter view={reportView} legacy={socialLegacy} />,
           connections: () => <ConnectionsChapter view={reportView} legacy={connectionsLegacy} />,

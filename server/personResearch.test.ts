@@ -35,3 +35,17 @@ it("renders readable page excerpts near the person instead of HTML and scripts",
   expect(text).toContain("Ada Example founded a company.");
   expect(text).not.toContain("<"); expect(text).not.toContain("ignore this");
 });
+
+it("uses an already sourced prior venture to investigate outcomes within the four-query budget", async () => {
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ organic: [] })));
+  const result = await collectPersonResearch({ ...member, projects: [{ name: "Prior Labs" }], projects_evidence_origin: "deterministic" }, "Example Labs", "key", { fetch: fetcher, read: vi.fn() });
+  expect(fetcher).toHaveBeenCalledTimes(4);
+  expect(JSON.parse(fetcher.mock.calls[1][1].body).q).toContain('"Prior Labs"');
+  expect(result.plannedQuestions?.[1].reason).toContain("prior venture");
+});
+it("uses a credits lead to test advertised backing without claiming it proved deception", async () => {
+  const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ organic: [{ link: "https://example.com/credits", title: "Programme", snippet: "Cloud credits for startups" }] })));
+  const result = await collectPersonResearch({ ...member, role: "Investor" }, "Example Labs", "key", { fetch: fetcher, read: vi.fn().mockResolvedValue({ status: "failed" }) });
+  expect(fetcher).toHaveBeenCalledTimes(4); expect(result.plannedQuestions?.[3].question).toContain("Reconcile");
+  expect(result.stopReason).toBe("completed_budget");
+});

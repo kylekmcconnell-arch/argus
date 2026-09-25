@@ -119,6 +119,9 @@ declare module "./evidence" {
 }
 
 export interface Dossier {
+  teamDiligence?: import("../lib/relationshipDiligence").TeamDiligence;
+  personInvestigation?: import("../lib/personInvestigation").PersonInvestigation;
+  diligenceProviders?: import("../lib/diligenceProviders").DiligenceProviderReceipt[];
   diligenceBrief?: import("../lib/diligenceBrief").DiligenceBrief;
   teamCompanyChecks?: import("../lib/teamCompanyBinding").TeamCompanyCheck[];
   handle: string;
@@ -629,6 +632,9 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     } : {}),
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
+    ...(ev.teamDiligence ? { teamDiligence: structuredClone(ev.teamDiligence) } : {}),
+    ...(ev.personInvestigation ? { personInvestigation: structuredClone(ev.personInvestigation) } : {}),
+    ...(ev.diligenceProviders ? { diligenceProviders: structuredClone(ev.diligenceProviders) } : {}),
     ...(ev.diligenceBrief ? { diligenceBrief: structuredClone(ev.diligenceBrief) } : {}),
     webTeam: groundedWebTeam,
     ...(ev.teamCompanyChecks ? { teamCompanyChecks: structuredClone(ev.teamCompanyChecks) } : {}),
