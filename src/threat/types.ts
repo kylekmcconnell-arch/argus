@@ -131,6 +131,7 @@ export interface ThreatScan {
     migration: MigrationInfo | null;
     launch: LaunchProvenance | null;
     product?: ProductAuthenticity | null;
+    claims?: ClaimsLedger | null;
     verification: RegistryVerification | null;
     sellers: SellStructure | null;
     site: SiteSafety | null;
@@ -169,6 +170,33 @@ export interface ProductAuthenticity {
   bundlesRead: number;
   read: "white-label" | "self-hosted" | "unknown";
   note: string;
+  // The product's backend, probed: self-reported service name, quote
+  // endpoints, and the error-code namespaces they answer with.
+  api?: { base: string; service: string | null; endpoints: string[]; errorCodes: string[]; providers: string[] } | null;
+}
+
+// The project's own statements, typed (api/claims), and the verdict each
+// earned against the evidence the scan holds. A claim the evidence
+// contradicts is a finding in its own right - the copy and the code disagree.
+export type ClaimKind = "router" | "original" | "fees-to-holders" | "dev-locked" | "no-snipers" | "no-custody" | "compliance" | "audit" | "doxxed" | "partnership";
+export interface ProjectClaim {
+  kind: ClaimKind;
+  text: string;
+  source: "website" | "bundle" | "telegram" | "on-chain description" | "aggregator";
+  url: string | null;
+  names: string[];
+}
+export interface ClaimVerdict {
+  claim: ProjectClaim;
+  status: "confirmed" | "contradicted" | "unrealised" | "unverifiable";
+  evidence: string;
+}
+export interface ClaimsLedger {
+  claims: ProjectClaim[];
+  verdicts: ClaimVerdict[];
+  sources: string[];
+  unavailable: string[];
+  telegramMembers: number | null;
 }
 
 export interface SiteSafety {
@@ -277,6 +305,7 @@ export interface LaunchProvenance {
     claimCount: number | null; // observed claims (null = couldn't observe)
     claimedUsd: number | null;
     claimedTokens?: number | null; // observed claims in the launched token
+    quoteClaims?: { count: number; eth: number; tokenPayouts: number } | null; // quote-asset venues (Pons v2)
     usage: "lp-add" | "buyback-burn" | "buyback" | "hold" | "dump" | "unknown";
     note: string;
   } | null;

@@ -5,7 +5,7 @@
 //     networks, LP locker identity. The Solana counterpart of GoPlus's depth.
 //   - Honeypot.is deep fields (EVM): the parts the base audit discards — per-
 //     holder sell analysis, supported summary flags, and honeypot reason.
-import type { ProductAuthenticity } from "./types";
+import type { ClaimsLedger, ProductAuthenticity, ProjectClaim } from "./types";
 import { apiFetch } from "./net";
 import { retryFetch, retryFetchWithFreshTimeout } from "../lib/retry";
 import { arr, bool, num, rec, str } from "../lib/json";
@@ -305,7 +305,37 @@ export async function productAuthenticity(socials: { label: string; url: string 
       contractsInApp: Number(d.contractsInApp ?? 0) || 0, bundlesRead: Number(d.bundlesRead ?? 0) || 0,
       read: d.read === "white-label" || d.read === "self-hosted" ? d.read : "unknown",
       note: str(d.note),
+      api: d.api && typeof d.api === "object" ? (() => { const a = rec(d.api); return { base: str(a.base), service: a.service == null ? null : str(a.service), endpoints: list(a.endpoints), errorCodes: list(a.errorCodes), providers: list(a.providers) }; })() : null,
     };
+  } catch {
+    return null;
+  }
+}
+
+// ---- the project's own claims via api/claims ----
+// Collected where the project makes them (site, bundle, Telegram preview,
+// on-chain description, aggregator blurb); verdicts are computed in
+// src/threat/claims.ts once the rest of the evidence is in.
+export async function projectClaims(socials: { label: string; url: string }[], description: string | null, cg: string | null): Promise<ClaimsLedger | null> {
+  const site = socials.find((s) => /^(website|site|web|home)/i.test(s.label) && /^https?:\/\//i.test(s.url))
+    ?? socials.find((s) => /^https?:\/\//i.test(s.url) && !/(x\.com|twitter\.com|t\.me|telegram|discord|github\.com|medium\.com|youtube\.com|instagram\.com|tiktok\.com)/i.test(s.url));
+  const tg = socials.find((s) => /t\.me\/|telegram/i.test(s.url) || /telegram/i.test(s.label));
+  if (!site && !tg && !description && !cg) return null;
+  const q = new URLSearchParams();
+  if (site) q.set("website", site.url);
+  if (tg) q.set("telegram", tg.url.replace(/^https?:\/\/t\.me\//i, "").replace(/^@/, ""));
+  if (description) q.set("description", description.slice(0, 2000));
+  if (cg) q.set("cg", cg.slice(0, 4000));
+  try {
+    const res = await apiFetch(`/api/claims?${q}`, { signal: AbortSignal.timeout(22000) });
+    if (!res.ok) return null;
+    const d = rec(await res.json());
+    const list = (v: unknown) => arr(v).map(str).filter(Boolean);
+    const claims: ProjectClaim[] = arr(d.claims).map(rec).map((c) => ({
+      kind: str(c.kind) as ProjectClaim["kind"], text: str(c.text), source: str(c.source) as ProjectClaim["source"],
+      url: c.url == null ? null : str(c.url), names: list(c.names),
+    })).filter((c) => c.kind && c.text);
+    return { claims, verdicts: [], sources: list(d.sources), unavailable: list(d.unavailable), telegramMembers: d.telegramMembers == null ? null : Number(d.telegramMembers) };
   } catch {
     return null;
   }

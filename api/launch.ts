@@ -356,6 +356,9 @@ const RH_SELL_SINKS = new Set([
   "0xdeadc0de0000e54725ad1bf220324717043e02bf", // proxy router (MEME read)
 ]);
 const RH_BURN = new Set([ZERO, "0x000000000000000000000000000000000000dead"]);
+// Where a buyback's tokens come from on Robinhood Chain: the v4 PoolManager
+// and the Pons v2 hook that settles swaps.
+const RH_POOLS = new Set(["0x8366a39cc670b4001a1121b8f6a443a643e40951", "0xe5e702641ea86f4ae6cc3cdaed2b886f976be044"]);
 
 
 // Blockscout's Etherscan-compatible token-transfer index. A full RPC log scan
@@ -364,7 +367,7 @@ const RH_BURN = new Set([ZERO, "0x000000000000000000000000000000000000dead"]);
 // 10,000-log cap, and the chain is ~70M blocks deep. The v1 index answers the
 // same question for one address and one token in a single call, and it is the
 // route api/launch.ts already relies on for contract creation.
-interface RhTransfer { from: string; to: string; value: string; tokenDecimal?: string; blockNumber: string }
+interface RhTransfer { from: string; to: string; value: string; tokenDecimal?: string; blockNumber: string; timeStamp?: string; contractAddress?: string }
 type RhTransfers = { rows: RhTransfer[]; truncated: boolean } | null;
 const RH_PAGE = 200;
 async function rhTokenTransfers(address: string, token: string, budget: { calls: number; deadline?: number }, maxPages = 3): Promise<RhTransfers> {
@@ -373,8 +376,8 @@ async function rhTokenTransfers(address: string, token: string, budget: { calls:
     if (budget.calls <= 0 || (budget.deadline != null && Date.now() > budget.deadline)) return null;
     budget.calls -= 1;
     try {
-      const q = `module=account&action=tokentx&address=${address}&contractaddress=${token}&page=${page}&offset=${RH_PAGE}&sort=asc`;
-      const r = await fetch(`https://robinhoodchain.blockscout.com/api?${q}`, { signal: AbortSignal.timeout(9000) });
+      const q = `module=account&action=tokentx&address=${address}${token ? `&contractaddress=${token}` : ""}&page=${page}&offset=${RH_PAGE}&sort=asc`;
+      const r = await fetch(`https://robinhoodchain.blockscout.com/api?${q}`, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "application/json" }, signal: AbortSignal.timeout(9000) });
       if (!r.ok) return null;
       const d = (await r.json()) as any;
       // An empty result is reported as status "0" with a "No transactions
@@ -413,6 +416,8 @@ export interface CreatorFeeUsage {
   heldTokens: number | null;
   usage: "lp-add" | "buyback-burn" | "buyback" | "hold" | "dump" | "unknown";
   note: string;
+  // Quote-asset venues (Pons v2): claims counted in ETH / quote-token payouts.
+  quoteClaims?: { count: number; eth: number; tokenPayouts: number };
 }
 export interface ClaimTrace {
   claimCount: number;
@@ -512,6 +517,93 @@ export async function robinhoodCreatorFeeUsage(
   return result;
 }
 
+// ---- creator fee claims on a quote-asset venue (Pons v2) ----
+// Pons v2 pays creators in the quote asset from its FeeEscrow, never in the
+// launched token, so the in-token tracer above has nothing to read. What a
+// "fees to holders / buybacks" claim needs instead: did the creator claim
+// (ETH internal transfers or ERC-20 transfers out of the escrow to the
+// creator), and after claiming did the creator buy the token back from the
+// pool, or move the quote on? Read from the creator's own feeds; bounded.
+const PONS_V2_FEE_ESCROW = "0xd3afeb2a57f70ef218aa82451c51b2fb0416ac9e";
+const PONS_V2_BUYBACK_VAULT = "0x42df2a798f82289e177311362e8f5ccc45c1219c";
+
+export interface QuoteFeeTrace {
+  claimCount: number;
+  claimedEth: number;
+  claimedTokenTransfers: number; // ERC-20 quote claims (USDG, stocks), counted not summed
+  boughtBackTokens: number;      // launched token received by the creator from the pool after the first claim
+  quoteForwardedEth: number;     // ETH the creator sent on after the first claim
+  firstClaimAt: number | null;
+}
+
+export function classifyQuoteFeeUsage(t: QuoteFeeTrace, symbol = "the token"): { usage: CreatorFeeUsage["usage"]; note: string } {
+  const fmt = (n: number, d = 4) => Number(n.toFixed(d)).toLocaleString();
+  if (t.claimCount === 0) return { usage: "unknown", note: "No creator fee claims observed from the venue's escrow - fees accrue unclaimed, so any 'fees to holders' promise is unrealised so far." };
+  const claims = `${t.claimCount} claim${t.claimCount === 1 ? "" : "s"}${t.claimedEth > 0 ? ` of ${fmt(t.claimedEth)} ETH` : ""}${t.claimedTokenTransfers ? ` and ${t.claimedTokenTransfers} quote-token payout${t.claimedTokenTransfers === 1 ? "" : "s"}` : ""}`;
+  if (t.boughtBackTokens > 0) return { usage: "buyback", note: `${claims}; the creator bought ${Math.round(t.boughtBackTokens).toLocaleString()} ${symbol} from the pool after claiming.` };
+  if (t.quoteForwardedEth >= t.claimedEth * 0.6 && t.claimedEth > 0) return { usage: "dump", note: `${claims}; ${fmt(t.quoteForwardedEth)} ETH moved on to other wallets, none returned to the token.` };
+  return { usage: "hold", note: `${claims}; the quote is still held by the creator, no buyback observed.` };
+}
+
+async function rhInternalTxs(address: string, budget: { calls: number; deadline?: number }): Promise<{ from: string; to: string; value: string; timeStamp: string }[] | null> {
+  if (budget.calls <= 0 || (budget.deadline != null && Date.now() > budget.deadline)) return null;
+  budget.calls -= 1;
+  try {
+    const r = await fetch(`https://robinhoodchain.blockscout.com/api?module=account&action=txlistinternal&address=${address}&page=1&offset=${RH_PAGE}&sort=asc`, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "application/json" }, signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return null;
+    const d = (await r.json()) as any;
+    if (d?.status === "0") return /no transactions found/i.test(String(d.message ?? "")) ? [] : null;
+    return Array.isArray(d?.result) ? d.result : null;
+  } catch { return null; }
+}
+
+export async function ponsV2CreatorFeeUsage(token: string, creator: string | null, symbol = "the token", budget: { calls: number; deadline?: number } = { calls: 4, deadline: Date.now() + 10_000 }): Promise<CreatorFeeUsage | null> {
+  const c = creator?.toLowerCase();
+  if (!c) return null;
+  const internals = await rhInternalTxs(c, budget);
+  if (!internals) return null;
+  const t: QuoteFeeTrace = { claimCount: 0, claimedEth: 0, claimedTokenTransfers: 0, boughtBackTokens: 0, quoteForwardedEth: 0, firstClaimAt: null };
+  for (const x of internals) {
+    const from = String(x.from).toLowerCase(), to = String(x.to).toLowerCase();
+    if (to === c && (from === PONS_V2_FEE_ESCROW || from === PONS_V2_BUYBACK_VAULT)) {
+      t.claimCount += 1; t.claimedEth += Number(x.value) / 1e18;
+      const ts = Number(x.timeStamp) * 1000;
+      if (t.firstClaimAt == null || ts < t.firstClaimAt) t.firstClaimAt = ts;
+    }
+  }
+  // Quote-token claims (USDG, stock tokens) leave the escrow as ERC-20s.
+  const allTokens = await rhTokenTransfers(c, "", budget, 2).catch(() => null);
+  if (allTokens) {
+    for (const r of allTokens.rows) {
+      const from = String(r.from).toLowerCase(), to = String(r.to).toLowerCase(), ca = String((r as any).contractAddress ?? "").toLowerCase();
+      if (to === c && from === PONS_V2_FEE_ESCROW && ca !== token) {
+        t.claimCount += 1; t.claimedTokenTransfers += 1;
+        const ts = Number(r.timeStamp) * 1000;
+        if (t.firstClaimAt == null || ts < t.firstClaimAt) t.firstClaimAt = ts;
+      }
+    }
+    if (t.firstClaimAt != null) {
+      for (const r of allTokens.rows) {
+        const from = String(r.from).toLowerCase(), to = String(r.to).toLowerCase(), ca = String((r as any).contractAddress ?? "").toLowerCase();
+        if (ca === token && to === c && Number(r.timeStamp) * 1000 >= t.firstClaimAt && (RH_POOLS.has(from) || RH_SELL_SINKS.has(from))) t.boughtBackTokens += Number(r.value) / 1e18;
+      }
+    }
+  }
+  if (t.firstClaimAt != null) {
+    for (const x of internals) {
+      if (String(x.from).toLowerCase() === c && Number(x.timeStamp) * 1000 >= t.firstClaimAt) t.quoteForwardedEth += Number(x.value) / 1e18;
+    }
+  }
+  const { usage, note } = classifyQuoteFeeUsage(t, symbol);
+  return {
+    claimer: c, claimCount: null, claimedTokens: null, evidence: "transfer-only",
+    sourceTransfers: t.claimCount, sourceTokens: 0, marketTransfers: 0, untracedTokens: 0,
+    soldTokens: null, burnedTokens: 0, boughtBackTokens: t.boughtBackTokens, heldTokens: null,
+    usage, note: `${note} (quote-asset venue: claims are ETH or the quote token, read from the creator's feeds)`,
+    quoteClaims: { count: t.claimCount, eth: t.claimedEth, tokenPayouts: t.claimedTokenTransfers },
+  } as CreatorFeeUsage;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const address = String(req.query.address ?? "").trim();
   const chain = String(req.query.chain ?? "").trim().toLowerCase();
@@ -551,9 +643,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sources = DOPPLER_TOKEN_FACTORIES.has(creation.factory) || creatorVenue === "bankr" ? [DOPPLER_INITIALIZER]
       : PONS_V1_FACTORIES.has(creation.factory) ? PONS_V1_LOCKERS
       : null;
+    const sym = String(req.query.symbol ?? "the token").slice(0, 16) || "the token";
     // Bounded so the endpoint stays inside the client's 20s budget; on expiry
     // the fee read is null and the venue answer still goes out.
-    if (sources) feePromise = robinhoodCreatorFeeUsage(addr, sources, creation.creator, String(req.query.symbol ?? "the token").slice(0, 16) || "the token", { calls: 8, deadline: Date.now() + 12_000 }).catch(() => null);
+    if (sources) feePromise = robinhoodCreatorFeeUsage(addr, sources, creation.creator, sym, { calls: 8, deadline: Date.now() + 12_000 }).catch(() => null);
+    else if (creatorVenue === "pons") feePromise = ponsV2CreatorFeeUsage(addr, creation.creator, sym, { calls: 4, deadline: Date.now() + 10_000 }).catch(() => null);
   }
   // The launcher's own metadata: Pons v2 tokens (and other Robinhood launchers)
   // carry a description() string set at creation - the project's pitch in the

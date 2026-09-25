@@ -11,7 +11,7 @@ import { AuditConsole } from "./AuditConsole";
 import type { ResolvedInput } from "../lib/resolveInput";
 import { printReportPdf } from "../lib/printPdf";
 import type { TraceStep } from "../data/evidence";
-import type { CodeFlag, ProductAuthenticity, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat/types";
+import type { ClaimsLedger, CodeFlag, ProductAuthenticity, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat/types";
 import { launchMs } from "../threat/launchTime";
 import { threatScan } from "../threat/scan";
 import { projectLinks } from "../threat/links";
@@ -517,8 +517,40 @@ function ProductPanel({ product, privacy }: { product: ProductAuthenticity; priv
         {product.paasHosts.length > 0 && row("Backend", <span className="mono">{product.paasHosts.join(", ")}</span>)}
         {product.originalityClaims.length > 0 && row("Copy claims", product.originalityClaims.slice(0, 4).map((c) => `"${c}"`).join(", "))}
         {product.contractsInApp > 0 && row("Contracts in client", String(product.contractsInApp))}
+        {product.api && row("Backend service", <span className="mono">{product.api.service ?? product.api.base}{product.api.errorCodes.length ? ` · ${product.api.errorCodes.slice(0, 3).join(", ")}` : ""}</span>)}
         {row("Bundles read", String(product.bundlesRead))}
       </div>
+    </div>
+  );
+}
+
+// Claims ledger: what the project says about itself, each line answered by
+// the evidence. Legacy primitives on purpose - restyled with the design pass.
+function ClaimsPanel({ ledger }: { ledger: ClaimsLedger }) {
+  const tone = (s: ClaimsLedger["verdicts"][number]["status"]) =>
+    s === "contradicted" ? "var(--color-avoid)" : s === "unrealised" ? "var(--color-caution)" : s === "confirmed" ? "var(--color-pass)" : undefined;
+  const order = { contradicted: 0, unrealised: 1, confirmed: 2, unverifiable: 3 } as const;
+  const rows = [...ledger.verdicts].sort((a, b) => order[a.status] - order[b.status]);
+  return (
+    <div className="mt-4 panel p-4">
+      <div className="flex items-baseline justify-between">
+        <h2 className="display-sm text-[18px] leading-tight text-ink">What the project says, and what holds</h2>
+        <span className="mono text-[10.5px] text-ink-faint">{ledger.claims.length} claims · from {ledger.sources.join(", ")}{ledger.telegramMembers != null ? ` · TG ${ledger.telegramMembers.toLocaleString()} members` : ""}</span>
+      </div>
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">Statements collected from the site, its app, the Telegram preview, the on-chain description and the aggregator blurb, each held against the evidence this scan read. Contradicted means the copy and the code disagree.</p>
+      <div className="mt-2 divide-y divide-line/60">
+        {rows.map((v, i) => (
+          <div key={i} className="py-2">
+            <div className="flex items-start justify-between gap-3">
+              <span className="text-[12.5px] text-ink">{v.claim.kind.replace(/-/g, " ")} <span className="text-ink-faint">· {v.claim.source}</span></span>
+              <span className="mono shrink-0 text-[11px] uppercase" style={{ color: tone(v.status) }}>{v.status}</span>
+            </div>
+            <p className="mt-0.5 text-[12px] italic text-ink-dim">"{v.claim.text}"</p>
+            <p className="mt-0.5 text-[12px] text-ink-faint">{v.evidence}</p>
+          </div>
+        ))}
+      </div>
+      {ledger.unavailable.length > 0 && <p className="mt-2 text-[11px] text-ink-faint">Not read: {ledger.unavailable.join("; ")}.</p>}
     </div>
   );
 }
@@ -993,6 +1025,8 @@ function Report({ scan, embedded = false, allowSupplemental = true }: { scan: Th
       {scan.deep.launch && scan.deep.launch.kind !== "unknown" && <LaunchPanel launch={scan.deep.launch} />}
       {/* product authenticity: what the linked product's own code says it is */}
       {scan.deep.product && <ProductPanel product={scan.deep.product} privacy={scan.classification?.kind === "privacy"} />}
+      {/* the project's own claims, held against the evidence */}
+      {scan.deep.claims && scan.deep.claims.claims.length > 0 && <ClaimsPanel ledger={scan.deep.claims} />}
 
       {/* linked-site safety */}
       {scan.deep.site && (scan.deep.site.worst !== "clean" || !scan.deep.site.hasX || scan.deep.site.xBio != null || scan.deep.site.xHistory != null) && (
