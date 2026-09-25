@@ -22237,6 +22237,7 @@ async function orientSubjectWithGrok(evidence, options) {
   const packet = buildOrientationPacket(evidence, options?.siteExcerpt);
   const chat = options?.chat;
   const key = env("XAI_API_KEY");
+  const accept = (raw) => reconcileOrientationIdentity(parseOrientation(raw, packet), evidence);
   if (chat) {
     const result = await chat({
       key: key || "test",
@@ -22247,17 +22248,29 @@ async function orientSubjectWithGrok(evidence, options) {
       jsonSchema: { name: "subject_orientation", schema: ORIENTATION_SCHEMA }
     });
     if (!result.ok) return null;
-    return parseOrientation(result.text, packet);
+    return accept(result.text);
   }
   if (!key) return null;
   const search = options?.search ?? grokSearch;
   const text2 = await search(ORIENTATION_SYSTEM, liveSearchUser(packet), {
     maxToolCalls: ORIENTATION_MAX_TOOL_CALLS,
     tools: ["web_search", "x_search"],
-    cacheKey: `subject-orientation:${normalizeHandle2(packet.handle)}`
+    cacheKey: `subject-orientation:v2:${normalizeHandle2(packet.handle)}`
   });
   if (!text2) return null;
-  return parseOrientation(text2, packet);
+  return accept(text2);
+}
+function reconcileOrientationIdentity(orientation, evidence) {
+  if (!orientation || orientation.kind !== "FOUNDER" || !handlesMatch(orientation.boundHandle, evidence.profile.handle) || !isOrganizationAccount({ roles: [], profile: evidence.profile })) return orientation;
+  return {
+    kind: "PROJECT",
+    what: "",
+    audience: "",
+    boundHandle: evidence.profile.handle,
+    boundDomain: canonicalOfficialWebsite(evidence.profile.website)?.domain ?? null,
+    sourceUrls: buildOrientationPacket(evidence).sourceUrls,
+    ...orientation.mentionedHandles?.length ? { mentionedHandles: orientation.mentionedHandles } : {}
+  };
 }
 
 // src/lib/basicFactQuestions.ts

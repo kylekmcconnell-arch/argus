@@ -8,6 +8,7 @@ import { env } from "./config";
 import type { CollectedEvidence, LaunchedProductLead, SubjectOrientation } from "../src/data/evidence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
 import { grokSearch } from "./adapters/x";
+import { isOrganizationAccount } from "../src/lib/investorSubject";
 
 const RECENT_ACTIVITY_CAP = 24;
 const RECENT_ACTIVITY_ITEM_CHARS = 500;
@@ -485,6 +486,7 @@ export async function orientSubjectWithGrok(
   const packet = buildOrientationPacket(evidence, options?.siteExcerpt);
   const chat = options?.chat;
   const key = env("XAI_API_KEY");
+  const accept = (raw: unknown) => reconcileOrientationIdentity(parseOrientation(raw, packet), evidence);
 
   // Packet-only test double. Production always uses Responses API + x_search.
   if (chat) {
@@ -497,7 +499,7 @@ export async function orientSubjectWithGrok(
       jsonSchema: { name: "subject_orientation", schema: ORIENTATION_SCHEMA },
     });
     if (!result.ok) return null;
-    return parseOrientation(result.text, packet);
+    return accept(result.text);
   }
 
   if (!key) return null;
@@ -506,8 +508,21 @@ export async function orientSubjectWithGrok(
   const text = await search(ORIENTATION_SYSTEM, liveSearchUser(packet), {
     maxToolCalls: ORIENTATION_MAX_TOOL_CALLS,
     tools: ["web_search", "x_search"],
-    cacheKey: `subject-orientation:${normalizeHandle(packet.handle)}`,
+    cacheKey: `subject-orientation:v2:${normalizeHandle(packet.handle)}`,
   });
   if (!text) return null;
-  return parseOrientation(text, packet);
+  return accept(text);
+}
+
+/** Reject the model's person narrative as well as its role when the frozen
+ * profile explicitly describes a product and credits a separate builder. */
+export function reconcileOrientationIdentity(orientation: SubjectOrientation | null, evidence: CollectedEvidence): SubjectOrientation | null {
+  if (!orientation || orientation.kind !== "FOUNDER"
+    || !handlesMatch(orientation.boundHandle, evidence.profile.handle)
+    || !isOrganizationAccount({ roles: [], profile: evidence.profile })) return orientation;
+  return { kind: "PROJECT", what: "", audience: "", boundHandle: evidence.profile.handle,
+    boundDomain: canonicalOfficialWebsite(evidence.profile.website)?.domain ?? null,
+    sourceUrls: buildOrientationPacket(evidence).sourceUrls,
+    ...(orientation.mentionedHandles?.length ? { mentionedHandles: orientation.mentionedHandles } : {}),
+  };
 }

@@ -6,6 +6,7 @@ import {
   orientationMentionLeads,
   orientSubjectWithGrok,
   parseOrientation,
+  reconcileOrientationIdentity,
   type OrientationPacket,
 } from "./subjectOrientation";
 
@@ -82,6 +83,18 @@ function stubEvidence(): CollectedEvidence {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
   headers: { "content-type": "application/json" },
+});
+
+it("discards a developer narrative when the frozen subject is a brand crediting another builder", () => {
+  const evidence = stubEvidence();
+  evidence.profile.bio = "A privacy protocol. Built by @alice";
+  const wrong = grokProject({ kind: "FOUNDER", what: "Alice is a developer", relatedCompanyHandle: "@multihopper" });
+  const corrected = reconcileOrientationIdentity(wrong, evidence);
+  expect(corrected?.kind).toBe("PROJECT");
+  expect(corrected?.what).toBe("");
+  expect(corrected?.relatedCompanyHandle).toBeUndefined();
+  evidence.profile.identity_binding = "independent_exact_handle";
+  expect(reconcileOrientationIdentity(wrong, evidence)).toBe(wrong);
 });
 
 describe("buildOrientationPacket", () => {
