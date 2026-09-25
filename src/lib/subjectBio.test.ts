@@ -8,7 +8,7 @@ it("assigns explicit builder credits to the other account, never to the subject"
   expect(result.selfDescription).not.toMatch(/founder|developed/i);
 });
 
-it.each(["I build a privacy protocol. CTO: @alice", "Founder of @protocol. Built by @alice", "Building @protocol, a privacy app. Dev: @alice"])("preserves a personal description: %s", bio => {
+it.each(["I build a privacy protocol. CTO: @alice", "Founder of @protocol. Built by @alice", "Building @protocol, a privacy app. Dev: @alice", "Privacy researcher | dev @company", "Engineer building a privacy protocol. CTO: @alice"])("preserves a personal description: %s", bio => {
   expect(subjectBioScope(bio, "@bob").brandDescription).toBe(false);
 });
 

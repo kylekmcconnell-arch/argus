@@ -17,7 +17,7 @@ export function subjectBioScope(bio: string, handle: string): { selfDescription:
   });
   // Require a product self-description as well as a separately credited builder.
   // A personal bio ("I build a protocol", "Founder at @project") is not a brand.
-  const personal = /\b(?:I(?:'m| am| build| founded| work)|my\s|founder\s+(?:of|at)|co-?founder\s+(?:of|at)|(?:engineer|developer|dev|ceo|cto)\s+(?:at|of)|building\s+@)\b/i.test(selfDescription);
+  const personal = /\b(?:I(?:'m| am| build| founded| work)|my\s|founder|co-?founder|engineer|developer|dev|ceo|cto|researcher|scientist|building\s+@)\b/i.test(selfDescription);
   const product = /\b(?:protocol|platform|exchange|privacy|marketplace|(?:trading|payments?|web|mobile) app|official account)\b/i.test(selfDescription);
   return { selfDescription, creditedHandles: [...new Set(creditedHandles)], brandDescription: creditedHandles.length > 0 && product && !personal };
 }

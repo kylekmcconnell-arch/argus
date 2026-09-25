@@ -511,7 +511,7 @@ function subjectBioScope(bio, handle) {
     creditedHandles.push(other.toLowerCase());
     return separator;
   });
-  const personal = /\b(?:I(?:'m| am| build| founded| work)|my\s|founder\s+(?:of|at)|co-?founder\s+(?:of|at)|(?:engineer|developer|dev|ceo|cto)\s+(?:at|of)|building\s+@)\b/i.test(selfDescription);
+  const personal = /\b(?:I(?:'m| am| build| founded| work)|my\s|founder|co-?founder|engineer|developer|dev|ceo|cto|researcher|scientist|building\s+@)\b/i.test(selfDescription);
   const product = /\b(?:protocol|platform|exchange|privacy|marketplace|(?:trading|payments?|web|mobile) app|official account)\b/i.test(selfDescription);
   return { selfDescription, creditedHandles: [...new Set(creditedHandles)], brandDescription: creditedHandles.length > 0 && product && !personal };
 }
