@@ -354,6 +354,10 @@ function threatBlock(d: Dossier): string {
   const productLine = product
     ? `<p class="dim">Product: ${esc(product.host ?? product.url)} - ${esc(product.read === "white-label" ? `white-label of ${product.providers.map((p) => p.name).join(", ")}${product.originalityClaims.length ? ", sold as original engineering" : ""}` : product.read === "self-hosted" ? "own contracts in the client" : "not verifiable from the client")}.</p>`
     : "";
+  const ledger = t.deep?.claims ?? null;
+  const claimsBlock = ledger && ledger.verdicts.length
+    ? `<div class="sub"><h3>What the project says, and what holds <span class="kicker">${ledger.claims.length} claims</span></h3><ul class="findings">${ledger.verdicts.map((v) => `<li><b>${esc(v.status)}</b> · ${esc(v.claim.kind.replace(/-/g, " "))} (${esc(v.claim.source)}): "${esc(v.claim.text)}" - ${esc(v.evidence)}</li>`).join("")}</ul></div>`
+    : "";
   const codeHead = code.verified
     ? `${esc(code.contractName ?? "contract")} · ${code.stats?.functions ?? 0} functions · ${code.stats?.gatedFunctions ?? 0} privileged${code.origin ? ` · via ${esc(code.origin)}` : ""}`
     : code.checked
@@ -379,7 +383,8 @@ function threatBlock(d: Dossier): string {
       ${code.flags.length ? `<ul class="findings">${codeFlags}</ul>` : code.verified ? `<p class="note">No dangerous patterns found in the source.</p>` : ""}
       ${ai}
       ${productLine}
-    </div>`;
+    </div>
+    ${claimsBlock}`;
 
   const tk = t.tokenomics;
   const tkRows = [

@@ -13,6 +13,7 @@
 // says "built by true cypherpunks", bundle says HOUDINI_AMOUNT_BELOW_MINIMUM,
 // HOUDINI_TRANSFER_NOT_FOUND, useXmr, backend hades-api-production.up.railway.app.
 import { fetchPublicScript, fetchPublicText } from "./_collector.js";
+import { bundleCopy, bundleUrls, hostOf as host, visibleText } from "./_productText";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 export const config = { maxDuration: 20 };
@@ -55,33 +56,6 @@ const ORIGINALITY = /\b(built (by|from the ground up|in[- ]house)|our (own|propr
 // Privacy-product language: what makes the probe apply at all.
 const PRIVACY = /\b(privacy|private (transfer|swap|send|bridge|route|routing)|mixer|mixing|anonym(ous|ity|ise|ize)|untraceable|unlinkable|stealth|shielded|obfuscat|xmr routing|monero)\b/i;
 
-function host(u: string): string | null {
-  try { return new URL(u).hostname.replace(/^www\./, "").toLowerCase(); } catch { return null; }
-}
-
-function visibleText(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&[a-z#0-9]+;/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function bundleUrls(html: string, base: string): string[] {
-  const out: string[] = [];
-  const re = /<script[^>]+src=["']([^"']+)["']/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) && out.length < 12) {
-    try {
-      const u = new URL(m[1], base);
-      if (u.hostname.replace(/^www\./, "") === host(base) && /\.m?js(\?|$)/i.test(u.pathname + u.search)) out.push(u.toString());
-    } catch { /* skip */ }
-  }
-  return [...new Set(out)].slice(0, BUNDLE_LIMIT);
-}
-
 export interface ProductProbe {
   available: boolean;
   url: string;
@@ -95,35 +69,35 @@ export interface ProductProbe {
   bundlesRead: number;
   read: "white-label" | "self-hosted" | "unknown";
   note: string;
+  // The product's own backend, probed: its self-reported service name and
+  // the error-code namespaces its quote endpoints answer with. A validation
+  // error still names the provider (HOUDINI_PRIVATE_ROUTE_UNAVAILABLE).
+  api?: ApiProbe | null;
 }
 
-// A client-rendered app carries its copy as string literals in the bundle,
-// not in the HTML. Pull the human-readable literals (quoted, backticked or
-// JSX text with spaces) so claims and privacy language are read from the app
-// the visitor actually sees.
-function bundleCopy(code: string): string {
-  const out: string[] = [];
-  const re = /["'`]([^"'`\n]{12,240})["'`]/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(code)) && out.length < 4000) {
-    const lit = m[1];
-    if (/\s/.test(lit) && /[a-z]{3,}/i.test(lit) && !/[{}<>=;()]/.test(lit)) out.push(lit);
-  }
-  return out.join(" ");
+export interface ApiProbe {
+  base: string;
+  service: string | null;
+  endpoints: string[];
+  errorCodes: string[];
+  providers: string[];
 }
 
-export function probeText(url: string, html: string, bundles: string[]): ProductProbe {
+export function probeText(url: string, html: string, bundles: string[], api: ApiProbe | null = null): ProductProbe {
   const h = host(url);
   const code = bundles.join("\n");
   const text = `${visibleText(html)} ${bundleCopy(code)}`.trim();
   const everything = `${html}\n${code}`;
 
+  const apiText = api ? `${api.service ?? ""}\n${api.errorCodes.join("\n")}` : "";
   const providers = PROVIDERS.map((p) => {
     const evidence = new Set<string>();
     for (const re of p.patterns) {
       const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
       let m: RegExpExecArray | null;
       while ((m = g.exec(everything)) && evidence.size < 4) evidence.add(m[0]);
+      const ga = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+      while ((m = ga.exec(apiText)) && evidence.size < 5) evidence.add(`api:${m[0]}`);
     }
     return { name: p.name, kind: p.kind, evidence: [...evidence] };
   }).filter((p) => p.evidence.length > 0);
@@ -161,7 +135,38 @@ export function probeText(url: string, html: string, bundles: string[]): Product
         ? "No readable application bundle - the product could not be inspected."
         : `No known provider fingerprint and no contract addresses in the bundle${paasHosts.length ? `; backend on ${paasHosts.join(", ")}` : ""} - what the product does is not verifiable from its client.`;
 
-  return { available: true, url, host: h, privacyProduct, providers, backendHosts, paasHosts, originalityClaims, contractsInApp, bundlesRead: bundles.length, read, note };
+  return { available: true, url, host: h, privacyProduct, providers, backendHosts, paasHosts, originalityClaims, contractsInApp, bundlesRead: bundles.length, read, note, api };
+}
+
+// Backend probe: the bundle names its API base (a literal https URL that is
+// not a CDN) and its quote / preview / route paths. GET /health for the
+// service's own name; POST an empty body to each quote path - a validation
+// error answers in the provider's error-code namespace. Bounded to one base
+// and four endpoints; nothing is created, funded or signed.
+const QUOTE_PATH = /["'`](\/[a-z0-9_\-/]*(quote|quotes|preview|route|routes|estimate)[a-z0-9_\-/]*)["'`]/gi;
+const API_BASE = /["'`](https:\/\/[a-z0-9.-]+\.(?:up\.railway\.app|railway\.app|vercel\.app|herokuapp\.com|onrender\.com|fly\.dev|workers\.dev|deno\.dev)|https:\/\/api\.[a-z0-9.-]+\.[a-z]{2,})["'`]/gi;
+async function probeApi(html: string, bundles: string[]): Promise<ApiProbe | null> {
+  const code = bundles.join("\n");
+  const base = [...code.matchAll(API_BASE)].map((m) => m[1])[0] ?? null;
+  if (!base) return null;
+  const endpoints = [...new Set([...code.matchAll(QUOTE_PATH)].map((m) => m[1].replace(/\$\{[^}]*\}/g, "x")))].filter((p) => !/\$\{/.test(p)).slice(0, 4);
+  const get = async (path: string, init?: RequestInit) => {
+    try {
+      const r = await fetch(`${base}${path}`, { ...init, headers: { "content-type": "application/json", "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", ...(init?.headers ?? {}) }, signal: AbortSignal.timeout(6000) });
+      return (await r.text()).slice(0, 4000);
+    } catch { return ""; }
+  };
+  const health = await get("/health");
+  const service = health.match(/"service"\s*:\s*"([^"]{2,80})"/)?.[1] ?? null;
+  const errorCodes = new Set<string>();
+  for (const ep of endpoints) {
+    const body = await get(ep, { method: "POST", body: "{}" });
+    for (const m of body.matchAll(/"code"\s*:\s*"([A-Z][A-Z0-9_]{6,60})"/g)) errorCodes.add(m[1]);
+    for (const m of body.matchAll(/\b([A-Z]{3,}_[A-Z_]{6,})\b/g)) errorCodes.add(m[1]);
+  }
+  const codes = [...errorCodes].slice(0, 12);
+  const providers = PROVIDERS.filter((p) => p.patterns.some((re) => codes.some((c) => new RegExp(re.source, re.flags.replace("g", "")).test(c)) || (service ? new RegExp(re.source, re.flags.replace("g", "")).test(service) : false))).map((p) => p.name);
+  return { base, service, endpoints, errorCodes: codes, providers };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -179,7 +184,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (r.status === "ok") bundles.push(r.text.slice(0, BUNDLE_BYTES));
       } catch { /* bounded best effort */ }
     }
-    res.status(200).json(probeText(page.url || url, html, bundles));
+    const api = await probeApi(html, bundles);
+    res.status(200).json(probeText(page.url || url, html, bundles, api));
   } catch (e) {
     res.status(200).json({ available: false, url, host: host(url), note: `probe failed: ${String(e).slice(0, 120)}` });
   }

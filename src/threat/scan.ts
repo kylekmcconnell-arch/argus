@@ -16,10 +16,11 @@ import type {
 } from "./types";
 import { reviewCode } from "./codereview";
 import { classifyToken, type TokenClassification } from "./classify";
+import { claimsScore, judgeClaims } from "./claims";
 import { analyzeTokenomics, type TokenomicsView } from "./tokenomics";
 import { recordReceipt, sharedByDeployer } from "./receipts";
 import {
-  honeypotDeep, rugcheckReport, goplusMeta, codeFingerprint, knownRugClones, burnHistory, productAuthenticity,
+  honeypotDeep, rugcheckReport, goplusMeta, codeFingerprint, knownRugClones, burnHistory, productAuthenticity, projectClaims,
   type HoneypotDeep, type RugcheckReport, type GoPlusMeta,
 } from "./deepsources";
 import { crossChain } from "./crosschain";
@@ -30,7 +31,7 @@ import { registryVerification } from "./verification";
 import { sellStructure } from "./sellers";
 import { siteSafety } from "./sitesafety";
 import { technicalPosture } from "./technicalposture";
-import type { CrossChain, MigrationInfo, LaunchProvenance, ProductAuthenticity, RegistryVerification, SellStructure, SiteSafety, TechnicalPosture } from "./types";
+import type { ClaimsLedger, CrossChain, MigrationInfo, LaunchProvenance, ProductAuthenticity, RegistryVerification, SellStructure, SiteSafety, TechnicalPosture } from "./types";
 
 const money = (n: number) =>
   n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
@@ -103,9 +104,10 @@ export async function threatScan(
   // and does it even have an X account. The danger here is off-chain.
   // The linked product is read alongside the site: what its client code says
   // it is (provider fingerprints, backend hosts) against what the copy claims.
-  const [site, product] = await Promise.all([
+  const [site, product, claimsRaw] = await Promise.all([
     siteSafety(dossier.socials ?? [], dossier.address, dossier.chain),
     productAuthenticity(dossier.socials ?? []),
+    projectClaims(dossier.socials ?? [], launch?.description ?? null, dossier.cg?.description ?? null),
   ]);
   if (product) {
     emit?.({
@@ -226,8 +228,23 @@ export async function threatScan(
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
     emit?.({ phase: "ARGUS · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders - a yield mechanism, not a rug tax.", tone: "good" });
   }
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification, sellers, site, classification, product);
-  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers, site, classification, posture, product);
+  // Claim verdicts need every other read in hand: product, launch, tape,
+  // tokenomics, the holder table's lockers, the deployer's funding trace.
+  const claims: ClaimsLedger | null = claimsRaw ? {
+    ...claimsRaw,
+    verdicts: judgeClaims(claimsRaw.claims, {
+      product, launch, sellers, tokenomics,
+      lockedHolderPct: (dossier.topHolders ?? []).filter((h) => h.marketKind === "locker").reduce((a, h) => a + (Number(h.percent) || 0), 0),
+      deployerMixerHop: (dossier.deployerRisk?.paths ?? []).find((p) => /mixer|tornado|tumbler|privacy|houdini|railgun/i.test(`${p.category ?? ""} ${p.seedName ?? ""}`))?.seedName ?? null,
+    }),
+  } : null;
+  if (claims) {
+    const contradicted = claims.verdicts.filter((v) => v.status === "contradicted").length;
+    const unrealised = claims.verdicts.filter((v) => v.status === "unrealised").length;
+    emit?.({ phase: "ARGUS · Claims", label: `${claims.claims.length} claim${claims.claims.length === 1 ? "" : "s"} read`, detail: `${contradicted} contradicted, ${unrealised} unrealised, ${claims.verdicts.filter((v) => v.status === "confirmed").length} confirmed, ${claims.verdicts.filter((v) => v.status === "unverifiable").length} unverifiable - from ${claims.sources.join(", ")}.`, tone: contradicted ? "bad" : unrealised ? "warn" : "neutral" });
+  }
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification, sellers, site, classification, product, claims);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers, site, classification, posture, product, claims);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -236,7 +253,7 @@ export async function threatScan(
     symbol: dossier.symbol,
     name: dossier.name,
     dossier, classification, call, code, deployer, tokenomics, checks,
-    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification, sellers, site, posture, product },
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification, sellers, site, posture, product, claims },
     scannedAt: Date.now(),
   };
 
@@ -333,6 +350,7 @@ export function judge( // exported for unit tests only
   sellers: SellStructure | null, site: SiteSafety | null,
   cls: TokenClassification = UNCLASSIFIED,
   product: ProductAuthenticity | null = null,
+  claims: ClaimsLedger | null = null,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -630,6 +648,18 @@ export function judge( // exported for unit tests only
     warnings.push(`The privacy product's client shows no contracts of its own and no known provider - what it actually does is not verifiable from ${product.host ?? "its site"}${product.paasHosts.length ? ` (backend on ${product.paasHosts.join(", ")})` : ""}`);
   }
 
+  // --- the project's own claims, held against the evidence ---
+  // Contradicted claims are findings: the copy and the code disagree. The
+  // product-authenticity flag above already covers "original engineering" on
+  // a white-label, so that one kind is not charged twice.
+  if (claims?.verdicts.length) {
+    const scored = claimsScore(claims.verdicts.filter((v) => !(v.claim.kind === "original" && product?.read === "white-label")));
+    if (scored.points) add(scored.points);
+    flags.push(...scored.flags);
+    warnings.push(...scored.warnings);
+    positives.push(...scored.positives);
+  }
+
   // --- taxes: the % AND what the tax DOES ---
   // A tax is not automatically bad. Reflections, buyback-burn, and the new
   // real-world-asset/stock distribution pattern are legitimate - even attractive -
@@ -912,6 +942,7 @@ export function buildChecks( // exported for unit tests only
   cls: TokenClassification = UNCLASSIFIED,
   posture: TechnicalPosture | null = null,
   product: ProductAuthenticity | null = null,
+  claims: ClaimsLedger | null = null,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -1036,6 +1067,14 @@ export function buildChecks( // exported for unit tests only
         : product.read === "white-label" ? `White-label of ${product.providers.map((p) => p.name).join(", ")}${(product.originalityClaims.length || ORIGINALITY_CLAIM.test(`${launch?.description ?? ""} ${d.cg?.description ?? ""}`)) ? " sold as original engineering" : ""}`
         : product.read === "self-hosted" ? `${product.contractsInApp} own contract${product.contractsInApp === 1 ? "" : "s"} in the client, no third-party provider`
         : "Client shows neither own contracts nor a known provider"),
+    chk("claims", "authority", "Claims vs evidence",
+      !claims ? "na"
+        : claims.verdicts.some((v) => v.status === "contradicted") ? "fail"
+        : claims.verdicts.some((v) => v.status === "unrealised") ? "warn"
+        : claims.claims.length ? "pass" : "na",
+      !claims ? "No project statements collected"
+        : !claims.claims.length ? `No testable claims in ${claims.sources.join(", ") || "the sources read"}`
+        : `${claims.claims.length} claim${claims.claims.length === 1 ? "" : "s"}: ${claims.verdicts.filter((v) => v.status === "contradicted").length} contradicted, ${claims.verdicts.filter((v) => v.status === "unrealised").length} unrealised, ${claims.verdicts.filter((v) => v.status === "confirmed").length} confirmed, ${claims.verdicts.filter((v) => v.status === "unverifiable").length} unverifiable`),
     chk("cluster-selling", "market", "Launch cluster still selling",
       (() => {
         if (!sellers?.recentTape) return "na";

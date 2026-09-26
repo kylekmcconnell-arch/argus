@@ -357,6 +357,7 @@ interface LaunchApiResponse {
     heldTokens: number | null;
     usage: NonNullable<LaunchProvenance["creatorFees"]>["usage"];
     note: string;
+    quoteClaims?: { count: number; eth: number; tokenPayouts: number } | null;
   } | null;
 }
 
@@ -530,7 +531,14 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
       // venue's default. A venue that pays in the token is a note; a creator
       // who keeps claiming and selling it is the warning.
       const cf = api?.creatorFees;
-      if (cf?.evidence === "transfer-only") {
+      if (cf?.quoteClaims) {
+        // Quote-asset venue (Pons v2): claims are ETH or the quote token, read
+        // from the creator's own feeds; conduct is buyback / hold / moved on.
+        out.creatorFees.quoteClaims = cf.quoteClaims;
+        out.creatorFees.claimCount = cf.quoteClaims.count;
+        out.creatorFees.usage = cf.usage;
+        out.creatorFees.note = `${cf.note} ${venue.feeNote}`;
+      } else if (cf?.evidence === "transfer-only") {
         out.creatorFees.note = `${cf.note} ${venue.feeNote}`;
       } else if (cf?.evidence === "verified-events" && cf.claimCount > 0) {
         out.creatorFees.claimCount = cf.claimCount;
